@@ -145,6 +145,13 @@ body{
   .tbl td:first-child{border-bottom:1px solid var(--sep);padding-bottom:8px;margin-bottom:6px;font-weight:700}
 }
 
+/* 階段 4：手機 RWD 微調（僅補強，不改既有規則） */
+@media (max-width:640px){
+  .inp{font-size:16px !important} /* iOS 防放大 */
+  .btn.bsm{padding:6px 10px;font-size:.78rem}
+  #build-tag{font-size:.55rem;opacity:.3}
+}
+
 /* Heatmap dark mode soften */
 html[data-theme=dark] .hm-green{background:#2d7d48!important}
 html[data-theme=dark] .hm-amber{background:#b17a17!important}
@@ -1396,6 +1403,11 @@ html[data-theme=blue] th{
 .tbl tbody tr:last-child td:first-child{border-radius:0 0 0 14px}
 .tbl tbody tr:last-child td:last-child{border-radius:0 0 14px 0}
 
+/* 階段 4：表格 sticky header */
+.tbl { position: relative; max-height: 75vh; overflow: auto; }
+.tbl thead th { position: sticky; top: 0; background: var(--bg-2, #fff); z-index: 10; box-shadow: 0 1px 0 var(--sep, #ddd); }
+html[data-theme="dark"] .tbl thead th { background: #252525; }
+
 /* 側邊欄導航改善 */
 .nb{
   display:flex;align-items:center;gap:9px;
@@ -1520,6 +1532,21 @@ html[data-theme=blue] th{
 [data-theme=darkblue] .inp,[data-theme=darkblue] .ta,[data-theme=darkblue] .sel{
   background:rgba(255,255,255,.08);
 }
+
+/* ═══ 階段 3：搜尋 loading 指示 ═══ */
+#tc.searching{opacity:.75;transition:opacity .15s;pointer-events:none}
+#tc.searching::after{
+  content:'⏳';position:fixed;top:50%;left:50%;
+  transform:translate(-50%,-50%);font-size:2rem;z-index:9999;
+  animation:searchSpin 1s linear infinite;
+}
+@keyframes searchSpin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+
+/* ═══ 階段 3：Toast 分型樣式（保留給未來使用） ═══ */
+.toast.toast-success{background:#059669!important}
+.toast.toast-error{background:#dc2626!important}
+.toast.toast-warn{background:#d97706!important}
+.toast.toast-info{background:#2563eb!important}
 </style>
 </head>
 <body>
@@ -5359,15 +5386,234 @@ function rSAnn(){
   return'<div class="ch" style="font-size:1.1rem;font-weight:900;margin-bottom:10px">📢 公告</div>'+rows;
 }
 
+// ═══════════ 工具函式 ═══════════
+window.UI = window.UI || {};
+
+function escapeHtml(s){
+  if(s==null) return '';
+  return String(s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function matchKeyword(item, fields, q){
+  if(!q) return true;
+  q = String(q).toLowerCase();
+  return fields.some(function(f){
+    var val = typeof f === 'function' ? f(item) : item[f];
+    return String(val||'').toLowerCase().includes(q);
+  });
+}
+
+function debounce(fn, ms){
+  var t;
+  return function(){
+    var args = arguments, ctx = this;
+    clearTimeout(t);
+    t = setTimeout(function(){ fn.apply(ctx, args); }, ms);
+  };
+}
+
+// ═══════════ 階段 3：空狀態友善提示工具 ═══════════
+function emptyState(msg, onClear){
+  var btn = onClear ? '<button class="btn bp bsm" style="margin-top:10px" onclick="'+onClear+'">清除搜尋</button>' : '';
+  return '<div style="text-align:center;padding:40px 20px;color:var(--gray)">'
+    +'<div style="font-size:2.5rem;margin-bottom:10px">🔍</div>'
+    +'<div style="font-size:.9rem">'+escapeHtml(msg)+'</div>'
+    +btn+'</div>';
+}
+
+// ═══════════ 階段 4：搜尋高亮 highlight() ═══════════
+function highlight(text, q){
+  if(!q || !text) return escapeHtml(text||'');
+  var safe = escapeHtml(String(text));
+  try {
+    var escQ = q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    var re = new RegExp('('+escQ+')','gi');
+    return safe.replace(re, '<mark style="background:#fffa8b;color:#333;padding:0 2px;border-radius:3px">$1</mark>');
+  } catch(e) { return safe; }
+}
+
+// ═══════════ 階段 4：CSV 匯出工具 ═══════════
+function exportCSV(headers, rows, filename){
+  try {
+    var lines = [headers].concat(rows).map(function(r){
+      return r.map(function(c){
+        var s = String(c==null?'':c).replace(/"/g,'""');
+        return /[,"\n]/.test(s) ? '"'+s+'"' : s;
+      }).join(',');
+    });
+    var csv = '\ufeff' + lines.join('\n'); // UTF-8 BOM for Excel
+    var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (filename||'export') + '-' + (typeof td==='function'?td():new Date().toISOString().slice(0,10)) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if(typeof toast === 'function') toast('✅ CSV 已下載');
+  } catch(err){
+    alert('❌ 匯出失敗：' + err.message);
+  }
+}
+
+// ═══════════ 階段 4：刪除撤銷 ═══════════
+window._undoStack = [];
+
+function undoableRemove(arrayKey, predicate, label){
+  try {
+    if(!DB[arrayKey] || !Array.isArray(DB[arrayKey])) return false;
+    var idx = DB[arrayKey].findIndex(predicate);
+    if(idx < 0) return false;
+    var removed = DB[arrayKey].splice(idx, 1)[0];
+    if(typeof saveDB === 'function') saveDB();
+    window._undoStack.push({ arrayKey: arrayKey, idx: idx, item: removed, at: Date.now() });
+    // 只保留最近 10 筆
+    if(window._undoStack.length > 10) window._undoStack.shift();
+    if(typeof toast === 'function') toast('🗑️ 已刪除 ' + (label||'項目') + '（可 Ctrl+Z 撤銷）');
+    return true;
+  } catch(e){ return false; }
+}
+
+function undoLastDelete(){
+  var last = window._undoStack.pop();
+  if(!last){
+    if(typeof toast === 'function') toast('⚠️ 沒有可撤銷的刪除');
+    return;
+  }
+  try {
+    DB[last.arrayKey].splice(last.idx, 0, last.item);
+    if(typeof saveDB === 'function') saveDB();
+    if(typeof toast === 'function') toast('↩️ 已還原');
+    var tcEl = document.getElementById('tc');
+    if(tcEl){
+      // 觸發當前頁面重繪：優先用 _lastRender（doSearch 記錄），其次用 _curTab 對照表
+      var curFn = window._lastRender;
+      if(typeof curFn !== 'function' && window._curTab){
+        var R = {overview:'rOv',students:'rStu',assignments:'rAsgn',attendance:'rAtt',submissions:'rSub',matrix:'rMatrix',scores:'rSco',evals:'rEv',groups:'rGrp',messages:'rMsg',grades:'rGrades',courses:'rCrs',pending:'rPend',announce:'rAnn',analytics:'rAnalytics'};
+        var fname = R[window._curTab];
+        if(fname && typeof window[fname] === 'function') curFn = window[fname];
+      }
+      if(typeof curFn === 'function') tcEl.innerHTML = curFn();
+    }
+  } catch(e){
+    if(typeof toast === 'function') toast('❌ 還原失敗：' + e.message);
+  }
+}
+
+// ═══════════ 階段 4：欄位排序工具（通用） ═══════════
+function sortBy(arr, key, dir){
+  dir = dir === 'desc' ? -1 : 1;
+  return (arr||[]).slice().sort(function(a,b){
+    var va = a ? a[key] : null, vb = b ? b[key] : null;
+    if(va==null && vb==null) return 0;
+    if(va==null) return 1;
+    if(vb==null) return -1;
+    if(typeof va === 'number' && typeof vb === 'number') return (va-vb)*dir;
+    return String(va).localeCompare(String(vb),'zh-Hant')*dir;
+  });
+}
+function toggleSortKey(key){
+  window.UI = window.UI || {};
+  if(window.UI.sortKey === key){
+    window.UI.sortDir = window.UI.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    window.UI.sortKey = key;
+    window.UI.sortDir = 'asc';
+  }
+  var tcEl = document.getElementById('tc');
+  var curFn = window._lastRender;
+  if(tcEl && typeof curFn === 'function') tcEl.innerHTML = curFn();
+}
+
 function doSearch(storeKey, renderFn, inputId, val){
   window[storeKey] = val;
-  if(window._imeActive) return;
+  var tcEl = document.getElementById('tc');
+  if(tcEl) tcEl.classList.add('searching');
   clearTimeout(window._srchTimer);
   window._srchTimer = setTimeout(function(){
-    if(window._imeActive) return;
-    renderPreservingInput('tc', window[renderFn], inputId);
-  }, 250);
+    var el = document.getElementById('tc');
+    var fn = window[renderFn];
+    if(!el || typeof fn !== 'function'){ if(el) el.classList.remove('searching'); return; }
+    var prevInp = document.getElementById(inputId);
+    var caret = prevInp ? prevInp.selectionStart : (val ? val.length : 0);
+
+    // 儲存搜尋歷史（只存長度 >= 2 的有效搜尋）
+    if(val && val.length >= 2){
+      try {
+        var hKey = '_srchHist_' + storeKey;
+        var hist = JSON.parse(localStorage.getItem(hKey) || '[]');
+        hist = hist.filter(function(x){ return x !== val; });
+        hist.unshift(val);
+        hist = hist.slice(0, 5);
+        localStorage.setItem(hKey, JSON.stringify(hist));
+      } catch(e){}
+    }
+
+    window._lastRender = fn;
+    el.innerHTML = fn();
+    el.classList.remove('searching');
+    requestAnimationFrame(function(){
+      var inp = document.getElementById(inputId);
+      if(!inp) return;
+      inp.focus();
+      try { inp.setSelectionRange(caret, caret); } catch(e){}
+
+      // 附加搜尋歷史 datalist
+      try {
+        var hKey2 = '_srchHist_' + storeKey;
+        var hist2 = JSON.parse(localStorage.getItem(hKey2) || '[]');
+        if(hist2.length){
+          var listId = inputId + '-history';
+          var existing = document.getElementById(listId);
+          if(existing) existing.remove();
+          var dl = document.createElement('datalist');
+          dl.id = listId;
+          dl.innerHTML = hist2.map(function(h){
+            return '<option value="'+escapeHtml(h)+'">';
+          }).join('');
+          inp.parentNode.appendChild(dl);
+          inp.setAttribute('list', listId);
+        }
+      } catch(e){}
+    });
+  }, 200);
 }
+
+// ═══════════ 階段 3：全域鍵盤快捷鍵 ═══════════
+document.addEventListener('keydown', function(e){
+  // Ctrl/Cmd + K：聚焦當前頁面第一個搜尋框
+  if((e.ctrlKey||e.metaKey) && !e.shiftKey && e.key && e.key.toLowerCase() === 'k'){
+    var searchInp = document.querySelector('#tc input[placeholder*="搜尋"]')
+                 || document.querySelector('#tc input[id$="-search"]');
+    if(searchInp){
+      e.preventDefault();
+      searchInp.focus();
+      try { searchInp.select(); } catch(err){}
+    }
+  }
+  // Esc：清除當前 focus 的搜尋框
+  if(e.key === 'Escape'){
+    var active = document.activeElement;
+    if(active && active.tagName === 'INPUT' && active.id && active.id.endsWith('-search')){
+      if(active.value){
+        active.value = '';
+        active.dispatchEvent(new Event('input', {bubbles:true}));
+      }
+    }
+  }
+  // Ctrl+Z：撤銷最後刪除（僅在 focus 不在 input/textarea 時）
+  if((e.ctrlKey||e.metaKey) && e.key && e.key.toLowerCase() === 'z' && !e.shiftKey){
+    var activeZ = document.activeElement;
+    var isInput = activeZ && (activeZ.tagName === 'INPUT' || activeZ.tagName === 'TEXTAREA' || activeZ.isContentEditable);
+    if(!isInput && window._undoStack && window._undoStack.length){
+      e.preventDefault();
+      undoLastDelete();
+    }
+  }
+});
 
 function openNewAsgn(){
   // 套用範本預設值
@@ -7937,8 +8183,20 @@ function oM(title,html,onEnter){
 }
 function cM(){document.getElementById('modal-bg').classList.remove('open')}
 let _cCb=null;
-function oC(msg,cb){
-  document.getElementById('confirm-msg').textContent=msg;
+function oC(msg,cb,previewHtml){
+  var msgEl=document.getElementById('confirm-msg');
+  msgEl.textContent=msg;
+  // 清除舊預覽（若有）
+  var oldPrev=document.getElementById('confirm-preview');
+  if(oldPrev) oldPrev.remove();
+  // 附加預覽 HTML（向後相容：不傳則行為不變）
+  if(typeof previewHtml==='string' && previewHtml){
+    var prev=document.createElement('div');
+    prev.id='confirm-preview';
+    prev.style.cssText='margin:8px 14px 4px;padding:10px 12px;background:var(--fill-2,#f5f5f7);border-radius:8px;font-size:.78rem;color:var(--text-2);max-height:180px;overflow:auto;text-align:left';
+    prev.innerHTML=previewHtml;
+    msgEl.parentNode.insertBefore(prev,msgEl.nextSibling);
+  }
   _cCb=cb;
   document.getElementById('confirm-bg').classList.add('open');
 }
@@ -7946,6 +8204,9 @@ function cC(ok){
   document.getElementById('confirm-bg').classList.remove('open');
   if(ok&&_cCb)_cCb();
   _cCb=null;
+  // 清除預覽區塊（若有）
+  var oldPrev=document.getElementById('confirm-preview');
+  if(oldPrev) oldPrev.remove();
 }
 
 // ══════════════════════════════════════════════════
@@ -9255,15 +9516,6 @@ function rEv(){
   var feeds=(DB.feeds||[]).filter(function(f){if(!_evQ)return true;var s=(DB.students||[]).find(function(x){return x.id===f.studentId;});return((s&&s.name||'').toLowerCase().includes(_evQ)||(f.text||'').toLowerCase().includes(_evQ)||String(f.stars).includes(_evQ));});
   var cur_evals=tab==='semester'?semEvals:tab==='daily'?dayEvals:feeds;
 
-  // 搜尋過濾
-  if(_evQ){
-    cur_evals=cur_evals.filter(function(e){
-      return (e.text||'').toLowerCase().includes(_evQ)
-        ||(e.studentName||'').toLowerCase().includes(_evQ)
-        ||(e.stars+'').includes(_evQ);
-    });
-  }
-
   var tabBar='<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px;align-items:center">'
     +'<button class="btn '+(tab==='semester'?'bp':'bgh')+' bsm" onclick="doTEvTab(\'semester\')">📋 學期評價 ('+semEvals.length+')</button>'
     +'<button class="btn '+(tab==='daily'?'bp':'bgh')+' bsm" onclick="doTEvTab(\'daily\')">📅 今日評價 ('+dayEvals.length+')</button>'
@@ -9291,8 +9543,8 @@ function rEv(){
         +dayFeeds.map(function(f){
           var stu=DB.students.find(function(s){return s.id===f.studentId;});
           return'<tr><td>'+stH(f.stars||0)+' '+(f.stars||0)+'★</td>'
-            +'<td style="font-size:.8rem;max-width:300px">'+f.text+'</td>'
-            +'<td><span style="font-size:.7rem;background:var(--gray-l);padding:2px 6px;border-radius:99px">'+(stu?stu.name:'匿名')+'</span></td>'
+            +'<td style="font-size:.8rem;max-width:300px">'+highlight(f.text||'',_evQ)+'</td>'
+            +'<td><span style="font-size:.7rem;background:var(--gray-l);padding:2px 6px;border-radius:99px">'+highlight(stu?stu.name:'匿名',_evQ)+'</span></td>'
             +'<td style="font-size:.7rem;color:var(--gray)">'+(f.at||f.date||'')+'</td>'
             +'</tr>';
         }).join('');
@@ -9307,8 +9559,8 @@ function rEv(){
 
   var rows2=cur_evals.map(function(e){
     return'<tr><td>'+stH(e.stars||0)+' '+(e.stars||0)+'★</td>'
-      +'<td style="font-size:.8rem;white-space:pre-wrap;max-width:300px">'+e.text+'</td>'
-      +'<td>'+bdg(e.studentName||'匿名','gray')+'</td>'
+      +'<td style="font-size:.8rem;white-space:pre-wrap;max-width:300px">'+highlight(e.text||e.comment||'',_evQ)+'</td>'
+      +'<td>'+bdg(highlight(e.studentName||'匿名',_evQ),'gray')+'</td>'
       +'<td style="font-size:.72rem;color:var(--gray)">'+(e.date||'')+'</td>'
       +'<td><button class="btn br bsm" onclick="dEv('+e.id+')">🗑️</button></td></tr>';
   }).join('');
@@ -9339,7 +9591,20 @@ function doTEvTab(tab){
 
 
 
-function dEv(id){oC('確定刪除？',()=>{var ent=DB.evals.find(x=>x.id===id);if(ent)pushTrash('eval',ent);DB.evals=DB.evals.filter(x=>x.id!==id);saveDB();if(typeof toast==='function')toast('已刪除（5 分鐘內可復原）');document.getElementById('tc').innerHTML=rEv();});}
+function dEv(id){oC('確定刪除此評價？',()=>{
+  var idx=(DB.evals||[]).findIndex(function(x){return x.id===id;});
+  if(idx<0)return;
+  var ent=DB.evals[idx];
+  if(typeof pushTrash==='function')pushTrash('eval',ent);
+  DB.evals.splice(idx,1);
+  // 同步推入 _undoStack，讓 Ctrl+Z 可即時撤銷
+  window._undoStack=window._undoStack||[];
+  window._undoStack.push({arrayKey:'evals',idx:idx,item:ent,at:Date.now()});
+  if(window._undoStack.length>10)window._undoStack.shift();
+  saveDB();
+  if(typeof toast==='function')toast('🗑️ 已刪除評價（可 Ctrl+Z 撤銷，或 5 分鐘內從分析工具復原）');
+  document.getElementById('tc').innerHTML=rEv();
+});}
 
 // ══════════════════════════════════════════════════
 //  GROUPS
@@ -9546,8 +9811,7 @@ function rGrades(){
     +'<div style="display:flex;gap:6px">'
     +(DB.settings.gradesLocked
       ?'<button class="btn bgh bsm" onclick="unlockGrades()">🔓 解鎖</button>'
-      :'<button class="btn bgh bsm" onclick="exportGrades()">📤 匯出CSV</button>'
-    +'<button class="btn bgh bsm" onclick="importGradesExcel()">📥 匯入</button>'
+      :'<button class="btn bgh bsm" onclick="importGradesExcel()">📥 匯入</button>'
       +'<button class="btn bgh bsm" onclick="bulkGradeInput()">📊 批次</button>'
       +'<button class="btn br bsm" onclick="lockGrades()">🔒 鎖定</button>')
     +'<button class="btn bgh bsm" onclick="expGrades()">📥 匯出CSV</button>'
@@ -9722,8 +9986,8 @@ function rPend(){
       ||(p.sid||'').toLowerCase().includes(_pq)
       ||(p.cls||'').toLowerCase().includes(_pq)
       ||(p.date||'').includes(_pq);
-}).map(p=>`<tr><td><strong>${p.name}</strong></td><td style="font-family:monospace;font-size:.77rem">${p.sid||''}</td><td>${p.cls||''}</td><td style="text-align:center">${p.seat||''}</td><td>${bdg(p.status==='pending'?'待審核':p.status==='approved'?'已核准':'已拒絕',p.status==='pending'?'amb':p.status==='approved'?'grn':'red')}</td><td style="font-size:.72rem;color:var(--gray)">${p.date||''}</td><td><div style="display:flex;gap:4px">${p.status==='pending'?`<button class="btn bg bsm" onclick="apP(${p.id})">✅ 核准</button><button class="btn br bsm" onclick="rjP(${p.id})">✗ 拒絕</button>`:''}</div></td></tr>`).join('');  var leaveSec=leaveList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">📆 請假申請（'+leaveList.length+'件待審）</div><div class="cb">'    +leaveList.map(function(p){return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+p.studentName+'</b> <span style="color:var(--text-3);font-size:.72rem">'+p.cls+'班</span><div style="font-size:.76rem;margin-top:2px">'+p.date+' · '+(p.reason||'')+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="approveLeave('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="approveLeave('+p.id+',true)">✅ 核准</button></div></div>'}).join('')    +'</div></div>':'';
-  var appealSec=appealList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">✋ 成績申訴（'+appealList.length+'件）</div><div class="cb">'    +appealList.map(function(p){var a=DB.assignments.find(function(x){return x.id===Number(p.assignmentId);});return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+p.studentName+'</b> <span style="color:var(--text-3);font-size:.72rem">'+p.cls+'班</span><div style="font-size:.76rem;margin-top:2px">'+(a?a.title:'作業')+' · '+(p.reason||'')+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="resolveAppeal('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="resolveAppeal('+p.id+',true)">✅ 已處理</button></div></div>'}).join('')    +'</div></div>':'';
+}).map(p=>`<tr><td><strong>${p.name}</strong></td><td style="font-family:monospace;font-size:.77rem">${p.sid||''}</td><td>${p.cls||''}</td><td style="text-align:center">${p.seat||''}</td><td>${bdg(p.status==='pending'?'待審核':p.status==='approved'?'已核准':'已拒絕',p.status==='pending'?'amb':p.status==='approved'?'grn':'red')}</td><td style="font-size:.72rem;color:var(--gray)">${p.date||''}</td><td><div style="display:flex;gap:4px">${p.status==='pending'?`<button class="btn bg bsm" onclick="apP(${p.id})">✅ 核准</button><button class="btn br bsm" onclick="rjP(${p.id})">✗ 拒絕</button>`:''}</div></td></tr>`).join('');  var leaveSec=leaveList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">📆 請假申請（'+leaveList.length+'件待審）</div><div class="cb">'    +leaveList.map(function(p){return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+(p.date||'')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="approveLeave('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="approveLeave('+p.id+',true)">✅ 核准</button></div></div>'}).join('')    +'</div></div>':'';
+  var appealSec=appealList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">✋ 成績申訴（'+appealList.length+'件）</div><div class="cb">'    +appealList.map(function(p){var a=DB.assignments.find(function(x){return x.id===Number(p.assignmentId);});return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+(a?a.title:'作業')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="resolveAppeal('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="resolveAppeal('+p.id+',true)">✅ 已處理</button></div></div>'}).join('')    +'</div></div>':'';
 
   return searchBar+leaveSec+appealSec+`<div style="margin-bottom:13px"><div style="font-size:1.15rem;font-weight:900">註冊審核</div><div style="font-size:.77rem;color:var(--gray)">待審核 ${DB.pending.filter(p=>p.status==='pending').length} 件</div></div>
   <div class="card"><div class="tbl"><table><thead><tr><th>姓名</th><th>學號</th><th>班級</th><th style="text-align:center">座號</th><th>狀態</th><th>申請日</th><th>操作</th></tr></thead><tbody>${rows||`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--gray)">尚無申請</td></tr>`}</tbody></table></div></div>`;
@@ -9732,16 +9996,18 @@ function apP(id){const p=DB.pending.find(x=>x.id===id);if(!p)return;DB.students.
 function rjP(id){const p=DB.pending.find(x=>x.id===id);if(!p)return;p.status='rejected';saveDB();document.getElementById('tc').innerHTML=rPend();}
 
 function rAnn(){
-  var _today=td();
-  var _annQ=(window._annQ||'').toLowerCase();
-  var list=[...(DB.announcements||[])]
-    .filter(function(a){ return !a.expires||a.expires>=_today; });
-  if(_annQ) list=list.filter(function(a){
-    return (a.title||'').toLowerCase().includes(_annQ)||(a.body||'').toLowerCase().includes(_annQ);
-  });
-  list.sort(function(a,b){
-    return (b.pinned?1:0)-(a.pinned?1:0) || (b.date||'').localeCompare(a.date||'');
-  });
+  var _today = td();
+  var _annQ = (window._annQ||'').toLowerCase();
+  var list = [...(DB.announcements||[])]
+    .filter(function(a){ return !a.expires || a.expires >= _today; })
+    .filter(function(a){
+      if(!_annQ) return true;
+      return (a.title||'').toLowerCase().includes(_annQ)
+          || (a.body||'').toLowerCase().includes(_annQ);
+    })
+    .sort(function(a,b){
+      return (b.pinned?1:0) - (a.pinned?1:0) || b.date.localeCompare(a.date);
+    });
   const rows=list.map(a=>{
     // 計算已讀人數
     var targetStus=a.annCls&&a.annCls!==''
@@ -11554,6 +11820,9 @@ setInterval(function(){updateMsgBadge();},3000);
   <button onclick="nbClick(document.getElementById('nb-assignments'),'assignments')"><span class="icon">📝</span><span>作業</span></button>
   <button onclick="nbClick(document.getElementById('nb-at'),'at')"><span class="icon">✅</span><span>出席</span></button>
   <button onclick="nbClick(document.getElementById('nb-messages'),'messages')"><span class="icon">💬</span><span>訊息</span></button>
+</div>
+<div id="build-tag" style="position:fixed;bottom:4px;right:6px;font-size:.65rem;color:var(--text-3,#999);opacity:.5;pointer-events:none;z-index:1">
+  v2026.04.21-stage4
 </div>
 </body>
 </html>
