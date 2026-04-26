@@ -155,7 +155,8 @@ body{
 /* 階段 5：手機底部元素避開 mobile-nav (52px 高 + 留白) */
 @media (max-width: 640px) {
   /* 浮動按鈕避開 mobile-nav (52px 高 + 留白) */
-  [style*="position:fixed"][style*="bottom:24px"] {
+  [style*="position:fixed"][style*="bottom:24px"],
+  [style*="position:fixed"][style*="bottom:20px"] {
     bottom: 70px !important;
   }
   /* build-tag 移到 mobile-nav 上方 */
@@ -164,6 +165,30 @@ body{
     right: 8px !important;
     opacity: .25 !important;
   }
+  /* 老師畫面：內容區底部留空，避免被 mobile-nav 遮住 */
+  #sc-teacher:not(.hidden) #tc {
+    padding-bottom: 70px !important;
+  }
+  /* 漢堡按鈕只在老師畫面顯示（其他畫面隱藏） */
+  body:has(#sc-student:not(.hidden)) #mob-menu,
+  body:has(#sc-login:not(.hidden)) #mob-menu,
+  body:has(#sc-tlogin:not(.hidden)) #mob-menu {
+    display: none !important;
+  }
+}
+
+/* Sidebar backdrop（黑色半透明遮罩，點外面關閉 sidebar） */
+#sb-backdrop {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 199; /* 在 sidebar(200) 下方一格 */
+  -webkit-tap-highlight-color: transparent;
+}
+#sb-backdrop.show { display: block; }
+@media(min-width:641px){
+  /* 桌面不顯示 backdrop */
+  #sb-backdrop { display: none !important; }
 }
 
 /* Heatmap dark mode soften */
@@ -11704,7 +11729,28 @@ table tr:hover td{background:var(--fill-2)!important}
 }
 function toggleMobSB(){
   const sb=document.getElementById('sidebar');
-  if(sb)sb.classList.toggle('sb-open');
+  if(!sb) return;
+  sb.classList.toggle('sb-open');
+  const isOpen = sb.classList.contains('sb-open');
+  // 動態管理 backdrop
+  let bd = document.getElementById('sb-backdrop');
+  if(isOpen){
+    if(!bd){
+      bd = document.createElement('div');
+      bd.id = 'sb-backdrop';
+      bd.onclick = closeMobSB;
+      document.body.appendChild(bd);
+    }
+    bd.classList.add('show');
+  } else {
+    if(bd) bd.classList.remove('show');
+  }
+}
+function closeMobSB(){
+  const sb=document.getElementById('sidebar');
+  if(sb) sb.classList.remove('sb-open');
+  const bd = document.getElementById('sb-backdrop');
+  if(bd) bd.classList.remove('show');
 }
 function toggleSB(){
   const sb=document.getElementById('sidebar');
@@ -11753,6 +11799,10 @@ function nbClick(btn,tab){window._curTab=tab;
   // Update mobile nav active
   var mNav=document.getElementById('mobile-nav');
   if(mNav)[...mNav.querySelectorAll('button')].forEach(function(btn){btn.classList.remove('active');if(btn.onclick&&btn.onclick.toString().includes("'"+tab+"'"))btn.classList.add('active');});
+  // 手機版：點 nav 後自動關閉 sidebar
+  if(window.innerWidth <= 640){
+    if(typeof closeMobSB === 'function') closeMobSB();
+  }
 }
 
 function stabClick(btn,tab){
