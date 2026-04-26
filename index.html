@@ -6499,6 +6499,9 @@ var COMMAND_PALETTE = [
   {label:'下載 CSV 範本', icon:'📋', action:'downloadCSVTemplate', role:'teacher'},
   {label:'遲交扣分設定', icon:'⏰', action:'showLatePolicySetup', role:'teacher'},
   {label:'作業批改自動同步成績', icon:'🔗', action:'toggleAutoGradeSync', role:'teacher'},
+  {label:'動態 QR 點名（防作弊）', icon:'📱', action:'openQrAttendanceRolling', role:'teacher'},
+  {label:'AI 批量生成評語', icon:'🤖', action:'aiBatchGenerateComments', role:'teacher'},
+  {label:'學期結算/封存', icon:'📦', action:'showSemesterArchive', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -6506,7 +6509,8 @@ var COMMAND_PALETTE = [
   {label:'互評', icon:'⭐', stab:'sc', role:'student'},
   {label:'評價', icon:'🔒', stab:'sd', role:'student'},
   {label:'成績', icon:'📊', stab:'sg', role:'student'},
-  {label:'個人', icon:'👤', stab:'sp', role:'student'}
+  {label:'個人', icon:'👤', stab:'sp', role:'student'},
+  {label:'編輯個人資料', icon:'📝', action:'showStudentProfileEdit', role:'student'}
 ];
 
 function openCommandPalette(){
@@ -6756,6 +6760,280 @@ async function aiFillComment(studentId, targetTextareaId){
   } else {
     ta.value = existing;
   }
+}
+
+// ═══════════ P2-1：學生編輯個人資料 ═══════════
+function showStudentProfileEdit(){
+  if(!window.cur || !window.cur.id){ if(typeof toast === 'function') toast('請先登入','warn'); return; }
+  var stu = (DB.students||[]).find(function(s){ return s.id === window.cur.id; });
+  if(!stu){ if(typeof toast === 'function') toast('找不到資料','err'); return; }
+  var msg = '<div style="font-size:.85rem;line-height:2">'
+    +'<div style="margin-bottom:8px;color:var(--text-3);font-size:.75rem">📝 修改你的個人資料（聯絡資訊只有你和老師看得到）</div>'
+    +'<div class="fg"><label class="fl">📧 Email</label><input class="inp" id="sp-email" type="email" value="'+escapeHtml(stu.email||'')+'" placeholder="可選"></div>'
+    +'<div class="fg"><label class="fl">📞 電話</label><input class="inp" id="sp-phone" type="tel" value="'+escapeHtml(stu.phone||'')+'" placeholder="可選"></div>'
+    +'<div style="height:1px;background:var(--sep);margin:14px 0"></div>'
+    +'<div style="margin-bottom:8px;font-weight:700;color:var(--text-2)">👨‍👩‍👧 家長聯絡資訊</div>'
+    +'<div class="fg"><label class="fl">家長姓名</label><input class="inp" id="sp-pname" value="'+escapeHtml(stu.parentName||'')+'" placeholder="可選"></div>'
+    +'<div class="fg"><label class="fl">家長電話</label><input class="inp" id="sp-pphone" type="tel" value="'+escapeHtml(stu.parentPhone||'')+'" placeholder="可選"></div>'
+    +'<div class="fg"><label class="fl">家長 Email</label><input class="inp" id="sp-pemail" type="email" value="'+escapeHtml(stu.parentEmail||'')+'" placeholder="可選"></div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bgh" onclick="cM()">取消</button> '
+    +'<button class="btn bp" onclick="saveStudentProfile()">💾 儲存</button></div></div>';
+  if(typeof oM === 'function') oM('📝 編輯個人資料', msg);
+}
+
+function saveStudentProfile(){
+  if(!window.cur || !window.cur.id) return;
+  var stu = (DB.students||[]).find(function(s){ return s.id === window.cur.id; });
+  if(!stu) return;
+  var emailEl = document.getElementById('sp-email');
+  var phoneEl = document.getElementById('sp-phone');
+  var pnameEl = document.getElementById('sp-pname');
+  var pphoneEl = document.getElementById('sp-pphone');
+  var pemailEl = document.getElementById('sp-pemail');
+  if(emailEl) stu.email = (emailEl.value||'').trim();
+  if(phoneEl) stu.phone = (phoneEl.value||'').trim();
+  if(pnameEl) stu.parentName = (pnameEl.value||'').trim();
+  if(pphoneEl) stu.parentPhone = (pphoneEl.value||'').trim();
+  if(pemailEl) stu.parentEmail = (pemailEl.value||'').trim();
+  if(typeof saveDB === 'function') saveDB();
+  if(typeof cM === 'function') cM();
+  if(typeof toast === 'function') toast('✅ 已更新','info');
+}
+
+// ═══════════ P2-2：動態 QR 點名（防作弊） ═══════════
+var _qrRollTimer = null;
+var _qrCurrentCode = null;
+var _qrValidUntil = 0;
+
+function openQrAttendanceRolling(){
+  // 清掉舊 timer
+  if(_qrRollTimer){ clearInterval(_qrRollTimer); _qrRollTimer = null; }
+
+  function genCode(){
+    var rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+    var ts = Date.now();
+    _qrCurrentCode = ts + '_' + rand;
+    _qrValidUntil = ts + 35000; // 35 秒有效（緩衝 5s）
+    return _qrCurrentCode;
+  }
+
+  function updateDisplay(){
+    var code = genCode();
+    var qrDiv = document.getElementById('rolling-qr-display');
+    var codeText = document.getElementById('rolling-qr-text');
+    var countdown = document.getElementById('rolling-qr-countdown');
+    if(!qrDiv) return;
+    var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent('CMS_ATT:'+code);
+    qrDiv.innerHTML = '<img src="'+qrUrl+'" alt="QR Code" style="width:200px;height:200px;border:1px solid #ddd;border-radius:8px">';
+    if(codeText) codeText.textContent = code.split('_')[1];
+    // 倒數
+    var sec = 30;
+    if(countdown){
+      countdown.textContent = sec;
+      if(window._rollingQrCdTimer){ clearInterval(window._rollingQrCdTimer); }
+      window._rollingQrCdTimer = setInterval(function(){
+        sec--;
+        var cd = document.getElementById('rolling-qr-countdown');
+        if(cd) cd.textContent = sec;
+        if(sec <= 0) clearInterval(window._rollingQrCdTimer);
+      }, 1000);
+    }
+  }
+
+  var msg = '<div style="text-align:center;font-size:.85rem">'
+    +'<div style="margin-bottom:10px;color:var(--text-3)">📱 學生掃描下方 QR Code 完成簽到</div>'
+    +'<div id="rolling-qr-display" style="margin:14px auto"></div>'
+    +'<div style="font-size:.78rem;color:var(--text-3)">驗證碼：<strong id="rolling-qr-text" style="font-family:monospace;font-size:1rem;color:var(--brand)">--</strong></div>'
+    +'<div style="font-size:.72rem;margin-top:8px">⏱️ <span id="rolling-qr-countdown" style="font-weight:800;color:var(--amb,#d97706)">30</span> 秒後自動更換</div>'
+    +'<div style="font-size:.7rem;color:var(--text-3);margin-top:6px">每 30 秒換一次碼，過期碼無法使用，可防止學生轉傳作弊</div>'
+    +'<div style="margin-top:14px;text-align:center">'
+    +'<button class="btn bgh" onclick="stopRollingQR();cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('📱 動態 QR 點名', msg);
+
+  setTimeout(updateDisplay, 100);
+  _qrRollTimer = setInterval(updateDisplay, 30000);
+}
+
+function stopRollingQR(){
+  if(_qrRollTimer){ clearInterval(_qrRollTimer); _qrRollTimer = null; }
+  if(window._rollingQrCdTimer){ clearInterval(window._rollingQrCdTimer); window._rollingQrCdTimer = null; }
+  _qrCurrentCode = null;
+}
+
+function verifyQrCode(scannedCode){
+  if(!scannedCode || !_qrCurrentCode) return false;
+  // scannedCode 格式：CMS_ATT:1234567890_XXXXXX
+  var match = scannedCode.match(/^CMS_ATT:(\d+)_([A-Z0-9]+)$/);
+  if(!match) return false;
+  var ts = parseInt(match[1]);
+  var now = Date.now();
+  // 檢查時間戳：35 秒內
+  if(now - ts > 35000) return false;
+  return true;
+}
+
+// ═══════════ P2-3：AI 全班批量評語 ═══════════
+async function aiBatchGenerateComments(){
+  if(typeof aiGenerateComment !== 'function'){
+    if(typeof toast === 'function') toast('AI 功能尚未啟用','warn');
+    return;
+  }
+  var apiKey = '';
+  try { apiKey = localStorage.getItem('claude_key') || ''; } catch(e){}
+  if(!apiKey){
+    if(typeof toast === 'function') toast('⚠️ 請先在設定設定 Claude API 金鑰','warn');
+    return;
+  }
+  var students = (DB.students||[]).slice();
+  if(!students.length){ if(typeof toast === 'function') toast('沒有學生','warn'); return; }
+
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div style="margin-bottom:10px">將為 <strong>'+students.length+'</strong> 位學生生成 AI 評語：</div>'
+    +'<div style="background:var(--fill-2);padding:10px;border-radius:8px;font-size:.78rem">'
+    +'⚠️ 注意：將消耗 API 額度（約 '+students.length+' x 500 tokens ≈ '+(students.length*0.5).toFixed(1)+'k tokens）<br>'
+    +'⏱️ 預估時間：'+Math.ceil(students.length * 3 / 60)+' 分鐘（每位約 3 秒）</div>'
+    +'<div style="margin-top:8px;font-size:.78rem;color:var(--text-3)">評語會儲存在每位學生的 <code>aiComment</code> 欄位，可在學生詳細頁查看。</div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bgh" onclick="cM()">取消</button> '
+    +'<button class="btn bp" onclick="cM();_aiBatchRun()">🚀 開始生成</button></div></div>';
+  if(typeof oM === 'function') oM('🤖 批量 AI 評語', msg);
+}
+
+async function _aiBatchRun(){
+  var students = (DB.students||[]).slice();
+  var done = 0, failed = 0;
+  if(typeof toast === 'function') toast('🤖 開始批量生成 ('+students.length+' 位)...','info',3000);
+  for(var i = 0; i < students.length; i++){
+    var stu = students[i];
+    try {
+      var comment = await aiGenerateComment(stu, '');
+      if(comment){
+        stu.aiComment = comment;
+        stu.aiCommentAt = new Date().toISOString();
+        done++;
+      } else {
+        failed++;
+      }
+      // 每 5 位儲存一次
+      if((i+1) % 5 === 0 && typeof saveDB === 'function') saveDB();
+      // 進度回報
+      if((i+1) % 10 === 0 || i === students.length - 1){
+        if(typeof toast === 'function') toast('🤖 進度：'+(i+1)+'/'+students.length,'info',1500);
+      }
+    } catch(e){
+      console.warn('[aiBatch]', stu.name, e);
+      failed++;
+    }
+    // rate limit：每 2 秒 1 次
+    await new Promise(function(r){ setTimeout(r, 2000); });
+  }
+  if(typeof saveDB === 'function') saveDB();
+  if(typeof toast === 'function') toast('✅ 完成！成功 '+done+'、失敗 '+failed,'info',5000);
+}
+
+// ═══════════ P2-4：學期結算與封存 ═══════════
+function showSemesterArchive(){
+  var sem = (typeof getSemester === 'function') ? getSemester() : {name:'未設定',startDate:'',weeks:18};
+  var archives = [];
+  try { archives = JSON.parse(localStorage.getItem('cms_archives') || '[]'); } catch(e){}
+  var rows = archives.length ? archives.map(function(a, i){
+    return '<tr>'
+      +'<td>'+escapeHtml(a.name)+'</td>'
+      +'<td style="font-size:.7rem;color:var(--text-3)">'+escapeHtml((a.archivedAt||'').slice(0,10))+'</td>'
+      +'<td>'+(a.studentCount||0)+'</td>'
+      +'<td><button class="btn bgh bsm" onclick="downloadArchive('+i+')">📥 下載</button> '
+      +'<button class="btn br bsm" onclick="deleteArchive('+i+')">🗑️</button></td>'
+      +'</tr>';
+  }).join('') : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-3)">尚無封存</td></tr>';
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div style="background:var(--fill-2);padding:10px;border-radius:8px;margin-bottom:14px">'
+    +'<div><strong>當前學期：</strong>'+escapeHtml(sem.name)+'（'+escapeHtml(sem.startDate)+' 起 '+sem.weeks+' 週）</div>'
+    +'<div style="font-size:.75rem;color:var(--text-3);margin-top:4px">封存後資料留存，當前學期可清空重新開始新學期。</div>'
+    +'</div>'
+    +'<div style="margin-bottom:14px;text-align:center">'
+    +'<button class="btn bp" onclick="archiveCurrentSemester()">📦 封存當前學期</button>'
+    +'</div>'
+    +'<div style="font-weight:700;margin-bottom:8px">已封存的學期：</div>'
+    +'<table class="tbl" style="width:100%"><thead><tr><th>學期</th><th>封存日</th><th>學生數</th><th>操作</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bp" onclick="cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('📦 學期結算與封存', msg);
+}
+
+function archiveCurrentSemester(){
+  var sem = (typeof getSemester === 'function') ? getSemester() : null;
+  if(!sem){ alert('請先設定學期'); return; }
+  if(!confirm('確定封存當前學期「'+sem.name+'」？\n\n當前資料會被儲存到封存區，可隨時下載復原。\n是否要清空當前學期重新開始？')) return;
+  var clearAfter = confirm('封存完成後是否清空當前學期資料？\n（出席、作業、繳交、成績、評價將被清空，學生名單保留）\n\n按「確定」清空，按「取消」保留。');
+
+  try {
+    var archives = [];
+    try { archives = JSON.parse(localStorage.getItem('cms_archives') || '[]'); } catch(e){}
+    archives.unshift({
+      name: sem.name,
+      semester: sem,
+      archivedAt: new Date().toISOString(),
+      studentCount: (DB.students||[]).length,
+      data: JSON.stringify({
+        students: DB.students,
+        attendance: DB.attendance,
+        assignments: DB.assignments,
+        submissions: DB.submissions,
+        grades: DB.grades,
+        evals: DB.evals,
+        feeds: DB.feeds,
+        announcements: DB.announcements,
+        messages: DB.messages,
+        groups: DB.groups
+      })
+    });
+    archives = archives.slice(0, 10); // 最多保留 10 個學期
+    localStorage.setItem('cms_archives', JSON.stringify(archives));
+
+    if(clearAfter){
+      DB.attendance = [];
+      DB.submissions = [];
+      DB.grades = {};
+      DB.evals = [];
+      DB.feeds = [];
+      DB.messages = (DB.messages||[]).filter(function(m){ return m.system; }); // 保留系統訊息
+      if(typeof saveDB === 'function') saveDB();
+    }
+    if(typeof cM === 'function') cM();
+    if(typeof toast === 'function') toast('✅ 已封存「'+sem.name+'」'+(clearAfter?'，當前學期已清空':''),'info',4000);
+  } catch(e){
+    alert('封存失敗：'+e.message);
+  }
+}
+
+function downloadArchive(i){
+  var archives = [];
+  try { archives = JSON.parse(localStorage.getItem('cms_archives') || '[]'); } catch(e){}
+  var a = archives[i];
+  if(!a) return;
+  try {
+    var blob = new Blob([a.data], {type:'application/json'});
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = '學期封存-'+a.name+'-'+(a.archivedAt||'').slice(0,10)+'.json';
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+    if(typeof toast === 'function') toast('✅ 已下載','info');
+  } catch(e){ alert('下載失敗：'+e.message); }
+}
+
+function deleteArchive(i){
+  if(!confirm('確定刪除此封存？刪除後無法復原。')) return;
+  try {
+    var archives = JSON.parse(localStorage.getItem('cms_archives') || '[]');
+    archives.splice(i, 1);
+    localStorage.setItem('cms_archives', JSON.stringify(archives));
+    if(typeof cM === 'function') cM();
+    setTimeout(showSemesterArchive, 100);
+  } catch(e){}
 }
 
 // ═══════════ 月曆檢視 (C4) ═══════════
@@ -12966,7 +13244,7 @@ function rSProf(){
   return`<div class="hero"><h2>個人資訊</h2><p>${cur.name} · ${cur.cls||''} ${cur.seat?'座號'+cur.seat:''}</p></div>
   <div class="card" style="margin-bottom:12px"><div class="ch">學習統計</div><div class="cb"><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">${[['✅','出席次數',attCnt+'次','grn'],['📤','作業繳交率',subRate+'%','ind'],['⭐','互評均分',scoAvg,'amb']].map(([ic,lb,val,c])=>`<div><div style="font-size:1.8rem">${ic}</div><div style="font-size:1.3rem;font-weight:900;color:var(--${c})">${val}</div><div style="font-size:.71rem;color:var(--gray)">${lb}</div></div>`).join('')}</div></div></div>
   ${badgesCard}
-  <div class="card" style="margin-bottom:10px"><div class="ch">🔐 帳號安全</div><div class="cb"><button class="btn bgh bfull" onclick="showChangePwModal(cur.id,false)">🔑 修改密碼</button></div></div><div class="card"><div class="ch">頭像</div><div class="cb">
+  <div class="card" style="margin-bottom:10px"><div class="ch">🔐 帳號安全</div><div class="cb" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn bgh" style="flex:1;min-width:140px" onclick="showChangePwModal(cur.id,false)">🔑 修改密碼</button><button class="btn bgh" style="flex:1;min-width:140px" onclick="showStudentProfileEdit()">📝 編輯個人資料</button></div></div><div class="card"><div class="ch">頭像</div><div class="cb">
     <label style="cursor:pointer;display:inline-flex;align-items:center;gap:9px">
       ${cur.avatarImg?`<img src="${cur.avatarImg}" style="width:56px;height:56px;border-radius:50%;object-fit:cover">`:`<div class="av avmd ${avc(cur.name)}" style="width:56px;height:56px;font-size:1.4rem">${cur.name[0]}</div>`}
       <span style="font-size:.8rem;color:var(--ind);font-weight:700">點擊更換頭像</span>
