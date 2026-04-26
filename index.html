@@ -1666,6 +1666,47 @@ html[data-theme=dark] #cmd-palette .cmd-box { background:#252525; }
     white-space: nowrap !important;
   }
 }
+.mob-more-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none;
+  padding: 9px 14px; font-size: .85rem; font-weight: 600;
+  color: var(--text-1); cursor: pointer;
+  border-radius: 8px; font-family: inherit;
+  transition: background .12s;
+}
+.mob-more-item:hover { background: var(--fill-2, #f0f0f5); }
+html[data-theme="dark"] .mob-more-item { color: #eee; }
+html[data-theme="dark"] .mob-more-item:hover { background: #333; }
+#mob-more-panel.show { display: flex !important; }
+#mob-more-bg.show { display: block !important; }
+
+@media (max-width: 640px) {
+  /* 顯示更多按鈕 */
+  #sc-teacher #mob-more-btn { display: inline-flex !important; align-items: center; }
+  /* 隱藏被收納的 topbar 按鈕 */
+  #sc-teacher .t-topbar-right > button[onclick*="openRandomCaller"],
+  #sc-teacher .t-topbar-right > button[onclick*="openClassTimer"],
+  #sc-teacher .t-topbar-right > button[onclick*="openQrAttendance"],
+  #sc-teacher .t-topbar-right > button[onclick*="openGlobalSearch"],
+  #sc-teacher #gas-refresh-btn,
+  #sc-teacher #dark-toggle-teacher,
+  #sc-teacher .t-topbar-right > button[onclick*="goSc('sc-login')"] {
+    display: none !important;
+  }
+  #sc-teacher .t-topbar-right > button[onclick*="openAI"] {
+    padding: 5px 9px !important; font-size: .72rem !important;
+  }
+  #sc-teacher .t-topbar { padding-left: 56px !important; padding-right: 8px !important; }
+  #sc-teacher .t-topbar-left { min-width: 0; }
+  /* 漢堡按鈕微調 */
+  #mob-menu {
+    width: 36px !important; height: 36px !important;
+    top: 10px !important; left: 10px !important;
+    font-size: 1.05rem !important; border-radius: 9px !important;
+  }
+  /* 隱藏右下容量指示（已在更多選單） */
+  #storage-tag { display: none !important; }
+}
 </style>
 </head>
 <body>
@@ -1845,6 +1886,7 @@ html[data-theme=dark] #cmd-palette .cmd-box { background:#252525; }
         </div>
       </div>
       <div class="t-topbar-right">
+        <button id="mob-more-btn" onclick="toggleMobMore()" title="更多功能" style="display:none;background:none;border:1.5px solid var(--gray-b);cursor:pointer;font-size:1rem;color:var(--text-2);padding:5px 10px;border-radius:8px;font-weight:700">⋮</button>
         <div id="t-date-badge" class="date-chip"></div>
         <button onclick="openRandomCaller()" title="隨機點名"
           style="background:none;border:1.5px solid var(--gray-b);cursor:pointer;
@@ -12717,6 +12759,19 @@ function closeMobSB(){
   const bd = document.getElementById('sb-backdrop');
   if(bd) bd.classList.remove('show');
 }
+function toggleMobMore(){
+  var panel = document.getElementById('mob-more-panel');
+  var bg = document.getElementById('mob-more-bg');
+  if(!panel || !bg) return;
+  if(panel.classList.contains('show')) closeMobMore();
+  else { panel.classList.add('show'); bg.classList.add('show'); }
+}
+function closeMobMore(){
+  var panel = document.getElementById('mob-more-panel');
+  var bg = document.getElementById('mob-more-bg');
+  if(panel) panel.classList.remove('show');
+  if(bg) bg.classList.remove('show');
+}
 function toggleSB(){
   const sb=document.getElementById('sidebar');
   if(sb)sb.classList.toggle('sb-collapsed');
@@ -12864,6 +12919,22 @@ setInterval(function(){updateMsgBadge();},3000);
 </div>
 <div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:8px 14px;text-align:center;font-size:.78rem;font-weight:700;z-index:9998">
   ⚠️ 目前離線中，資料變更暫時無法同步
+</div>
+<!-- 手機更多功能選單 -->
+<div id="mob-more-bg" style="display:none;position:fixed;inset:0;z-index:840;background:transparent" onclick="closeMobMore()"></div>
+<div id="mob-more-panel" style="display:none;position:fixed;top:52px;right:8px;background:var(--card,#fff);border:1px solid var(--sep,#ddd);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.15);z-index:850;min-width:180px;padding:6px;flex-direction:column">
+  <button onclick="closeMobMore();openRandomCaller()" class="mob-more-item">🎲 隨機點名</button>
+  <button onclick="closeMobMore();openClassTimer()" class="mob-more-item">⏰ 課堂計時器</button>
+  <button onclick="closeMobMore();openQrAttendance()" class="mob-more-item">📱 QR 點名</button>
+  <button onclick="closeMobMore();openGlobalSearch()" class="mob-more-item">🔍 全域搜尋</button>
+  <button onclick="closeMobMore();gasRefreshAll()" class="mob-more-item">🔄 GAS 刷新</button>
+  <div style="height:1px;background:var(--sep);margin:4px 8px"></div>
+  <button onclick="closeMobMore();toggleDark()" class="mob-more-item">🌓 切換主題</button>
+  <button onclick="closeMobMore();typeof openCommandPalette==='function'&&openCommandPalette()" class="mob-more-item">⌨️ 命令面板</button>
+  <button onclick="closeMobMore();typeof showStorageInfo==='function'&&showStorageInfo()" class="mob-more-item">💾 儲存空間</button>
+  <button onclick="closeMobMore();typeof showAutoBackups==='function'&&showAutoBackups()" class="mob-more-item">📦 自動備份</button>
+  <div style="height:1px;background:var(--sep);margin:4px 8px"></div>
+  <button onclick="closeMobMore();goSc('sc-login')" class="mob-more-item" style="color:#dc2626">🚪 登出</button>
 </div>
 </body>
 </html>
