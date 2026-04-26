@@ -4241,6 +4241,8 @@ function openSubFeedback(subId){
     : '<div style="color:var(--text-3);font-size:.76rem;text-align:center;padding:10px">尚無討論</div>';
   oM('💬 批改評語與討論：'+st.name,
     '<div style="font-size:.78rem;color:var(--text-3);margin-bottom:10px">作業：'+a.title+(sub.date?' · 繳交於 '+sub.date:'')+'</div>'
+    +'<div class="fg"><label class="fl">📊 分數（0-100，留空為僅評語）</label>'
+    +'<input class="inp" type="number" id="sub-fb-score" min="0" max="100" placeholder="例如：85" value="'+(typeof sub.score==='number'?sub.score:'')+'"></div>'
     +'<div class="fg"><label class="fl">主要評語（顯示於學生作業頁）</label>'
     +'<textarea class="ta" id="sub-fb-txt" rows="3" placeholder="輸入對這份作業的評語與建議…">'+(sub.feedback||'')+'</textarea></div>'
     +'<div class="fg"><label class="fl">💬 師生討論串（'+sub.thread.length+' 則）</label>'
@@ -4256,10 +4258,16 @@ function openSubFeedback(subId){
 function saveSubFeedback(subId){
   var txt=((document.getElementById('sub-fb-txt')||{value:''}).value||'').trim();
   var newMsg=((document.getElementById('sub-thread-new')||{value:''}).value||'').trim();
+  var scoreEl=document.getElementById('sub-fb-score');
+  var scoreRaw=scoreEl?String(scoreEl.value||'').trim():'';
   var sub=DB.submissions.find(function(s){return s.id===subId;});
   if(!sub)return;
   sub.feedback=txt;
   sub.graded=true;
+  if(scoreRaw!==''){
+    var scoreNum=Math.max(0,Math.min(100,parseFloat(scoreRaw)));
+    if(!isNaN(scoreNum)) sub.score=scoreNum;
+  }
   // 加入討論串訊息
   if(newMsg){
     sub.thread=sub.thread||[];
@@ -4274,6 +4282,12 @@ function saveSubFeedback(subId){
       from:'teacher', at:new Date().toLocaleTimeString('zh-TW'), date:td(), read:false
     });
   }
+  // 自動同步到學期成績的作業分項
+  try {
+    if(typeof updateGradeFromSubmission === 'function'){
+      updateGradeFromSubmission(sub);
+    }
+  } catch(e){ console.warn('[gradeSync]', e); }
   saveDB();cM();
   document.getElementById('tc').innerHTML=rSub();
   toast('✅ 評語已儲存'+(newMsg?' + 討論訊息已發送':''));
@@ -5403,6 +5417,68 @@ function saveRubricItems(asgnId){
   toast('✅ 評分細項已儲存');
 }
 
+// ═══════════ 作業批改自動同步學期成績 ═══════════
+function updateGradeFromSubmission(sub){
+  if(!sub || !sub.studentId || !sub.assignmentId) return;
+  if(typeof sub.score !== 'number') return;
+
+  // 檢查是否啟用「自動帶入」設定（預設開）
+  var autoSync = true;
+  try {
+    if(DB.settings && DB.settings.autoGradeSync === false) autoSync = false;
+  } catch(e){}
+  if(!autoSync) return;
+
+  // 取得對應學期成績記錄（DB.grades 是以 sid 為 key 的物件）
+  var grade = (typeof getGrd === 'function') ? getGrd(sub.studentId) : null;
+  if(!grade){
+    if(!DB.grades) DB.grades = {};
+    grade = DB.grades[sub.studentId] || (DB.grades[sub.studentId] = {regular:0,midterm:0,final:0,semComment:'',assignments:{}});
+  }
+  // assignmentScores 用獨立 key，避免覆蓋 g.assignments[aid] 的文字回饋
+  grade.assignmentScores = grade.assignmentScores || {};
+  // 計算遲交扣分
+  var asgn = (DB.assignments||[]).find(function(a){ return a.id === sub.assignmentId; });
+  var penalty = 0;
+  if(asgn && asgn.due && sub.submittedAt && typeof calcLatePenalty === 'function'){
+    penalty = calcLatePenalty(sub.submittedAt, asgn.due);
+  } else if(asgn && asgn.due && sub.date && typeof calcLatePenalty === 'function'){
+    penalty = calcLatePenalty(sub.date, asgn.due);
+  }
+  var finalScore = Math.max(0, sub.score - penalty);
+  grade.assignmentScores[sub.assignmentId] = {
+    raw: sub.score,
+    penalty: penalty,
+    final: finalScore,
+    syncedAt: new Date().toISOString()
+  };
+  // 觸發儀表板/成績頁更新（若當前在相關頁）
+  try {
+    var tcEl = document.getElementById('tc');
+    if(tcEl && (window._curTab === 'grades' || window._curTab === 'overview' || window._curTab === 'scores')){
+      if(typeof window._lastRender === 'function'){
+        tcEl.innerHTML = window._lastRender();
+      } else {
+        var R={overview:'rOv',grades:'rGrades',scores:'rSco'};
+        var fn = R[window._curTab];
+        if(fn && typeof window[fn] === 'function') tcEl.innerHTML = window[fn]();
+      }
+    }
+  } catch(e){}
+}
+
+// 切換自動同步設定的開關
+function toggleAutoGradeSync(){
+  DB.settings = DB.settings || {};
+  // 預設 true；切換邏輯：當前若為 true(或 undefined) 則設為 false，反之為 true
+  var current = (DB.settings.autoGradeSync !== false);
+  DB.settings.autoGradeSync = !current;
+  if(typeof saveDB === 'function') saveDB();
+  if(typeof toast === 'function'){
+    toast(DB.settings.autoGradeSync ? '✅ 自動同步成績已開啟' : '⚠️ 自動同步成績已關閉','info');
+  }
+}
+
 function rSelfEval(){
   var myEvals=(DB.evals||[]).filter(function(e){return e.studentId===cur.id&&e.isSelf;});
   var asgns=DB.assignments.filter(function(a){
@@ -6422,6 +6498,7 @@ var COMMAND_PALETTE = [
   {label:'匯入學生 CSV', icon:'📥', action:'importStudentsCSV', role:'teacher'},
   {label:'下載 CSV 範本', icon:'📋', action:'downloadCSVTemplate', role:'teacher'},
   {label:'遲交扣分設定', icon:'⏰', action:'showLatePolicySetup', role:'teacher'},
+  {label:'作業批改自動同步成績', icon:'🔗', action:'toggleAutoGradeSync', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -7268,6 +7345,7 @@ function restoreTrash(id){
     else if(t.kind==='eval') DB.evals.push(t.entity);
     else if(t.kind==='group') DB.groups.push(t.entity);
     else if(t.kind==='announcement') (DB.announcements=DB.announcements||[]).push(t.entity);
+    else if(t.kind==='attendance') (DB.attendance=DB.attendance||[]).push(t.entity);
   }catch(e){ console.error('[restoreTrash]',e); }
   window._trash=window._trash.filter(function(x){return x.id!==id;});
   saveDB();
@@ -10892,7 +10970,20 @@ function rAtt(){
     +'</table></div></div>';
 }
 
-function dAtt(id){oC('確定刪除此紀錄？',()=>{DB.attendance=DB.attendance.filter(x=>x.id!==id);saveDB();document.getElementById('tc').innerHTML=rAtt();if(typeof toast==='function')toast('已刪除出缺勤紀錄');});}
+function dAtt(id){
+  var att=(DB.attendance||[]).find(function(a){return a.id===id;});
+  if(!att){if(typeof toast==='function')toast('找不到該紀錄','err');return;}
+  oC('確定刪除此紀錄？',function(){
+    // 加入垃圾桶可復原（5 分鐘內）
+    if(typeof pushTrash==='function'){
+      try{ pushTrash('attendance', att); }catch(e){ console.warn('[pushTrash:att]',e); }
+    }
+    DB.attendance=DB.attendance.filter(function(x){return x.id!==id;});
+    saveDB();
+    document.getElementById('tc').innerHTML=rAtt();
+    if(typeof toast==='function')toast('🗑️ 已刪除（5 分鐘內可從分析→垃圾桶復原）','info');
+  });
+}
 function printAtt(){
   const stus=[...DB.students].sort((a,b)=>(a.cls||'').localeCompare(b.cls||'')||Number(a.seat||99)-Number(b.seat||99));
   const dates=[...new Set((DB.attendance||[]).map(a=>a.date))].sort().slice(-10);
