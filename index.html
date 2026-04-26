@@ -167,13 +167,48 @@ body{
   }
   /* 老師畫面：內容區底部留空，避免被 mobile-nav 遮住 */
   #sc-teacher:not(.hidden) #tc {
-    padding-bottom: 70px !important;
+    padding-bottom: 90px !important;
   }
   /* 漢堡按鈕只在老師畫面顯示（其他畫面隱藏） */
   body:has(#sc-student:not(.hidden)) #mob-menu,
   body:has(#sc-login:not(.hidden)) #mob-menu,
   body:has(#sc-tlogin:not(.hidden)) #mob-menu {
     display: none !important;
+  }
+
+  /* ═══ Fix 1：老師 topbar 手機簡化（不擁擠） ═══ */
+  #sc-teacher .tpage-sub { display: none !important; }
+  #sc-teacher #t-date-badge { display: none !important; }
+  #sc-teacher .t-topbar-right { gap: 4px !important; }
+  #sc-teacher .t-topbar-right button { padding: 5px 8px !important; font-size: .75rem !important; }
+  /* 「🔄 刷新」改只顯示圖示 */
+  #sc-teacher #gas-refresh-btn { font-size: 0 !important; padding: 5px 8px !important; }
+  #sc-teacher #gas-refresh-btn::before { content: '🔄'; font-size: .9rem; }
+  /* 登出按鈕縮小 */
+  #sc-teacher button[onclick*="goSc('sc-login')"] { font-size: 0 !important; padding: 5px 7px !important; }
+  #sc-teacher button[onclick*="goSc('sc-login')"]::before { content: '🚪'; font-size: .9rem; }
+  /* 暗色切換縮小 */
+  #sc-teacher #dark-toggle-teacher { padding: 5px 7px !important; }
+  /* 標題單行省略 */
+  #sc-teacher .tpage-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 6em;
+  }
+  /* topbar 整體更緊湊（左 padding 56px 讓出漢堡按鈕空間） */
+  .t-topbar { padding: 0 8px 0 56px !important; height: 48px !important; }
+
+  /* ═══ Fix 4：mobile-nav 加更明顯背景 + 陰影分隔 ═══ */
+  .mobile-nav {
+    box-shadow: 0 -4px 12px rgba(0,0,0,.06) !important;
+    background: var(--card, #fff) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  html[data-theme="dark"] .mobile-nav,
+  html[data-theme=dark] .mobile-nav {
+    background: rgba(28,28,40,.95) !important;
   }
 }
 
@@ -1609,7 +1644,27 @@ html[data-theme=dark] #cmd-palette .cmd-box { background:#252525; }
 
 /* ═══ 功能 6 手機 RWD 容量指示 ═══ */
 @media (max-width:640px){
-  #storage-tag { bottom: 80px !important; opacity: .35 !important; font-size: .55rem !important; }
+  /* Fix 6：右下浮動元素整理（避開 mobile-nav 52px + class chips wrap 約 40px） */
+  #storage-tag { bottom: 95px !important; right: 4px !important; font-size: .55rem !important; opacity: .35 !important; padding: 1px 5px !important; }
+  #build-tag { bottom: 78px !important; right: 4px !important; font-size: .5rem !important; opacity: .25 !important; }
+
+  /* ═══ Fix 2：班級篩選 chips 改水平捲動，避免兩排與 mobile-nav 重疊 ═══ */
+  .ctabs {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 4px;
+    /* 滾動指示：右側漸層 */
+    mask-image: linear-gradient(to right, black 90%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black 90%, transparent 100%);
+  }
+  .ctabs::-webkit-scrollbar { height: 3px; }
+  .ctabs::-webkit-scrollbar-thumb { background: var(--text-3); border-radius: 99px; }
+  .ctab {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
 }
 </style>
 </head>
@@ -5682,11 +5737,11 @@ function dashStats(){
 function dashCards(){
   var s = dashStats();
   var attColor = s.todayAttRate >= 80 ? '#059669' : s.todayAttRate >= 60 ? '#d97706' : '#dc2626';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">'
-    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800">'+s.totalStu+'</div><div style="font-size:.72rem;color:var(--text-3)">👥 學生總數</div></div>'
-    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800;color:'+attColor+'">'+s.todayAttRate+'%</div><div style="font-size:.72rem;color:var(--text-3)">✅ 今日出席率 ('+s.presentToday+'/'+s.totalStu+')</div></div>'
-    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800;color:'+(s.pendingCount>0?'#d97706':'#059669')+'">'+s.pendingCount+'</div><div style="font-size:.72rem;color:var(--text-3)">⏳ 待審核註冊</div></div>'
-    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800;color:'+(s.dueSoon>0?'#dc2626':'#059669')+'">'+s.dueSoon+'</div><div style="font-size:.72rem;color:var(--text-3)">⏰ 3 天內到期</div></div>'
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px">'
+    +'<div class="card" style="padding:11px;text-align:center"><div style="font-size:1.35rem;font-weight:800">'+s.totalStu+'</div><div style="font-size:.72rem;color:var(--text-3)">👥 學生總數</div></div>'
+    +'<div class="card" style="padding:11px;text-align:center"><div style="font-size:1.35rem;font-weight:800;color:'+attColor+'">'+s.todayAttRate+'%</div><div style="font-size:.72rem;color:var(--text-3)">✅ 今日出席率 ('+s.presentToday+'/'+s.totalStu+')</div></div>'
+    +'<div class="card" style="padding:11px;text-align:center"><div style="font-size:1.35rem;font-weight:800;color:'+(s.pendingCount>0?'#d97706':'#059669')+'">'+s.pendingCount+'</div><div style="font-size:.72rem;color:var(--text-3)">⏳ 待審核註冊</div></div>'
+    +'<div class="card" style="padding:11px;text-align:center"><div style="font-size:1.35rem;font-weight:800;color:'+(s.dueSoon>0?'#dc2626':'#059669')+'">'+s.dueSoon+'</div><div style="font-size:.72rem;color:var(--text-3)">⏰ 3 天內到期</div></div>'
     +'</div>';
 }
 
