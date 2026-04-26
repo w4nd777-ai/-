@@ -1780,12 +1780,58 @@ html[data-theme="dark"] .mob-more-item:hover { background: #333; }
   box-shadow: 0 0 0 2px var(--card,#fff);
 }
 .stab { position: relative !important; }
+
+/* 手機橫屏優化 */
+@media (max-width: 900px) and (orientation: landscape) {
+  .stabs, .mobile-nav { height: 44px !important; }
+  .stab .sico { font-size: 1rem !important; }
+  .stab { font-size: .55rem !important; padding: 4px 2px 3px !important; }
+  .t-topbar { height: 42px !important; }
+  #st-head { padding: 6px 14px !important; }
+  /* 橫屏 modal 高度限制 */
+  #modal-bg .modal-card { max-height: 88vh !important; }
+}
+
+/* 無障礙：螢幕閱讀器專用文字 */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+button:not([aria-label]):not([title])::after {
+  content: attr(onclick);
+  display: none; /* 視覺隱藏，但被讀屏器讀取 */
+}
+/* 焦點環增強 */
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--brand,#5e5ce6) !important;
+  outline-offset: 2px;
+}
 </style>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#5e5ce6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="課程系統">
+<!-- PDF 匯出庫 (lazy-loaded on demand) -->
+<script>
+window._pdfLibsLoaded = false;
+function loadPdfLibs(){
+  return new Promise(function(resolve, reject){
+    if(window._pdfLibsLoaded && window.jspdf && window.html2canvas){
+      resolve(); return;
+    }
+    var loaded = 0;
+    function check(){ loaded++; if(loaded === 2){ window._pdfLibsLoaded = true; resolve(); } }
+    function load(src){
+      var s = document.createElement('script');
+      s.src = src; s.onload = check; s.onerror = function(){ reject(new Error('Failed to load '+src)); };
+      document.head.appendChild(s);
+    }
+    if(window.jspdf) check(); else load('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+    if(window.html2canvas) check(); else load('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+  });
+}
+</script>
 </head>
 <body>
 
@@ -1953,7 +1999,7 @@ html[data-theme="dark"] .mob-more-item:hover { background: #333; }
       <div style="text-align:center;font-size:.62rem;color:var(--text-3);padding:6px 0;margin-top:4px">v2026.04.19 · 課程管理系統</div>
     </div>
   </aside>
-  <button id="mob-menu" onclick="toggleMobSB()" style="display:none;position:fixed;top:14px;left:14px;z-index:300;width:38px;height:38px;border-radius:10px;background:#fff;border:1.5px solid var(--gray-b);cursor:pointer;font-size:1rem;align-items:center;justify-content:center;box-shadow:var(--shadow)">☰</button>
+  <button id="mob-menu" onclick="toggleMobSB()" aria-label="開啟側邊選單" style="display:none;position:fixed;top:14px;left:14px;z-index:300;width:38px;height:38px;border-radius:10px;background:#fff;border:1.5px solid var(--gray-b);cursor:pointer;font-size:1rem;align-items:center;justify-content:center;box-shadow:var(--shadow)">☰</button>
   <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">
     <div class="t-topbar">
       <div class="t-topbar-left">
@@ -1964,27 +2010,27 @@ html[data-theme="dark"] .mob-more-item:hover { background: #333; }
         </div>
       </div>
       <div class="t-topbar-right">
-        <button id="mob-more-btn" onclick="toggleMobMore()" title="更多功能" style="display:none;background:none;border:1.5px solid var(--gray-b);cursor:pointer;font-size:1rem;color:var(--text-2);padding:5px 10px;border-radius:8px;font-weight:700">⋮</button>
+        <button id="mob-more-btn" onclick="toggleMobMore()" title="更多功能" aria-label="更多功能" style="display:none;background:none;border:1.5px solid var(--gray-b);cursor:pointer;font-size:1rem;color:var(--text-2);padding:5px 10px;border-radius:8px;font-weight:700">⋮</button>
         <div id="t-date-badge" class="date-chip"></div>
-        <button onclick="openRandomCaller()" title="隨機點名"
+        <button onclick="openRandomCaller()" title="隨機點名" aria-label="隨機點名"
           style="background:none;border:1.5px solid var(--gray-b);cursor:pointer;
           font-size:.8rem;color:var(--text-2);padding:5px 10px;border-radius:8px;
           font-weight:600;transition:all .15s"
           onmouseover="this.style.background='var(--fill-2)'"
           onmouseout="this.style.background='none'">🎲</button>
-        <button onclick="openClassTimer()" title="課堂計時器"
+        <button onclick="openClassTimer()" title="課堂計時器" aria-label="課堂計時器"
           style="background:none;border:1.5px solid var(--gray-b);cursor:pointer;
           font-size:.8rem;color:var(--text-2);padding:5px 10px;border-radius:8px;
           font-weight:600;transition:all .15s"
           onmouseover="this.style.background='var(--fill-2)'"
           onmouseout="this.style.background='none'">⏰</button>
-        <button onclick="openQrAttendance()" title="QR Code 點名"
+        <button onclick="openQrAttendance()" title="QR Code 點名" aria-label="QR Code 點名"
           style="background:none;border:1.5px solid var(--gray-b);cursor:pointer;
           font-size:.8rem;color:var(--text-2);padding:5px 10px;border-radius:8px;
           font-weight:600;transition:all .15s"
           onmouseover="this.style.background='var(--fill-2)'"
           onmouseout="this.style.background='none'">📱</button>
-        <button onclick="openGlobalSearch()" title="全域搜尋 (Ctrl+K)"
+        <button onclick="openGlobalSearch()" title="全域搜尋 (Ctrl+K)" aria-label="全域搜尋"
           style="background:none;border:1.5px solid var(--gray-b);cursor:pointer;
           font-size:.8rem;color:var(--text-2);padding:5px 10px;border-radius:8px;
           font-weight:600;transition:all .15s"
@@ -5417,6 +5463,281 @@ function saveRubricItems(asgnId){
   toast('✅ 評分細項已儲存');
 }
 
+// ═══════════ PDF 學期報告匯出 ═══════════
+async function exportSemesterPDF(){
+  if(typeof toast === 'function') toast('📄 載入 PDF 庫中...','info',2000);
+  try {
+    await loadPdfLibs();
+  } catch(e){
+    if(typeof toast === 'function') toast('❌ 載入失敗：'+e.message,'err',5000);
+    return;
+  }
+
+  // 收集資料
+  var sem = (typeof getSemester === 'function') ? getSemester() : {name:'學期', startDate:'', weeks:18};
+  var students = (DB.students||[]).slice().sort(function(a,b){
+    var ca = (a.cls||'').localeCompare(b.cls||'');
+    if(ca !== 0) return ca;
+    return (parseInt(a.seat)||0) - (parseInt(b.seat)||0);
+  });
+  var asgnList = (DB.assignments||[]);
+
+  // 確認對話框
+  var msg = '<div style="font-size:.85rem">'
+    +'<div style="margin-bottom:10px">將為 <strong>'+students.length+'</strong> 位學生產生 PDF 報告：</div>'
+    +'<div class="fg"><label class="fl">報告類型</label><select class="sel" id="pdf-type">'
+    +'<option value="all">全班總覽（一份 PDF）</option>'
+    +'<option value="individual">個別學生報告（每人一頁）</option>'
+    +'</select></div>'
+    +'<div class="fg"><label class="fl">包含內容</label><div style="font-size:.78rem">'
+    +'<label><input type="checkbox" id="pdf-att" checked> 出席紀錄</label> '
+    +'<label><input type="checkbox" id="pdf-grade" checked> 成績</label> '
+    +'<label><input type="checkbox" id="pdf-comment" checked> 評語</label></div></div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bgh" onclick="cM()">取消</button> '
+    +'<button class="btn bp" onclick="cM();_doPdfExport()">📥 產生 PDF</button></div></div>';
+  if(typeof oM === 'function') oM('📄 學期 PDF 報告', msg);
+}
+
+async function _doPdfExport(){
+  try {
+    var type = document.getElementById('pdf-type')?.value || 'all';
+    var inclAtt = document.getElementById('pdf-att')?.checked !== false;
+    var inclGrade = document.getElementById('pdf-grade')?.checked !== false;
+    var inclComment = document.getElementById('pdf-comment')?.checked !== false;
+
+    if(typeof toast === 'function') toast('📄 PDF 產生中，請稍候...','info',3000);
+
+    var jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    if(!jsPDF){ alert('jsPDF 載入失敗'); return; }
+
+    var doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    var sem = getSemester();
+    var students = (DB.students||[]).slice().sort(function(a,b){
+      var ca = (a.cls||'').localeCompare(b.cls||'');
+      if(ca !== 0) return ca;
+      return (parseInt(a.seat)||0) - (parseInt(b.seat)||0);
+    });
+
+    // 中文字體：用 jspdf 預設無法顯示中文，改用 html2canvas 截圖方式
+
+    if(type === 'all'){
+      // 全班總覽：產生 HTML 然後截圖
+      var html = _genClassHtml(students, sem, {inclAtt:inclAtt, inclGrade:inclGrade, inclComment:inclComment});
+      var tempDiv = document.createElement('div');
+      tempDiv.style.cssText = 'position:absolute;left:-99999px;top:0;width:794px;background:#fff;padding:30px;font-family:"Microsoft JhengHei","PingFang TC",sans-serif';
+      tempDiv.innerHTML = html;
+      document.body.appendChild(tempDiv);
+      var canvas = await html2canvas(tempDiv, { scale: 1.5, backgroundColor: '#fff' });
+      tempDiv.remove();
+      var imgData = canvas.toDataURL('image/jpeg', 0.85);
+      var imgWidth = 210; // A4 寬
+      var imgHeight = canvas.height * imgWidth / canvas.width;
+      var pageHeight = 297;
+      var heightLeft = imgHeight;
+      var position = 0;
+      doc.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while(heightLeft > 0){
+        position = heightLeft - imgHeight;
+        doc.addPage();
+        doc.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      doc.save('全班學期報告-'+sem.name+'.pdf');
+    } else {
+      // 個別學生：每人一頁
+      for(var i = 0; i < students.length; i++){
+        var stu = students[i];
+        if(typeof toast === 'function' && i % 5 === 0) toast('產生中：'+(i+1)+'/'+students.length,'info',1500);
+        var html2 = _genStudentHtml(stu, sem, {inclAtt:inclAtt, inclGrade:inclGrade, inclComment:inclComment});
+        var tempDiv2 = document.createElement('div');
+        tempDiv2.style.cssText = 'position:absolute;left:-99999px;top:0;width:794px;background:#fff;padding:30px;font-family:"Microsoft JhengHei","PingFang TC",sans-serif';
+        tempDiv2.innerHTML = html2;
+        document.body.appendChild(tempDiv2);
+        var canvas2 = await html2canvas(tempDiv2, { scale: 1.5, backgroundColor: '#fff' });
+        tempDiv2.remove();
+        var imgData2 = canvas2.toDataURL('image/jpeg', 0.85);
+        var imgWidth2 = 210;
+        var imgHeight2 = canvas2.height * imgWidth2 / canvas2.width;
+        if(i > 0) doc.addPage();
+        doc.addImage(imgData2, 'JPEG', 0, 0, imgWidth2, Math.min(imgHeight2, 297));
+        // rate limit
+        await new Promise(function(r){ setTimeout(r, 100); });
+      }
+      doc.save('個別學生報告-'+sem.name+'.pdf');
+    }
+    if(typeof toast === 'function') toast('✅ PDF 已下載','info',3000);
+  } catch(e){
+    console.error('[PDF]', e);
+    alert('PDF 產生失敗：'+e.message);
+  }
+}
+
+function _genClassHtml(students, sem, opts){
+  var rows = students.map(function(s){
+    var atts = (DB.attendance||[]).filter(function(a){ return a.studentId === s.id; });
+    var presentN = atts.filter(function(a){ return a.status==='present' || a.status==='出席'; }).length;
+    var attRate = atts.length ? Math.round(presentN/atts.length*100) : 0;
+    var subs = (DB.submissions||[]).filter(function(x){ return x.studentId === s.id; });
+    var avgScore = subs.length ? Math.round(subs.reduce(function(a,x){return a+(x.score||0);},0)/subs.length) : 0;
+    var cells = '';
+    cells += '<td>'+escapeHtml(s.cls||'')+'</td><td style="text-align:center">'+escapeHtml(String(s.seat||''))+'</td><td>'+escapeHtml(s.name||'')+'</td><td>'+escapeHtml(String(s.sid||''))+'</td>';
+    if(opts.inclAtt) cells += '<td style="text-align:center">'+presentN+'/'+atts.length+'</td><td style="text-align:center">'+attRate+'%</td>';
+    if(opts.inclGrade) cells += '<td style="text-align:center">'+avgScore+'</td>';
+    return '<tr>'+cells+'</tr>';
+  }).join('');
+  var headers = '<th>班</th><th>座</th><th>姓名</th><th>學號</th>';
+  if(opts.inclAtt) headers += '<th>出席</th><th>出席率</th>';
+  if(opts.inclGrade) headers += '<th>平均分</th>';
+  return '<div style="font-family:sans-serif">'
+    +'<h1 style="text-align:center;font-size:24px;margin-bottom:6px">課程管理系統 - 全班學期報告</h1>'
+    +'<div style="text-align:center;color:#666;margin-bottom:20px">學期：'+escapeHtml(sem.name)+' · 共 '+students.length+' 位學生 · 產生於 '+(new Date()).toLocaleString('zh-TW')+'</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    +'<thead style="background:#f0f0f0"><tr>'+headers+'</tr></thead>'
+    +'<tbody>'+rows+'</tbody></table>'
+    +'</div>';
+}
+
+function _genStudentHtml(stu, sem, opts){
+  var atts = (DB.attendance||[]).filter(function(a){ return a.studentId === stu.id; });
+  var presentN = atts.filter(function(a){ return a.status==='present' || a.status==='出席'; }).length;
+  var attRate = atts.length ? Math.round(presentN/atts.length*100) : 0;
+  var subs = (DB.submissions||[]).filter(function(x){ return x.studentId === stu.id; });
+  var avgScore = subs.length ? Math.round(subs.reduce(function(a,x){return a+(x.score||0);},0)/subs.length) : 0;
+  var grd = (DB.grades||{})[stu.id] || {};
+  var html = '<div style="font-family:sans-serif">'
+    +'<h1 style="font-size:22px;margin-bottom:4px">'+escapeHtml(stu.name||'')+' 學期報告</h1>'
+    +'<div style="color:#666;margin-bottom:14px">'
+    +'學號 '+escapeHtml(String(stu.sid||''))+' · '+escapeHtml(stu.cls||'')+'班 '
+    +(stu.seat?'座號 '+escapeHtml(String(stu.seat)):'')+' · 學期 '+escapeHtml(sem.name)+'</div>';
+
+  if(opts.inclAtt){
+    html += '<div style="margin-bottom:18px"><h2 style="font-size:16px;border-bottom:2px solid #5e5ce6;padding-bottom:4px">出席紀錄</h2>'
+      +'<div style="font-size:14px;margin:8px 0">總共 '+atts.length+' 次，出席 '+presentN+' 次（'+attRate+'%）</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+      +'<thead style="background:#f0f0f0"><tr><th style="border:1px solid #ccc;padding:4px">日期</th><th style="border:1px solid #ccc;padding:4px">狀態</th></tr></thead>'
+      +'<tbody>'+atts.slice(0,30).map(function(a){
+        return '<tr><td style="border:1px solid #ccc;padding:3px 6px">'+escapeHtml(a.date||'')+'</td><td style="border:1px solid #ccc;padding:3px 6px">'+escapeHtml(a.status||'')+'</td></tr>';
+      }).join('')+'</tbody></table></div>';
+  }
+
+  if(opts.inclGrade){
+    html += '<div style="margin-bottom:18px"><h2 style="font-size:16px;border-bottom:2px solid #5e5ce6;padding-bottom:4px">作業成績</h2>'
+      +'<div style="font-size:14px;margin:8px 0">已繳交 '+subs.length+' 份，平均分 '+avgScore+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+      +'<thead style="background:#f0f0f0"><tr><th style="border:1px solid #ccc;padding:4px">作業</th><th style="border:1px solid #ccc;padding:4px">分數</th><th style="border:1px solid #ccc;padding:4px">繳交日</th></tr></thead>'
+      +'<tbody>'+subs.slice(0,30).map(function(s){
+        var asgn = (DB.assignments||[]).find(function(a){ return a.id === s.assignmentId; });
+        return '<tr><td style="border:1px solid #ccc;padding:3px 6px">'+escapeHtml((asgn&&asgn.title)||'')+'</td><td style="border:1px solid #ccc;padding:3px 6px;text-align:center">'+(s.score||'-')+'</td><td style="border:1px solid #ccc;padding:3px 6px">'+escapeHtml(s.date||s.submittedAt||'')+'</td></tr>';
+      }).join('')+'</tbody></table></div>';
+  }
+
+  if(opts.inclComment){
+    var comment = stu.aiComment || grd.comment || '尚無評語';
+    html += '<div style="margin-bottom:18px"><h2 style="font-size:16px;border-bottom:2px solid #5e5ce6;padding-bottom:4px">學期評語</h2>'
+      +'<div style="font-size:13px;line-height:1.8;padding:10px;background:#f9f9f9;border-radius:6px">'+escapeHtml(comment)+'</div></div>';
+  }
+
+  html += '<div style="margin-top:30px;font-size:10px;color:#999;text-align:right">'+(new Date()).toLocaleString('zh-TW')+'</div></div>';
+  return html;
+}
+
+// ═══════════ 本地推播通知 ═══════════
+function requestNotificationPermission(){
+  if(!('Notification' in window)){
+    if(typeof toast === 'function') toast('此瀏覽器不支援通知','warn');
+    return Promise.resolve('unsupported');
+  }
+  return Notification.requestPermission().then(function(p){
+    if(typeof toast === 'function'){
+      if(p === 'granted') toast('✅ 通知已啟用','info');
+      else if(p === 'denied') toast('⚠️ 通知被封鎖，請到瀏覽器設定開啟','warn');
+    }
+    return p;
+  });
+}
+
+function showLocalNotification(title, body, data){
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    var n = new Notification(title, {
+      body: body || '',
+      icon: 'manifest.json', // 用 manifest 圖示
+      tag: data && data.tag,
+      data: data || {},
+      requireInteraction: false
+    });
+    n.onclick = function(){
+      window.focus();
+      if(data && data.url) location.href = data.url;
+      n.close();
+    };
+    return n;
+  } catch(e){ console.warn('[notif]', e); }
+}
+
+// 啟動時檢查作業到期、未繳作業
+function checkDueReminders(){
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  // 老師：3 天內到期作業
+  if(window.cur && window.cur.role === 'teacher'){
+    var soonAsgns = (DB.assignments||[]).filter(function(a){
+      if(!a.due) return false;
+      var diff = new Date(a.due) - new Date();
+      return diff > 0 && diff < 3*86400000;
+    });
+    if(soonAsgns.length){
+      var lastReminded = parseInt(localStorage.getItem('cms_last_due_reminder')||'0');
+      if(Date.now() - lastReminded > 6*3600000){ // 每 6 小時提醒一次
+        showLocalNotification('📅 作業即將到期', soonAsgns.length+' 份作業 3 天內到期', {tag:'asgn-due'});
+        localStorage.setItem('cms_last_due_reminder', Date.now());
+      }
+    }
+  }
+  // 學生：自己未繳作業
+  if(window.cur && window.cur.role === 'student' && window.cur.id){
+    var stuId = window.cur.id;
+    var totalAsgn = (DB.assignments||[]).length;
+    var submitted = (DB.submissions||[]).filter(function(s){ return s.studentId === stuId; }).length;
+    var unsub = totalAsgn - submitted;
+    if(unsub > 0){
+      var lastNotif = parseInt(localStorage.getItem('cms_stu_due_notif_'+stuId)||'0');
+      if(Date.now() - lastNotif > 24*3600000){ // 每天最多一次
+        showLocalNotification('📝 你有未繳作業', '還有 '+unsub+' 份作業未繳交', {tag:'stu-asgn'});
+        localStorage.setItem('cms_stu_due_notif_'+stuId, Date.now());
+      }
+    }
+  }
+}
+
+// 註冊啟動檢查
+setTimeout(function(){
+  if('Notification' in window && Notification.permission === 'granted'){
+    checkDueReminders();
+    // 每小時檢查
+    setInterval(checkDueReminders, 3600000);
+  }
+}, 5000);
+
+function showNotificationSettings(){
+  var perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  var statusText = perm === 'granted' ? '✅ 已啟用' : perm === 'denied' ? '⛔ 被封鎖' : perm === 'unsupported' ? '不支援' : '尚未設定';
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div style="margin-bottom:10px">📲 推播通知狀態：<strong>'+statusText+'</strong></div>'
+    +'<div style="font-size:.78rem;color:var(--text-3);margin-bottom:14px">啟用後可收到：'
+    +'<ul style="margin:6px 0 0 14px"><li>作業 3 天內到期提醒</li><li>新公告通知</li><li>未讀訊息提醒</li></ul></div>';
+  if(perm === 'granted'){
+    msg += '<button class="btn bp" onclick="showLocalNotification(\'🔔 測試\',\'通知功能正常運作！\');toast(\'已發送測試\',\'info\')">🔔 發送測試</button>';
+  } else if(perm === 'denied'){
+    msg += '<div style="background:var(--fill-2);padding:10px;border-radius:8px;font-size:.78rem">通知已被封鎖，請到瀏覽器網址列旁的鎖頭圖示 → 通知 → 允許</div>';
+  } else {
+    msg += '<button class="btn bp" onclick="cM();requestNotificationPermission()">啟用通知</button>';
+  }
+  msg += '<div style="margin-top:14px;text-align:right"><button class="btn bgh" onclick="cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('📲 推播通知設定', msg);
+}
+
 // ═══════════ 作業批改自動同步學期成績 ═══════════
 function updateGradeFromSubmission(sub){
   if(!sub || !sub.studentId || !sub.assignmentId) return;
@@ -6502,6 +6823,8 @@ var COMMAND_PALETTE = [
   {label:'動態 QR 點名（防作弊）', icon:'📱', action:'openQrAttendanceRolling', role:'teacher'},
   {label:'AI 批量生成評語', icon:'🤖', action:'aiBatchGenerateComments', role:'teacher'},
   {label:'學期結算/封存', icon:'📦', action:'showSemesterArchive', role:'teacher'},
+  {label:'匯出學期 PDF 報告', icon:'📄', action:'exportSemesterPDF', role:'teacher'},
+  {label:'推播通知設定', icon:'📲', action:'showNotificationSettings', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
