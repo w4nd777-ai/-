@@ -5861,6 +5861,10 @@ var COMMAND_PALETTE = [
   {label:'註冊審核', icon:'✋', tab:'pending', role:'teacher'},
   {label:'分組', icon:'👥', tab:'groups', role:'teacher'},
   {label:'匯出備份', icon:'📦', tab:'export', role:'teacher'},
+  {label:'自動備份歷史', icon:'💾', action:'showAutoBackups', role:'teacher'},
+  {label:'錯誤紀錄', icon:'🐛', action:'showErrorLog', role:'teacher'},
+  {label:'儲存空間詳情', icon:'📊', action:'showStorageInfo', role:'teacher'},
+  {label:'月曆檢視', icon:'📅', action:'showCalendar', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -5930,6 +5934,285 @@ function executeCommand(i){
       if(stabBtn) stabBtn.click();
     }
   } catch(e){ console.error('[command palette]', e); }
+}
+
+// ═══════════ 每日自動備份 (C1) ═══════════
+function getAutoBackups(){
+  try {
+    return JSON.parse(localStorage.getItem('cms_auto_backups') || '[]');
+  } catch(e){ return []; }
+}
+
+function saveAutoBackup(){
+  try {
+    if(typeof DB === 'undefined' || !DB) return false;
+    var today = (typeof td === 'function') ? td() : new Date().toISOString().slice(0,10);
+    var backups = getAutoBackups();
+    // 已備份過今天 -> 跳過
+    if(backups.some(function(b){ return b.date === today; })) return false;
+    var snapshot = JSON.stringify(DB);
+    backups.unshift({
+      date: today,
+      time: new Date().toISOString(),
+      sizeKB: (snapshot.length / 1024).toFixed(1),
+      data: snapshot
+    });
+    // 只保留最近 7 天
+    backups = backups.slice(0, 7);
+    try {
+      localStorage.setItem('cms_auto_backups', JSON.stringify(backups));
+      console.log('[autoBackup] 已自動備份 '+today+' ('+backups[0].sizeKB+'KB)');
+      return true;
+    } catch(e){
+      // 容量不足 -> 移除最舊的繼續
+      backups = backups.slice(0, 3);
+      try {
+        localStorage.setItem('cms_auto_backups', JSON.stringify(backups));
+        return true;
+      } catch(e2){
+        console.warn('[autoBackup] 容量不足，跳過');
+        return false;
+      }
+    }
+  } catch(e){ console.error('[autoBackup]', e); return false; }
+}
+
+function showAutoBackups(){
+  var backups = getAutoBackups();
+  if(!backups.length){
+    if(typeof toast === 'function') toast('沒有自動備份','info');
+    return;
+  }
+  var rows = backups.map(function(b, i){
+    return '<tr>'
+      +'<td>'+b.date+'</td>'
+      +'<td style="font-size:.7rem;color:var(--text-3)">'+(b.time||'').slice(11,19)+'</td>'
+      +'<td>'+b.sizeKB+' KB</td>'
+      +'<td><button class="btn bp bsm" onclick="restoreAutoBackup('+i+')">↩️ 還原</button> '
+      +'<button class="btn bgh bsm" onclick="downloadAutoBackup('+i+')">📥 下載</button></td>'
+      +'</tr>';
+  }).join('');
+  var msg = '<div style="font-size:.85rem">'
+    +'<div style="margin-bottom:8px;color:var(--text-3)">系統會在每天第一次開啟時自動備份，保留最近 7 天。</div>'
+    +'<table class="tbl" style="width:100%"><thead><tr><th>日期</th><th>時間</th><th>大小</th><th>操作</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn br bsm" onclick="if(confirm(\'確定刪除所有自動備份？\')){localStorage.removeItem(\'cms_auto_backups\');cM();toast(\'已清空\',\'info\');}">🗑️ 清空全部</button> '
+    +'<button class="btn bp" onclick="cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('💾 自動備份歷史 ('+backups.length+' 天)', msg);
+}
+
+function restoreAutoBackup(i){
+  var backups = getAutoBackups();
+  var b = backups[i];
+  if(!b) return;
+  if(!confirm('⚠️ 確定還原 '+b.date+' 的備份？\n\n當前所有資料會被覆蓋，無法復原！')) return;
+  try {
+    var data = JSON.parse(b.data);
+    Object.keys(data).forEach(function(k){
+      if(k !== '_meta') DB[k] = data[k];
+    });
+    if(typeof saveDB === 'function') saveDB();
+    if(typeof toast === 'function') toast('✅ 已還原 '+b.date+' 備份','info');
+    setTimeout(function(){ location.reload(); }, 1500);
+  } catch(e){
+    alert('❌ 還原失敗：'+e.message);
+  }
+}
+
+function downloadAutoBackup(i){
+  var backups = getAutoBackups();
+  var b = backups[i];
+  if(!b) return;
+  try {
+    var blob = new Blob([b.data], {type:'application/json'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = '自動備份-'+b.date+'.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if(typeof toast === 'function') toast('✅ 已下載 '+b.date,'info');
+  } catch(e){
+    alert('❌ 下載失敗：'+e.message);
+  }
+}
+
+// 啟動時執行（延遲 2 秒避免影響初始載入）
+setTimeout(function(){
+  try { saveAutoBackup(); } catch(e){}
+}, 2000);
+
+// ═══════════ AI 評語建議（Claude API）(C3) ═══════════
+async function aiGenerateComment(stu, context){
+  try {
+    var apiKey = '';
+    try { apiKey = localStorage.getItem('claude_key') || ''; } catch(e){}
+    if(!apiKey){
+      if(typeof toast === 'function') toast('⚠️ 未設定 Claude API 金鑰','warn');
+      return null;
+    }
+    if(typeof toast === 'function') toast('🤖 AI 生成中...','info',2000);
+
+    // 收集學生資料摘要
+    var subs = (DB.submissions||[]).filter(function(s){ return s.studentId === stu.id; });
+    var atts = (DB.attendance||[]).filter(function(a){ return a.studentId === stu.id; });
+    var presentCount = atts.filter(function(a){ return a.status === 'present' || a.status === '出席'; }).length;
+    var avgScore = subs.length ? (subs.reduce(function(a,s){return a+(s.score||0);},0) / subs.length).toFixed(1) : 'N/A';
+    var attRate = atts.length ? Math.round(presentCount/atts.length*100)+'%' : 'N/A';
+
+    var summary = '學生姓名：'+stu.name+'\n'
+      +'班級：'+(stu.cls||'')+'\n'
+      +'出席率：'+attRate+'\n'
+      +'平均分：'+avgScore+'\n'
+      +'已繳作業數：'+subs.length+'\n'
+      +(context ? '\n額外資訊：'+context : '');
+
+    var prompt = '你是一位中學老師，請根據以下學生表現摘要，撰寫一段 80-150 字的學期評語。'
+      +'評語應該客觀、具體、給予正向鼓勵但也指出可改進處。請用繁體中文。\n\n'
+      + summary;
+
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 500,
+        messages: [{role:'user', content: prompt}]
+      })
+    });
+    if(!resp.ok){
+      var errText = await resp.text();
+      throw new Error('API '+resp.status+': '+errText.slice(0,200));
+    }
+    var data = await resp.json();
+    var text = (data.content && data.content[0] && data.content[0].text) || '';
+    return text;
+  } catch(e){
+    if(typeof toast === 'function') toast('❌ AI 失敗：'+e.message, 'err', 5000);
+    return null;
+  }
+}
+
+// 在學生詳細資料/評論輸入框旁加一鍵 AI 按鈕
+function aiCommentBtn(studentId, targetTextareaId){
+  return '<button class="btn bp bsm" type="button" onclick="aiFillComment('+studentId+',\''+targetTextareaId+'\')" style="margin-left:6px">🤖 AI 建議</button>';
+}
+
+async function aiFillComment(studentId, targetTextareaId){
+  var stu = (DB.students||[]).find(function(s){ return s.id === studentId; });
+  if(!stu){ if(typeof toast === 'function') toast('找不到學生','err'); return; }
+  var ta = document.getElementById(targetTextareaId);
+  if(!ta){ if(typeof toast === 'function') toast('找不到輸入框','err'); return; }
+  var existing = ta.value;
+  ta.value = '⏳ AI 生成中，請稍候...';
+  ta.disabled = true;
+  var comment = await aiGenerateComment(stu, existing && existing !== '⏳ AI 生成中，請稍候...' ? existing : '');
+  ta.disabled = false;
+  if(comment){
+    ta.value = comment;
+    if(typeof toast === 'function') toast('✅ AI 已生成評語','info');
+  } else {
+    ta.value = existing;
+  }
+}
+
+// ═══════════ 月曆檢視 (C4) ═══════════
+function renderCalendar(year, month){
+  // year: 4 位數, month: 0-11
+  var now = new Date();
+  year = year || now.getFullYear();
+  month = month != null ? month : now.getMonth();
+  var firstDay = new Date(year, month, 1);
+  var lastDay = new Date(year, month+1, 0);
+  var startWeekday = firstDay.getDay(); // 0=Sun
+  var daysInMonth = lastDay.getDate();
+  var todayStr = now.toISOString().slice(0,10);
+
+  // 收集各日的事件
+  var events = {};
+  (DB.assignments||[]).forEach(function(a){
+    if(!a.due) return;
+    var d = String(a.due).slice(0,10);
+    events[d] = events[d] || [];
+    events[d].push({type:'assignment', title:a.title, color:'#2563eb'});
+  });
+  (DB.announcements||[]).forEach(function(an){
+    if(!an.date) return;
+    var d = String(an.date).slice(0,10);
+    events[d] = events[d] || [];
+    events[d].push({type:'announce', title:an.title, color:'#d97706'});
+  });
+  (DB.attendance||[]).forEach(function(at){
+    if(!at.date) return;
+    var d = String(at.date).slice(0,10);
+    events[d] = events[d] || [];
+    if(!events[d].some(function(e){return e.type==='att';})){
+      events[d].push({type:'att', title:'有出席紀錄', color:'#059669'});
+    }
+  });
+
+  var monthName = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'][month];
+  var weekdays = ['日','一','二','三','四','五','六'];
+
+  var headerRow = weekdays.map(function(w){
+    return '<div style="text-align:center;font-weight:700;font-size:.78rem;color:var(--text-3);padding:6px 0">'+w+'</div>';
+  }).join('');
+
+  var cells = '';
+  // 月初前的空格
+  for(var i = 0; i < startWeekday; i++){
+    cells += '<div style="min-height:60px"></div>';
+  }
+  for(var d = 1; d <= daysInMonth; d++){
+    var dateStr = year + '-' + String(month+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    var isToday = dateStr === todayStr;
+    var dayEvents = events[dateStr] || [];
+    var bg = isToday ? 'background:var(--brand-l,#e0e7ff);' : '';
+    var dotsHtml = dayEvents.slice(0,3).map(function(e){
+      return '<div style="width:5px;height:5px;border-radius:50%;background:'+e.color+';display:inline-block;margin:0 1px"></div>';
+    }).join('');
+    var moreText = dayEvents.length > 3 ? '+'+(dayEvents.length-3) : '';
+    var titleAttr = dayEvents.length ? 'title="' + escapeHtml(dayEvents.map(function(e){return e.title;}).join('\n')) + '"' : '';
+    cells += '<div '+titleAttr+' style="min-height:60px;border:1px solid var(--sep,#eee);border-radius:6px;padding:4px;'+bg+'cursor:'+(dayEvents.length?'pointer':'default')+'">'
+      +'<div style="font-size:.78rem;font-weight:'+(isToday?'800':'600')+'">'+d+'</div>'
+      +'<div style="margin-top:4px">'+dotsHtml+'</div>'
+      +(moreText ? '<div style="font-size:.6rem;color:var(--text-3)">'+moreText+'</div>' : '')
+      +'</div>';
+  }
+
+  return '<div class="card" style="padding:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+    +'  <button class="btn bgh bsm" onclick="showCalendar('+year+','+(month-1)+')">‹</button>'
+    +'  <div style="font-weight:800;font-size:1rem">'+year+' 年 '+monthName+'</div>'
+    +'  <button class="btn bgh bsm" onclick="showCalendar('+year+','+(month+1)+')">›</button>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">'
+    + headerRow + cells
+    +'</div>'
+    +'<div style="margin-top:14px;display:flex;gap:14px;font-size:.72rem;flex-wrap:wrap;color:var(--text-3)">'
+    +'  <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2563eb;margin-right:4px"></span>作業到期</span>'
+    +'  <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#d97706;margin-right:4px"></span>公告</span>'
+    +'  <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#059669;margin-right:4px"></span>有出席</span>'
+    +'</div></div>';
+}
+
+function showCalendar(year, month){
+  var now = new Date();
+  year = year || now.getFullYear();
+  month = month != null ? month : now.getMonth();
+  // 處理月份溢位
+  if(month < 0){ year--; month = 11; }
+  if(month > 11){ year++; month = 0; }
+  var content = renderCalendar(year, month);
+  if(typeof oM === 'function') oM('📅 月曆檢視', content);
 }
 
 // ═══════════ localStorage 容量檢查 (功能 6) ═══════════
