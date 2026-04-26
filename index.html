@@ -5599,6 +5599,197 @@ function toggleSortKey(key){
   if(tcEl && typeof curFn === 'function') tcEl.innerHTML = curFn();
 }
 
+// ═══════════ B1：Due Date 倒數 ═══════════
+function dueCountdown(dueDate){
+  if(!dueDate) return '';
+  try {
+    var due = new Date(dueDate);
+    var now = new Date();
+    var diff = due - now;
+    if(diff <= 0){
+      var pastMs = -diff;
+      var pastDays = Math.floor(pastMs / 86400000);
+      return '<span style="color:#dc2626;font-weight:700">⚠️ 已過期 '+pastDays+' 天</span>';
+    }
+    var days = Math.floor(diff / 86400000);
+    var hours = Math.floor((diff % 86400000) / 3600000);
+    var color = days <= 1 ? '#dc2626' : days <= 3 ? '#d97706' : '#059669';
+    var icon = days <= 1 ? '🚨' : days <= 3 ? '⏰' : '📅';
+    if(days < 1){
+      return '<span style="color:'+color+';font-weight:700">'+icon+' 剩 '+hours+' 小時</span>';
+    }
+    return '<span style="color:'+color+';font-weight:700">'+icon+' 還剩 '+days+' 天 '+hours+' 小時</span>';
+  } catch(e){ return ''; }
+}
+
+// ═══════════ B2：學生卡片 ═══════════
+function studentCard(stu){
+  if(!stu) return '';
+  var totalAtt = (DB.attendance||[]).filter(function(a){ return a.studentId === stu.id; });
+  var presentCount = totalAtt.filter(function(a){ return a.status === 'present' || a.status === '出席'; }).length;
+  var attRate = totalAtt.length ? Math.round(presentCount / totalAtt.length * 100) : 0;
+  var subs = (DB.submissions||[]).filter(function(s){ return s.studentId === stu.id; });
+  var avgScore = subs.length ? Math.round(subs.reduce(function(a,s){ return a+(s.score||0); }, 0) / subs.length) : 0;
+  var totalAsgn = (DB.assignments||[]).length;
+  var unsubmitted = totalAsgn - subs.length;
+
+  var attColor = attRate >= 90 ? '#059669' : attRate >= 70 ? '#d97706' : '#dc2626';
+  var scoreColor = avgScore >= 80 ? '#059669' : avgScore >= 60 ? '#d97706' : '#dc2626';
+
+  return '<div class="card" style="padding:14px;margin-bottom:10px">'
+    +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">'
+    +'  <div style="width:48px;height:48px;border-radius:50%;background:var(--brand-l,#e0e7ff);display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:800">'+(stu.name||'?').slice(0,1)+'</div>'
+    +'  <div><div style="font-weight:800;font-size:1rem">'+escapeHtml(stu.name||'')+'</div>'
+    +'  <div style="font-size:.72rem;color:var(--text-3)">'+escapeHtml(stu.cls||'')+(stu.seat?' 座號 '+stu.seat:'')+'</div></div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:.78rem;text-align:center">'
+    +'  <div style="background:var(--fill-2);padding:10px;border-radius:8px">'
+    +'    <div style="color:'+attColor+';font-size:1.3rem;font-weight:800">'+attRate+'%</div>'
+    +'    <div style="color:var(--text-3);font-size:.65rem">出席率</div></div>'
+    +'  <div style="background:var(--fill-2);padding:10px;border-radius:8px">'
+    +'    <div style="color:'+scoreColor+';font-size:1.3rem;font-weight:800">'+avgScore+'</div>'
+    +'    <div style="color:var(--text-3);font-size:.65rem">平均分</div></div>'
+    +'  <div style="background:var(--fill-2);padding:10px;border-radius:8px">'
+    +'    <div style="color:'+(unsubmitted>0?'#dc2626':'#059669')+';font-size:1.3rem;font-weight:800">'+unsubmitted+'</div>'
+    +'    <div style="color:var(--text-3);font-size:.65rem">未繳作業</div></div>'
+    +'</div></div>';
+}
+
+// ═══════════ B3：Dashboard 統計 ═══════════
+function dashStats(){
+  var today = (typeof td === 'function') ? td() : new Date().toISOString().slice(0,10);
+  var totalStu = (DB.students||[]).length;
+  var todayAtt = (DB.attendance||[]).filter(function(a){ return a.date === today; });
+  var presentToday = todayAtt.filter(function(a){ return a.status === 'present' || a.status === '出席'; }).length;
+  var todayAttRate = totalStu ? Math.round(presentToday / totalStu * 100) : 0;
+  var pendingCount = (DB.pending||[]).filter(function(p){ return p.status === 'pending'; }).length;
+  var totalAsgn = (DB.assignments||[]).length;
+  var dueSoon = (DB.assignments||[]).filter(function(a){
+    if(!a.due) return false;
+    var diff = new Date(a.due) - new Date();
+    return diff > 0 && diff < 3 * 86400000; // 3 天內到期
+  }).length;
+  return {
+    totalStu: totalStu,
+    presentToday: presentToday,
+    todayAttRate: todayAttRate,
+    pendingCount: pendingCount,
+    totalAsgn: totalAsgn,
+    dueSoon: dueSoon
+  };
+}
+
+function dashCards(){
+  var s = dashStats();
+  var attColor = s.todayAttRate >= 80 ? '#059669' : s.todayAttRate >= 60 ? '#d97706' : '#dc2626';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">'
+    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800">'+s.totalStu+'</div><div style="font-size:.72rem;color:var(--text-3)">👥 學生總數</div></div>'
+    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800;color:'+attColor+'">'+s.todayAttRate+'%</div><div style="font-size:.72rem;color:var(--text-3)">✅ 今日出席率 ('+s.presentToday+'/'+s.totalStu+')</div></div>'
+    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800;color:'+(s.pendingCount>0?'#d97706':'#059669')+'">'+s.pendingCount+'</div><div style="font-size:.72rem;color:var(--text-3)">⏳ 待審核註冊</div></div>'
+    +'<div class="card" style="padding:14px;text-align:center"><div style="font-size:1.6rem;font-weight:800;color:'+(s.dueSoon>0?'#dc2626':'#059669')+'">'+s.dueSoon+'</div><div style="font-size:.72rem;color:var(--text-3)">⏰ 3 天內到期</div></div>'
+    +'</div>';
+}
+
+// ═══════════ B4：批次審核 ═══════════
+function batchApprovePending(){
+  var pendingItems = (DB.pending||[]).filter(function(p){ return p.status === 'pending'; });
+  if(!pendingItems.length){ if(typeof toast==='function') toast('沒有待審核項目','warn'); return; }
+  if(!confirm('確定批次核准 '+pendingItems.length+' 件待審核項目？')) return;
+  var done = 0;
+  pendingItems.forEach(function(p){
+    if(p.type === 'leave' && typeof approveLeave === 'function'){
+      approveLeave(p.id, true); done++;
+    } else if(p.type === 'appeal' && typeof resolveAppeal === 'function'){
+      resolveAppeal(p.id, true); done++;
+    } else if(typeof apP === 'function'){
+      apP(p.id); done++;
+    }
+  });
+  if(typeof toast === 'function') toast('✅ 已批次核准 '+done+' 件','info');
+}
+
+function batchRejectPending(){
+  var pendingItems = (DB.pending||[]).filter(function(p){ return p.status === 'pending'; });
+  if(!pendingItems.length){ if(typeof toast==='function') toast('沒有待審核項目','warn'); return; }
+  if(!confirm('⚠️ 確定批次拒絕 '+pendingItems.length+' 件待審核項目？此操作不可復原！')) return;
+  var done = 0;
+  pendingItems.forEach(function(p){
+    if(p.type === 'leave' && typeof approveLeave === 'function'){
+      approveLeave(p.id, false); done++;
+    } else if(p.type === 'appeal' && typeof resolveAppeal === 'function'){
+      resolveAppeal(p.id, false); done++;
+    } else if(typeof rjP === 'function'){
+      rjP(p.id); done++;
+    }
+  });
+  if(typeof toast === 'function') toast('已批次拒絕 '+done+' 件','warn');
+}
+
+// ═══════════ D3：全域錯誤捕獲 ═══════════
+window._errorLog = window._errorLog || [];
+window.addEventListener('error', function(e){
+  try {
+    window._errorLog.push({
+      time: new Date().toISOString(),
+      msg: e.message,
+      file: e.filename,
+      line: e.lineno,
+      col: e.colno
+    });
+    if(window._errorLog.length > 50) window._errorLog.shift();
+  } catch(_){}
+});
+window.addEventListener('unhandledrejection', function(e){
+  try {
+    window._errorLog.push({
+      time: new Date().toISOString(),
+      msg: 'Promise rejected: ' + (e.reason && e.reason.message || e.reason),
+      type: 'promise'
+    });
+    if(window._errorLog.length > 50) window._errorLog.shift();
+  } catch(_){}
+});
+
+function showErrorLog(){
+  if(!window._errorLog.length){ if(typeof toast === 'function') toast('沒有錯誤紀錄','info'); return; }
+  var rows = window._errorLog.slice().reverse().map(function(e){
+    return '<tr><td style="font-size:.7rem">'+e.time.slice(11,19)+'</td><td style="font-size:.78rem;font-family:monospace">'+escapeHtml(e.msg)+'</td><td style="font-size:.7rem;color:var(--text-3)">'+escapeHtml((e.file||'').split('/').pop())+(e.line?':'+e.line:'')+'</td></tr>';
+  }).join('');
+  var msg = '<div style="max-height:60vh;overflow:auto"><table class="tbl" style="font-size:.8rem;width:100%">'
+    +'<thead><tr><th>時間</th><th>錯誤</th><th>位置</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bgh bsm" onclick="window._errorLog=[];cM();toast(\'錯誤紀錄已清空\',\'info\')">🗑️ 清空</button> '
+    +'<button class="btn bp" onclick="cM()">關閉</button></div>';
+  if(typeof oM === 'function') oM('🐛 錯誤紀錄 ('+window._errorLog.length+' 筆)', msg);
+}
+
+// ═══════════ D4：表格分頁工具 ═══════════
+function paginate(items, page, pageSize){
+  page = page || 1; pageSize = pageSize || 50;
+  var total = (items||[]).length;
+  var totalPages = Math.ceil(total / pageSize) || 1;
+  var start = (page - 1) * pageSize;
+  return {
+    items: (items||[]).slice(start, start + pageSize),
+    page: page,
+    pageSize: pageSize,
+    total: total,
+    totalPages: totalPages,
+    hasNext: page < totalPages,
+    hasPrev: page > 1
+  };
+}
+
+function pageBar(p, onPageChange){
+  if(!p || p.totalPages <= 1) return '';
+  return '<div style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:12px;font-size:.78rem">'
+    +'<button class="btn bgh bsm" '+(p.hasPrev?'':'disabled')+' onclick="'+onPageChange+'('+(p.page-1)+')">‹ 上一頁</button>'
+    +'<span style="padding:0 10px">'+p.page+' / '+p.totalPages+'（共 '+p.total+' 筆）</span>'
+    +'<button class="btn bgh bsm" '+(p.hasNext?'':'disabled')+' onclick="'+onPageChange+'('+(p.page+1)+')">下一頁 ›</button>'
+    +'</div>';
+}
+
 // ═══════════ 多分頁資料同步 (A1) ═══════════
 window.addEventListener('storage', function(e){
   if(e.key === 'cmsDB'){
@@ -9202,7 +9393,7 @@ var statCards=[
       }).join('')
       +'</div></div>':'' ;
 
-  return'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+  return dashCards()+'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
     +'<div><div style="font-size:1.2rem;font-weight:900;letter-spacing:-.01em">今日總覽</div>'
     +'<div style="font-size:.75rem;color:var(--text-3);margin-top:2px">'+today+' '+gasChip+'</div></div>'
     +'<button class="btn bgh bsm" onclick="checkGasStatus()">📡 檢測連線</button>'
@@ -9700,6 +9891,22 @@ function rAtt(){
   var attDates=[...new Set((DB.attendance||[]).map(function(a){return a.date;}))].sort();
   var list=[...DB.attendance].filter(function(a){if(_ac==='all')return true;var s=DB.students.find(function(x){return x.id===a.studentId;});return s&&(s.cls||'未分班')===_ac;}).sort(function(a,b){return b.date.localeCompare(a.date)||((b.time||'').localeCompare(a.time||''));});
   if(attQ)list=list.filter(function(a){var s=gs(a.studentId);return(s.name||'').includes(attQ)||(s.sid||'').includes(attQ);});
+  // B5：欄位排序套用
+  if(window.UI && window.UI.sortKey){
+    var _sk = window.UI.sortKey;
+    var _sd = window.UI.sortDir === 'desc' ? -1 : 1;
+    list = list.slice().sort(function(a,b){
+      var va, vb;
+      if(_sk === 'name'){ va = (gs(a.studentId).name||''); vb = (gs(b.studentId).name||''); }
+      else if(_sk === 'sid'){ va = (gs(a.studentId).sid||''); vb = (gs(b.studentId).sid||''); }
+      else if(_sk === 'date'){ va = a.date||''; vb = b.date||''; }
+      else { va = a[_sk]; vb = b[_sk]; }
+      if(va==null && vb==null) return 0;
+      if(va==null) return 1;
+      if(vb==null) return -1;
+      return String(va).localeCompare(String(vb),'zh-Hant')*_sd;
+    });
+  }
 
   var rows=list.map(function(a){
     var s=gs(a.studentId);
@@ -9768,7 +9975,11 @@ function rAtt(){
     +summaryCards+'</div>'
     +'<input id=\"att-search\" class="inp" placeholder="🔍 搜尋姓名或學號…" value="'+attQ+'" oninput="doSearch(\'attQ\',\'rAtt\',\'att-search\',this.value)" style="margin-bottom:10px">'
     +'<div class="card"><div class="tbl"><table>'
-    +'<thead><tr><th>姓名</th><th>學號</th><th>日期</th><th>簽到時間</th><th>簽退時間</th><th>狀態</th><th style="text-align:center">出席率</th><th>操作</th></tr></thead>'
+    +'<thead><tr>'
+    +'<th style="cursor:pointer" onclick="toggleSortKey(\'name\');document.getElementById(\'tc\').innerHTML=rAtt()">姓名 ↕</th>'
+    +'<th style="cursor:pointer" onclick="toggleSortKey(\'sid\');document.getElementById(\'tc\').innerHTML=rAtt()">學號 ↕</th>'
+    +'<th style="cursor:pointer" onclick="toggleSortKey(\'date\');document.getElementById(\'tc\').innerHTML=rAtt()">日期 ↕</th>'
+    +'<th>簽到時間</th><th>簽退時間</th><th>狀態</th><th style="text-align:center">出席率</th><th>操作</th></tr></thead>'
     +'<tbody>'+(rows||'<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--gray)">尚無紀錄</td></tr>')+'</tbody>'
     +'</table></div></div>';
 }
@@ -10442,7 +10653,17 @@ function rPend(){
 }).map(p=>`<tr><td><strong>${p.name}</strong></td><td style="font-family:monospace;font-size:.77rem">${p.sid||''}</td><td>${p.cls||''}</td><td style="text-align:center">${p.seat||''}</td><td>${bdg(p.status==='pending'?'待審核':p.status==='approved'?'已核准':'已拒絕',p.status==='pending'?'amb':p.status==='approved'?'grn':'red')}</td><td style="font-size:.72rem;color:var(--gray)">${p.date||''}</td><td><div style="display:flex;gap:4px">${p.status==='pending'?`<button class="btn bg bsm" onclick="apP(${p.id})">✅ 核准</button><button class="btn br bsm" onclick="rjP(${p.id})">✗ 拒絕</button>`:''}</div></td></tr>`).join('');  var leaveSec=leaveList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">📆 請假申請（'+leaveList.length+'件待審）</div><div class="cb">'    +leaveList.map(function(p){return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+escapeHtml(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+escapeHtml(p.date||'')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="approveLeave('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="approveLeave('+p.id+',true)">✅ 核准</button></div></div>'}).join('')    +'</div></div>':'';
   var appealSec=appealList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">✋ 成績申訴（'+appealList.length+'件）</div><div class="cb">'    +appealList.map(function(p){var a=DB.assignments.find(function(x){return x.id===Number(p.assignmentId);});return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+escapeHtml(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+escapeHtml(a?a.title:'作業')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="resolveAppeal('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="resolveAppeal('+p.id+',true)">✅ 已處理</button></div></div>'}).join('')    +'</div></div>':'';
 
-  return searchBar+leaveSec+appealSec+`<div style="margin-bottom:13px"><div style="font-size:1.15rem;font-weight:900">註冊審核</div><div style="font-size:.77rem;color:var(--gray)">待審核 ${DB.pending.filter(p=>p.status==='pending').length} 件</div></div>
+  // B4：批次操作按鈕
+  var batchBar = '';
+  if(leaveList.length > 0 || appealList.length > 0){
+    batchBar = '<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">'
+      +'<span style="font-size:.78rem;color:var(--text-3)">批次操作：</span>'
+      +'<button class="btn bg bsm" onclick="batchApprovePending()">✅ 全部核准('+(leaveList.length+appealList.length)+'件)</button>'
+      +'<button class="btn br bsm" onclick="batchRejectPending()">❌ 全部拒絕</button>'
+      +'</div>';
+  }
+
+  return searchBar+batchBar+leaveSec+appealSec+`<div style="margin-bottom:13px"><div style="font-size:1.15rem;font-weight:900">註冊審核</div><div style="font-size:.77rem;color:var(--gray)">待審核 ${DB.pending.filter(p=>p.status==='pending').length} 件</div></div>
   <div class="card"><div class="tbl"><table><thead><tr><th>姓名</th><th>學號</th><th>班級</th><th style="text-align:center">座號</th><th>狀態</th><th>申請日</th><th>操作</th></tr></thead><tbody>${rows||`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--gray)">尚無申請</td></tr>`}</tbody></table></div></div>`;
 }
 function apP(id){const p=DB.pending.find(x=>x.id===id);if(!p)return;DB.students.push({id:nid(),name:p.name,sid:p.sid,cls:p.cls,seat:p.seat,email:p.email||'',pass:p.initPass||String(p.sid||'0000').slice(-4),mustChangePw:!p.initPass});p.status='approved';bLS();saveDB();document.getElementById('tc').innerHTML=rPend();toast('✅ 已核准 '+p.name);}
@@ -11275,6 +11496,7 @@ function rSAsgn(){
       +'<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">'
       +'<div style="font-weight:700;font-size:.88rem">'+a.title+'</div>'
       +'<span style="font-size:.72rem;color:'+dc+'">'+dt+'</span></div>'
+      +(due?'<div style="margin-bottom:6px;font-size:.72rem">'+dueCountdown(due)+'</div>':'')
       +(a.desc?'<div style="font-size:.76rem;color:var(--gray);margin-bottom:8px">'+a.desc+'</div>':'')
       +subInfo
       +'<button class="btn bp bsm" onclick="openSubModal('+aid+',\''+a.title.replace(/'/g,'')+'\')">'+( sub?'🔄 重新繳交':'📤 繳交作業')+'</button>'
