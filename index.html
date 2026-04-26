@@ -6842,6 +6842,12 @@ setInterval(updateStorageIndicator, 60000);
 
 function doSearch(storeKey, renderFn, inputId, val){
   window[storeKey] = val;
+  // IME 中文輸入法防護：組字中不觸發搜尋
+  var prevInpEarly = document.getElementById(inputId);
+  if(prevInpEarly && prevInpEarly._composing){
+    // 組字進行中，不啟動 timer，等 compositionend 再呼叫
+    return;
+  }
   var tcEl = document.getElementById('tc');
   if(tcEl) tcEl.classList.add('searching');
   clearTimeout(window._srchTimer);
@@ -6872,6 +6878,8 @@ function doSearch(storeKey, renderFn, inputId, val){
       if(!inp) return;
       inp.focus();
       try { inp.setSelectionRange(caret, caret); } catch(e){}
+      // 重新綁定 IME 監聽（因為 innerHTML 重建了 input）
+      bindImeHandlers(inp, storeKey, renderFn, inputId);
 
       // 附加搜尋歷史 datalist
       try {
@@ -6893,6 +6901,59 @@ function doSearch(storeKey, renderFn, inputId, val){
     });
   }, 200);
 }
+
+// IME 組字監聽：防止中文輸入法觸發過早搜尋
+function bindImeHandlers(inp, storeKey, renderFn, inputId){
+  if(!inp || inp._imeBound) return;
+  inp._imeBound = true;
+  inp.addEventListener('compositionstart', function(){
+    inp._composing = true;
+    // 取消已排定的搜尋
+    clearTimeout(window._srchTimer);
+    var tcEl = document.getElementById('tc');
+    if(tcEl) tcEl.classList.remove('searching');
+  });
+  inp.addEventListener('compositionend', function(e){
+    inp._composing = false;
+    // 組字結束，現在才觸發搜尋
+    var finalVal = inp.value;
+    doSearch(storeKey, renderFn, inputId, finalVal);
+  });
+}
+
+// 自動偵測新出現的搜尋框並綁定 IME
+function autoBindImeOnSearchInputs(){
+  // 找出所有 oninput 包含 doSearch 的 input
+  var inputs = document.querySelectorAll('input[oninput*="doSearch"]');
+  inputs.forEach(function(inp){
+    if(inp._imeBound) return;
+    // 解析 doSearch 參數：doSearch('storeKey','renderFn','inputId',this.value)
+    var oninputAttr = inp.getAttribute('oninput') || '';
+    var m = oninputAttr.match(/doSearch\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/);
+    if(m){
+      bindImeHandlers(inp, m[1], m[2], m[3]);
+    }
+  });
+}
+
+// 監聽 DOM 變化自動綁定
+if(typeof MutationObserver !== 'undefined'){
+  var _imeObserver = new MutationObserver(function(){
+    autoBindImeOnSearchInputs();
+  });
+  // 啟動時延遲觀察
+  setTimeout(function(){
+    var tcEl = document.getElementById('tc');
+    var stcEl = document.getElementById('stc');
+    if(tcEl) _imeObserver.observe(tcEl, {childList: true, subtree: true});
+    if(stcEl) _imeObserver.observe(stcEl, {childList: true, subtree: true});
+    autoBindImeOnSearchInputs();
+  }, 500);
+}
+
+// 頁面載入後也跑一次
+document.addEventListener('DOMContentLoaded', autoBindImeOnSearchInputs);
+window.addEventListener('load', autoBindImeOnSearchInputs);
 
 // ═══════════ 階段 3：全域鍵盤快捷鍵 ═══════════
 document.addEventListener('keydown', function(e){
