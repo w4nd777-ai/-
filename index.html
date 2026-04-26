@@ -152,6 +152,20 @@ body{
   #build-tag{font-size:.55rem;opacity:.3}
 }
 
+/* 階段 5：手機底部元素避開 mobile-nav (52px 高 + 留白) */
+@media (max-width: 640px) {
+  /* 浮動按鈕避開 mobile-nav (52px 高 + 留白) */
+  [style*="position:fixed"][style*="bottom:24px"] {
+    bottom: 70px !important;
+  }
+  /* build-tag 移到 mobile-nav 上方 */
+  #build-tag {
+    bottom: 60px !important;
+    right: 8px !important;
+    opacity: .25 !important;
+  }
+}
+
 /* Heatmap dark mode soften */
 html[data-theme=dark] .hm-green{background:#2d7d48!important}
 html[data-theme=dark] .hm-amber{background:#b17a17!important}
