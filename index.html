@@ -3320,6 +3320,7 @@ function toggleGraded(subId){
   sub.graded=!sub.graded;
   saveDB();
   document.getElementById('tc').innerHTML=rSub();
+  if(typeof toast==='function') toast(sub.graded?'✅ 已標記為已批改':'⬜ 已改回待批');
 }
 
 function broadcastMsg(){
@@ -7180,7 +7181,7 @@ function saveDB(){
     submissions:DB.submissions,scores:DB.scores,evals:DB.evals,groups:DB.groups,
     messages:DB.messages,pending:DB.pending,courses:DB.courses,accounts:DB.accounts,
     settings:DB.settings,branding:DB.branding,announcements:DB.announcements,
-    grades:DB.grades,_n:DB._n,
+    grades:DB.grades,feeds:DB.feeds||[],_n:DB._n,
     _saved:Date.now()
   };
   var json=JSON.stringify(payload);
@@ -7219,7 +7220,7 @@ function idbRestoreIfNewer(){
     if((idbData._saved||0) > lsSaved){
       // IDB 版本較新，覆蓋記憶體內 DB
       ['students','assignments','attendance','submissions','scores','evals','groups',
-       'messages','pending','courses','accounts','settings','branding','announcements','grades'
+       'messages','pending','courses','accounts','settings','branding','announcements','grades','feeds'
       ].forEach(function(k){ if(idbData[k]!==undefined) DB[k]=idbData[k]; });
       if(idbData._n) DB._n=idbData._n;
       // 重建索引
@@ -8149,9 +8150,15 @@ function doAttFromQr(code){
     }
     DB.attendance=DB.attendance||[];
     DB.attendance.push({
+      id:(typeof nid==='function'?nid():Date.now()),
       studentId:cur.id,
+      studentName:cur.name,
+      cls:cur.cls||'',
+      seat:cur.seat||'',
       date:today,
       time:timeStr,
+      signOutTime:'',
+      status:'present',
       type:'present',
       method:'qr',
       qrCode:code
@@ -9199,7 +9206,7 @@ function loadDB(){
       return;
     }
     ['students','assignments','attendance','submissions','scores','evals','groups',
-     'messages','pending','courses','accounts','settings','branding','announcements','grades'
+     'messages','pending','courses','accounts','settings','branding','announcements','grades','feeds'
     ].forEach(k=>{if(d[k]!==undefined)DB[k]=d[k]});
     if(d._n)DB._n=d._n;
     // 一次性正規化 sid 為字串 + 修復壞掉的密碼
@@ -10457,6 +10464,7 @@ function dStu(id){
     DB.scores=DB.scores.filter(function(x){return x.scorerId!==id&&x.targetId!==id;});
     DB.evals=(DB.evals||[]).filter(function(x){return x.studentId!==id;});
     DB.messages=(DB.messages||[]).filter(function(x){return x.studentId!==id;});
+    DB.feeds=(DB.feeds||[]).filter(function(x){return x.studentId!==id;});
     if(DB.grades)delete DB.grades[id];
     // Remove from groups
     DB.groups.forEach(function(g){
@@ -10884,7 +10892,7 @@ function rAtt(){
     +'</table></div></div>';
 }
 
-function dAtt(id){oC('確定刪除此紀錄？',()=>{DB.attendance=DB.attendance.filter(x=>x.id!==id);saveDB();document.getElementById('tc').innerHTML=rAtt();});}
+function dAtt(id){oC('確定刪除此紀錄？',()=>{DB.attendance=DB.attendance.filter(x=>x.id!==id);saveDB();document.getElementById('tc').innerHTML=rAtt();if(typeof toast==='function')toast('已刪除出缺勤紀錄');});}
 function printAtt(){
   const stus=[...DB.students].sort((a,b)=>(a.cls||'').localeCompare(b.cls||'')||Number(a.seat||99)-Number(b.seat||99));
   const dates=[...new Set((DB.attendance||[]).map(a=>a.date))].sort().slice(-10);
@@ -11845,7 +11853,7 @@ function impBak(inp){
       const d=JSON.parse(e.target.result);
       if(!d.students||!d.courses){toast('❌ 備份格式不正確','err',4000);return;}
       if(!confirm('確定要還原備份？\n備份日期：'+(d._date||'未知')+'\n⚠️ 此操作將覆蓋所有現有資料！')){return;}
-      ['students','grades','assignments','attendance','submissions','scores','evals','groups','messages','pending','courses','accounts','settings','branding','announcements'].forEach(k=>{if(d[k]!==undefined)DB[k]=d[k];});
+      ['students','grades','assignments','attendance','submissions','scores','evals','groups','messages','pending','courses','accounts','settings','branding','announcements','feeds'].forEach(k=>{if(d[k]!==undefined)DB[k]=d[k];});
       if(d._n)DB._n=d._n;
       if(!DB.grades)DB.grades={};
       saveDB();bLS();document.getElementById('tc').innerHTML=rExp();toast('✅ 備份還原成功！','ok',3500);
