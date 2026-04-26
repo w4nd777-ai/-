@@ -1634,6 +1634,28 @@ body.offline-mode { padding-top: 36px; }
 #cmd-palette .cmd-item:hover { background:var(--fill-2,#f0f0f5); }
 html[data-theme=dark] #cmd-palette .cmd-box { background:#252525; }
 
+/* ═══ 工作區指示器（多老師資料隔離） ═══ */
+#workspace-indicator {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: .68rem;
+  font-weight: 700;
+  z-index: 850;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  cursor: pointer;
+  display: none;
+}
+#workspace-indicator.show { display: block; }
+@media (max-width: 640px) {
+  #workspace-indicator { top: 4px; font-size: .6rem; padding: 2px 8px; }
+}
+
 /* ═══ 功能 6 手機 RWD 容量指示 ═══ */
 @media (max-width:640px){
   /* Fix 6：右下浮動元素整理（避開 mobile-nav 52px + class chips wrap 約 40px） */
@@ -6825,6 +6847,7 @@ var COMMAND_PALETTE = [
   {label:'學期結算/封存', icon:'📦', action:'showSemesterArchive', role:'teacher'},
   {label:'匯出學期 PDF 報告', icon:'📄', action:'exportSemesterPDF', role:'teacher'},
   {label:'推播通知設定', icon:'📲', action:'showNotificationSettings', role:'teacher'},
+  {label:'工作區管理（多老師隔離）', icon:'🗂️', action:'showWorkspaceManager', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -7908,6 +7931,245 @@ function idbRestoreIfNewer(){
     return false;
   }).catch(function(e){ console.error('[idbRestore]',e); return false; });
 }
+
+// ═══════════ 多老師資料隔離（Workspace） ═══════════
+function getCurrentWorkspace(){
+  try {
+    var saved = localStorage.getItem('cms_active_workspace') || 'default';
+    return saved;
+  } catch(e){ return 'default'; }
+}
+
+function getWorkspaceKey(originalKey){
+  var ws = getCurrentWorkspace();
+  if(ws === 'default') return originalKey; // 預設行為不變
+  return 'ws_' + ws + '_' + originalKey;
+}
+
+function listWorkspaces(){
+  var list = [{id:'default', name:'共用工作區（預設）', isDefault:true}];
+  try {
+    var meta = JSON.parse(localStorage.getItem('cms_workspaces_meta') || '[]');
+    meta.forEach(function(w){ if(w.id !== 'default') list.push(w); });
+  } catch(e){}
+  return list;
+}
+
+function createWorkspace(name, ownerUser){
+  if(!name) return false;
+  var meta = [];
+  try { meta = JSON.parse(localStorage.getItem('cms_workspaces_meta') || '[]'); } catch(e){}
+  var id = 'teacher_' + (ownerUser||'') + '_' + Date.now().toString(36);
+  meta.push({
+    id: id,
+    name: name,
+    owner: ownerUser || '',
+    createdAt: new Date().toISOString()
+  });
+  localStorage.setItem('cms_workspaces_meta', JSON.stringify(meta));
+  return id;
+}
+
+function switchWorkspace(workspaceId){
+  if(!workspaceId) workspaceId = 'default';
+  try {
+    localStorage.setItem('cms_active_workspace', workspaceId);
+    if(typeof toast === 'function') toast('🔄 切換到工作區，重新載入...', 'info', 2000);
+    setTimeout(function(){ location.reload(); }, 1500);
+  } catch(e){
+    alert('切換失敗：'+e.message);
+  }
+}
+
+function deleteWorkspace(workspaceId){
+  if(workspaceId === 'default'){ alert('無法刪除預設工作區'); return; }
+  if(!confirm('⚠️ 確定刪除此工作區？\n\n所有資料會被永久刪除，無法復原！\n建議先匯出備份。')) return;
+  try {
+    // 列出所有 ws_xxx_* keys 並刪除
+    var keysToDelete = [];
+    for(var i = 0; i < localStorage.length; i++){
+      var k = localStorage.key(i);
+      if(k && k.indexOf('ws_'+workspaceId+'_') === 0) keysToDelete.push(k);
+    }
+    keysToDelete.forEach(function(k){ localStorage.removeItem(k); });
+    // 從 meta 移除
+    var meta = JSON.parse(localStorage.getItem('cms_workspaces_meta') || '[]');
+    meta = meta.filter(function(w){ return w.id !== workspaceId; });
+    localStorage.setItem('cms_workspaces_meta', JSON.stringify(meta));
+    // 如果刪除的是當前 workspace，切回 default
+    if(getCurrentWorkspace() === workspaceId){
+      localStorage.setItem('cms_active_workspace', 'default');
+      if(typeof toast === 'function') toast('已刪除並切回預設工作區，重新載入...','info',2000);
+      setTimeout(function(){ location.reload(); }, 1500);
+    } else {
+      if(typeof toast === 'function') toast('已刪除工作區','info');
+      setTimeout(showWorkspaceManager, 500);
+    }
+  } catch(e){
+    alert('刪除失敗：'+e.message);
+  }
+}
+
+function showWorkspaceManager(){
+  var current = getCurrentWorkspace();
+  var ws = listWorkspaces();
+  var rows = ws.map(function(w){
+    var isActive = w.id === current;
+    return '<tr style="'+(isActive?'background:var(--brand-l,#e0e7ff)':'')+'">'
+      +'<td><strong>'+escapeHtml(w.name)+'</strong>'+(isActive?' <span style="font-size:.7rem;color:var(--brand)">✓ 使用中</span>':'')+'</td>'
+      +'<td style="font-size:.7rem;color:var(--text-3)">'+escapeHtml(w.owner||'-')+'</td>'
+      +'<td>'
+      +(isActive ? '<span style="font-size:.7rem;color:var(--text-3)">當前</span>' : '<button class="btn bp bsm" onclick="switchWorkspace(\''+w.id+'\')">切換</button>')
+      +' '
+      +(w.isDefault ? '' : '<button class="btn br bsm" onclick="deleteWorkspace(\''+w.id+'\')">🗑️</button>')
+      +'</td></tr>';
+  }).join('');
+  var curName = current;
+  for(var i=0;i<ws.length;i++){ if(ws[i].id===current){ curName = ws[i].name; break; } }
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div style="background:var(--fill-2);padding:10px;border-radius:8px;margin-bottom:14px;font-size:.8rem">'
+    +'<div style="font-weight:700;margin-bottom:4px">💡 什麼是工作區？</div>'
+    +'<div style="color:var(--text-3)">每個工作區有獨立的學生、作業、成績等資料。多位老師共用此系統時，可建立各自的工作區，互不干擾。預設「共用工作區」保留原行為。</div>'
+    +'</div>'
+    +'<div style="margin-bottom:14px"><strong>當前工作區：</strong>'+escapeHtml(curName)+'</div>'
+    +'<table class="tbl" style="width:100%"><thead><tr><th>名稱</th><th>擁有者</th><th>操作</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table>'
+    +'<div style="margin-top:14px;padding:10px;background:var(--amb-l,#fef3c7);border-radius:8px;font-size:.78rem">'
+    +'⚠️ <strong>注意：</strong>切換工作區會重新載入頁面。當前工作區的資料會保留，下次切換回來時還在。建議先匯出備份再進行任何切換。'
+    +'</div>'
+    +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:space-between;align-items:center">'
+    +'<button class="btn bp bsm" onclick="newWorkspaceDialog()">➕ 建立新工作區</button>'
+    +'<button class="btn bgh" onclick="cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('🗂️ 工作區管理', msg);
+}
+
+function newWorkspaceDialog(){
+  var owner = (window.cur && window.cur.user) || '';
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div class="fg"><label class="fl">工作區名稱</label><input class="inp" id="ws-name" placeholder="例：王老師-202班" required></div>'
+    +'<div class="fg"><label class="fl">擁有者帳號</label><input class="inp" id="ws-owner" value="'+escapeHtml(owner)+'" placeholder="老師帳號"></div>'
+    +'<div style="background:var(--fill-2);padding:10px;border-radius:8px;font-size:.78rem;margin-top:8px">'
+    +'💡 建立後新工作區是「<strong>空白的</strong>」（沒有任何學生/作業）。如果要從預設工作區複製資料：先在預設區匯出備份，切換新工作區後再匯入。'
+    +'</div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bgh" onclick="cM();showWorkspaceManager()">取消</button> '
+    +'<button class="btn bp" onclick="_doCreateWorkspace()">✅ 建立</button></div></div>';
+  if(typeof oM === 'function') oM('➕ 建立新工作區', msg);
+}
+
+function _doCreateWorkspace(){
+  var name = (document.getElementById('ws-name').value||'').trim();
+  var owner = (document.getElementById('ws-owner').value||'').trim();
+  if(!name){ alert('請填寫工作區名稱'); return; }
+  var id = createWorkspace(name, owner);
+  if(id){
+    if(typeof cM === 'function') cM();
+    if(typeof toast === 'function') toast('✅ 已建立工作區「'+name+'」','info');
+    setTimeout(function(){
+      if(confirm('立即切換到新工作區「'+name+'」？\n\n注意：新工作區是空白的，沒有任何資料。')){
+        switchWorkspace(id);
+      } else {
+        showWorkspaceManager();
+      }
+    }, 500);
+  }
+}
+
+// ═══════════ Workspace 攔截 localStorage（影響 saveDB / loadDB） ═══════════
+// 注意：絕對不改既有 saveDB / loadDB 函式體，改用 localStorage 攔截。
+// 預設 workspace='default' 時 shouldNamespace 一律回 false → 行為 100% 不變。
+(function patchDBForWorkspace(){
+  function _doPatch(){
+    if(window._dbPatched) return;
+    if(typeof saveDB !== 'function' || typeof loadDB !== 'function') return;
+    window._dbPatched = true;
+
+    var _origSetItem = localStorage.setItem.bind(localStorage);
+    var _origGetItem = localStorage.getItem.bind(localStorage);
+    var _origRemoveItem = localStorage.removeItem.bind(localStorage);
+
+    function shouldNamespace(key){
+      if(typeof key !== 'string') return false;
+      var ws;
+      try { ws = localStorage.getItem('cms_active_workspace') || 'default'; } catch(e){ ws='default'; }
+      if(ws === 'default') return false;
+      // 不要 namespace 工作區管理本身的 key
+      if(key === 'cms_active_workspace') return false;
+      if(key === 'cms_workspaces_meta') return false;
+      if(key.indexOf('ws_') === 0) return false; // 已經 namespace 的不重複
+      // 主要 DB key + 衍生 key
+      var prefixes = ['cmsDB', 'cms_db', 'cms_archives', 'cms_auto_backups'];
+      for(var i = 0; i < prefixes.length; i++){
+        if(key === prefixes[i] || key.indexOf(prefixes[i]) === 0) return true;
+      }
+      return false;
+    }
+
+    function nsKey(key){
+      var ws;
+      try { ws = localStorage.getItem('cms_active_workspace') || 'default'; } catch(e){ ws='default'; }
+      if(ws === 'default') return key;
+      return 'ws_' + ws + '_' + key;
+    }
+
+    try {
+      localStorage.setItem = function(key, value){
+        try {
+          if(shouldNamespace(key)) key = nsKey(key);
+        } catch(e){}
+        return _origSetItem(key, value);
+      };
+      localStorage.getItem = function(key){
+        try {
+          if(shouldNamespace(key)) key = nsKey(key);
+        } catch(e){}
+        return _origGetItem(key);
+      };
+      localStorage.removeItem = function(key){
+        try {
+          if(shouldNamespace(key)) key = nsKey(key);
+        } catch(e){}
+        return _origRemoveItem(key);
+      };
+      console.log('[Workspace] DB patched, current workspace:',
+        (function(){ try { return localStorage.getItem('cms_active_workspace') || 'default'; } catch(e){ return 'default'; }})());
+    } catch(e){
+      console.warn('[Workspace] patch failed (graceful fallback):', e);
+      window._dbPatched = false;
+    }
+  }
+  // 確保 saveDB / loadDB 已定義（保險起見延遲）
+  if(typeof saveDB === 'function' && typeof loadDB === 'function'){
+    _doPatch();
+  } else {
+    setTimeout(_doPatch, 100);
+  }
+})();
+
+// 工作區指示器（非 default 時顯示）
+function updateWorkspaceIndicator(){
+  try {
+    var ws = getCurrentWorkspace();
+    var ind = document.getElementById('workspace-indicator');
+    if(!ind){
+      ind = document.createElement('div');
+      ind.id = 'workspace-indicator';
+      ind.onclick = showWorkspaceManager;
+      ind.title = '點擊管理工作區';
+      document.body.appendChild(ind);
+    }
+    if(ws === 'default'){
+      ind.classList.remove('show');
+    } else {
+      var meta = listWorkspaces();
+      var w = null;
+      for(var i=0;i<meta.length;i++){ if(meta[i].id===ws){ w=meta[i]; break; } }
+      ind.textContent = '🗂️ ' + (w ? w.name : ws);
+      ind.classList.add('show');
+    }
+  } catch(e){ console.warn('[updateWorkspaceIndicator]', e); }
+}
+setTimeout(updateWorkspaceIndicator, 1500);
 
 // ═══ 新增工具函式區 ═══
 
@@ -14153,6 +14415,7 @@ setInterval(function(){updateMsgBadge();},3000);
   <button onclick="closeMobMore();typeof openCommandPalette==='function'&&openCommandPalette()" class="mob-more-item">⌨️ 命令面板</button>
   <button onclick="closeMobMore();typeof showStorageInfo==='function'&&showStorageInfo()" class="mob-more-item">💾 儲存空間</button>
   <button onclick="closeMobMore();typeof showAutoBackups==='function'&&showAutoBackups()" class="mob-more-item">📦 自動備份</button>
+  <button onclick="closeMobMore();typeof showWorkspaceManager==='function'&&showWorkspaceManager()" class="mob-more-item">🗂️ 工作區管理</button>
   <button onclick="closeMobMore();window.print()" class="mob-more-item">🖨️ 列印當前頁面</button>
   <button onclick="closeMobMore();installPWA()" class="mob-more-item" id="pwa-install-btn" style="display:none">📲 加到主畫面</button>
   <div style="height:1px;background:var(--sep);margin:4px 8px"></div>
