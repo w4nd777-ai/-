@@ -1207,15 +1207,7 @@ html[data-theme=dark] #st-cn{background:rgba(94,92,230,.2)!important;color:#c4b5
   .hero{padding:16px 18px}
   .hero h2{font-size:1.1rem}
 }
-@media(max-width:640px){
-  #sidebar{width:0!important;position:fixed;z-index:200;height:100%;box-shadow:var(--shadow-lg)}
-  #sidebar.sb-open{width:216px!important}
-  #mob-menu{display:flex!important}
-  #tc{padding:14px}
-  .expg{grid-template-columns:1fr 1fr}
-  .hero{padding:16px 18px}
-  .hero h2{font-size:1.1rem}
-}
+/* （原本此處重複了一段相同的 @media 區塊，已移除以避免重複規則） */
 
 /* ── AI Panel ── */
 .ai-chip{
@@ -1706,6 +1698,31 @@ html[data-theme="dark"] .mob-more-item:hover { background: #333; }
   }
   /* 隱藏右下容量指示（已在更多選單） */
   #storage-tag { display: none !important; }
+}
+
+/* ═══ 終局審查補強：學生 stabs 在窄手機 (<360px) 上避免溢出 ═══ */
+@media (max-width: 380px) {
+  /* 10 個 tab 在 360px 以下空間極度緊張，縮小 padding 並允許橫向 scroll */
+  #sc-student .stabs {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    flex-wrap: nowrap !important;
+  }
+  #sc-student .stabs::-webkit-scrollbar { display: none; }
+  #sc-student .stab {
+    flex: 0 0 auto !important;
+    min-width: 52px !important;
+    padding: 7px 8px 5px !important;
+    font-size: .54rem !important;
+  }
+  #sc-student .stab .sico { font-size: 1.15rem !important; }
+
+  /* modal 在極窄螢幕（<360px）上 padding 縮一半，避免內容被擠壓 */
+  #modal-bg { padding: 8px !important; padding-top: max(40px, env(safe-area-inset-top, 12px)) !important; }
+  #modal { border-radius: 16px !important; }
+
+  /* toast 在極窄螢幕上避免被 mobile-nav 遮住，再上移一些 */
+  #toast { max-width: 94vw !important; font-size: .72rem !important; padding: 9px 14px !important; }
 }
 </style>
 </head>
@@ -2663,7 +2680,7 @@ function addMaChip(sid){
   chip.className='ma-chip';
   chip.setAttribute('data-sid',sid);
   chip.style.cssText='display:inline-flex;align-items:center;gap:4px;background:var(--brand-l);color:var(--brand);border-radius:8px;padding:3px 10px;font-size:.75rem;font-weight:700';
-  chip.innerHTML=s.name+' <span style="color:var(--text-3);font-size:.68rem">'+s.cls+'</span><span onclick="removeMaChip('+sid+')" style="margin-left:3px;cursor:pointer;color:var(--text-3);font-size:.88rem" title="移除">×</span>';
+  chip.innerHTML=(typeof escapeHtml==='function'?escapeHtml(s.name):s.name)+' <span style="color:var(--text-3);font-size:.68rem">'+(typeof escapeHtml==='function'?escapeHtml(s.cls||''):(s.cls||''))+'</span><span onclick="removeMaChip('+sid+')" style="margin-left:3px;cursor:pointer;color:var(--text-3);font-size:.88rem" title="移除">×</span>';
   area.appendChild(chip);
   var inp=document.getElementById('ma-search');
   if(inp)inp.value='';
@@ -3794,7 +3811,9 @@ function applyNbPreset(mode){
 var _idleTimer=null;
 var _IDLE_MS=30*60*1000; // 30 minutes
 
-function resetIdleTimer(){
+// 注意：此函式已被下方 6762 行的較新版本覆蓋（hoisting 後者勝出）。
+// 重新命名以避免函式重複定義警告，並保留原邏輯以供日後參考/手動切換。
+function resetIdleTimerLegacy(){
   clearTimeout(_idleTimer);
   _idleTimer=setTimeout(function(){
     var onTeacher=!document.getElementById('sc-teacher').classList.contains('hidden');
@@ -4540,7 +4559,7 @@ function addStuChip(sid){
   chip.className='stu-chip';
   chip.setAttribute('data-sid',sid);
   chip.style.cssText='display:flex;align-items:center;gap:4px;background:var(--brand-l);color:var(--brand);border-radius:7px;padding:3px 8px;font-size:.74rem;font-weight:600';
-  chip.innerHTML=s.name+' <span style="color:var(--text-3);font-size:.66rem">'+s.cls+'</span> <span onclick="removeStuChip('+sid+')" style="cursor:pointer;font-size:.8rem;color:var(--text-3);margin-left:2px">✕</span>';
+  chip.innerHTML=(typeof escapeHtml==='function'?escapeHtml(s.name):s.name)+' <span style="color:var(--text-3);font-size:.66rem">'+(typeof escapeHtml==='function'?escapeHtml(s.cls||''):(s.cls||''))+'</span> <span onclick="removeStuChip('+sid+')" style="cursor:pointer;font-size:.8rem;color:var(--text-3);margin-left:2px">✕</span>';
   sel.appendChild(chip);
   // Clear search
   var inp=document.getElementById('stu-search');
@@ -5152,7 +5171,9 @@ function applyTheme(){
   try{var t=localStorage.getItem('cms_theme')||'light';document.documentElement.setAttribute('data-theme',t);}catch(e){}
 }
 
-function bulkResetPw(){
+// 重新命名以避免與下方 8140 行的 bulkResetPw（批量選取版）名稱衝突。
+// 此版本為「按班級重設」UI，未來若需要可以從設定面板呼叫。
+function bulkResetPwByClass(){
   var classes=[...new Set(DB.students.map(function(s){return s.cls||'未分班';}))].sort();
   var opts=classes.map(function(cls){return'<option value="'+cls+'">'+cls+'班</option>';}).join('');
   oM('🔐 批次重設學生密碼',
@@ -6573,7 +6594,7 @@ function addNaChip(sid){
   var chip=document.createElement('div');
   chip.className='na-chip stu-chip';
   chip.setAttribute('data-sid',sid);
-  chip.setAttribute('data-nsid',sid);chip.innerHTML=s.name+' <span style="color:var(--text-3);font-size:.68rem">'+s.cls+'</span><span onclick="removeNaChip(Number(this.closest(\'.na-chip\').dataset.nsid))" style="margin-left:3px;cursor:pointer;color:var(--text-3)">×</span>';
+  chip.setAttribute('data-nsid',sid);chip.innerHTML=(typeof escapeHtml==='function'?escapeHtml(s.name):s.name)+' <span style="color:var(--text-3);font-size:.68rem">'+(typeof escapeHtml==='function'?escapeHtml(s.cls||''):(s.cls||''))+'</span><span onclick="removeNaChip(Number(this.closest(\'.na-chip\').dataset.nsid))" style="margin-left:3px;cursor:pointer;color:var(--text-3)">×</span>';
   area.appendChild(chip);
   var inp=document.getElementById('na-stu-search');if(inp)inp.value='';
   var drop=document.getElementById('na-stu-drop');if(drop)drop.style.display='none';
@@ -6930,7 +6951,7 @@ function doRandomCall(){
   var ticks=0, maxTicks=15;
   var tick=function(){
     var s=pool[Math.floor(Math.random()*pool.length)];
-    display.innerHTML='<div style="font-size:2.2rem;font-weight:900;color:var(--brand)">'+s.name+'</div><div style="font-size:.78rem;color:var(--text-3)">'+(s.cls||'')+(s.seat?' · 座號 '+s.seat:'')+'</div>';
+    display.innerHTML='<div style="font-size:2.2rem;font-weight:900;color:var(--brand)">'+(typeof escapeHtml==='function'?escapeHtml(s.name):s.name)+'</div><div style="font-size:.78rem;color:var(--text-3)">'+(typeof escapeHtml==='function'?escapeHtml(s.cls||''):(s.cls||''))+(s.seat?' · 座號 '+(typeof escapeHtml==='function'?escapeHtml(String(s.seat)):s.seat):'')+'</div>';
     ticks++;
     if(ticks<maxTicks){ setTimeout(tick, 40+ticks*8); }
     else {
@@ -9273,7 +9294,7 @@ function onName(){
     const s=DB.students.find(x=>x.id===id);
     if(s){
       cf.style.display='block';
-      cf.innerHTML='✅ 確認：<strong>'+(s.cls||'')+'</strong> 座號 <strong>'+(s.seat||'?')+'</strong> · <strong>'+s.name+'</strong>';
+      cf.innerHTML='✅ 確認：<strong>'+(typeof escapeHtml==='function'?escapeHtml(s.cls||''):(s.cls||''))+'</strong> 座號 <strong>'+(typeof escapeHtml==='function'?escapeHtml(String(s.seat||'?')):(s.seat||'?'))+'</strong> · <strong>'+(typeof escapeHtml==='function'?escapeHtml(s.name):s.name)+'</strong>';
       if(pw)pw.style.display='block';
       if(hint)hint.textContent=s.mustChangePw?'⚠️ 首次登入，預設密碼為學號後4碼（'+(String(s.sid||'0000').slice(-4))+'），登入後請修改':'輸入你的密碼';
       // Clear password field
@@ -9510,7 +9531,7 @@ function goReg(){
   goSc('sc-reg');
   // Populate course dropdown
   var sel=document.getElementById('rg-co');
-  if(sel)sel.innerHTML=DB.courses.map(function(co){return'<option value="'+co.id+'">'+co.name+(co.code?' ('+co.code+')':'')+'</option>';}).join('');
+  if(sel)sel.innerHTML=DB.courses.map(function(co){var _e=typeof escapeHtml==='function'?escapeHtml:function(x){return x;};return'<option value="'+co.id+'">'+_e(co.name||'')+(co.code?' ('+_e(co.code)+')':'')+'</option>';}).join('');
 
   // Apply regFields settings to form
   var rf=DB.settings.regFields||{};
