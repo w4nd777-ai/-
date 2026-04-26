@@ -1284,6 +1284,15 @@ html[data-theme=blue] th{
   .main-content{margin-left:0!important;padding-bottom:60px!important;}
   .mobile-nav{display:flex!important;}
 }
+/* mobile-nav 只在老師畫面 (sc-teacher) 顯示，避免與學生 stabs / 登入頁重疊 */
+@media (max-width: 640px) {
+  body:has(#sc-teacher.hidden) .mobile-nav,
+  body:has(#sc-student:not(.hidden)) .mobile-nav,
+  body:has(#sc-login:not(.hidden)) .mobile-nav,
+  body:has(#sc-tlogin:not(.hidden)) .mobile-nav {
+    display: none !important;
+  }
+}
 .mobile-nav{
   display:none;
   position:fixed;bottom:0;left:0;right:0;
