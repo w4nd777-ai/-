@@ -1619,7 +1619,7 @@ html[data-theme="dark"] .tbl thead th { background: #252525; }
       <div id="stu-pass-wrap" style="display:none;margin-bottom:10px">
         <div style="display:flex;gap:6px;align-items:center">
           <input class="inp" type="password" id="stu-pass" placeholder="輸入密碼" onkeydown="if(event.key==='Enter')goStu()" style="flex:1">
-          <button onclick="toggleStuPass()" style="background:var(--gray-l);border:1.5px solid var(--gray-b);border-radius:9px;padding:0 11px;height:40px;cursor:pointer;font-size:.85rem">👁</button>
+          <button onclick="toggleStuPass()" title="顯示密碼" style="background:var(--gray-l);border:1.5px solid var(--gray-b);border-radius:9px;padding:0 14px;height:42px;cursor:pointer;font-size:1.05rem;min-width:48px;flex-shrink:0">👁</button>
         </div>
         <div style="font-size:.71rem;color:var(--text-3);margin-top:4px" id="stu-pass-hint">預設密碼為學號後4碼</div>
       </div>
@@ -1631,6 +1631,10 @@ html[data-theme="dark"] .tbl thead th { background: #252525; }
       <button onclick="goForgotPw()" style="background:none;border:none;cursor:pointer;font-size:.76rem;color:var(--text-3);font-weight:600">🔑 忘記密碼？</button>
       <span style="color:var(--gray-b)">·</span>
       <button onclick="goSc('sc-tlogin')" style="background:none;border:none;cursor:pointer;font-size:.76rem;color:var(--text-3);font-weight:600">🔐 教師登入</button>
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:.72rem;display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+      <button onclick="quickExport()" style="background:none;border:none;color:var(--text-3);cursor:pointer;text-decoration:underline;font-size:.72rem">📤 匯出此裝置資料</button>
+      <button onclick="quickImport()" style="background:none;border:none;color:var(--text-3);cursor:pointer;text-decoration:underline;font-size:.72rem">📥 從備份還原</button>
     </div>
   </div>
   <!-- Dark mode toggle — login screen -->
@@ -8473,7 +8477,82 @@ function onName(){
 }
 function toggleStuPass(){
   const inp=document.getElementById('stu-pass');
-  if(inp)inp.type=inp.type==='password'?'text':'password';
+  if(!inp) return;
+  const isPw = inp.type === 'password';
+  inp.type = isPw ? 'text' : 'password';
+  // 切換按鈕圖示
+  const btns = document.querySelectorAll('button[onclick="toggleStuPass()"]');
+  btns.forEach(function(b){
+    b.textContent = isPw ? '🙈' : '👁';
+    b.title = isPw ? '隱藏密碼' : '顯示密碼';
+  });
+  // 重新聚焦並維持游標位置
+  try {
+    const pos = inp.value.length;
+    inp.focus();
+    inp.setSelectionRange(pos, pos);
+  } catch(e){}
+}
+function toggleTeaPass(){
+  const inp=document.getElementById('tl-p');
+  if(!inp) return;
+  const isPw = inp.type === 'password';
+  inp.type = isPw ? 'text' : 'password';
+  const btns = document.querySelectorAll('button[onclick="toggleTeaPass()"]');
+  btns.forEach(function(b){
+    b.textContent = isPw ? '🙈' : '👁';
+    b.title = isPw ? '隱藏密碼' : '顯示密碼';
+  });
+}
+function quickImport(){
+  // 開啟檔案選擇器
+  var inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.json,application/json';
+  inp.onchange = function(){
+    var file = inp.files && inp.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var data = JSON.parse(e.target.result);
+        if(!confirm('⚠️ 確定要從備份檔還原？\n\n這會覆蓋此裝置目前所有資料（學生、作業、密碼等），無法復原。\n\n建議：先用「📥 匯出備份」備份目前資料以防萬一。')) return;
+        // 套用資料
+        Object.keys(data).forEach(function(k){
+          if(k !== '_meta') DB[k] = data[k];
+        });
+        if(typeof saveDB === 'function') saveDB();
+        if(typeof toast === 'function') toast('✅ 已匯入備份，重新載入頁面...','info',2000);
+        setTimeout(function(){ location.reload(); }, 1500);
+      } catch(err){
+        alert('❌ 檔案格式錯誤：'+err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+  inp.click();
+}
+function quickExport(){
+  try {
+    if(typeof DB === 'undefined' || !DB) {
+      alert('❌ 沒有可匯出的資料');
+      return;
+    }
+    var data = JSON.stringify(DB, null, 2);
+    var blob = new Blob([data], {type:'application/json'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    var dateStr = (typeof td === 'function' ? td() : new Date().toISOString().slice(0,10));
+    a.download = '課程系統備份-' + dateStr + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if(typeof toast === 'function') toast('✅ 備份檔已下載，請傳到另一台裝置匯入','info',4000);
+  } catch(err){
+    alert('❌ 匯出失敗：' + err.message);
+  }
 }
 function rememberLogin(){
   try{const sid=document.getElementById('sel-name')?.value;const cid=document.getElementById('sel-course')?.value;if(sid&&cid)localStorage.setItem('cms_last_login',JSON.stringify({sid,cid}));}catch(e){}
