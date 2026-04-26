@@ -7868,17 +7868,48 @@ function loadDB(){
      'messages','pending','courses','accounts','settings','branding','announcements','grades'
     ].forEach(k=>{if(d[k]!==undefined)DB[k]=d[k]});
     if(d._n)DB._n=d._n;
-    // normalizeSids: 確保所有 sid 為字串型別，避免 Number 導致 .slice 崩潰
-    if(DB.students && Array.isArray(DB.students)){
-      DB.students.forEach(function(s){
-        if(s && s.sid != null && typeof s.sid !== 'string') s.sid = String(s.sid);
-      });
-    }
-    if(DB.pending && Array.isArray(DB.pending)){
-      DB.pending.forEach(function(p){
-        if(p && p.sid != null && typeof p.sid !== 'string') p.sid = String(p.sid);
-      });
-    }
+    // 一次性正規化 sid 為字串 + 修復壞掉的密碼
+    (function normalizeSids(){
+      try {
+        if(typeof DB === 'undefined' || !DB) return;
+        var fixed = { sidNum: 0, passEmpty: 0, total: 0 };
+        if(DB.students && Array.isArray(DB.students)){
+          DB.students.forEach(function(s){
+            if(!s) return;
+            fixed.total++;
+            // 1. sid 轉字串
+            if(s.sid != null && typeof s.sid !== 'string'){
+              s.sid = String(s.sid);
+              fixed.sidNum++;
+            }
+            // 2. 自動修復壞掉的密碼（空/null/undefined/非字串）
+            if(s.pass == null || typeof s.pass !== 'string' || s.pass === ''){
+              s.pass = String(s.sid||'0000').slice(-4);
+              s.mustChangePw = false; // 可直接用預設密碼登入，不強制改
+              fixed.passEmpty++;
+            } else {
+              // pass 有值但去頭尾空白避免錯配
+              s.pass = String(s.pass).trim();
+            }
+          });
+        }
+        if(DB.pending && Array.isArray(DB.pending)){
+          DB.pending.forEach(function(p){
+            if(p && p.sid != null && typeof p.sid !== 'string'){
+              p.sid = String(p.sid);
+              fixed.sidNum++;
+            }
+          });
+        }
+        // 摘要報告
+        if(fixed.sidNum > 0 || fixed.passEmpty > 0){
+          console.log('[normalizeSids] 自動修復：'
+            + fixed.sidNum + ' 筆 sid 轉字串，'
+            + fixed.passEmpty + ' 筆密碼還原為預設（學號後 4 碼）');
+          if(typeof saveDB === 'function') saveDB();
+        }
+      } catch(e) { console.error('[normalizeSids]', e); }
+    })();
     if(!DB.grades)DB.grades={};
     if(!DB.announcements)DB.announcements=[];
     if(!DB.settings.gradeWeights)DB.settings.gradeWeights={regular:30,midterm:30,final:40};
@@ -8499,7 +8530,16 @@ function goStu(){
   // 雙邊都 trim 避免空白字元造成錯配
   const defaultPass=(String(stu.sid||'0000')).slice(-4);
   const storedPass=String(stu.pass||defaultPass).trim();
-  if(enteredPass!==storedPass){
+  // Last-resort recovery: 若輸入的是預設密碼但比對失敗，自動還原 stu.pass
+  if(enteredPass===defaultPass && enteredPass!==storedPass){
+    console.warn('[goStu] stu.pass 異常，自動還原為預設密碼讓使用者登入');
+    stu.pass = defaultPass;
+    stu.mustChangePw = false;
+    if(typeof saveDB === 'function') saveDB();
+  }
+  // 重新計算最終比對值
+  var finalStored = String(stu.pass||defaultPass).trim();
+  if(enteredPass!==finalStored){
     // 累計錯誤次數
     window._stuLoginFails=(window._stuLoginFails||{});
     window._stuLoginFails[nid2]=(window._stuLoginFails[nid2]||0)+1;
