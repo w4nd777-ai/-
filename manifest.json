@@ -1,0 +1,22 @@
+{
+  "name": "課程管理系統",
+  "short_name": "課程系統",
+  "description": "教師端課程/出席/作業/成績管理",
+  "start_url": "/-/",
+  "display": "standalone",
+  "background_color": "#f5f5f7",
+  "theme_color": "#5e5ce6",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTkyIj48cmVjdCB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgcng9IjMyIiBmaWxsPSIjNWU1Y2U2Ii8+PHRleHQgeD0iOTYiIHk9IjEzMCIgZm9udC1zaXplPSIxMTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPvCfk5o8L3RleHQ+PC9zdmc+",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9Ijg2IiBmaWxsPSIjNWU1Y2U2Ii8+PHRleHQgeD0iMjU2IiB5PSIzNDQiIGZvbnQtc2l6ZT0iMjkwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5OaPC90ZXh0Pjwvc3ZnPg==",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

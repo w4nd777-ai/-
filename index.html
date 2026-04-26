@@ -1724,7 +1724,68 @@ html[data-theme="dark"] .mob-more-item:hover { background: #333; }
   /* toast 在極窄螢幕上避免被 mobile-nav 遮住，再上移一些 */
   #toast { max-width: 94vw !important; font-size: .72rem !important; padding: 9px 14px !important; }
 }
+
+/* ═══════════ N3：印表友善樣式 ═══════════ */
+@media print {
+  /* 隱藏導航與互動元素 */
+  .sidebar, #mobile-nav, .mobile-nav, #mob-menu, #mob-more-btn,
+  .t-topbar, .stabs, .ctabs, .btn, button, input, select,
+  #toast, #modal-bg, #cmd-palette, #mob-more-panel, #mob-more-bg,
+  #build-tag, #storage-tag, #offline-banner,
+  [onclick] { display: none !important; }
+
+  /* 內容區佔滿頁面 */
+  body, html { background: #fff !important; color: #000 !important; margin: 0; padding: 0; }
+  .main-content { margin-left: 0 !important; padding: 0 !important; }
+  #tc, #stc { padding: 0 !important; overflow: visible !important; max-height: none !important; }
+
+  /* 卡片簡化 */
+  .card { box-shadow: none !important; border: 1px solid #ccc !important; padding: 8px !important; page-break-inside: avoid; }
+
+  /* 表格友善 */
+  table { width: 100% !important; border-collapse: collapse; font-size: 11pt; }
+  th, td { border: 1px solid #888 !important; padding: 4px 6px !important; }
+  th { background: #f0f0f0 !important; font-weight: 700; }
+
+  /* 列印標題 */
+  .print-only { display: block !important; text-align: center; margin: 10px 0; font-size: 14pt; font-weight: 800; }
+
+  /* 分頁 */
+  tr, .card { page-break-inside: avoid; }
+  h1, h2, h3 { page-break-after: avoid; }
+
+  /* 隱藏 highlight 黃標 */
+  mark { background: none !important; color: inherit !important; padding: 0 !important; }
+
+  /* 連結顯示 URL（除外） */
+  a[href]:after { content: ""; }
+}
+
+.print-only { display: none; }
+
+/* ═══════════ N4：學生 tab 徽章 ═══════════ */
+.stab-badge {
+  position: absolute;
+  top: 4px; right: 50%;
+  transform: translateX(20px);
+  background: #dc2626;
+  color: #fff;
+  font-size: .55rem;
+  font-weight: 800;
+  border-radius: 99px;
+  padding: 1px 5px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 1.2;
+  box-shadow: 0 0 0 2px var(--card,#fff);
+}
+.stab { position: relative !important; }
 </style>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#5e5ce6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="課程系統">
 </head>
 <body>
 
@@ -5773,6 +5834,121 @@ function studentCard(stu){
     +'</div></div>';
 }
 
+// ═══════════ N2：學期週次管理 ═══════════
+function getSemester(){
+  if(!DB.settings) DB.settings = {};
+  if(!DB.settings.semester){
+    // 預設：本學期 18 週
+    var today = new Date();
+    var startStr = (today.getMonth() < 7) ? today.getFullYear()+'-02-15' : today.getFullYear()+'-09-15';
+    DB.settings.semester = {
+      name: today.getMonth() < 7 ? today.getFullYear()+'-2' : today.getFullYear()+'-1',
+      startDate: startStr,
+      weeks: 18
+    };
+    if(typeof saveDB === 'function') saveDB();
+  }
+  return DB.settings.semester;
+}
+
+function getCurrentWeek(){
+  var sem = getSemester();
+  var start = new Date(sem.startDate);
+  var now = new Date();
+  var diffDays = Math.floor((now - start) / 86400000);
+  var week = Math.floor(diffDays / 7) + 1;
+  if(week < 1) return 0; // 還沒開學
+  if(week > sem.weeks) return -1; // 已結業
+  return week;
+}
+
+function getWeekLabel(){
+  var w = getCurrentWeek();
+  var sem = getSemester();
+  if(w === 0) return '尚未開學';
+  if(w === -1) return '已結業';
+  return sem.name + ' 第 ' + w + ' 週 / 共 ' + sem.weeks + ' 週';
+}
+
+function showSemesterSetup(){
+  var sem = getSemester();
+  var msg = '<div style="font-size:.85rem;line-height:2">'
+    +'<div class="fg"><label class="fl">學期名稱</label><input class="inp" id="sem-name" value="'+escapeHtml(sem.name)+'" placeholder="例：2026-1"></div>'
+    +'<div class="fg"><label class="fl">開學日期</label><input class="inp" id="sem-start" type="date" value="'+escapeHtml(sem.startDate)+'"></div>'
+    +'<div class="fg"><label class="fl">總週數</label><input class="inp" id="sem-weeks" type="number" min="1" max="30" value="'+sem.weeks+'"></div>'
+    +'<div style="font-size:.75rem;color:var(--text-3);margin-top:8px">目前：'+getWeekLabel()+'</div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bgh" onclick="cM()">取消</button> '
+    +'<button class="btn bp" onclick="saveSemester()">💾 儲存</button></div></div>';
+  if(typeof oM === 'function') oM('📅 學期設定', msg);
+}
+
+function saveSemester(){
+  var name = document.getElementById('sem-name').value.trim();
+  var start = document.getElementById('sem-start').value;
+  var weeks = parseInt(document.getElementById('sem-weeks').value) || 18;
+  if(!name || !start){ toast('請填完整','warn'); return; }
+  DB.settings = DB.settings || {};
+  DB.settings.semester = { name: name, startDate: start, weeks: weeks };
+  saveDB();
+  if(typeof cM === 'function') cM();
+  toast('✅ 學期設定已儲存：'+getWeekLabel(),'info');
+}
+
+// ═══════════ N4：學生 tab 徽章 ═══════════
+function updateStuTabBadges(){
+  try {
+    if(!window.cur || !window.cur.id) return;
+    var stuId = window.cur.id;
+    // 計算未繳作業
+    var totalAsgn = (DB.assignments||[]).length;
+    var submitted = (DB.submissions||[]).filter(function(s){ return s.studentId === stuId; }).length;
+    var unsubmitted = totalAsgn - submitted;
+    // 計算未讀訊息
+    var unreadMsg = (DB.messages||[]).filter(function(m){
+      return m.toStudent === stuId && !m.read;
+    }).length;
+    // 套用徽章
+    var asgnTab = document.querySelector('.stab[data-stab="sb"]');
+    var msgTab = document.querySelector('.stab[data-stab="sm"]');
+    [['stab-asgn-badge', asgnTab, unsubmitted],
+     ['stab-msg-badge', msgTab, unreadMsg]].forEach(function(spec){
+      if(!spec[1]) return;
+      var existing = spec[1].querySelector('.stab-badge');
+      if(spec[2] > 0){
+        if(!existing){
+          var b = document.createElement('span');
+          b.className = 'stab-badge';
+          b.id = spec[0];
+          spec[1].appendChild(b);
+          existing = b;
+        }
+        existing.textContent = spec[2] > 99 ? '99+' : spec[2];
+      } else if(existing){
+        existing.remove();
+      }
+    });
+  } catch(e){ console.warn('[updateStuTabBadges]', e); }
+}
+
+// 進入學生畫面後 + 每分鐘自動更新
+setInterval(function(){
+  if(document.getElementById('sc-student') && !document.getElementById('sc-student').classList.contains('hidden')){
+    updateStuTabBadges();
+  }
+}, 60000);
+
+// ═══════════ N6：家長聯絡資訊顯示卡片 ═══════════
+function studentParentInfo(stu){
+  if(!stu) return '';
+  var info = [];
+  if(stu.parentName) info.push('👤 '+escapeHtml(stu.parentName));
+  if(stu.parentPhone) info.push('📞 <a href="tel:'+escapeHtml(stu.parentPhone)+'">'+escapeHtml(stu.parentPhone)+'</a>');
+  if(stu.parentEmail) info.push('✉️ <a href="mailto:'+escapeHtml(stu.parentEmail)+'">'+escapeHtml(stu.parentEmail)+'</a>');
+  if(!info.length) return '';
+  return '<div style="font-size:.75rem;color:var(--text-3);margin-top:6px;padding:6px 10px;background:var(--fill-2);border-radius:6px"><strong>家長聯絡：</strong> '+info.join(' · ')+'</div>';
+}
+
 // ═══════════ B3：Dashboard 統計 ═══════════
 function dashStats(){
   var today = (typeof td === 'function') ? td() : new Date().toISOString().slice(0,10);
@@ -5800,7 +5976,11 @@ function dashStats(){
 function dashCards(){
   var s = dashStats();
   var attColor = s.todayAttRate >= 80 ? '#059669' : s.todayAttRate >= 60 ? '#d97706' : '#dc2626';
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px">'
+  return '<div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:10px 14px;border-radius:10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="showSemesterSetup()" title="點擊設定學期">'
+    +'<div><div style="font-size:.7rem;opacity:.85">📅 目前進度</div><div style="font-weight:800;font-size:1rem">'+getWeekLabel()+'</div></div>'
+    +'<div style="font-size:1.2rem">⚙️</div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px">'
     +'<div class="card" style="padding:11px;text-align:center"><div style="font-size:1.35rem;font-weight:800">'+s.totalStu+'</div><div style="font-size:.72rem;color:var(--text-3)">👥 學生總數</div></div>'
     +'<div class="card" style="padding:11px;text-align:center"><div style="font-size:1.35rem;font-weight:800;color:'+attColor+'">'+s.todayAttRate+'%</div><div style="font-size:.72rem;color:var(--text-3)">✅ 今日出席率 ('+s.presentToday+'/'+s.totalStu+')</div></div>'
     +'<div class="card" style="padding:11px;text-align:center"><div style="font-size:1.35rem;font-weight:800;color:'+(s.pendingCount>0?'#d97706':'#059669')+'">'+s.pendingCount+'</div><div style="font-size:.72rem;color:var(--text-3)">⏳ 待審核註冊</div></div>'
@@ -5983,6 +6163,7 @@ var COMMAND_PALETTE = [
   {label:'錯誤紀錄', icon:'🐛', action:'showErrorLog', role:'teacher'},
   {label:'儲存空間詳情', icon:'📊', action:'showStorageInfo', role:'teacher'},
   {label:'月曆檢視', icon:'📅', action:'showCalendar', role:'teacher'},
+  {label:'學期設定', icon:'📅', action:'showSemesterSetup', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -12954,8 +13135,46 @@ setInterval(function(){updateMsgBadge();},3000);
   <button onclick="closeMobMore();typeof openCommandPalette==='function'&&openCommandPalette()" class="mob-more-item">⌨️ 命令面板</button>
   <button onclick="closeMobMore();typeof showStorageInfo==='function'&&showStorageInfo()" class="mob-more-item">💾 儲存空間</button>
   <button onclick="closeMobMore();typeof showAutoBackups==='function'&&showAutoBackups()" class="mob-more-item">📦 自動備份</button>
+  <button onclick="closeMobMore();window.print()" class="mob-more-item">🖨️ 列印當前頁面</button>
+  <button onclick="closeMobMore();installPWA()" class="mob-more-item" id="pwa-install-btn" style="display:none">📲 加到主畫面</button>
   <div style="height:1px;background:var(--sep);margin:4px 8px"></div>
   <button onclick="closeMobMore();goSc('sc-login')" class="mob-more-item" style="color:#dc2626">🚪 登出</button>
 </div>
+<script>
+// PWA Service Worker 註冊
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('sw.js').then(function(reg) {
+      console.log('[PWA] Service Worker registered:', reg.scope);
+    }).catch(function(err) {
+      console.warn('[PWA] SW register failed:', err);
+    });
+  });
+}
+
+// PWA 安裝提示
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  deferredPrompt = e;
+  // 顯示安裝按鈕（如果有的話）
+  var btn = document.getElementById('pwa-install-btn');
+  if(btn) btn.style.display = 'inline-flex';
+});
+
+function installPWA(){
+  if(!deferredPrompt){
+    if(typeof toast === 'function') toast('已安裝或不支援此功能','info');
+    return;
+  }
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(function(choice){
+    if(choice.outcome === 'accepted' && typeof toast === 'function') toast('✅ 已加入主畫面');
+    deferredPrompt = null;
+    var btn = document.getElementById('pwa-install-btn');
+    if(btn) btn.style.display = 'none';
+  });
+}
+</script>
 </body>
 </html>
