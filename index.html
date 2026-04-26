@@ -2236,7 +2236,7 @@ function doChangePw(studentId, isForced){
   if(!stu)return;
   if(!isForced){
     var oldPw=(document.getElementById('pw-old')||{value:''}).value;
-    var storedOld=stu.pass||(stu.sid||'0000').slice(-4);
+    var storedOld=stu.pass||String(stu.sid||'0000').slice(-4);
     if(oldPw!==storedOld){toast('目前密碼錯誤','err');return;}
   }
   stu.pass=newPw;
@@ -2309,7 +2309,7 @@ function enterStudent(){
 // Teacher: reset student password
 function resetAllPw(){
   oC('確定要重設所有學生的密碼為預設值（學號後4碼）嗎？', function(){
-    DB.students.forEach(function(s){s.pass=(s.sid||'0000').slice(-4);s.mustChangePw=true;});
+    DB.students.forEach(function(s){s.pass=String(s.sid||'0000').slice(-4);s.mustChangePw=true;});
     saveDB();
     document.getElementById('tc').innerHTML=rStu();
     toast('✅ 已重設所有學生密碼');
@@ -2318,7 +2318,7 @@ function resetAllPw(){
 function resetStuPw(studentId){
   var stu=DB.students.find(function(s){return s.id===studentId;});
   if(!stu)return;
-  var defaultPw=(stu.sid||'0000').slice(-4);
+  var defaultPw=String(stu.sid||'0000').slice(-4);
   oC('確定要將 '+stu.name+' 的密碼重設為預設值（'+defaultPw+'）？', function(){
     stu.pass=defaultPw;
     stu.mustChangePw=true;
@@ -3062,7 +3062,7 @@ function doBatchAdd(){
       return s.name===name||(sid&&s.sid===sid);
     });
     if(exists){skipped++;return;}
-    var defaultPw=sid?sid.slice(-4):'0000';
+    var defaultPw=sid?String(sid).slice(-4):'0000';
     DB.students.push({
       id:nid(),name:name,sid:sid,cls:cls,seat:seat,email:'',
       pass:defaultPw,mustChangePw:true
@@ -7327,7 +7327,7 @@ function bulkResetPw(){
   if(!confirm('將 '+(window._stuSel||[]).length+' 位學生的密碼重設為「學號後 4 碼」，並要求首次登入時改密碼？')) return;
   (window._stuSel||[]).forEach(function(id){
     var s=DB.students.find(function(x){return x.id===id;});
-    if(s){ s.pass=(s.sid||'0000').slice(-4); s.mustChangePw=true; }
+    if(s){ s.pass=String(s.sid||'0000').slice(-4); s.mustChangePw=true; }
   });
   saveDB(); if(typeof logOp==='function') logOp('批量重設密碼',window._stuSel.length+'人');
   window._stuSel=[];
@@ -7868,6 +7868,17 @@ function loadDB(){
      'messages','pending','courses','accounts','settings','branding','announcements','grades'
     ].forEach(k=>{if(d[k]!==undefined)DB[k]=d[k]});
     if(d._n)DB._n=d._n;
+    // normalizeSids: 確保所有 sid 為字串型別，避免 Number 導致 .slice 崩潰
+    if(DB.students && Array.isArray(DB.students)){
+      DB.students.forEach(function(s){
+        if(s && s.sid != null && typeof s.sid !== 'string') s.sid = String(s.sid);
+      });
+    }
+    if(DB.pending && Array.isArray(DB.pending)){
+      DB.pending.forEach(function(p){
+        if(p && p.sid != null && typeof p.sid !== 'string') p.sid = String(p.sid);
+      });
+    }
     if(!DB.grades)DB.grades={};
     if(!DB.announcements)DB.announcements=[];
     if(!DB.settings.gradeWeights)DB.settings.gradeWeights={regular:30,midterm:30,final:40};
@@ -7879,7 +7890,7 @@ function loadDB(){
       {id:5,name:'黃詩涵',sid:'S005',cls:'B班',seat:'03',email:'huang@school.edu',pass:'0005',mustChangePw:true},
     ];}
     // Ensure existing students have pass field
-    DB.students.forEach(function(s){if(!s.pass){s.pass=(s.sid||'0000').slice(-4);s.mustChangePw=true;}});
+    DB.students.forEach(function(s){if(!s.pass){s.pass=String(s.sid||'0000').slice(-4);s.mustChangePw=true;}});
     if(!DB.settings.regFields)DB.settings.regFields={sid:{show:true,required:false},cls:{show:true,required:false},seat:{show:true,required:false},email:{show:true,required:false}};
     if(DB.settings.regEnabled===undefined)DB.settings.regEnabled=true;
     if(DB.settings.regNote===undefined)DB.settings.regNote='';
@@ -7898,7 +7909,7 @@ function loadDB(){
       {id:2,name:'第二組',leaderId:4,memberIds:[4,5]},
     ];}
     // Migrate: add pass to students that don't have one
-    DB.students.forEach(function(s){if(!s.pass){s.pass=(s.sid||'0000').slice(-4);s.mustChangePw=true;}});
+    DB.students.forEach(function(s){if(!s.pass){s.pass=String(s.sid||'0000').slice(-4);s.mustChangePw=true;}});
     // Migrate: fix dates that might be in zh-TW format (2026/3/24 → 2026-03-24)
     function fixDate(d){if(!d||d.includes('-'))return d;var p=d.split('/');if(p.length!==3)return d;return p[0]+'-'+String(p[1]).padStart(2,'0')+'-'+String(p[2]).padStart(2,'0');}
     DB.attendance.forEach(function(a){a.date=fixDate(a.date);});
@@ -8419,7 +8430,7 @@ function onName(){
       cf.style.display='block';
       cf.innerHTML='✅ 確認：<strong>'+(s.cls||'')+'</strong> 座號 <strong>'+(s.seat||'?')+'</strong> · <strong>'+s.name+'</strong>';
       if(pw)pw.style.display='block';
-      if(hint)hint.textContent=s.mustChangePw?'⚠️ 首次登入，預設密碼為學號後4碼（'+((s.sid||'0000').slice(-4))+'），登入後請修改':'輸入你的密碼';
+      if(hint)hint.textContent=s.mustChangePw?'⚠️ 首次登入，預設密碼為學號後4碼（'+(String(s.sid||'0000').slice(-4))+'），登入後請修改':'輸入你的密碼';
       // Clear password field
       const pi=document.getElementById('stu-pass');if(pi)pi.value='';
     }
@@ -8485,15 +8496,27 @@ function goStu(){
   const passInp=document.getElementById('stu-pass');
   const enteredPass=(passInp?passInp.value:'').trim();
   if(!enteredPass){toast('請輸入密碼','warn');return;}
-  const storedPass=stu.pass||(stu.sid||'0000').slice(-4);
+  // 雙邊都 trim 避免空白字元造成錯配
+  const defaultPass=(String(stu.sid||'0000')).slice(-4);
+  const storedPass=String(stu.pass||defaultPass).trim();
   if(enteredPass!==storedPass){
-    toast('密碼錯誤','err',3000);
+    // 累計錯誤次數
+    window._stuLoginFails=(window._stuLoginFails||{});
+    window._stuLoginFails[nid2]=(window._stuLoginFails[nid2]||0)+1;
+    var fails=window._stuLoginFails[nid2];
+    var hint='';
+    if(fails>=3){
+      hint='\n💡 預設密碼是學號最後 4 碼：'+defaultPass;
+    }
+    toast('密碼錯誤'+(fails>1?'（第 '+fails+' 次）':'')+hint,'err',fails>=3?5000:3000);
     if(passInp){passInp.value='';passInp.focus();}
     // Shake the password field
     const wrap=document.getElementById('stu-pass-wrap');
     if(wrap){wrap.classList.remove('shake');void wrap.offsetWidth;wrap.classList.add('shake');}
     return;
   }
+  // 登入成功，清除錯誤計數
+  if(window._stuLoginFails)delete window._stuLoginFails[nid2];
   cur=stu;
   // First login - force change password
   if(cur.mustChangePw){
@@ -10040,7 +10063,7 @@ function rPend(){
   return searchBar+leaveSec+appealSec+`<div style="margin-bottom:13px"><div style="font-size:1.15rem;font-weight:900">註冊審核</div><div style="font-size:.77rem;color:var(--gray)">待審核 ${DB.pending.filter(p=>p.status==='pending').length} 件</div></div>
   <div class="card"><div class="tbl"><table><thead><tr><th>姓名</th><th>學號</th><th>班級</th><th style="text-align:center">座號</th><th>狀態</th><th>申請日</th><th>操作</th></tr></thead><tbody>${rows||`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--gray)">尚無申請</td></tr>`}</tbody></table></div></div>`;
 }
-function apP(id){const p=DB.pending.find(x=>x.id===id);if(!p)return;DB.students.push({id:nid(),name:p.name,sid:p.sid,cls:p.cls,seat:p.seat,email:p.email||'',pass:p.initPass||(p.sid||'0000').slice(-4),mustChangePw:!p.initPass});p.status='approved';bLS();saveDB();document.getElementById('tc').innerHTML=rPend();toast('✅ 已核准 '+p.name);}
+function apP(id){const p=DB.pending.find(x=>x.id===id);if(!p)return;DB.students.push({id:nid(),name:p.name,sid:p.sid,cls:p.cls,seat:p.seat,email:p.email||'',pass:p.initPass||String(p.sid||'0000').slice(-4),mustChangePw:!p.initPass});p.status='approved';bLS();saveDB();document.getElementById('tc').innerHTML=rPend();toast('✅ 已核准 '+p.name);}
 function rjP(id){const p=DB.pending.find(x=>x.id===id);if(!p)return;p.status='rejected';saveDB();document.getElementById('tc').innerHTML=rPend();}
 
 function rAnn(){
