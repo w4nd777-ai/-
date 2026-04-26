@@ -1595,6 +1595,22 @@ html[data-theme="dark"] .tbl thead th { background: #252525; }
 .toast.toast-error{background:#dc2626!important}
 .toast.toast-warn{background:#d97706!important}
 .toast.toast-info{background:#2563eb!important}
+
+/* ═══ A2 離線狀態橫幅 ═══ */
+body.offline-mode #offline-banner { display: block !important; }
+body.offline-mode { padding-top: 36px; }
+
+/* ═══ A5 命令面板 ═══ */
+#cmd-palette { position:fixed; inset:0; z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding-top:80px; }
+#cmd-palette .cmd-bg { position:absolute; inset:0; background:rgba(0,0,0,.5); backdrop-filter:blur(4px); }
+#cmd-palette .cmd-box { position:relative; background:var(--card,#fff); border-radius:14px; padding:14px; width:90%; max-width:480px; box-shadow:var(--shadow-lg,0 20px 60px rgba(0,0,0,.3)); max-height:60vh; overflow:auto; }
+#cmd-palette .cmd-item:hover { background:var(--fill-2,#f0f0f5); }
+html[data-theme=dark] #cmd-palette .cmd-box { background:#252525; }
+
+/* ═══ 功能 6 手機 RWD 容量指示 ═══ */
+@media (max-width:640px){
+  #storage-tag { bottom: 80px !important; opacity: .35 !important; font-size: .55rem !important; }
+}
 </style>
 </head>
 <body>
@@ -1635,6 +1651,9 @@ html[data-theme="dark"] .tbl thead th { background: #252525; }
     <div style="text-align:center;margin-top:14px;font-size:.72rem;display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
       <button onclick="quickExport()" style="background:none;border:none;color:var(--text-3);cursor:pointer;text-decoration:underline;font-size:.72rem">📤 匯出此裝置資料</button>
       <button onclick="quickImport()" style="background:none;border:none;color:var(--text-3);cursor:pointer;text-decoration:underline;font-size:.72rem">📥 從備份還原</button>
+    </div>
+    <div style="text-align:center;margin-top:8px;font-size:.7rem;color:var(--text-3)">
+      <span style="cursor:pointer;text-decoration:underline" onclick="showForgotPwHelp()">❓ 忘記密碼？</span>
     </div>
   </div>
   <!-- Dark mode toggle — login screen -->
@@ -5580,6 +5599,217 @@ function toggleSortKey(key){
   if(tcEl && typeof curFn === 'function') tcEl.innerHTML = curFn();
 }
 
+// ═══════════ 多分頁資料同步 (A1) ═══════════
+window.addEventListener('storage', function(e){
+  if(e.key === 'cmsDB'){
+    if(window._suppressStorageReload) return;
+    if(typeof toast === 'function') toast('🔄 偵測到其他分頁更新資料，3 秒後重新載入...','info',3000);
+    setTimeout(function(){ location.reload(); }, 3000);
+  }
+});
+
+// ═══════════ 離線狀態偵測 (A2) ═══════════
+(function setupOnlineDetection(){
+  function update(){
+    if(navigator.onLine){
+      document.body.classList.remove('offline-mode');
+    } else {
+      document.body.classList.add('offline-mode');
+    }
+  }
+  window.addEventListener('online', update);
+  window.addEventListener('offline', update);
+  if(document.body) update();
+  else document.addEventListener('DOMContentLoaded', update);
+})();
+
+// ═══════════ GAS 自動同步 (A3) ═══════════
+var _gasAutoSyncTimer = null;
+function scheduleGasAutoSync(){
+  if(typeof gasUrl !== 'function') return;
+  if(!gasUrl()) return; // 沒設定 GAS 就不同步
+  clearTimeout(_gasAutoSyncTimer);
+  _gasAutoSyncTimer = setTimeout(function(){
+    try {
+      if(typeof gasSyncStudents === 'function'){
+        gasSyncStudents().then(function(){
+          console.log('[GAS auto-sync] students synced');
+        }).catch(function(e){
+          console.warn('[GAS auto-sync] failed:', e && e.message);
+        });
+      }
+    } catch(e){ console.warn('[GAS auto-sync]', e); }
+  }, 30000); // 30 秒 debounce
+}
+
+// ═══════════ 忘記密碼提示 (A4) ═══════════
+function showForgotPwHelp(){
+  var msg = '<div style="line-height:1.8;font-size:.85rem">'
+    + '<div style="margin-bottom:8px;font-weight:700">🔑 預設密碼規則</div>'
+    + '<div>• 預設密碼是<strong>學號最後 4 碼</strong></div>'
+    + '<div>• 例如學號 <code style="background:var(--fill);padding:2px 6px;border-radius:4px">1095678</code> → 密碼 <code style="background:var(--fill);padding:2px 6px;border-radius:4px">5678</code></div>'
+    + '<div style="margin-top:10px;color:var(--text-3)">若仍無法登入，請聯絡老師重設密碼。</div>'
+    + '<div style="margin-top:14px;text-align:right">'
+    + '<button class="btn bp" onclick="cM()">了解</button></div></div>';
+  if(typeof oM === 'function') oM('🔑 密碼提示', msg);
+  else alert('預設密碼是學號最後 4 碼');
+}
+
+// ═══════════ 命令面板 Ctrl+P (A5) ═══════════
+var COMMAND_PALETTE = [
+  // 老師端
+  {label:'總覽 / Dashboard', icon:'📊', tab:'overview', role:'teacher'},
+  {label:'學生管理', icon:'👥', tab:'students', role:'teacher'},
+  {label:'作業管理', icon:'📝', tab:'assignments', role:'teacher'},
+  {label:'出席紀錄', icon:'✅', tab:'at', role:'teacher'},
+  {label:'成績管理', icon:'📊', tab:'scores', role:'teacher'},
+  {label:'學期成績', icon:'🎓', tab:'grades', role:'teacher'},
+  {label:'課程評價', icon:'⭐', tab:'evals', role:'teacher'},
+  {label:'公告', icon:'📢', tab:'announce', role:'teacher'},
+  {label:'訊息', icon:'💬', tab:'messages', role:'teacher'},
+  {label:'註冊審核', icon:'✋', tab:'pending', role:'teacher'},
+  {label:'分組', icon:'👥', tab:'groups', role:'teacher'},
+  {label:'匯出備份', icon:'📦', tab:'export', role:'teacher'},
+  {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
+  // 學生端
+  {label:'簽到', icon:'📍', stab:'sa', role:'student'},
+  {label:'作業', icon:'📤', stab:'sb', role:'student'},
+  {label:'互評', icon:'⭐', stab:'sc', role:'student'},
+  {label:'評價', icon:'🔒', stab:'sd', role:'student'},
+  {label:'成績', icon:'📊', stab:'sg', role:'student'},
+  {label:'個人', icon:'👤', stab:'sp', role:'student'}
+];
+
+function openCommandPalette(){
+  var existing = document.getElementById('cmd-palette');
+  if(existing){ existing.remove(); return; }
+  var palette = document.createElement('div');
+  palette.id = 'cmd-palette';
+  palette.innerHTML = ''
+    + '<div class="cmd-bg" onclick="closeCommandPalette()"></div>'
+    + '<div class="cmd-box">'
+    + '  <input id="cmd-input" placeholder="🔍 搜尋功能..." class="inp" style="font-size:1rem;margin-bottom:10px">'
+    + '  <div id="cmd-list"></div>'
+    + '</div>';
+  document.body.appendChild(palette);
+  var inp = document.getElementById('cmd-input');
+  var list = document.getElementById('cmd-list');
+  function render(){
+    var q = (inp.value||'').toLowerCase();
+    var filtered = COMMAND_PALETTE.filter(function(c){
+      if(!q) return true;
+      return c.label.toLowerCase().includes(q);
+    });
+    list.innerHTML = filtered.length ? filtered.map(function(c, i){
+      return '<div class="cmd-item" data-i="'+i+'" onclick="executeCommand('+i+')" style="padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:10px"><span style="font-size:1.1rem">'+c.icon+'</span><span>'+escapeHtml(c.label)+'</span></div>';
+    }).join('') : '<div style="padding:14px;color:var(--text-3);text-align:center">沒有匹配的功能</div>';
+    window._cmdFiltered = filtered;
+  }
+  inp.addEventListener('input', render);
+  inp.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') closeCommandPalette();
+    if(e.key === 'Enter' && window._cmdFiltered && window._cmdFiltered.length){
+      executeCommand(0);
+    }
+  });
+  render();
+  setTimeout(function(){ inp.focus(); }, 50);
+}
+
+function closeCommandPalette(){
+  var p = document.getElementById('cmd-palette');
+  if(p) p.remove();
+}
+
+function executeCommand(i){
+  var cmd = (window._cmdFiltered||COMMAND_PALETTE)[i];
+  if(!cmd) return;
+  closeCommandPalette();
+  try {
+    if(cmd.action && typeof window[cmd.action] === 'function'){
+      window[cmd.action]();
+    } else if(cmd.tab){
+      var navBtn = document.getElementById('nb-'+cmd.tab);
+      if(navBtn){
+        if(typeof nbClick === 'function') nbClick(navBtn, cmd.tab);
+        else navBtn.click();
+      }
+    } else if(cmd.stab){
+      var stabBtn = document.querySelector('.stab[data-stab="'+cmd.stab+'"]');
+      if(stabBtn) stabBtn.click();
+    }
+  } catch(e){ console.error('[command palette]', e); }
+}
+
+// ═══════════ localStorage 容量檢查 (功能 6) ═══════════
+function getStorageInfo(){
+  try {
+    var totalUsed = 0;
+    for(var k in localStorage){
+      if(Object.prototype.hasOwnProperty.call(localStorage, k)){
+        totalUsed += (String(localStorage[k]).length + k.length) * 2; // UTF-16 約 2 bytes/字元
+      }
+    }
+    var maxBytes = 5 * 1024 * 1024; // 一般瀏覽器 5MB
+    var percent = (totalUsed / maxBytes) * 100;
+    return {
+      usedBytes: totalUsed,
+      maxBytes: maxBytes,
+      usedKB: (totalUsed/1024).toFixed(1),
+      usedMB: (totalUsed/1024/1024).toFixed(2),
+      remainKB: ((maxBytes-totalUsed)/1024).toFixed(0),
+      remainMB: ((maxBytes-totalUsed)/1024/1024).toFixed(2),
+      percent: percent.toFixed(1),
+      level: percent < 50 ? 'safe' : percent < 80 ? 'warn' : 'critical'
+    };
+  } catch(e){
+    return null;
+  }
+}
+
+function showStorageInfo(){
+  var info = getStorageInfo();
+  if(!info){ alert('無法讀取容量資訊'); return; }
+  var color = info.level === 'safe' ? '#059669' : info.level === 'warn' ? '#d97706' : '#dc2626';
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    + '<div style="margin-bottom:8px"><strong>📊 儲存空間使用情況</strong></div>'
+    + '<div style="margin-bottom:6px">已用：<strong>'+info.usedMB+' MB</strong> / '+(info.maxBytes/1024/1024)+' MB</div>'
+    + '<div style="margin-bottom:6px">剩餘：<strong style="color:'+color+'">'+info.remainMB+' MB</strong></div>'
+    + '<div style="height:14px;background:var(--fill,#eee);border-radius:7px;overflow:hidden;margin:10px 0">'
+    + '  <div style="height:100%;width:'+Math.min(100,info.percent)+'%;background:'+color+';transition:width .3s"></div>'
+    + '</div>'
+    + '<div style="font-size:.75rem;color:var(--text-3);margin-top:8px">'
+    + (info.level === 'critical' ? '⚠️ 空間即將用完，建議匯出備份並清理資料' : info.level === 'warn' ? '⚠️ 已使用過半，建議定期備份' : '✅ 空間充足')
+    + '</div>'
+    + '<div style="margin-top:14px;text-align:right">'
+    + '<button class="btn bp" onclick="cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('💾 儲存容量', msg);
+}
+
+// 在右下角 build-tag 旁加迷你容量指示
+function updateStorageIndicator(){
+  try {
+    var info = getStorageInfo();
+    if(!info) return;
+    var el = document.getElementById('storage-tag');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'storage-tag';
+      el.style.cssText = 'position:fixed;bottom:24px;right:6px;font-size:.62rem;color:var(--text-3,#999);opacity:.5;cursor:pointer;z-index:1;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.04)';
+      el.title = '點擊查看儲存空間詳情';
+      el.onclick = showStorageInfo;
+      document.body.appendChild(el);
+    }
+    var color = info.level === 'safe' ? '' : info.level === 'warn' ? '#d97706' : '#dc2626';
+    el.style.color = color || '';
+    el.textContent = '💾 ' + info.usedMB + 'MB / 5MB (' + info.percent + '%)';
+  } catch(e){}
+}
+
+// 啟動時顯示，並每 60 秒更新
+setTimeout(updateStorageIndicator, 1000);
+setInterval(updateStorageIndicator, 60000);
+
 function doSearch(storeKey, renderFn, inputId, val){
   window[storeKey] = val;
   var tcEl = document.getElementById('tc');
@@ -5636,6 +5866,12 @@ function doSearch(storeKey, renderFn, inputId, val){
 
 // ═══════════ 階段 3：全域鍵盤快捷鍵 ═══════════
 document.addEventListener('keydown', function(e){
+  // Ctrl/Cmd + P：開啟命令面板
+  if((e.ctrlKey||e.metaKey) && e.key && e.key.toLowerCase() === 'p'){
+    e.preventDefault();
+    if(typeof openCommandPalette === 'function') openCommandPalette();
+    return;
+  }
   // Ctrl/Cmd + K：聚焦當前頁面第一個搜尋框
   if((e.ctrlKey||e.metaKey) && !e.shiftKey && e.key && e.key.toLowerCase() === 'k'){
     var searchInp = document.querySelector('#tc input[placeholder*="搜尋"]')
@@ -5878,6 +6114,9 @@ function saveDB(){
   try{
     idbSet('cmsDB', payload).catch(function(e){ console.error('[saveDB] IDB error',e); });
   }catch(e){ console.error('[saveDB] IDB sync err',e); }
+
+  // 3. GAS 自動同步（debounced 30s，僅在已設 GAS 端點時）
+  if(typeof scheduleGasAutoSync === 'function') scheduleGasAutoSync();
 }
 
 // 異步從 IDB 載入較新版本（如果有）
@@ -9064,9 +9303,21 @@ function _readParentFields(){
 function svStu(){
   const n=document.getElementById('fn').value.trim();
   if(!n){toast('請輸入姓名','err');return;}
+  var sidVal=document.getElementById('fs').value.trim();
+  // D2: 驗證 sid 格式（純數字 2-15 碼）+ 重複檢查
+  if(sidVal){
+    if(!/^\d{2,15}$/.test(sidVal)){
+      if(typeof toast === 'function') toast('⚠️ 學號格式錯誤（應為 2-15 位數字）','warn');
+      return;
+    }
+    if(DB.students.some(function(s){ return String(s.sid) === sidVal; })){
+      if(typeof toast === 'function') toast('⚠️ 學號 '+sidVal+' 已存在','warn');
+      return;
+    }
+  }
   var p=_readParentFields();
   DB.students.push(Object.assign({id:nid(),name:n,
-    sid:document.getElementById('fs').value.trim(),
+    sid:sidVal,
     cls:document.getElementById('fc').value.trim(),
     seat:document.getElementById('fse').value.trim(),
     email:document.getElementById('fe').value.trim()
@@ -9076,8 +9327,20 @@ function svStu(){
 function upStu(id){
   const n=document.getElementById('fn').value.trim();
   if(!n){toast('請輸入姓名','err');return;}
+  var sidVal=document.getElementById('fs').value.trim();
+  // D2: 驗證 sid 格式 + 重複檢查（排除自己）
+  if(sidVal){
+    if(!/^\d{2,15}$/.test(sidVal)){
+      if(typeof toast === 'function') toast('⚠️ 學號格式錯誤（應為 2-15 位數字）','warn');
+      return;
+    }
+    if(DB.students.some(function(x){ return String(x.sid) === sidVal && x.id !== id; })){
+      if(typeof toast === 'function') toast('⚠️ 學號 '+sidVal+' 已存在','warn');
+      return;
+    }
+  }
   const s=DB.students.find(x=>x.id===id);
-  s.name=n;s.sid=document.getElementById('fs').value.trim();
+  s.name=n;s.sid=sidVal;
   s.cls=document.getElementById('fc').value.trim();
   s.seat=document.getElementById('fse').value.trim();
   s.email=document.getElementById('fe').value.trim();
@@ -10176,8 +10439,8 @@ function rPend(){
       ||(p.sid||'').toLowerCase().includes(_pq)
       ||(p.cls||'').toLowerCase().includes(_pq)
       ||(p.date||'').includes(_pq);
-}).map(p=>`<tr><td><strong>${p.name}</strong></td><td style="font-family:monospace;font-size:.77rem">${p.sid||''}</td><td>${p.cls||''}</td><td style="text-align:center">${p.seat||''}</td><td>${bdg(p.status==='pending'?'待審核':p.status==='approved'?'已核准':'已拒絕',p.status==='pending'?'amb':p.status==='approved'?'grn':'red')}</td><td style="font-size:.72rem;color:var(--gray)">${p.date||''}</td><td><div style="display:flex;gap:4px">${p.status==='pending'?`<button class="btn bg bsm" onclick="apP(${p.id})">✅ 核准</button><button class="btn br bsm" onclick="rjP(${p.id})">✗ 拒絕</button>`:''}</div></td></tr>`).join('');  var leaveSec=leaveList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">📆 請假申請（'+leaveList.length+'件待審）</div><div class="cb">'    +leaveList.map(function(p){return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+(p.date||'')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="approveLeave('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="approveLeave('+p.id+',true)">✅ 核准</button></div></div>'}).join('')    +'</div></div>':'';
-  var appealSec=appealList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">✋ 成績申訴（'+appealList.length+'件）</div><div class="cb">'    +appealList.map(function(p){var a=DB.assignments.find(function(x){return x.id===Number(p.assignmentId);});return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+(a?a.title:'作業')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="resolveAppeal('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="resolveAppeal('+p.id+',true)">✅ 已處理</button></div></div>'}).join('')    +'</div></div>':'';
+}).map(p=>`<tr><td><strong>${p.name}</strong></td><td style="font-family:monospace;font-size:.77rem">${p.sid||''}</td><td>${p.cls||''}</td><td style="text-align:center">${p.seat||''}</td><td>${bdg(p.status==='pending'?'待審核':p.status==='approved'?'已核准':'已拒絕',p.status==='pending'?'amb':p.status==='approved'?'grn':'red')}</td><td style="font-size:.72rem;color:var(--gray)">${p.date||''}</td><td><div style="display:flex;gap:4px">${p.status==='pending'?`<button class="btn bg bsm" onclick="apP(${p.id})">✅ 核准</button><button class="btn br bsm" onclick="rjP(${p.id})">✗ 拒絕</button>`:''}</div></td></tr>`).join('');  var leaveSec=leaveList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">📆 請假申請（'+leaveList.length+'件待審）</div><div class="cb">'    +leaveList.map(function(p){return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+escapeHtml(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+escapeHtml(p.date||'')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="approveLeave('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="approveLeave('+p.id+',true)">✅ 核准</button></div></div>'}).join('')    +'</div></div>':'';
+  var appealSec=appealList.length?'<div class="card" style="margin-bottom:12px"><div class="ch">✋ 成績申訴（'+appealList.length+'件）</div><div class="cb">'    +appealList.map(function(p){var a=DB.assignments.find(function(x){return x.id===Number(p.assignmentId);});return'<div style="background:var(--fill-2);border-radius:10px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center"><div><b style="font-size:.82rem">'+highlight(p.studentName||'',_pq)+'</b> <span style="color:var(--text-3);font-size:.72rem">'+escapeHtml(p.cls||'')+'班</span><div style="font-size:.76rem;margin-top:2px">'+escapeHtml(a?a.title:'作業')+' · '+highlight(p.reason||'',_pq)+'</div></div><div style="display:flex;gap:5px"><button class="btn br bsm" onclick="resolveAppeal('+p.id+',false)">駁回</button><button class="btn bp bsm" onclick="resolveAppeal('+p.id+',true)">✅ 已處理</button></div></div>'}).join('')    +'</div></div>':'';
 
   return searchBar+leaveSec+appealSec+`<div style="margin-bottom:13px"><div style="font-size:1.15rem;font-weight:900">註冊審核</div><div style="font-size:.77rem;color:var(--gray)">待審核 ${DB.pending.filter(p=>p.status==='pending').length} 件</div></div>
   <div class="card"><div class="tbl"><table><thead><tr><th>姓名</th><th>學號</th><th>班級</th><th style="text-align:center">座號</th><th>狀態</th><th>申請日</th><th>操作</th></tr></thead><tbody>${rows||`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--gray)">尚無申請</td></tr>`}</tbody></table></div></div>`;
@@ -12038,6 +12301,9 @@ setInterval(function(){updateMsgBadge();},3000);
 </div>
 <div id="build-tag" style="position:fixed;bottom:4px;right:6px;font-size:.65rem;color:var(--text-3,#999);opacity:.5;pointer-events:none;z-index:1">
   v2026.04.21-stage4
+</div>
+<div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:8px 14px;text-align:center;font-size:.78rem;font-weight:700;z-index:9998">
+  ⚠️ 目前離線中，資料變更暫時無法同步
 </div>
 </body>
 </html>
