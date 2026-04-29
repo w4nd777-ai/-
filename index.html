@@ -6851,6 +6851,7 @@ var COMMAND_PALETTE = [
   {label:'通知整合設定 (LINE/Discord/Telegram)', icon:'💬', action:'showWebhookSetup', role:'teacher'},
   {label:'寄送 Email 通知', icon:'📧', action:'showEmailComposer', role:'teacher'},
   {label:'重看新手引導', icon:'🎓', action:'reShowOnboarding'},
+  {label:'使用統計', icon:'📊', action:'showUsageStats', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -6859,7 +6860,8 @@ var COMMAND_PALETTE = [
   {label:'評價', icon:'🔒', stab:'sd', role:'student'},
   {label:'成績', icon:'📊', stab:'sg', role:'student'},
   {label:'個人', icon:'👤', stab:'sp', role:'student'},
-  {label:'編輯個人資料', icon:'📝', action:'showStudentProfileEdit', role:'student'}
+  {label:'編輯個人資料', icon:'📝', action:'showStudentProfileEdit', role:'student'},
+  {label:'AI 學習助教（學生）', icon:'🤖', action:'showStudentAIChat', role:'student'}
 ];
 
 function openCommandPalette(){
@@ -14809,6 +14811,318 @@ try{const cw=localStorage.getItem('cms_cw');const tc=document.getElementById('tc
 
 setInterval(function(){updateMsgBadge();},3000);
 
+
+// ═══════════ 學生端 AI 助手 ═══════════
+async function stuAskAI(question){
+  if(!window.cur || window.cur.role !== 'student' || !window.cur.id){
+    if(typeof toast === 'function') toast('請先以學生身份登入','warn');
+    return null;
+  }
+  var apiKey = '';
+  try { apiKey = localStorage.getItem('claude_key') || ''; } catch(e){}
+  if(!apiKey){
+    if(typeof toast === 'function') toast('⚠️ 老師尚未設定 AI 金鑰','warn');
+    return null;
+  }
+
+  var stu = (DB.students||[]).find(function(s){ return s.id === window.cur.id; });
+  if(!stu) return null;
+
+  // 建立學生脈絡
+  var asgnList = (DB.assignments||[]).slice(-5).map(function(a){
+    return '- '+(a.title||'')+(a.due ? ' (截止：'+a.due+')' : '')+(a.desc?' '+(a.desc.slice(0,50)):'');
+  }).join('\n');
+  var atts = (DB.attendance||[]).filter(function(a){ return a.studentId === stu.id; });
+  var presentN = atts.filter(function(a){ return a.status==='present'||a.status==='出席'; }).length;
+  var attRate = atts.length ? Math.round(presentN/atts.length*100)+'%' : 'N/A';
+  var subs = (DB.submissions||[]).filter(function(s){ return s.studentId === stu.id; });
+  var avgScore = subs.length ? Math.round(subs.reduce(function(a,s){return a+(s.score||0);},0)/subs.length) : 0;
+
+  var sys = '你是一位友善的學習助教，協助學生 '+stu.name+' 解答課程相關問題。'
+    +'請用繁體中文、口語、鼓勵的語氣回答。如果問題涉及作業/出席/成績，請參考下方脈絡資料。'
+    +'\n\n=== 學生脈絡 ==='
+    +'\n姓名：'+stu.name+(stu.cls?'（'+stu.cls+'班）':'')
+    +'\n出席率：'+attRate+'（共 '+atts.length+' 次）'
+    +'\n作業平均分：'+avgScore+'（已繳 '+subs.length+'/'+(DB.assignments||[]).length+' 份）'
+    +'\n\n=== 最近作業 ===\n'+(asgnList||'無');
+
+  try {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        system: sys,
+        messages: [{role:'user', content: question}]
+      })
+    });
+    if(!resp.ok){
+      var err = await resp.text();
+      throw new Error('API '+resp.status+': '+err.slice(0,200));
+    }
+    var data = await resp.json();
+    return (data.content && data.content[0] && data.content[0].text) || '';
+  } catch(e){
+    console.error('[stuAskAI]', e);
+    return '（發生錯誤：'+e.message+'）';
+  }
+}
+
+function showStudentAIChat(){
+  if(!window.cur || window.cur.role !== 'student'){
+    if(typeof toast === 'function') toast('此功能僅供學生使用','warn');
+    return;
+  }
+  var msg = '<div style="font-size:.85rem;line-height:1.6;display:flex;flex-direction:column;height:60vh">'
+    +'<div id="stu-ai-chat" style="flex:1;overflow-y:auto;background:var(--fill-2);padding:12px;border-radius:10px;margin-bottom:10px">'
+    +'<div style="text-align:center;color:var(--text-3);font-size:.8rem;padding:10px">👋 你好！我是 AI 學習助教，可以問我課程相關問題～<br><br>例如：「最近有什麼作業？」「我的出席率如何？」「這次作業要做什麼？」</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:6px">'
+    +'<input class="inp" id="stu-ai-input" placeholder="輸入問題..." style="flex:1" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();_doStuAskAI();}">'
+    +'<button class="btn bp" onclick="_doStuAskAI()">送出</button>'
+    +'</div>'
+    +'<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;font-size:.75rem">'
+    +'<button class="btn bgh bsm" onclick="document.getElementById(\'stu-ai-input\').value=\'最近有什麼作業？\';_doStuAskAI()">📝 最近作業</button>'
+    +'<button class="btn bgh bsm" onclick="document.getElementById(\'stu-ai-input\').value=\'我的出席狀況如何？\';_doStuAskAI()">✅ 出席狀況</button>'
+    +'<button class="btn bgh bsm" onclick="document.getElementById(\'stu-ai-input\').value=\'我目前的學習表現怎麼樣？\';_doStuAskAI()">📊 學習表現</button>'
+    +'</div>'
+    +'<div style="margin-top:8px;text-align:right">'
+    +'<button class="btn bgh bsm" onclick="cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('🤖 AI 學習助教', msg);
+}
+
+async function _doStuAskAI(){
+  var input = document.getElementById('stu-ai-input');
+  var chat = document.getElementById('stu-ai-chat');
+  if(!input || !chat) return;
+  var q = (input.value||'').trim();
+  if(!q) return;
+  // 顯示問題
+  var qDiv = document.createElement('div');
+  qDiv.style.cssText = 'text-align:right;margin-bottom:8px';
+  qDiv.innerHTML = '<div style="display:inline-block;background:var(--brand,#5e5ce6);color:#fff;padding:8px 12px;border-radius:14px;max-width:80%;text-align:left">'+escapeHtml(q)+'</div>';
+  chat.appendChild(qDiv);
+  // loading
+  var loadDiv = document.createElement('div');
+  loadDiv.style.cssText = 'text-align:left;margin-bottom:8px';
+  loadDiv.innerHTML = '<div style="display:inline-block;background:var(--card,#fff);padding:8px 12px;border-radius:14px;color:var(--text-3)">⏳ 思考中...</div>';
+  chat.appendChild(loadDiv);
+  chat.scrollTop = chat.scrollHeight;
+  input.value = '';
+  input.disabled = true;
+
+  var ans = await stuAskAI(q);
+  loadDiv.remove();
+  var aDiv = document.createElement('div');
+  aDiv.style.cssText = 'text-align:left;margin-bottom:8px';
+  aDiv.innerHTML = '<div style="display:inline-block;background:var(--card,#fff);padding:8px 12px;border-radius:14px;max-width:80%;border:1px solid var(--sep,#ddd);white-space:pre-wrap">'+escapeHtml(ans||'(無回應)')+'</div>';
+  chat.appendChild(aDiv);
+  chat.scrollTop = chat.scrollHeight;
+  input.disabled = false;
+  input.focus();
+}
+
+// ═══════════ 作業檔案附件 ═══════════
+function attachFileToSubmission(subId, file){
+  if(!file) return Promise.reject(new Error('沒有檔案'));
+  var maxSize = 500 * 1024; // 500KB
+  if(file.size > maxSize){
+    return Promise.reject(new Error('檔案太大（'+(file.size/1024).toFixed(0)+'KB），上限 500KB。請改用雲端連結或圖片壓縮。'));
+  }
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var sub = (DB.submissions||[]).find(function(x){ return x.id === subId; });
+        if(!sub){ reject(new Error('找不到繳交記錄')); return; }
+        sub.attachments = sub.attachments || [];
+        sub.attachments.push({
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          dataUrl: e.target.result, // base64 data URL
+          uploadedAt: new Date().toISOString()
+        });
+        if(typeof saveDB === 'function') saveDB();
+        resolve(sub);
+      } catch(err){ reject(err); }
+    };
+    reader.onerror = function(){ reject(new Error('讀取失敗')); };
+    reader.readAsDataURL(file);
+  });
+}
+
+function removeAttachmentFromSub(subId, attIndex){
+  var sub = (DB.submissions||[]).find(function(x){ return x.id === subId; });
+  if(!sub || !sub.attachments) return;
+  sub.attachments.splice(attIndex, 1);
+  if(typeof saveDB === 'function') saveDB();
+  if(typeof toast === 'function') toast('已移除附件','info');
+}
+
+function previewAttachment(subId, attIndex){
+  var sub = (DB.submissions||[]).find(function(x){ return x.id === subId; });
+  if(!sub || !sub.attachments || !sub.attachments[attIndex]) return;
+  var att = sub.attachments[attIndex];
+  var content;
+  if((att.type||'').indexOf('image/') === 0){
+    content = '<img src="'+att.dataUrl+'" style="max-width:100%;max-height:60vh;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15)" alt="'+escapeHtml(att.name)+'">';
+  } else if((att.type||'').indexOf('text/') === 0 || att.type === 'application/json'){
+    try {
+      var text = atob(att.dataUrl.split(',')[1] || '');
+      // 處理 UTF-8
+      try { text = decodeURIComponent(escape(text)); } catch(e){}
+      content = '<pre style="background:var(--fill-2);padding:10px;border-radius:8px;max-height:60vh;overflow:auto;font-size:.78rem;white-space:pre-wrap">'+escapeHtml(text.slice(0, 5000))+'</pre>';
+    } catch(e){
+      content = '<div>無法解析文字內容</div>';
+    }
+  } else if(att.type === 'application/pdf'){
+    content = '<embed src="'+att.dataUrl+'" type="application/pdf" style="width:100%;height:60vh;border-radius:8px">';
+  } else {
+    content = '<div style="text-align:center;padding:40px"><div style="font-size:3rem">📎</div><div style="margin-top:10px">'+escapeHtml(att.name)+'</div><div style="color:var(--text-3);font-size:.8rem;margin-top:6px">'+(att.size/1024).toFixed(1)+' KB</div></div>';
+  }
+  var msg = '<div>'
+    +'<div style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">'
+    +'<div><strong>'+escapeHtml(att.name)+'</strong> <span style="color:var(--text-3);font-size:.78rem">('+(att.size/1024).toFixed(1)+' KB)</span></div>'
+    +'<button class="btn bgh bsm" onclick="downloadAttachment('+subId+','+attIndex+')">📥 下載</button>'
+    +'</div>'
+    + content
+    +'<div style="margin-top:14px;text-align:right"><button class="btn bp" onclick="cM()">關閉</button></div></div>';
+  if(typeof oM === 'function') oM('📎 附件預覽', msg);
+}
+
+function downloadAttachment(subId, attIndex){
+  var sub = (DB.submissions||[]).find(function(x){ return x.id === subId; });
+  if(!sub || !sub.attachments || !sub.attachments[attIndex]) return;
+  var att = sub.attachments[attIndex];
+  var a = document.createElement('a');
+  a.href = att.dataUrl;
+  a.download = att.name || 'attachment';
+  document.body.appendChild(a); a.click(); a.remove();
+  if(typeof toast === 'function') toast('✅ 已下載','info');
+}
+
+// 學生端：顯示附件上傳介面
+function attachmentUploadUI(subId){
+  return '<div style="margin:10px 0;padding:10px;border:2px dashed var(--gray-b,#ccc);border-radius:8px;text-align:center">'
+    +'<input type="file" id="att-file-'+subId+'" accept="image/*,application/pdf,text/*,.json" style="display:none" onchange="_doAttachUpload('+subId+',this.files[0])">'
+    +'<button class="btn bgh bsm" onclick="document.getElementById(\'att-file-'+subId+'\').click()">📎 上傳附件（限 500KB）</button>'
+    +'<div style="font-size:.7rem;color:var(--text-3);margin-top:6px">支援：圖片 / PDF / 文字 / JSON</div>'
+    +'</div>';
+}
+
+async function _doAttachUpload(subId, file){
+  if(!file) return;
+  try {
+    if(typeof toast === 'function') toast('📎 上傳中...','info',1500);
+    await attachFileToSubmission(subId, file);
+    if(typeof toast === 'function') toast('✅ 已上傳：'+file.name,'info',3000);
+    // 觸發重繪當前頁
+    if(typeof window._lastRender === 'function'){
+      var el = document.getElementById('tc') || document.getElementById('stc');
+      if(el) el.innerHTML = window._lastRender();
+    }
+  } catch(e){
+    alert('❌ 上傳失敗：'+e.message);
+  }
+}
+
+// 渲染附件列表
+function renderAttachments(sub){
+  if(!sub || !sub.attachments || !sub.attachments.length) return '';
+  return '<div style="margin-top:8px">'
+    + sub.attachments.map(function(att, i){
+        var icon = '📎';
+        if((att.type||'').indexOf('image/') === 0) icon = '🖼️';
+        else if(att.type === 'application/pdf') icon = '📄';
+        else if((att.type||'').indexOf('text/') === 0) icon = '📝';
+        return '<div style="display:inline-flex;align-items:center;gap:6px;background:var(--fill-2);padding:6px 10px;border-radius:6px;font-size:.78rem;margin:2px">'
+          +'<span>'+icon+'</span>'
+          +'<span style="cursor:pointer;text-decoration:underline" onclick="previewAttachment('+sub.id+','+i+')">'+escapeHtml(att.name)+'</span>'
+          +'<span style="color:var(--text-3);font-size:.7rem">('+(att.size/1024).toFixed(1)+'KB)</span>'
+          +'</div>';
+      }).join('')
+    +'</div>';
+}
+
+// ═══════════ 使用統計 ═══════════
+function trackUsage(action){
+  try {
+    var stats = JSON.parse(localStorage.getItem('cms_usage_stats') || '{}');
+    stats[action] = (stats[action] || 0) + 1;
+    stats._lastAction = action;
+    stats._lastAt = new Date().toISOString();
+    localStorage.setItem('cms_usage_stats', JSON.stringify(stats));
+  } catch(e){}
+}
+
+function getUsageStats(){
+  try { return JSON.parse(localStorage.getItem('cms_usage_stats') || '{}'); }
+  catch(e){ return {}; }
+}
+
+function showUsageStats(){
+  var stats = getUsageStats();
+  var actions = Object.keys(stats).filter(function(k){ return !k.startsWith('_'); });
+  if(!actions.length){
+    if(typeof toast === 'function') toast('尚無使用紀錄，繼續使用後再來看吧','info',3000);
+    return;
+  }
+  // 排序
+  actions.sort(function(a, b){ return (stats[b]||0) - (stats[a]||0); });
+  var max = stats[actions[0]] || 1;
+  var rows = actions.slice(0, 20).map(function(a){
+    var count = stats[a];
+    var pct = (count / max) * 100;
+    return '<tr>'
+      +'<td>'+escapeHtml(a)+'</td>'
+      +'<td style="text-align:right;font-weight:700">'+count+'</td>'
+      +'<td><div style="background:var(--fill-2);border-radius:99px;height:8px;overflow:hidden"><div style="background:var(--brand,#5e5ce6);height:100%;width:'+pct+'%"></div></div></td>'
+      +'</tr>';
+  }).join('');
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div style="background:var(--fill-2);padding:10px;border-radius:8px;margin-bottom:14px;font-size:.78rem">'
+    +'<div>📊 你最常用的功能：'+escapeHtml(actions[0])+'（'+stats[actions[0]]+' 次）</div>'
+    +(stats._lastAt ? '<div style="color:var(--text-3);margin-top:4px">最後操作：'+(stats._lastAction||'')+' '+new Date(stats._lastAt).toLocaleString('zh-TW')+'</div>' : '')
+    +'</div>'
+    +'<table class="tbl" style="width:100%">'
+    +'<thead><tr><th>功能</th><th style="text-align:right">次數</th><th style="width:40%">頻率</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody></table>'
+    +'<div style="margin-top:14px;display:flex;justify-content:space-between">'
+    +'<button class="btn br bsm" onclick="if(confirm(\'確定清空使用統計？\')){localStorage.removeItem(\'cms_usage_stats\');cM();toast(\'已清空\',\'info\');}">🗑️ 清空</button>'
+    +'<button class="btn bp" onclick="cM()">關閉</button>'
+    +'</div></div>';
+  if(typeof oM === 'function') oM('📊 使用統計', msg);
+}
+
+// 自動追蹤命令面板執行
+(function autoTrackCommandPalette(){
+  if(typeof executeCommand !== 'function') return;
+  var orig = executeCommand;
+  window.executeCommand = function(i){
+    try {
+      var cmd = (window._cmdFiltered||COMMAND_PALETTE||[])[i];
+      if(cmd && cmd.label) trackUsage(cmd.label);
+    } catch(e){}
+    return orig(i);
+  };
+})();
+
+// 自動追蹤 nbClick (老師導航)
+(function autoTrackNbClick(){
+  if(typeof nbClick !== 'function') return;
+  var orig = nbClick;
+  window.nbClick = function(btn, tab){
+    try { trackUsage('nav:' + tab); } catch(e){}
+    return orig(btn, tab);
+  };
+})();
 
 </script>
 <div class="mobile-nav" id="mobile-nav">
