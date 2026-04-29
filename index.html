@@ -6848,6 +6848,9 @@ var COMMAND_PALETTE = [
   {label:'匯出學期 PDF 報告', icon:'📄', action:'exportSemesterPDF', role:'teacher'},
   {label:'推播通知設定', icon:'📲', action:'showNotificationSettings', role:'teacher'},
   {label:'工作區管理（多老師隔離）', icon:'🗂️', action:'showWorkspaceManager', role:'teacher'},
+  {label:'通知整合設定 (LINE/Discord/Telegram)', icon:'💬', action:'showWebhookSetup', role:'teacher'},
+  {label:'寄送 Email 通知', icon:'📧', action:'showEmailComposer', role:'teacher'},
+  {label:'重看新手引導', icon:'🎓', action:'reShowOnboarding'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -6919,6 +6922,425 @@ function executeCommand(i){
     }
   } catch(e){ console.error('[command palette]', e); }
 }
+
+// ═══════════ Webhook 通知整合 (LINE/Discord/Telegram 等) ═══════════
+function getWebhookConfig(){
+  if(typeof DB === 'undefined' || !DB) return {enabled:false,url:'',type:'generic',token:'',autoTriggers:{}};
+  if(!DB.settings) DB.settings = {};
+  if(!DB.settings.webhook){
+    DB.settings.webhook = {
+      enabled: false,
+      url: '',
+      type: 'generic', // generic, line_messaging, discord, telegram
+      token: '',
+      autoTriggers: {
+        newAnnouncement: true,
+        assignmentDue: true,
+        lowAttendance: false
+      }
+    };
+  }
+  return DB.settings.webhook;
+}
+
+async function sendWebhookNotification(message, opts){
+  var cfg = getWebhookConfig();
+  if(!cfg.enabled || !cfg.url) return false;
+  opts = opts || {};
+  try {
+    var body, headers = {'Content-Type': 'application/json'};
+    if(cfg.type === 'discord'){
+      body = JSON.stringify({content: message});
+    } else if(cfg.type === 'telegram'){
+      // url 應為 https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<ID>
+      body = JSON.stringify({text: message});
+    } else if(cfg.type === 'line_messaging'){
+      // LINE Messaging API
+      headers['Authorization'] = 'Bearer ' + cfg.token;
+      body = JSON.stringify({
+        to: opts.to || cfg.defaultTo,
+        messages: [{type: 'text', text: message}]
+      });
+    } else {
+      // generic webhook
+      body = JSON.stringify(Object.assign({message: message}, opts));
+    }
+    var resp = await fetch(cfg.url, {
+      method: 'POST',
+      headers: headers,
+      body: body,
+      mode: 'cors'
+    });
+    if(resp.ok || resp.status === 0){ // status 0 是 no-cors 成功
+      console.log('[Webhook] sent:', message.slice(0,50));
+      return true;
+    }
+    return false;
+  } catch(e){
+    // CORS 失敗時嘗試 no-cors mode
+    try {
+      await fetch(cfg.url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: message}),
+        mode: 'no-cors'
+      });
+      console.log('[Webhook] sent via no-cors fallback');
+      return true;
+    } catch(e2){
+      console.warn('[Webhook] failed:', e2.message);
+      return false;
+    }
+  }
+}
+
+function showWebhookSetup(){
+  var cfg = getWebhookConfig();
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div style="background:var(--fill-2);padding:10px;border-radius:8px;margin-bottom:14px;font-size:.78rem">'
+    +'<div style="font-weight:700;margin-bottom:4px">💬 通知整合</div>'
+    +'<div style="color:var(--text-3)">系統可自動推送通知到 LINE / Discord / Telegram 群組或頻道。</div>'
+    +'</div>'
+    +'<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px">'
+    +'<input type="checkbox" id="wh-enabled" '+(cfg.enabled?'checked':'')+'> <strong>啟用 Webhook 通知</strong></label>'
+    +'<div class="fg"><label class="fl">通知平台</label>'
+    +'<select class="sel" id="wh-type">'
+    +'<option value="generic" '+(cfg.type==='generic'?'selected':'')+'>通用 Webhook</option>'
+    +'<option value="discord" '+(cfg.type==='discord'?'selected':'')+'>Discord Webhook</option>'
+    +'<option value="telegram" '+(cfg.type==='telegram'?'selected':'')+'>Telegram Bot</option>'
+    +'<option value="line_messaging" '+(cfg.type==='line_messaging'?'selected':'')+'>LINE Messaging API</option>'
+    +'</select></div>'
+    +'<div class="fg"><label class="fl">Webhook URL</label>'
+    +'<input class="inp" id="wh-url" value="'+escapeHtml(cfg.url||'')+'" placeholder="https://...">'
+    +'</div>'
+    +'<div class="fg"><label class="fl">Token / Secret（如需要）</label>'
+    +'<input class="inp" id="wh-token" type="password" value="'+escapeHtml(cfg.token||'')+'" placeholder="可選"></div>'
+    +'<div style="margin-top:10px;padding:8px;background:var(--fill);border-radius:6px;font-size:.72rem;line-height:1.6">'
+    +'<strong>各平台設定教學：</strong><br>'
+    +'• <strong>Discord</strong>：頻道 → 編輯頻道 → 整合 → Webhook → 複製 URL<br>'
+    +'• <strong>Telegram</strong>：找 @BotFather 建 Bot → 取得 Token → URL 填 <code style="font-size:.7rem">https://api.telegram.org/bot[TOKEN]/sendMessage?chat_id=[ID]</code><br>'
+    +'• <strong>LINE Messaging API</strong>：LINE Developers → Channel access token → URL: <code style="font-size:.7rem">https://api.line.me/v2/bot/message/push</code>'
+    +'</div>'
+    +'<div style="margin-top:14px;font-weight:700">自動觸發：</div>'
+    +'<label style="display:block;font-size:.78rem"><input type="checkbox" id="wh-tr-ann" '+((cfg.autoTriggers||{}).newAnnouncement?'checked':'')+'> 新公告發布時</label>'
+    +'<label style="display:block;font-size:.78rem"><input type="checkbox" id="wh-tr-asgn" '+((cfg.autoTriggers||{}).assignmentDue?'checked':'')+'> 作業即將到期</label>'
+    +'<label style="display:block;font-size:.78rem"><input type="checkbox" id="wh-tr-att" '+((cfg.autoTriggers||{}).lowAttendance?'checked':'')+'> 學生缺席異常</label>'
+    +'<div style="margin-top:14px;display:flex;gap:8px;justify-content:space-between">'
+    +'<button class="btn bgh bsm" onclick="testWebhook()">🔔 發送測試</button>'
+    +'<div><button class="btn bgh" onclick="cM()">取消</button> '
+    +'<button class="btn bp" onclick="saveWebhookConfig()">💾 儲存</button></div></div></div>';
+  if(typeof oM === 'function') oM('💬 通知整合設定', msg);
+}
+
+function saveWebhookConfig(){
+  if(typeof DB === 'undefined' || !DB){ if(typeof toast==='function') toast('DB 未就緒','warn'); return; }
+  DB.settings = DB.settings || {};
+  DB.settings.webhook = {
+    enabled: document.getElementById('wh-enabled').checked,
+    type: document.getElementById('wh-type').value,
+    url: (document.getElementById('wh-url').value||'').trim(),
+    token: (document.getElementById('wh-token').value||'').trim(),
+    autoTriggers: {
+      newAnnouncement: document.getElementById('wh-tr-ann').checked,
+      assignmentDue: document.getElementById('wh-tr-asgn').checked,
+      lowAttendance: document.getElementById('wh-tr-att').checked
+    }
+  };
+  if(typeof saveDB==='function') saveDB();
+  if(typeof cM==='function') cM();
+  if(typeof toast==='function') toast('✅ Webhook 設定已儲存','info');
+}
+
+async function testWebhook(){
+  var temp = {
+    enabled: document.getElementById('wh-enabled').checked,
+    type: document.getElementById('wh-type').value,
+    url: (document.getElementById('wh-url').value||'').trim(),
+    token: (document.getElementById('wh-token').value||'').trim()
+  };
+  if(!temp.url){ if(typeof toast==='function') toast('請先填寫 URL','warn'); return; }
+  // 暫時覆蓋
+  if(typeof DB==='undefined'||!DB) return;
+  DB.settings = DB.settings || {};
+  var orig = DB.settings.webhook;
+  DB.settings.webhook = Object.assign({}, orig||{}, temp);
+  if(typeof toast==='function') toast('🔔 發送測試訊息中...','info',2000);
+  var ok = await sendWebhookNotification('🔔 測試訊息：來自課程管理系統 ('+(new Date()).toLocaleString('zh-TW')+')');
+  DB.settings.webhook = orig; // 還原
+  if(typeof toast==='function'){
+    if(ok) toast('✅ 測試成功！請到平台確認','info',4000);
+    else toast('⚠️ 測試失敗或被 CORS 阻擋（功能仍可用）','warn',5000);
+  }
+}
+
+// ═══════════ Email 寄送 ═══════════
+function emailStudent(stuId, subject, body){
+  var stu = (DB.students||[]).find(function(s){ return s.id === stuId; });
+  if(!stu){ if(typeof toast==='function') toast('找不到學生','err'); return; }
+  if(!stu.email){
+    if(confirm(stu.name+' 沒有 Email。\n\n要寄給家長嗎？\n\n家長 Email：'+(stu.parentEmail||'(未設定)'))){
+      if(stu.parentEmail) emailTo(stu.parentEmail, subject, body);
+    }
+    return;
+  }
+  emailTo(stu.email, subject, body);
+}
+
+function emailTo(addr, subject, body){
+  if(!addr) return;
+  var url = 'mailto:'+encodeURIComponent(addr)
+    +'?subject='+encodeURIComponent(subject||'')
+    +'&body='+encodeURIComponent(body||'');
+  window.open(url, '_blank');
+}
+
+function emailBulkBcc(addrs, subject, body){
+  // 多人 bcc 寄送
+  if(!addrs || !addrs.length) return;
+  var bccList = addrs.filter(function(a){ return a; }).join(',');
+  var url = 'mailto:?bcc='+encodeURIComponent(bccList)
+    +'&subject='+encodeURIComponent(subject||'')
+    +'&body='+encodeURIComponent(body||'');
+  window.open(url, '_blank');
+}
+
+function showEmailComposer(){
+  var students = ((typeof DB!=='undefined'&&DB)?DB.students:[])||[];
+  if(!students.length){ if(typeof toast==='function') toast('沒有學生','warn'); return; }
+  var clsOpts = ['<option value="all">全部學生</option>'];
+  var seen = {};
+  var classes = [];
+  students.forEach(function(s){ var c = s.cls||'未分班'; if(!seen[c]){ seen[c]=1; classes.push(c); } });
+  classes.sort();
+  classes.forEach(function(c){ clsOpts.push('<option value="'+escapeHtml(c)+'">'+escapeHtml(c)+'班</option>'); });
+  var msg = '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div class="fg"><label class="fl">收件對象</label>'
+    +'<select class="sel" id="em-target">'+clsOpts.join('')+'</select></div>'
+    +'<div class="fg"><label class="fl">寄給</label>'
+    +'<select class="sel" id="em-who"><option value="student">學生本人</option><option value="parent">家長</option><option value="both">學生+家長</option></select></div>'
+    +'<div class="fg"><label class="fl">主旨</label>'
+    +'<input class="inp" id="em-subject" placeholder="例：本週課程提醒"></div>'
+    +'<div class="fg"><label class="fl">內容</label>'
+    +'<textarea class="inp" id="em-body" rows="6" placeholder="信件內容..."></textarea></div>'
+    +'<div style="margin-top:8px;font-size:.75rem;color:var(--text-3)">系統會用瀏覽器/手機的預設信箱應用程式打開，由你確認後寄出。</div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bgh" onclick="cM()">取消</button> '
+    +'<button class="btn bp" onclick="doSendBulkEmail()">📧 開啟郵件 App</button></div></div>';
+  if(typeof oM === 'function') oM('📧 寄送 Email 給學生', msg);
+}
+
+function doSendBulkEmail(){
+  var target = document.getElementById('em-target').value;
+  var who = document.getElementById('em-who').value;
+  var subject = document.getElementById('em-subject').value;
+  var body = document.getElementById('em-body').value;
+  var students = ((typeof DB!=='undefined'&&DB)?DB.students:[])||[];
+  if(target !== 'all'){
+    students = students.filter(function(s){ return (s.cls||'未分班') === target; });
+  }
+  var addrs = [];
+  students.forEach(function(s){
+    if(who === 'student' || who === 'both'){
+      if(s.email) addrs.push(s.email);
+    }
+    if(who === 'parent' || who === 'both'){
+      if(s.parentEmail) addrs.push(s.parentEmail);
+    }
+  });
+  if(!addrs.length){ alert('沒有可寄送的 Email 地址'); return; }
+  if(typeof cM==='function') cM();
+  // mailto: URL 太長會失敗，超過 50 個分批
+  if(addrs.length > 50){
+    if(!confirm('共 '+addrs.length+' 個收件人，瀏覽器 URL 可能太長。\n\n建議拆批寄送（每批 50 人）。\n按確定先開啟前 50 人，剩餘將顯示在 toast。')){
+      return;
+    }
+    emailBulkBcc(addrs.slice(0, 50), subject, body);
+    var rest = addrs.slice(50);
+    setTimeout(function(){
+      if(typeof toast==='function') toast('剩餘 '+rest.length+' 人需另行寄送','warn',5000);
+    }, 2000);
+  } else {
+    emailBulkBcc(addrs, subject, body);
+    if(typeof toast==='function') toast('✅ 已開啟郵件，請在郵件 App 確認後寄出','info',4000);
+  }
+}
+
+// ═══════════ 新手引導 ═══════════
+function showOnboarding(force){
+  if(!force){
+    try {
+      if(localStorage.getItem('cms_onboarding_done') === '1') return;
+    } catch(e){}
+  }
+
+  var role = (window.cur && window.cur.role) || 'teacher';
+  var steps;
+  if(role === 'student'){
+    steps = [
+      {title:'👋 歡迎！', desc:'這是你的課程管理系統。讓我們快速看 3 個重點功能。', emoji:'🎓'},
+      {title:'📍 簽到', desc:'每堂課按「簽到」記錄出席。可用 QR Code 或代碼。', emoji:'✅'},
+      {title:'📤 繳交作業', desc:'從「作業」分頁查看與繳交。可上傳檔案或貼連結。', emoji:'📝'},
+      {title:'⌨️ 快捷鍵', desc:'按 Ctrl+P 打開命令面板，搜尋任何功能！手機則點 ⋮ 更多。', emoji:'⚡'}
+    ];
+  } else {
+    steps = [
+      {title:'👋 歡迎使用！', desc:'這是課程管理系統教師端。讓我們花 1 分鐘看核心功能。', emoji:'🎓'},
+      {title:'📊 總覽', desc:'這裡看今日出席、未繳作業、待審核項目，是你的主控台。', emoji:'📊'},
+      {title:'⌨️ 命令面板', desc:'按 Ctrl+P 打開！可搜尋任何功能（學期設定、PDF 匯出、AI 評語...）', emoji:'⚡'},
+      {title:'⋮ 更多選單', desc:'手機上點右上 ⋮ 打開所有功能。電腦則用左側選單。', emoji:'📱'},
+      {title:'📦 自動備份', desc:'系統每天自動備份。重要資料也記得手動匯出 JSON。', emoji:'💾'},
+      {title:'🤖 AI 助教', desc:'已整合 Claude AI！可一鍵生成評語、分析班級狀況。', emoji:'✨'}
+    ];
+  }
+
+  window._onboardStep = 0;
+  window._onboardSteps = steps;
+  renderOnboardingStep();
+}
+
+function renderOnboardingStep(){
+  var step = window._onboardStep || 0;
+  var steps = window._onboardSteps || [];
+  if(step >= steps.length){ closeOnboarding(true); return; }
+  var s = steps[step];
+  var msg = '<div style="text-align:center;padding:10px 0">'
+    +'<div style="font-size:4rem;margin-bottom:14px">'+s.emoji+'</div>'
+    +'<h2 style="font-size:1.3rem;font-weight:800;margin-bottom:10px">'+escapeHtml(s.title)+'</h2>'
+    +'<div style="color:var(--text-2);line-height:1.8;font-size:.9rem;margin-bottom:20px">'+escapeHtml(s.desc)+'</div>'
+    +'<div style="display:flex;gap:6px;justify-content:center;margin-bottom:14px">'
+    + steps.map(function(_, i){
+        return '<div style="width:'+(i===step?'24px':'8px')+';height:8px;border-radius:99px;background:'+(i===step?'var(--brand,#5e5ce6)':'var(--gray-l,#ddd)')+';transition:all .2s"></div>';
+      }).join('')
+    +'</div>'
+    +'<div style="display:flex;gap:8px;justify-content:space-between">'
+    +'<button class="btn bgh bsm" onclick="closeOnboarding(false)">略過</button>'
+    +'<div>'
+    +(step > 0 ? '<button class="btn bgh bsm" onclick="prevOnboarding()">‹ 上一步</button> ' : '')
+    +'<button class="btn bp" onclick="nextOnboarding()">'+(step === steps.length-1 ? '🎉 開始使用' : '下一步 ›')+'</button>'
+    +'</div></div></div>';
+  if(typeof oM === 'function') oM('', msg);
+}
+
+function nextOnboarding(){
+  window._onboardStep = (window._onboardStep||0) + 1;
+  renderOnboardingStep();
+}
+
+function prevOnboarding(){
+  window._onboardStep = Math.max(0, (window._onboardStep||0) - 1);
+  renderOnboardingStep();
+}
+
+function closeOnboarding(completed){
+  try { localStorage.setItem('cms_onboarding_done', '1'); } catch(e){}
+  if(typeof cM === 'function') cM();
+  if(completed){
+    if(typeof toast==='function') toast('🎉 歡迎加入！按 Ctrl+P 隨時找功能','info',4000);
+  }
+}
+
+function reShowOnboarding(){ showOnboarding(true); }
+
+// 啟動時檢查是否要顯示
+setTimeout(function(){
+  // 老師登入後 3 秒檢查
+  if(window.cur && (window.cur.role === 'teacher' || window.cur.role === 'student')){
+    try { showOnboarding(false); } catch(e){ console.warn('[onboarding]', e); }
+  }
+}, 3000);
+
+// ═══════════ 拖放上傳 JSON/CSV ═══════════
+(function setupDropZone(){
+  if(window._dropZoneInit) return;
+  window._dropZoneInit = true;
+
+  var dropOverlay = null;
+  function createOverlay(){
+    if(dropOverlay) return dropOverlay;
+    dropOverlay = document.createElement('div');
+    dropOverlay.id = 'drop-overlay';
+    dropOverlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(94,92,230,.15);backdrop-filter:blur(8px);border:4px dashed var(--brand,#5e5ce6);pointer-events:none';
+    dropOverlay.innerHTML = '<div style="background:#fff;padding:30px 50px;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center"><div style="font-size:4rem;margin-bottom:12px">📥</div><div style="font-size:1.2rem;font-weight:800">放開以匯入</div><div style="font-size:.85rem;color:var(--text-3);margin-top:6px">支援 JSON 備份檔 / CSV 學生名單</div></div>';
+    document.body.appendChild(dropOverlay);
+    return dropOverlay;
+  }
+
+  var dragCounter = 0;
+  document.addEventListener('dragenter', function(e){
+    if(!e.dataTransfer || !e.dataTransfer.types || !Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') > -1) {
+      // 兼容寫法 below
+    }
+    if(!e.dataTransfer) return;
+    var hasFiles = false;
+    try {
+      var t = e.dataTransfer.types;
+      for(var i=0;i<t.length;i++){ if(t[i]==='Files'){ hasFiles=true; break; } }
+    } catch(err){}
+    if(!hasFiles) return;
+    e.preventDefault();
+    dragCounter++;
+    var ov = createOverlay();
+    ov.style.display = 'flex';
+  });
+  document.addEventListener('dragleave', function(e){
+    dragCounter--;
+    if(dragCounter <= 0){
+      dragCounter = 0;
+      if(dropOverlay) dropOverlay.style.display = 'none';
+    }
+  });
+  document.addEventListener('dragover', function(e){
+    if(!e.dataTransfer) return;
+    var hasFiles = false;
+    try {
+      var t = e.dataTransfer.types;
+      for(var i=0;i<t.length;i++){ if(t[i]==='Files'){ hasFiles=true; break; } }
+    } catch(err){}
+    if(hasFiles) e.preventDefault();
+  });
+  document.addEventListener('drop', function(e){
+    if(!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    dragCounter = 0;
+    if(dropOverlay) dropOverlay.style.display = 'none';
+    var file = e.dataTransfer.files[0];
+    handleDroppedFile(file);
+  });
+
+  function handleDroppedFile(file){
+    var name = (file.name||'').toLowerCase();
+    if(name.endsWith('.json')){
+      // JSON 備份還原
+      var reader = new FileReader();
+      reader.onload = function(ev){
+        try {
+          var data = JSON.parse(ev.target.result);
+          if(!confirm('🗂️ 偵測到 JSON 備份檔：' + file.name + '\n\n確定要還原？這會覆蓋當前所有資料！')) return;
+          if(typeof DB === 'undefined' || !DB){ alert('DB 未就緒'); return; }
+          Object.keys(data).forEach(function(k){ if(k !== '_meta') DB[k] = data[k]; });
+          if(typeof saveDB === 'function') saveDB();
+          if(typeof toast === 'function') toast('✅ 已匯入備份，重新載入...','info',2000);
+          setTimeout(function(){ location.reload(); }, 1500);
+        } catch(err){ alert('❌ JSON 格式錯誤：'+err.message); }
+      };
+      reader.readAsText(file);
+    } else if(name.endsWith('.csv')){
+      // CSV 學生匯入
+      if(typeof parseAndImportCSV === 'function'){
+        var reader = new FileReader();
+        reader.onload = function(ev){
+          try { parseAndImportCSV(ev.target.result); }
+          catch(err){ alert('❌ CSV 處理失敗：'+err.message); }
+        };
+        reader.readAsText(file, 'utf-8');
+      } else {
+        alert('CSV 匯入功能尚未啟用');
+      }
+    } else {
+      if(typeof toast === 'function') toast('⚠️ 不支援的檔案格式（僅 JSON / CSV）','warn',4000);
+    }
+  }
+})();
 
 // ═══════════ 每日自動備份 (C1) ═══════════
 function getAutoBackups(){
