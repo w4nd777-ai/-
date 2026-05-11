@@ -5414,6 +5414,38 @@ function doAsgnRemind(asgnId){
   toast('✅ 已通知 '+targets.length+' 位學生');
 }
 
+// ═══════════ 統一日期時間格式化（出席資料） ═══════════
+function fmtAttDate(a){
+  if(!a) return '';
+  var d = a.date;
+  if(!d){
+    try {
+      if(a.id && typeof a.id === 'number' && a.id > 1000000000){
+        d = new Date(a.id).toISOString().slice(0,10);
+      }
+    } catch(e){}
+  }
+  return d || '';
+}
+function fmtAttTime(a){
+  if(!a) return '';
+  var t = a.time;
+  if(!t || t === 'undefined'){
+    try {
+      if(a.id && typeof a.id === 'number' && a.id > 1000000000){
+        var d = new Date(a.id);
+        t = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+      }
+    } catch(e){}
+  }
+  return t || '';
+}
+function fmtAttDateTime(a){
+  var d = fmtAttDate(a), t = fmtAttTime(a);
+  if(!d && !t) return '—';
+  return d + (t ? ' ' + t : '');
+}
+
 function doPrintLabels(){
   var cls=(document.getElementById('pl-cls')||{value:'all'}).value;
   var stus=cls==='all'?DB.students:DB.students.filter(function(s){return(s.cls||'未分班')===cls;});
@@ -9372,8 +9404,11 @@ function openQrAttendance(){
   window._attQrCode=code;
   window._attQrStart=Date.now();
   var course=(DB.courses[0]||{}).name||'課程';
-  var payload=JSON.stringify({code:code,course:course,at:Date.now()});
-  var qrUrl='https://api.qrserver.com/v1/create-qr-code/?size=320x320&data='+encodeURIComponent(payload);
+  // QR 內容改為 URL，學生用相機掃即可開啟簽到頁
+  var siteUrl = location.origin + location.pathname;
+  siteUrl = siteUrl.replace(/index\.html$/, '');
+  var qrPayload = siteUrl + '#att=' + code;
+  var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(qrPayload);
   // 即時顯示今日簽到人數
   var todayStr=(typeof td==='function'?td():new Date().toISOString().slice(0,10));
   function signedCountHtml(){
@@ -9382,7 +9417,7 @@ function openQrAttendance(){
   }
   oM('📱 QR Code 點名',
     '<div style="text-align:center">'
-    +'<div style="font-size:.82rem;color:var(--text-3);margin-bottom:10px">將下方 QR Code 投影給學生掃描，或請學生輸入代碼：</div>'
+    +'<div style="font-size:.82rem;color:var(--text-3);margin-bottom:10px">學生用手機相機掃描即可自動簽到；或請學生輸入下方代碼：</div>'
     +'<img src="'+qrUrl+'" alt="QR" style="max-width:100%;background:#fff;padding:10px;border-radius:12px;box-shadow:var(--shadow-md);margin-bottom:10px">'
     +'<div style="font-family:monospace;font-size:1.8rem;font-weight:900;color:var(--brand);letter-spacing:.1em;margin-bottom:10px">'+code+'</div>'
     +'<div style="display:flex;justify-content:space-around;margin-bottom:10px;gap:8px">'
@@ -13069,7 +13104,31 @@ function rPend(){
       +'</div>';
   }
 
-  return searchBar+batchBar+leaveSec+appealSec+`<div style="margin-bottom:13px"><div style="font-size:1.15rem;font-weight:900">註冊審核</div><div style="font-size:.77rem;color:var(--gray)">待審核 ${DB.pending.filter(p=>p.status==='pending').length} 件</div></div>
+  // 全部請假紀錄（含已核准/已駁回）
+  var allLeaves = (DB.pending||[]).filter(function(p){ return p.type==='leave'; }).sort(function(a,b){
+    return (b.date||'').localeCompare(a.date||'');
+  });
+  var leaveHistorySec = allLeaves.length ? '<div class="card" style="margin-bottom:12px"><div class="ch">📆 請假紀錄（全部 '+allLeaves.length+' 筆）</div><div class="cb" style="max-height:300px;overflow-y:auto"><table class="tbl" style="width:100%;font-size:.78rem"><thead><tr><th>學生</th><th>班</th><th>日期</th><th>原因</th><th>狀態</th><th>操作</th></tr></thead><tbody>'
+    + allLeaves.map(function(p){
+        var statusBdg = p.status === 'pending' ? '<span style="color:var(--amb);font-weight:700">待審核</span>'
+          : p.status === 'approved' ? '<span style="color:var(--grn);font-weight:700">✅ 已核准</span>'
+          : '<span style="color:var(--red);font-weight:700">✗ 已駁回</span>';
+        var actions = p.status === 'pending'
+          ? '<button class="btn br bsm" onclick="approveLeave('+p.id+',false)">駁回</button> <button class="btn bp bsm" onclick="approveLeave('+p.id+',true)">核准</button>'
+          : '<span style="color:var(--text-3);font-size:.7rem">—</span>';
+        return '<tr><td><strong>'+escapeHtml(p.studentName||'')+'</strong></td><td>'+escapeHtml(p.cls||'')+'</td><td>'+escapeHtml(p.date||'')+'</td><td style="max-width:200px">'+escapeHtml(p.reason||'')+'</td><td>'+statusBdg+'</td><td>'+actions+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div></div>' : '';
+
+  // 頂部訊息 badge：請假總筆數提示
+  var leaveTopBadge = allLeaves.length
+    ? '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
+      +'<span style="display:inline-flex;align-items:center;gap:5px;background:var(--amb-l);color:var(--amb);padding:4px 10px;border-radius:99px;font-size:.76rem;font-weight:700">📆 '+allLeaves.length+' 筆請假</span>'
+      +(leaveList.length?'<span style="display:inline-flex;align-items:center;gap:5px;background:var(--red-l, #fee2e2);color:var(--red);padding:4px 10px;border-radius:99px;font-size:.76rem;font-weight:700">⏳ '+leaveList.length+' 待審</span>':'')
+      +'</div>'
+    : '';
+
+  return searchBar+leaveTopBadge+batchBar+leaveSec+leaveHistorySec+appealSec+`<div style="margin-bottom:13px"><div style="font-size:1.15rem;font-weight:900">註冊審核</div><div style="font-size:.77rem;color:var(--gray)">待審核 ${DB.pending.filter(p=>p.status==='pending').length} 件</div></div>
   <div class="card"><div class="tbl"><table><thead><tr><th>姓名</th><th>學號</th><th>班級</th><th style="text-align:center">座號</th><th>狀態</th><th>申請日</th><th>操作</th></tr></thead><tbody>${rows||`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--gray)">尚無申請</td></tr>`}</tbody></table></div></div>`;
 }
 function apP(id){const p=DB.pending.find(x=>x.id===id);if(!p)return;DB.students.push({id:nid(),name:p.name,sid:p.sid,cls:p.cls,seat:p.seat,email:p.email||'',pass:p.initPass||String(p.sid||'0000').slice(-4),mustChangePw:!p.initPass});p.status='approved';bLS();saveDB();document.getElementById('tc').innerHTML=rPend();toast('✅ 已核准 '+p.name);}
@@ -14932,6 +14991,75 @@ try{const cw=localStorage.getItem('cms_cw');const tc=document.getElementById('tc
 
 setInterval(function(){updateMsgBadge();},3000);
 
+// ═══════════ 老師端未讀訊息監聽（toast + 推播） ═══════════
+function checkTeacherUnreadMsgs(){
+  if(!window.cur || window.cur.role !== 'teacher') return;
+  try {
+    var unread = (DB.messages||[]).filter(function(m){ return m.from === 'student' && !m.read; });
+    var nbBtn = document.getElementById('nb-messages');
+    if(!nbBtn) return;
+    var existing = nbBtn.querySelector('.nb-badge');
+    if(unread.length > 0){
+      if(!existing){
+        var b = document.createElement('span');
+        b.className = 'nb-badge';
+        b.style.cssText = 'background:#dc2626;color:#fff;border-radius:99px;padding:1px 6px;font-size:.6rem;font-weight:800;margin-left:6px;display:inline-block';
+        nbBtn.appendChild(b);
+        existing = b;
+      }
+      existing.textContent = unread.length > 99 ? '99+' : unread.length;
+      // 提示新訊息（與上次比較）
+      var lastSeen = parseInt(localStorage.getItem('cms_last_unread_count') || '0');
+      if(unread.length > lastSeen){
+        var newCount = unread.length - lastSeen;
+        var latest = unread[unread.length - 1];
+        if(typeof toast === 'function'){
+          toast('💬 '+newCount+' 則新訊息 (最近：'+(latest.studentName||'')+')','info',4000);
+        }
+        // 推播
+        if(typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted'){
+          try {
+            showLocalNotification('💬 '+newCount+' 則新訊息',
+              (latest.studentName||'')+'：'+(latest.text||'').slice(0,60),
+              {tag:'new-msg', url:'?nav=messages'});
+          } catch(e){}
+        }
+      }
+      localStorage.setItem('cms_last_unread_count', unread.length);
+    } else {
+      if(existing) existing.remove();
+      localStorage.setItem('cms_last_unread_count', '0');
+    }
+  } catch(e){ console.warn('[checkTeacherUnreadMsgs]', e); }
+}
+function startTeacherMsgWatcher(){
+  if(window._teacherMsgWatcher) clearInterval(window._teacherMsgWatcher);
+  window._teacherMsgWatcher = setInterval(checkTeacherUnreadMsgs, 15000);
+  setTimeout(checkTeacherUnreadMsgs, 2000); // 立即跑一次
+}
+// 跨分頁同步
+try {
+  window.addEventListener('storage', function(ev){
+    if(!ev || !ev.key) return;
+    if(ev.key === 'cms_db_v1' || ev.key === 'cms_messages'){
+      setTimeout(checkTeacherUnreadMsgs, 200);
+    }
+  });
+} catch(e){}
+// Wrap doTL to start watcher on teacher login
+(function wrapDoTL(){
+  if(typeof doTL !== 'function' || window._doTLWrapped) return;
+  window._doTLWrapped = true;
+  var orig = doTL;
+  window.doTL = function(){
+    var result = orig.apply(this, arguments);
+    setTimeout(function(){
+      if(window.cur && window.cur.role === 'teacher') startTeacherMsgWatcher();
+    }, 1500);
+    return result;
+  };
+})();
+
 
 // ═══════════ 學生端 AI 助手 ═══════════
 async function stuAskAI(question){
@@ -15313,6 +15441,47 @@ function installPWA(){
     if(btn) btn.style.display = 'none';
   });
 }
+
+// ═══════════ QR Code URL 自動簽到處理 ═══════════
+(function autoAttFromHash(){
+  function tryAutoAtt(){
+    var hash = location.hash || '';
+    var m = hash.match(/[#&]att=([A-Z0-9-]+)/i);
+    if(!m) return;
+    var code = m[1];
+    // 等到 cur 物件有值（學生已登入）
+    if(!window.cur || !window.cur.id){
+      setTimeout(function(){
+        if(typeof toast === 'function') toast('📱 請先登入學生帳號才能簽到','warn',5000);
+      }, 1500);
+      return;
+    }
+    if(window.cur.role !== 'student'){
+      if(typeof toast === 'function') toast('⚠️ 此 QR Code 為學生簽到用','warn',4000);
+      return;
+    }
+    // 觸發簽到
+    setTimeout(function(){
+      if(typeof verifyAttCode === 'function' && !verifyAttCode(code)){
+        if(typeof toast === 'function') toast('❌ 簽到代碼已過期，請老師重新產生','err',5000);
+        return;
+      }
+      if(typeof doAttFromQr === 'function'){
+        doAttFromQr(code);
+        // 清除 hash 避免重整時重複簽到
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+    }, 1500);
+  }
+  // 啟動時跑一次
+  setTimeout(tryAutoAtt, 2500);
+  // 監聽 hash 變化（用戶在已開啟頁面再掃新 QR）
+  window.addEventListener('hashchange', tryAutoAtt);
+  // 學生登入完成後也再跑一次（cur 可能晚於頁面載入才設定）
+  window.addEventListener('focus', function(){
+    if(location.hash.indexOf('att=') >= 0) tryAutoAtt();
+  });
+})();
 </script>
 </body>
 </html>
