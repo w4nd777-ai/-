@@ -8143,6 +8143,7 @@ function openNewAsgn(){
     +'<div class="fg"><label class="fl">⭐ 互評截止日</label><input class="inp" id="na-pd" type="date" value="'+defPeerDue+'"></div>'
     +'<div class="fg" style="grid-column:1/-1"><label class="fl">說明</label><textarea class="ta" id="na-desc" rows="2" placeholder="作業要求…"></textarea></div>'
     +'<div class="fg" style="grid-column:1/-1"><label class="fl">評分標準'+(tpl?' <span style="font-size:.65rem;background:var(--brand-l);color:var(--brand);padding:2px 7px;border-radius:99px;font-weight:700;margin-left:4px">已套用範本</span>':'')+'</label><input class="inp" id="na-rubric" value="'+defRubric+'" placeholder="邏輯30% 內容40% 創意30%"></div>'
+    +'<div class="fg" style="grid-column:1/-1"><label class="fl">📎 題目附件（選填，最大 30MB）</label><input type="file" id="na-attach" class="inp" style="padding:6px" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.zip,.txt"><div style="font-size:.7rem;color:var(--text-3);margin-top:4px">學生在作業頁面可下載此檔案</div></div>'
     +'</div>'
     +'<div class="fg">'
     +'<label class="fl" style="margin-bottom:8px">派發對象</label>'
@@ -8247,11 +8248,53 @@ function saveNewAsgn(){
   var stuIds=mode==='stu'?getNaStuIds():[];
   var newA={id:nid(),title:t,due:d,peerDue:pd,desc:desc,rubric:rubric,
     cls:clsVal,stuIds:stuIds,createdAt:td()};
+  // === 處理題目附件 (新增) ===
+  var _attachInput=document.getElementById('na-attach');
+  var _attachFile=_attachInput&&_attachInput.files&&_attachInput.files[0];
+  if(_attachFile){
+    var _maxAttach=1024*1024; // 建議 1MB 上限（localStorage 限制）
+    if(_attachFile.size>_maxAttach){
+      if(!confirm('⚠️ 附件大小 '+(_attachFile.size/1024/1024).toFixed(2)+'MB 超過建議 1MB 上限。\n\n仍要繼續？（可能因儲存空間不足而失敗）')){
+        return;
+      }
+    }
+    var _reader=new FileReader();
+    _reader.onload=function(e){
+      newA.attachment={
+        name:_attachFile.name,
+        type:_attachFile.type,
+        size:_attachFile.size,
+        dataUrl:e.target.result,
+        uploadedAt:new Date().toISOString()
+      };
+      _finalizeNewAsgn(newA);
+    };
+    _reader.onerror=function(){
+      if(typeof toast==='function') toast('附件讀取失敗，作業仍會儲存','warn');
+      _finalizeNewAsgn(newA);
+    };
+    _reader.readAsDataURL(_attachFile);
+    return; // 暫停同步流程，等 reader 完成
+  }
+  // 沒附件直接走原流程
+  _finalizeNewAsgn(newA);
+}
+
+function _finalizeNewAsgn(newA){
   DB.assignments.unshift(newA);
-  logOp('新增作業',t);
-  saveDB();cM();
-  document.getElementById('tc').innerHTML=rAsgn();
-  toast('✅ 作業「'+t+'」已新增');
+  logOp('新增作業',newA.title);
+  try{ saveDB(); }
+  catch(e){
+    console.error('[saveNewAsgn] saveDB failed',e);
+    if(typeof toast==='function') toast('儲存失敗（附件可能過大）','err');
+    // 回滾
+    DB.assignments=DB.assignments.filter(function(x){return x.id!==newA.id;});
+    return;
+  }
+  cM();
+  var tcEl=document.getElementById('tc');
+  if(tcEl) tcEl.innerHTML=rAsgn();
+  toast('✅ 作業「'+newA.title+'」已新增'+(newA.attachment?'（含附件）':''));
 }
 
 // ═══ IndexedDB 大容量儲存層（~100MB+）═══
@@ -12002,6 +12045,7 @@ function rAsgn(){
       +(a.peerDue?'<span class="date-badge date-ok">⭐ 互評 '+a.peerDue+'</span>':'')
       +(a.allowLate?'<span class="badge" style="background:var(--amb-l);color:var(--amb)">⏰ 可遲交</span>':'')
       +(a.rubricItems&&a.rubricItems.length?'<span class="badge" style="background:var(--grn-l);color:var(--grn)">⭐ '+a.rubricItems.length+' 細項</span>':'')
+      +(a.attachment?asgnAttachLink(a):'')
       +'</div>'
       // 繳交進度條
       +'<div style="margin-bottom:8px">'
@@ -12047,16 +12091,81 @@ function svAsgn(existingId){
   var desc=(document.getElementById('adesc')||{value:''}).value;
   var rubric=(document.getElementById('arubric')||{value:''}).value.trim();
   var peerDue=(document.getElementById('apd')||{value:''}).value||null;
+  var targetAsgn=null;
   if(existingId&&existingId!='null'){
-    var a=DB.assignments.find(function(x){return x.id===Number(existingId);});
-    if(a){a.title=t;a.due=d;a.desc=desc;a.rubric=rubric;a.peerDue=peerDue||a.peerDue;a.cls=clsVal;a.stuIds=stuIds;}
-    toast('✅ 作業已更新');
+    targetAsgn=DB.assignments.find(function(x){return x.id===Number(existingId);});
+    if(targetAsgn){targetAsgn.title=t;targetAsgn.due=d;targetAsgn.desc=desc;targetAsgn.rubric=rubric;targetAsgn.peerDue=peerDue||targetAsgn.peerDue;targetAsgn.cls=clsVal;targetAsgn.stuIds=stuIds;}
   } else {
-    DB.assignments.push({id:nid(),title:t,due:d,desc:desc,rubric:rubric,peerDue:peerDue,cls:clsVal,stuIds:stuIds});
-    toast('✅ 作業已新增');
+    targetAsgn={id:nid(),title:t,due:d,desc:desc,rubric:rubric,peerDue:peerDue,cls:clsVal,stuIds:stuIds};
+    DB.assignments.push(targetAsgn);
   }
-  saveDB();cM();
-  document.getElementById('tc').innerHTML=rAsgn();
+  // === 處理題目附件（編輯時可換檔／移除）===
+  var _ea=document.getElementById('ea-attach');
+  var _eaFile=_ea&&_ea.files&&_ea.files[0];
+  var _eaRm=document.getElementById('ea-attach-remove');
+  var _wantRemove=_eaRm&&_eaRm.checked;
+  var _isEdit=!!(existingId&&existingId!='null');
+  if(_eaFile){
+    var _maxAttach=1024*1024;
+    if(_eaFile.size>_maxAttach){
+      if(!confirm('⚠️ 附件大小 '+(_eaFile.size/1024/1024).toFixed(2)+'MB 超過建議 1MB 上限。\n\n仍要繼續？（可能因儲存空間不足而失敗）')){
+        return;
+      }
+    }
+    var _reader=new FileReader();
+    _reader.onload=function(e){
+      targetAsgn.attachment={
+        name:_eaFile.name,
+        type:_eaFile.type,
+        size:_eaFile.size,
+        dataUrl:e.target.result,
+        uploadedAt:new Date().toISOString()
+      };
+      _finalizeSvAsgn(targetAsgn,_isEdit);
+    };
+    _reader.onerror=function(){
+      if(typeof toast==='function') toast('附件讀取失敗，作業仍會儲存','warn');
+      _finalizeSvAsgn(targetAsgn,_isEdit);
+    };
+    _reader.readAsDataURL(_eaFile);
+    return;
+  }
+  if(_wantRemove&&targetAsgn&&targetAsgn.attachment){
+    delete targetAsgn.attachment;
+  }
+  _finalizeSvAsgn(targetAsgn,_isEdit);
+}
+
+function _finalizeSvAsgn(a,isEdit){
+  try{ saveDB(); }
+  catch(e){
+    console.error('[svAsgn] saveDB failed',e);
+    if(typeof toast==='function') toast('儲存失敗（附件可能過大）','err');
+    return;
+  }
+  cM();
+  var tcEl=document.getElementById('tc');
+  if(tcEl) tcEl.innerHTML=rAsgn();
+  toast(isEdit?'✅ 作業已更新':'✅ 作業已新增');
+}
+
+// 取得作業附件下載連結 HTML（供學生／老師端共用）
+function asgnAttachLink(asgn){
+  if(!asgn||!asgn.attachment) return '';
+  var a=asgn.attachment;
+  var icon='📎';
+  if((a.type||'').indexOf('image/')===0) icon='🖼️';
+  else if(a.type==='application/pdf') icon='📄';
+  else if((a.type||'').indexOf('word')>=0||/\.docx?$/i.test(a.name||'')) icon='📘';
+  else if((a.type||'').indexOf('powerpoint')>=0||/\.pptx?$/i.test(a.name||'')) icon='📙';
+  else if((a.type||'').indexOf('zip')>=0||/\.zip$/i.test(a.name||'')) icon='🗜️';
+  var sizeKB=a.size?(a.size/1024).toFixed(0)+'KB':'';
+  return '<a href="'+escapeHtml(a.dataUrl||'')+'" download="'+escapeHtml(a.name||'attachment')+'" '
+    +'style="display:inline-flex;align-items:center;gap:4px;background:var(--brand-l,#e0e7ff);color:var(--brand,#5e5ce6);'
+    +'padding:4px 10px;border-radius:6px;font-size:.75rem;text-decoration:none;font-weight:600;margin:4px 4px 4px 0">'
+    +icon+' '+escapeHtml(a.name||'附件')
+    +(sizeKB?' <span style="color:var(--text-3);font-size:.68rem;font-weight:400">('+sizeKB+')</span>':'')
+    +'</a>';
 }
 
 function eAsgn(id){
@@ -12105,6 +12214,17 @@ function eAsgn(id){
     +'</div>'
     +'<div class="fg"><label class="fl">說明</label><textarea class="ta" id="adesc" rows="2">'+(a.desc||'')+'</textarea></div>'
     +'<div class="fg"><label class="fl">評分標準</label><textarea class="ta" id="arubric" rows="2" placeholder="例：邏輯清晰30%…">'+(a.rubric||'')+'</textarea></div>'
+    +'<div class="fg"><label class="fl">📎 題目附件（選填）</label>'
+    +(a.attachment
+      ?'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--fill-2);padding:8px 10px;border-radius:8px;margin-bottom:6px">'
+        +'<span style="font-size:.78rem;flex:1">目前附件：<strong>'+escapeHtml(a.attachment.name||'附件')+'</strong>'
+        +(a.attachment.size?' <span style="color:var(--text-3);font-size:.7rem">('+(a.attachment.size/1024).toFixed(0)+'KB)</span>':'')+'</span>'
+        +'<label style="display:inline-flex;align-items:center;gap:4px;font-size:.74rem;cursor:pointer;color:var(--red)"><input type="checkbox" id="ea-attach-remove"> 🗑️ 移除附件</label>'
+        +'</div>'
+      :'')
+    +'<input type="file" id="ea-attach" class="inp" style="padding:6px" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.zip,.txt">'
+    +'<div style="font-size:.7rem;color:var(--text-3);margin-top:4px">'+(a.attachment?'選擇新檔案會取代現有附件':'學生在作業頁面可下載此檔案')+'（建議 < 1MB）</div>'
+    +'</div>'
     +'<div style="display:flex;gap:9px">'
     +'<button class="btn bgh" style="flex:1" onclick="cM()">取消</button>'
     +'<button class="btn bp" style="flex:1" onclick="svAsgn('+id+')">💾 更新</button>'
@@ -13759,7 +13879,7 @@ function rSAsgn(){
   var asgns=DB.assignments.filter(function(a){
     if(a.stuIds&&a.stuIds.length>0)return a.stuIds.includes(cur.id);
     return !a.cls||a.cls===''||a.cls.split(',').includes(cur.cls||'未分班');
-  }).map(function(a){return {assignmentId:a.id,title:a.title,due:a.due,desc:a.desc,peerDue:a.peerDue};});
+  }).map(function(a){return {assignmentId:a.id,title:a.title,due:a.due,desc:a.desc,peerDue:a.peerDue,attachment:a.attachment};});
   var gasSubs=gasSD.submissions||[];var mySubs=gasSubs.length?gasSubs:DB.submissions.filter(function(s){return s.studentId===cur.id;});
   var cards=asgns.map(function(a){
     var aid=Number(a.assignmentId||a.id);
@@ -13784,6 +13904,7 @@ function rSAsgn(){
       +'<span style="font-size:.72rem;color:'+dc+'">'+dt+'</span></div>'
       +(due?'<div style="margin-bottom:6px;font-size:.72rem">'+dueCountdown(due)+'</div>':'')
       +(a.desc?'<div style="font-size:.76rem;color:var(--gray);margin-bottom:8px">'+a.desc+'</div>':'')
+      +(a.attachment?'<div style="margin-bottom:8px">'+asgnAttachLink(a)+'</div>':'')
       +subInfo
       +'<button class="btn bp bsm" onclick="openSubModal('+aid+',\''+a.title.replace(/'/g,'')+'\')">'+( sub?'🔄 重新繳交':'📤 繳交作業')+'</button>'
       +threadBtn
