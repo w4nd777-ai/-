@@ -5446,6 +5446,118 @@ function fmtAttDateTime(a){
   return d + (t ? ' ' + t : '');
 }
 
+// ═══════════ 老師端自動刷新當前頁面（解決學生操作老師看不到的問題） ═══════════
+window._autoRefreshPages = ['overview','attendance','submissions','messages','pending'];
+
+function startTeacherAutoRefresh(){
+  if(window._teacherAutoRefresh) clearInterval(window._teacherAutoRefresh);
+  window._teacherAutoRefresh = setInterval(function(){
+    try {
+      if(!window.cur || window.cur.role !== 'teacher') return;
+      // 不打擾使用者：modal 開著時不刷新
+      var modalOpen = document.getElementById('modal-bg');
+      if(modalOpen && modalOpen.classList.contains('open')) return;
+      // 不打擾使用者：focus 在輸入框時不刷新
+      var ae = document.activeElement;
+      if(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      // 只在指定頁面自動刷新
+      var curTab = window._curTab || '';
+      if(window._autoRefreshPages.indexOf(curTab) < 0) return;
+      // 執行刷新
+      var renderFn = null;
+      if(curTab === 'overview') renderFn = window.rOv;
+      else if(curTab === 'attendance') renderFn = window.rAtt;
+      else if(curTab === 'submissions') renderFn = window.rSub;
+      else if(curTab === 'messages') renderFn = window.rMsg;
+      else if(curTab === 'pending') renderFn = window.rPend;
+      if(typeof renderFn !== 'function') return;
+      var tc = document.getElementById('tc');
+      if(tc){
+        // 保留卷軸位置
+        var scrollTop = tc.scrollTop;
+        tc.innerHTML = renderFn();
+        tc.scrollTop = scrollTop;
+        // 視覺提示：頂部 1 秒淡入淡出綠條
+        var ind = document.createElement('div');
+        ind.style.cssText = 'position:fixed;top:0;left:0;right:0;height:2px;background:var(--grn,#10b981);z-index:9999;opacity:.8;transition:opacity .6s';
+        document.body.appendChild(ind);
+        setTimeout(function(){ ind.style.opacity = '0'; setTimeout(function(){ ind.remove(); }, 600); }, 400);
+      }
+    } catch(e){ console.warn('[autoRefresh]', e); }
+  }, 20000); // 20 秒
+}
+
+function stopTeacherAutoRefresh(){
+  if(window._teacherAutoRefresh){
+    clearInterval(window._teacherAutoRefresh);
+    window._teacherAutoRefresh = null;
+  }
+}
+
+// 老師登入後啟動（用 wrapper 包 doTL）
+(function wrapDoTLAutoRefresh(){
+  if(typeof doTL !== 'function' || window._doTLWrappedAR) return;
+  window._doTLWrappedAR = true;
+  var orig = window.doTL;
+  window.doTL = function(){
+    var r = orig.apply(this, arguments);
+    setTimeout(function(){
+      if(window.cur && window.cur.role === 'teacher') startTeacherAutoRefresh();
+    }, 2000);
+    return r;
+  };
+})();
+
+// 同網域跨分頁/裝置即時通知（BroadcastChannel）
+(function setupBroadcast(){
+  if(typeof BroadcastChannel === 'undefined') return;
+  if(window._bcInited) return;
+  window._bcInited = true;
+  try {
+    window._bc = new BroadcastChannel('cms-updates');
+    window._bc.onmessage = function(ev){
+      var d = ev.data || {};
+      if(d.type === 'data-changed'){
+        console.log('[BC] data changed by another tab:', d.action);
+        // 立即觸發刷新
+        if(window.cur && window.cur.role === 'teacher'){
+          var curTab = window._curTab || '';
+          if(window._autoRefreshPages.indexOf(curTab) >= 0){
+            var renderFn = null;
+            if(curTab === 'overview') renderFn = window.rOv;
+            else if(curTab === 'attendance') renderFn = window.rAtt;
+            else if(curTab === 'submissions') renderFn = window.rSub;
+            else if(curTab === 'messages') renderFn = window.rMsg;
+            else if(curTab === 'pending') renderFn = window.rPend;
+            if(typeof renderFn === 'function'){
+              var tc = document.getElementById('tc');
+              if(tc){
+                var st = tc.scrollTop;
+                tc.innerHTML = renderFn();
+                tc.scrollTop = st;
+              }
+            }
+          }
+        }
+      }
+    };
+  } catch(e){ console.warn('[BC setup]', e); }
+})();
+
+// 包裝 saveDB 自動廣播
+(function wrapSaveDBBroadcast(){
+  if(typeof saveDB !== 'function' || window._saveDBBcWrapped) return;
+  window._saveDBBcWrapped = true;
+  var orig = window.saveDB;
+  window.saveDB = function(){
+    var r = orig.apply(this, arguments);
+    try {
+      if(window._bc) window._bc.postMessage({type: 'data-changed', at: Date.now()});
+    } catch(e){}
+    return r;
+  };
+})();
+
 function doPrintLabels(){
   var cls=(document.getElementById('pl-cls')||{value:'all'}).value;
   var stus=cls==='all'?DB.students:DB.students.filter(function(s){return(s.cls||'未分班')===cls;});
@@ -11647,11 +11759,23 @@ var statCards=[
       +' stroke-dasharray="'+attRate+' '+(100-attRate)+'" stroke-dashoffset="25" stroke-linecap="round"/>'
       +'<text x="18" y="21" text-anchor="middle" font-size="9" font-weight="800" fill="'+s.col+'">'+attRate+'%</text>'
       +'</svg>':'';
-    return'<div class="card cb" style="flex:1;min-width:130px;cursor:'+(s.label==='今日出席'||s.label==='未讀訊息'?'pointer':'default')+'" onclick="'+(s.label==='未讀訊息'?'nbClick(document.getElementById(\'nb-messages\'),\'messages\')':s.label==='今日出席'?'nbClick(document.getElementById(\'nb-attendance\'),\'attendance\')':'')+'\">'
+    // 每張卡片的跳轉動作
+    var navAction = '';
+    if(s.label === '今日出席' || s.label === '整體出席率' || s.label === '出席異常'){
+      navAction = "nbClick(document.getElementById('nb-attendance'),'attendance')";
+    } else if(s.label === '今日繳交' || s.label === '整體繳交率') {
+      navAction = "nbClick(document.getElementById('nb-submissions'),'submissions')";
+    } else if(s.label === '逾期未繳'){
+      navAction = "nbClick(document.getElementById('nb-submissions'),'submissions')";
+    } else if(s.label === '未讀訊息'){
+      navAction = "nbClick(document.getElementById('nb-messages'),'messages')";
+    }
+    return '<div class="card cb" style="flex:1;min-width:130px;cursor:pointer;transition:transform .12s,box-shadow .12s" onclick="'+navAction+'" onmouseover="this.style.transform=\'translateY(-2px)\';this.style.boxShadow=\'0 4px 12px rgba(0,0,0,.1)\'" onmouseout="this.style.transform=\'\';this.style.boxShadow=\'\'">'
       +'<div style="font-size:1.5rem;margin-bottom:4px">'+s.icon+'</div>'
       +'<div style="font-size:1.6rem;font-weight:900;color:'+s.col+';line-height:1">'+s.val+'</div>'
       +'<div style="font-size:.73rem;font-weight:700;color:var(--text-2);margin-top:3px">'+s.label+'</div>'
       +'<div style="font-size:.66rem;color:var(--text-3)">'+s.sub+'</div>'
+      +'<div style="font-size:.6rem;color:var(--brand);margin-top:4px;opacity:.7">點擊查看 →</div>'
       +'</div>';
   }).join('');
 
@@ -12338,20 +12462,34 @@ function rAtt(){
 
   var rows=list.map(function(a){
     var s=gs(a.studentId);
-    var signIn=a.time||a.checkIn||'—';
+    // 統一日期時間格式化（用 fmtAttDate/fmtAttTime 處理缺失）
+    var displayDate = (typeof fmtAttDate === 'function') ? (fmtAttDate(a) || '—') : (a.date || '—');
+    var displayTime = (typeof fmtAttTime === 'function') ? (fmtAttTime(a) || (a.checkIn || '—')) : (a.time || a.checkIn || '—');
+    var signIn = displayTime || '—';
     var signOut=a.signOutTime||a.checkOut||'—';
+    // 加上週幾
+    var weekday = '';
+    if(displayDate && displayDate !== '—'){
+      try {
+        var dObj = new Date(displayDate);
+        if(!isNaN(dObj)){
+          weekday = ['週日','週一','週二','週三','週四','週五','週六'][dObj.getDay()];
+        }
+      } catch(e){}
+    }
     var status=a.signOutTime||a.checkOut?'已簽退':a.status==='late'?'遲到':a.status==='leave'?'請假':a.time||a.checkIn?'出席中':'缺席';
     var stColor=status==='已簽退'?'blu':status==='遲到'?'amb':status==='請假'?'ind':status==='出席中'?'grn':'red';
     var cnt=DB.attendance.filter(function(x){return x.studentId===a.studentId;}).length;
     var total=attDates.length||1;
     var pct=Math.round(cnt/total*100);
     var pctSpan='<span style="font-weight:700;color:'+(pct<70?'var(--red)':pct<85?'var(--amb)':'var(--grn)')+'">'+pct+'%'+(pct<70?' ⚠️':'')+'</span>';
+    var _esc = (typeof escapeHtml === 'function') ? escapeHtml : function(x){return String(x==null?'':x);};
     return'<tr>'
-      +'<td style="font-weight:600">'+s.name+'</td>'
-      +'<td style="font-size:.73rem;color:var(--gray)">'+( s.sid||'')+'</td>'
-      +'<td style="font-size:.8rem">'+a.date+'</td>'
-      +'<td style="font-size:.82rem;color:var(--grn);font-weight:600">'+signIn+'</td>'
-      +'<td style="font-size:.82rem;color:'+(signOut!=='—'?'var(--ind)':'var(--gray)')+'">'+signOut+'</td>'
+      +'<td style="font-weight:600">'+_esc(s.name||'')+'</td>'
+      +'<td style="font-size:.73rem;color:var(--gray);font-family:monospace">'+_esc(s.sid||'')+'</td>'
+      +'<td style="font-size:.8rem"><div>'+_esc(displayDate)+'</div>'+(weekday?'<div style="font-size:.65rem;color:var(--text-3)">'+weekday+'</div>':'')+'</td>'
+      +'<td style="font-size:.82rem;color:var(--grn);font-weight:600;font-family:monospace">'+_esc(signIn)+'</td>'
+      +'<td style="font-size:.82rem;color:'+(signOut!=='—'?'var(--ind)':'var(--gray)')+';font-family:monospace">'+_esc(signOut)+'</td>'
       +'<td>'+bdg(status,stColor)+'</td>'
       +'<td style="text-align:center">'+pctSpan+'</td>'
       +'<td><div style="display:flex;gap:4px"><button class="btn bgh bsm" title="修改狀態（病/事/公假等）" onclick="pickAttType('+a.studentId+',\''+a.date+'\')">✏️</button><button class="btn br bsm" onclick="dAtt('+a.id+')">🗑️</button></div></td>'
@@ -13674,8 +13812,9 @@ function rSAtt(){
   // Sign-in box
   var signBox='';
   if(att){
+    var _attT=(typeof fmtAttTime==='function')?(fmtAttTime(att)||att.checkIn||'--'):(att.time||att.checkIn||'--');
     signBox='<div class="ibox igrn" style="margin-bottom:10px"><span>✅</span>'
-      +'<span style="font-weight:700">今日已簽到 ('+att.time+')'+(att.signOutTime?' · 已簽退 '+att.signOutTime:'')+'</span></div>'
+      +'<span style="font-weight:700">今日已簽到 ('+_attT+')'+(att.signOutTime?' · 已簽退 '+att.signOutTime:'')+'</span></div>'
       +'<div style="text-align:right;margin-top:6px">'  
       +'<button onclick="stuRefreshAtt()" style="background:none;border:none;cursor:pointer;font-size:.72rem;color:var(--ind)">🔄 重新整理</button>'
       +'<span style="color:var(--gray-b);margin:0 5px">·</span>'
@@ -14447,7 +14586,11 @@ function rSProf(){
     var grpBadge=myGrp?'<div class="ibox iind" style="margin-bottom:10px"><span>👥</span><span>所屬組別：<b>'+myGrp.name+'</b></span></div>':'';
     return grpBadge+'<div class="card" style="margin-top:10px"><div class="ch">📅 出席記錄（最近10次）</div>'
       +'<div class="tbl"><table><thead><tr><th>日期</th><th>簽到</th><th>簽退</th></tr></thead><tbody>'
-      +myAtt.map(function(a){return'<tr><td>'+a.date+'</td><td>'+(a.time||a.checkIn||'--')+'</td><td style="color:'+(a.signOutTime||a.checkOut?'var(--grn)':'var(--gray)')+'">'+(a.signOutTime||a.checkOut||'未簽退')+'</td></tr>';}).join('')
+      +myAtt.map(function(a){
+        var _d=(typeof fmtAttDate==='function')?(fmtAttDate(a)||'--'):(a.date||'--');
+        var _t=(typeof fmtAttTime==='function')?(fmtAttTime(a)||a.checkIn||'--'):(a.time||a.checkIn||'--');
+        return'<tr><td>'+_d+'</td><td style="font-family:monospace">'+_t+'</td><td style="color:'+(a.signOutTime||a.checkOut?'var(--grn)':'var(--gray)')+';font-family:monospace">'+(a.signOutTime||a.checkOut||'未簽退')+'</td></tr>';
+      }).join('')
       +'</tbody></table></div></div>';
   })()}
   ${(function(){
