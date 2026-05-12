@@ -11347,50 +11347,56 @@ function loadDB(){
           fixBrokenAttData();
         }
 
-        // 二段：自動移除壞掉的出席紀錄
+        // 二段：超強力清除假簽到資料
         setTimeout(function(){
           var beforeCount = DB.attendance.length;
-          var keepAttendance = DB.attendance.filter(function(a){
-            // 刪除條件：
-            // 1. _timeUnreliable=true (新標記)
+
+          // 真實簽到的特徵（任一即可保留）：
+          // 1. 有 method 欄位 AND time 是合法 HH:MM 或 HH:MM:SS
+          // 2. 有 timestamp 欄位（毫秒，> 1000000000000）
+          // 3. 有 qrCode 欄位
+          // 4. method = 'student-self' / 'qr' / 'teacher-manual'
+          function isRealSignIn(a){
+            if(!a) return false;
+            // 明確標記為不可靠 → 不是真實
             if(a._timeUnreliable) return false;
             if(a._importedFrom === 'csv') return false;
-            // 2. 沒有 method 欄位 + 沒有 timestamp = 可能是 CSV 匯入
-            if(!a.method && !a.timestamp && !a.qrCode){
-              // 進一步檢查：time 是不是常見的 Excel 偽值（如全部 05:43 等）
-              // 如果 attendance 中有 >50% 的紀錄 time 完全相同，那肯定是 CSV
-              return true; // 暫時保留，下面集中判斷
-            }
-            return true;
-          });
+            // 必須有實際的 time 欄位
+            var hasValidTime = typeof a.time === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(a.time);
+            // 必須有 method 或 timestamp 或 qrCode
+            var hasMethod = a.method && ['student-self','qr','teacher-manual','manual'].indexOf(a.method) >= 0;
+            var hasTimestamp = typeof a.timestamp === 'number' && a.timestamp > 1000000000000;
+            var hasQrCode = !!a.qrCode;
+            // 至少有合法時間 AND 至少一個來源證明
+            return hasValidTime && (hasMethod || hasTimestamp || hasQrCode);
+          }
 
-          // 二次判斷：找出「同一個 time 值出現超過 5 次」的紀錄（CSV 匯入特徵）
-          var timeCount = {};
-          keepAttendance.forEach(function(a){
-            if(a.method) return; // 有 method 表示是真實簽到，跳過
-            var k = (a.date||'') + '|' + (a.time||'');
-            timeCount[k] = (timeCount[k]||0) + 1;
-          });
-          var suspiciousKeys = {};
-          Object.keys(timeCount).forEach(function(k){
-            if(timeCount[k] >= 5) suspiciousKeys[k] = true;
-          });
-          keepAttendance = keepAttendance.filter(function(a){
-            if(a.method) return true; // 有 method = 真實，保留
-            var k = (a.date||'') + '|' + (a.time||'');
-            if(suspiciousKeys[k]) return false; // 同日同時間 5+ 筆 = CSV 假資料
-            return true;
+          // 請假紀錄特殊處理：time='請假' 或 status==='leave' 也保留
+          function isLeaveRecord(a){
+            return a && (a.time === '請假' || a.status === 'leave' || a.type === 'leave' ||
+                         a.status === 'sick' || a.type === 'sick' ||
+                         a.status === 'personal' || a.type === 'personal' ||
+                         a.status === 'official' || a.type === 'official');
+          }
+
+          var keepAttendance = (DB.attendance||[]).filter(function(a){
+            // 請假類型保留
+            if(isLeaveRecord(a)) return true;
+            // 真實簽到保留
+            if(isRealSignIn(a)) return true;
+            // 其他都視為假資料刪除
+            return false;
           });
 
           var removed = beforeCount - keepAttendance.length;
           if(removed > 0){
             DB.attendance = keepAttendance;
             if(typeof saveDB === 'function') saveDB();
-            console.log('[autoFix] 已自動清除 '+removed+' 筆 CSV 匯入垃圾資料');
+            console.log('[autoFix] 已清除 '+removed+' 筆無時間的假簽到資料');
             if(typeof toast === 'function' && window.cur && window.cur.role === 'teacher'){
-              toast('🗑️ 已自動清除 '+removed+' 筆無效出席紀錄（CSV 匯入垃圾）','info',5000);
+              toast('🗑️ 已自動清除 '+removed+' 筆無效紀錄\n（沒有真實簽到時間的 CSV 匯入資料）','info',6000);
             }
-            // 觸發頁面重繪
+            // 立即重繪當前頁面
             try {
               if(typeof window._lastRender === 'function'){
                 var tc = document.getElementById('tc');
@@ -13179,6 +13185,50 @@ function addAsgn(){
 // ══════════════════════════════════════════════════
 var attQ='';
 // ═══════════ 清空出席紀錄（重置） ═══════════
+function doForceCleanFake(){
+  if(!confirm('⚠️ 確定清除所有假簽到資料？\n\n會保留：\n• 真實簽到（學生 App 簽到 / QR / 老師補簽）\n• 請假紀錄\n\n會刪除：\n• 無時間的 CSV 匯入資料\n• 「— 未記錄」記錄\n\n無法復原！')) return;
+  function isRealSignIn(a){
+    var hasValidTime = typeof a.time === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(a.time);
+    var hasMethod = a.method && ['student-self','qr','teacher-manual','manual'].indexOf(a.method) >= 0;
+    var hasTimestamp = typeof a.timestamp === 'number' && a.timestamp > 1000000000000;
+    return hasValidTime && (hasMethod || hasTimestamp || a.qrCode);
+  }
+  function isLeaveRecord(a){ return a && (a.time === '請假' || ['leave','sick','personal','official'].indexOf(a.status) >= 0 || ['leave','sick','personal','official'].indexOf(a.type) >= 0); }
+  var before = (DB.attendance||[]).length;
+  DB.attendance = (DB.attendance||[]).filter(function(a){
+    return isLeaveRecord(a) || isRealSignIn(a);
+  });
+  var removed = before - DB.attendance.length;
+  saveDB();
+  toast('✅ 已清除 '+removed+' 筆假資料！\n剩餘：'+DB.attendance.length+' 筆真實紀錄','success',5000);
+  var tc=document.getElementById('tc');
+  if(tc && typeof rAtt==='function') tc.innerHTML=rAtt();
+}
+
+function showAttHelp(){
+  oM('📖 出席系統使用說明',
+    '<div style="font-size:.85rem;line-height:1.8">'
+    +'<div style="background:var(--fill-2);padding:10px;border-radius:8px;margin-bottom:10px">'
+    +'<strong>3 種真實簽到方式：</strong><br>'
+    +'1️⃣ 學生在 App 按「簽到」→ 紀錄當下時間<br>'
+    +'2️⃣ 學生用手機掃 QR Code → 自動簽到<br>'
+    +'3️⃣ 老師「補簽到」→ 用當前時間補登'
+    +'</div>'
+    +'<div style="background:var(--amb-l);padding:10px;border-radius:8px;margin-bottom:10px">'
+    +'<strong>⚠️ CSV 匯入要注意：</strong><br>'
+    +'匯入時若沒有時間欄位 → 顯示「未記錄」<br>'
+    +'這些不是真實簽到，建議清除<br>'
+    +'學生需要重新在 App 簽到'
+    +'</div>'
+    +'<div style="background:var(--grn-l);padding:10px;border-radius:8px">'
+    +'<strong>✅ 即時同步：</strong><br>'
+    +'學生簽到後 → 老師 < 1 秒內看到（BroadcastChannel）<br>'
+    +'前提：老師頁面開著'
+    +'</div>'
+    +'<div style="margin-top:14px;text-align:right">'
+    +'<button class="btn bp" onclick="cM()">了解</button></div></div>');
+}
+
 function confirmWipeAttendance(){
   var total = (DB.attendance||[]).length;
   if(!total){ toast('沒有出席紀錄','info'); return; }
@@ -13215,10 +13265,41 @@ function doWipeAttendance(mode){
 function rAtt(){
   // Attendance report shortcut
   var _ac=window._attCls||'all';
-  var _ctatt=mkClsTabs2(_ac,'_attCls','rAtt','<button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()" style="margin-left:auto">📊 統計報表</button><button class="btn br bsm" onclick="confirmWipeAttendance()" style="margin-left:8px" title="清空全部出席紀錄重新開始">🗑️ 清空所有</button>');
-  var _attHeader='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:900">出席管理</div><div style="display:flex;gap:8px"><button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()">📊 統計報表</button><button class="btn br bsm" onclick="confirmWipeAttendance()" title="清空全部出席紀錄重新開始">🗑️ 清空所有</button></div></div>';
-  var unreliableCount = (DB.attendance||[]).filter(function(a){ return a._timeUnreliable; }).length;
-  var unreliableBanner = unreliableCount > 0 ? '<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:8px;padding:8px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="showCleanupUnreliable()"><div style="font-size:.82rem;color:#92400e"><strong>⚠️ 偵測到 '+unreliableCount+' 筆 CSV 匯入垃圾資料</strong>（顯示為「— 未記錄」）</div><button class="btn bgh bsm">🗑️ 清理</button></div>' : '';
+  var _ctatt=mkClsTabs2(_ac,'_attCls','rAtt','<button class="btn bgh bsm" onclick="showAttHelp()" title="使用說明" style="margin-left:auto">❓</button><button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()" style="margin-left:8px">📊 統計報表</button><button class="btn br bsm" onclick="confirmWipeAttendance()" style="margin-left:8px" title="清空全部出席紀錄重新開始">🗑️ 清空所有</button>');
+  var _attHeader='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:900">出席管理</div><div style="display:flex;gap:8px"><button class="btn bgh bsm" onclick="showAttHelp()" title="使用說明">❓</button><button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()">📊 統計報表</button><button class="btn br bsm" onclick="confirmWipeAttendance()" title="清空全部出席紀錄重新開始">🗑️ 清空所有</button></div></div>';
+  // 計算各類記錄
+  function _isRealSI(a){
+    var hasValidTime = typeof a.time === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(a.time);
+    var hasMethod = a.method && ['student-self','qr','teacher-manual','manual'].indexOf(a.method) >= 0;
+    var hasTimestamp = typeof a.timestamp === 'number' && a.timestamp > 1000000000000;
+    return hasValidTime && (hasMethod || hasTimestamp || a.qrCode);
+  }
+  function _isLeaveR(a){ return a && (a.time === '請假' || ['leave','sick','personal','official'].indexOf(a.status) >= 0 || ['leave','sick','personal','official'].indexOf(a.type) >= 0); }
+
+  var fakeCount = (DB.attendance||[]).filter(function(a){
+    if(_isLeaveR(a)) return false;
+    return !_isRealSI(a);
+  }).length;
+  var realCount = (DB.attendance||[]).filter(_isRealSI).length;
+  var leaveCount = (DB.attendance||[]).filter(_isLeaveR).length;
+
+  var unreliableBanner = fakeCount > 0 ?
+    '<div style="background:linear-gradient(135deg,#fee2e2,#fecaca);border:2px solid #ef4444;border-radius:12px;padding:14px;margin-bottom:14px">'
+    +'<div style="font-size:1rem;font-weight:900;color:#991b1b;margin-bottom:6px">🚨 偵測到 '+fakeCount+' 筆無效簽到資料</div>'
+    +'<div style="font-size:.82rem;color:#7f1d1d;line-height:1.6;margin-bottom:10px">'
+    +'這些是 CSV 匯入的假資料（沒有真實簽到時間），<strong>會導致出席統計失真</strong>。'
+    +'<br>真實簽到需要學生在 App 按「簽到」按鈕或掃 QR Code。'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:.78rem">'
+    +'<div style="background:#fff;padding:4px 10px;border-radius:6px"><span style="color:var(--grn);font-weight:700">✅ '+realCount+'</span> 筆真實簽到</div>'
+    +'<div style="background:#fff;padding:4px 10px;border-radius:6px"><span style="color:#8b5cf6;font-weight:700">📆 '+leaveCount+'</span> 筆請假</div>'
+    +'<div style="background:#fff;padding:4px 10px;border-radius:6px"><span style="color:#ef4444;font-weight:700">🗑️ '+fakeCount+'</span> 筆假資料</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:10px">'
+    +'<button class="btn br" style="flex:1" onclick="doForceCleanFake()">🚨 立即清除所有假資料</button>'
+    +'<button class="btn bgh bsm" onclick="showCleanupUnreliable()">了解詳情</button>'
+    +'</div>'
+    +'</div>' : '';
   var attDates=[...new Set((DB.attendance||[]).map(function(a){return a.date;}))].sort();
   // 日期快捷篩選：今天 / 本週 / 本月 / 全部
   var _attRange=window._attRange||'all';
