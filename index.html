@@ -10183,11 +10183,11 @@ function doAttFromQr(code){
   try{
     var today=(typeof td==='function'?td():new Date().toISOString().slice(0,10));
     var now=new Date();
-    var timeStr=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+    var timeStr=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
     var existing=(DB.attendance||[]).find(function(a){return a.studentId===cur.id&&a.date===today;});
     if(existing){
       if(typeof toast==='function') toast('今日已簽到過','',3000);
-      doSTab('sa');
+      // 不強制切 tab，留在原本畫面
       return;
     }
     DB.attendance=DB.attendance||[];
@@ -10199,6 +10199,7 @@ function doAttFromQr(code){
       seat:cur.seat||'',
       date:today,
       time:timeStr,
+      timestamp:Date.now(), // 備份 timestamp
       signOutTime:'',
       status:'present',
       type:'present',
@@ -10206,9 +10207,18 @@ function doAttFromQr(code){
       qrCode:code
     });
     saveDB();
-    if(typeof logOp==='function') logOp('QR 簽到', cur.name+' ('+code+')');
-    if(typeof toast==='function') toast('✅ QR 簽到成功！'+timeStr);
-    doSTab('sa');
+    if(typeof logOp==='function') logOp('QR 簽到', cur.name+' '+timeStr+' ('+code+')');
+    // 顯示成功動畫
+    if(typeof showCheckInSuccess==='function'){
+      try{showCheckInSuccess('present');}catch(e){}
+    }
+    if(typeof toast==='function') toast('✅ QR 簽到成功！'+timeStr,'success');
+    // 智能刷新：在簽到分頁才刷新，否則保留學生位置
+    var activeStab = document.querySelector('.stab.active');
+    var curStab = activeStab && activeStab.dataset && activeStab.dataset.stab;
+    if(curStab === 'sa' && typeof doSTab === 'function'){
+      doSTab('sa');
+    }
   }catch(e){
     if(typeof toast==='function') toast('簽到失敗：'+e.message,'err');
     console.error('[doAttFromQr]',e);
@@ -11293,22 +11303,41 @@ function loadDB(){
         }
       } catch(e) { console.error('[normalizeSids]', e); }
     })();
-    // 啟動時自動修復壞掉的日期時間（一次）
+    // 啟動時自動修復+清理壞掉的日期時間（一次）
     setTimeout(function(){
       try {
-        if(typeof fixBrokenAttData === 'function' && DB.attendance && DB.attendance.length){
-          // 檢查是否有壞資料
-          var hasBad = DB.attendance.some(function(a){
-            return (typeof a.date === 'string' && a.date.indexOf('T') > 0) ||
-                   (typeof a.time === 'string' && a.time.indexOf('T') > 0) ||
-                   (typeof a.time === 'number' && a.time < 1);
-          });
-          if(hasBad){
-            console.log('[autoFix] 偵測到壞掉的日期時間，自動修復中...');
-            fixBrokenAttData();
-          }
+        if(typeof fixBrokenAttData !== 'function' || !DB.attendance || !DB.attendance.length) return;
+
+        var hasBad = DB.attendance.some(function(a){
+          return (typeof a.date === 'string' && a.date.indexOf('T') > 0) ||
+                 (typeof a.time === 'string' && a.time.indexOf('T') > 0) ||
+                 (typeof a.time === 'number' && a.time < 1);
+        });
+        if(hasBad){
+          console.log('[autoFix] 偵測到壞掉的日期時間，自動修復中...');
+          fixBrokenAttData();
         }
-      } catch(e){}
+
+        // 二段：自動移除 _timeUnreliable 的垃圾資料
+        // 因為這些都是 CSV 匯入時時間為 garbage（1899 epoch）
+        // 既然連時間都不知道，這些根本不是真實簽到，自動刪除
+        setTimeout(function(){
+          var beforeCount = DB.attendance.length;
+          var keepAttendance = DB.attendance.filter(function(a){
+            // 保留條件：不是 unreliable, 或 是 unreliable 但已經被老師補登過
+            return !a._timeUnreliable;
+          });
+          var removed = beforeCount - keepAttendance.length;
+          if(removed > 0){
+            DB.attendance = keepAttendance;
+            if(typeof saveDB === 'function') saveDB();
+            console.log('[autoFix] 已自動清除 '+removed+' 筆 CSV 匯入垃圾資料');
+            if(typeof toast === 'function' && window.cur && window.cur.role === 'teacher'){
+              toast('🗑️ 已自動清除 '+removed+' 筆無效的出席紀錄（CSV 匯入垃圾）','info',5000);
+            }
+          }
+        }, 800);
+      } catch(e){ console.warn('[autoFix]', e); }
     }, 3000);
     if(!DB.grades)DB.grades={};
     if(!DB.announcements)DB.announcements=[];
@@ -14628,16 +14657,26 @@ function dkIn(status){
   var exists=DB.attendance.find(function(a){return a.studentId===cur.id&&a.date===td();});
   if(exists){toast('今天已簽到過了','warn');return;}
   var st=status||'present';
+  var nowTime = nt(); // 記錄當下實際時間
   DB.attendance.push({id:nid(),studentId:cur.id,studentName:cur.name,
-    cls:cur.cls||'',seat:cur.seat||'',date:td(),time:nt(),signOutTime:'',status:st});
-  logOp('學生簽到',cur.name);saveDB();
+    cls:cur.cls||'',seat:cur.seat||'',date:td(),time:nowTime,signOutTime:'',status:st,
+    method:'student-self', // 標記為學生自己簽到（非匯入）
+    timestamp:Date.now()}); // 額外存 timestamp 作為備份
+  logOp('學生簽到',cur.name+' '+nowTime);saveDB();
   // 顯示成功動畫
   if(typeof showCheckInSuccess==='function'){
     try{showCheckInSuccess(st);}catch(e){}
   }
-  doSTab('sa');
+  // 智能刷新：只在當前是簽到 tab 才刷新顯示，否則留在原 tab
+  var activeStab = document.querySelector('.stab.active');
+  var curStab = activeStab && activeStab.dataset && activeStab.dataset.stab;
+  if(curStab === 'sa'){
+    // 已在簽到分頁，刷新內容（顯示新的「今日已簽到」狀態）
+    if(typeof doSTab === 'function') doSTab('sa');
+  }
+  // 否則：保留學生原本的位置，不打擾
   var label=st==='late'?'遲到':st==='leave'?'請假':'簽到';
-  toast('✅ '+label+'成功 ('+nt()+')','success');
+  toast('✅ '+label+'成功 ('+nowTime+')','success');
   // Sync to GAS
   if(gasUrl()){
     gasPost({action:'signIn',studentId:cur.id,studentName:cur.name,
