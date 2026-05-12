@@ -5473,32 +5473,201 @@ function doAsgnRemind(asgnId){
 function fmtAttDate(a){
   if(!a) return '';
   var d = a.date;
-  if(!d){
+  // 情境 1: 已是 YYYY-MM-DD 純字串
+  if(typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)){
+    return d;
+  }
+  // 情境 2: ISO datetime 字串（含 T...Z），需轉成本地日期
+  if(typeof d === 'string' && d.indexOf('T') > 0){
     try {
-      if(a.id && typeof a.id === 'number' && a.id > 1000000000){
-        d = new Date(a.id).toISOString().slice(0,10);
+      var dt = new Date(d);
+      if(!isNaN(dt)){
+        // 用本地時區（Taipei UTC+8）取年月日
+        var y = dt.getFullYear();
+        var m = String(dt.getMonth()+1).padStart(2,'0');
+        var dd = String(dt.getDate()).padStart(2,'0');
+        // 如果是 1899（Excel epoch garbage），回退到 a.id
+        if(y < 2000){
+          if(a.id && typeof a.id === 'number' && a.id > 1000000000){
+            return new Date(a.id).toISOString().slice(0,10);
+          }
+          return '';
+        }
+        return y+'-'+m+'-'+dd;
       }
     } catch(e){}
   }
-  return d || '';
+  // 情境 3: Date 物件
+  if(d instanceof Date && !isNaN(d)){
+    var y2 = d.getFullYear();
+    return y2+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  // 情境 4: 數字（timestamp 或 Excel 序列號）
+  if(typeof d === 'number'){
+    if(d > 1000000000){
+      // JS timestamp ms
+      var dt2 = new Date(d);
+      return dt2.getFullYear()+'-'+String(dt2.getMonth()+1).padStart(2,'0')+'-'+String(dt2.getDate()).padStart(2,'0');
+    } else if(d > 25000 && d < 80000){
+      // Excel serial date (天數 from 1899-12-30)
+      var excelEpoch = new Date(1899, 11, 30);
+      var dt3 = new Date(excelEpoch.getTime() + d * 86400000);
+      return dt3.getFullYear()+'-'+String(dt3.getMonth()+1).padStart(2,'0')+'-'+String(dt3.getDate()).padStart(2,'0');
+    }
+  }
+  // 情境 5: 沒值，從 a.id (timestamp) 推算
+  if(a.id && typeof a.id === 'number' && a.id > 1000000000){
+    try {
+      var d2 = new Date(a.id);
+      return d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0')+'-'+String(d2.getDate()).padStart(2,'0');
+    } catch(e){}
+  }
+  // 最後：原樣返回字串（但限制長度避免炸版）
+  if(typeof d === 'string') return d.slice(0, 10);
+  return '';
 }
+
 function fmtAttTime(a){
   if(!a) return '';
   var t = a.time;
-  if(!t || t === 'undefined'){
+  // 情境 1: 已是 HH:MM 純字串
+  if(typeof t === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(t)){
+    // 確保兩位數
+    var parts = t.split(':');
+    return parts[0].padStart(2,'0') + ':' + parts[1].padStart(2,'0');
+  }
+  // 情境 2: ISO datetime 字串（含 T），取時分
+  if(typeof t === 'string' && t.indexOf('T') > 0){
     try {
-      if(a.id && typeof a.id === 'number' && a.id > 1000000000){
-        var d = new Date(a.id);
-        t = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+      var dt = new Date(t);
+      if(!isNaN(dt)){
+        // 1899 epoch (Excel time) 用 UTC 取原始時分（Z 已表示 UTC）
+        // 正常時間用 local 取小時分鐘
+        var useUTC = dt.getFullYear() < 2000;
+        var hh = useUTC ? dt.getUTCHours() : dt.getHours();
+        var mm = useUTC ? dt.getUTCMinutes() : dt.getMinutes();
+        return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
       }
     } catch(e){}
   }
-  return t || '';
+  // 情境 3: Date 物件
+  if(t instanceof Date && !isNaN(t)){
+    return String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0');
+  }
+  // 情境 4: 數字（Excel time fraction 0~1，代表一天中的比例）
+  if(typeof t === 'number'){
+    if(t >= 0 && t < 1){
+      // Excel time fraction
+      var totalSec = Math.round(t * 86400);
+      var h = Math.floor(totalSec / 3600);
+      var min = Math.floor((totalSec % 3600) / 60);
+      return String(h).padStart(2,'0') + ':' + String(min).padStart(2,'0');
+    } else if(t > 1000000000){
+      // JS timestamp ms
+      var dt2 = new Date(t);
+      return String(dt2.getHours()).padStart(2,'0') + ':' + String(dt2.getMinutes()).padStart(2,'0');
+    }
+  }
+  // 情境 5: 字串 'undefined' 或空
+  if(!t || t === 'undefined' || t === 'null'){
+    // 試 checkIn / checkInTime / signInTime
+    var alt = a.checkIn || a.checkInTime || a.signInTime;
+    if(alt) return fmtAttTime({time: alt});
+    // 從 a.id 推算
+    if(a.id && typeof a.id === 'number' && a.id > 1000000000){
+      try {
+        var d3 = new Date(a.id);
+        return String(d3.getHours()).padStart(2,'0') + ':' + String(d3.getMinutes()).padStart(2,'0');
+      } catch(e){}
+    }
+    return '';
+  }
+  // 最後：嘗試解析
+  try {
+    var dt3 = new Date(t);
+    if(!isNaN(dt3)){
+      return String(dt3.getHours()).padStart(2,'0') + ':' + String(dt3.getMinutes()).padStart(2,'0');
+    }
+  } catch(e){}
+  // 字串原樣返回（但限制長度）
+  if(typeof t === 'string') return t.slice(0, 8);
+  return '';
 }
+
 function fmtAttDateTime(a){
   var d = fmtAttDate(a), t = fmtAttTime(a);
   if(!d && !t) return '—';
   return d + (t ? ' ' + t : '');
+}
+
+// 簽退時間
+function fmtAttSignOut(a){
+  if(!a) return '';
+  var t = a.signOutTime || a.checkOut || a.signOut;
+  if(!t) return '';
+  return fmtAttTime({time: t});
+}
+
+// ═══════════ 一次性修復現有壞掉的日期時間資料 ═══════════
+function fixBrokenAttData(){
+  if(!DB.attendance || !Array.isArray(DB.attendance)){
+    if(typeof toast === 'function') toast('沒有出席資料','info');
+    return;
+  }
+  var fixed = 0;
+  DB.attendance.forEach(function(a){
+    var changed = false;
+    // 修 date
+    if(a.date){
+      if(typeof a.date === 'string' && a.date.indexOf('T') > 0){
+        // ISO 字串轉純日期
+        try {
+          var dt = new Date(a.date);
+          if(!isNaN(dt) && dt.getFullYear() >= 2000){
+            a.date = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+            changed = true;
+          }
+        } catch(e){}
+      } else if(typeof a.date === 'number'){
+        if(a.date > 25000 && a.date < 80000){
+          // Excel serial
+          var excelEpoch = new Date(1899, 11, 30);
+          var dt2 = new Date(excelEpoch.getTime() + a.date * 86400000);
+          a.date = dt2.getFullYear()+'-'+String(dt2.getMonth()+1).padStart(2,'0')+'-'+String(dt2.getDate()).padStart(2,'0');
+          changed = true;
+        }
+      }
+    }
+    // 修 time
+    if(a.time){
+      if(typeof a.time === 'string' && a.time.indexOf('T') > 0){
+        // ISO（含 1899 epoch）只取時分
+        try {
+          var t = new Date(a.time);
+          if(!isNaN(t)){
+            // 1899 epoch 用 UTC、正常時間用 local
+            var useUTC2 = t.getFullYear() < 2000;
+            var hh2 = useUTC2 ? t.getUTCHours() : t.getHours();
+            var mm2 = useUTC2 ? t.getUTCMinutes() : t.getMinutes();
+            a.time = String(hh2).padStart(2,'0') + ':' + String(mm2).padStart(2,'0');
+            changed = true;
+          }
+        } catch(e){}
+      } else if(typeof a.time === 'number' && a.time >= 0 && a.time < 1){
+        // Excel time fraction
+        var totalSec = Math.round(a.time * 86400);
+        a.time = String(Math.floor(totalSec/3600)).padStart(2,'0')+':'+String(Math.floor((totalSec%3600)/60)).padStart(2,'0');
+        changed = true;
+      }
+    }
+    if(changed) fixed++;
+  });
+  if(fixed > 0){
+    if(typeof saveDB === 'function') saveDB();
+    if(typeof toast === 'function') toast('✅ 已修復 '+fixed+' 筆日期時間','info',4000);
+  } else {
+    if(typeof toast === 'function') toast('沒有需要修復的資料','info');
+  }
 }
 
 // ═══════════ 老師端自動刷新當前頁面（解決學生操作老師看不到的問題） ═══════════
@@ -7051,6 +7220,7 @@ var COMMAND_PALETTE = [
   {label:'寄送 Email 通知', icon:'📧', action:'showEmailComposer', role:'teacher'},
   {label:'重看新手引導', icon:'🎓', action:'reShowOnboarding'},
   {label:'使用統計', icon:'📊', action:'showUsageStats', role:'teacher'},
+  {label:'🔧 修復日期時間資料', icon:'🔧', action:'fixBrokenAttData', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -10866,6 +11036,23 @@ function loadDB(){
         }
       } catch(e) { console.error('[normalizeSids]', e); }
     })();
+    // 啟動時自動修復壞掉的日期時間（一次）
+    setTimeout(function(){
+      try {
+        if(typeof fixBrokenAttData === 'function' && DB.attendance && DB.attendance.length){
+          // 檢查是否有壞資料
+          var hasBad = DB.attendance.some(function(a){
+            return (typeof a.date === 'string' && a.date.indexOf('T') > 0) ||
+                   (typeof a.time === 'string' && a.time.indexOf('T') > 0) ||
+                   (typeof a.time === 'number' && a.time < 1);
+          });
+          if(hasBad){
+            console.log('[autoFix] 偵測到壞掉的日期時間，自動修復中...');
+            fixBrokenAttData();
+          }
+        }
+      } catch(e){}
+    }, 3000);
     if(!DB.grades)DB.grades={};
     if(!DB.announcements)DB.announcements=[];
     if(!DB.settings.gradeWeights)DB.settings.gradeWeights={regular:30,midterm:30,final:40};
@@ -12577,7 +12764,7 @@ function rAtt(){
     var displayDate = (typeof fmtAttDate === 'function') ? (fmtAttDate(a) || '—') : (a.date || '—');
     var displayTime = (typeof fmtAttTime === 'function') ? (fmtAttTime(a) || (a.checkIn || '—')) : (a.time || a.checkIn || '—');
     var signIn = displayTime || '—';
-    var signOut=a.signOutTime||a.checkOut||'—';
+    var signOut=(typeof fmtAttSignOut === 'function') ? (fmtAttSignOut(a) || '—') : (a.signOutTime||a.checkOut||'—');
     // 加上週幾
     var weekday = '';
     if(displayDate && displayDate !== '—'){
@@ -14791,7 +14978,8 @@ function rSProf(){
       +myAtt.map(function(a){
         var _d=(typeof fmtAttDate==='function')?(fmtAttDate(a)||'--'):(a.date||'--');
         var _t=(typeof fmtAttTime==='function')?(fmtAttTime(a)||a.checkIn||'--'):(a.time||a.checkIn||'--');
-        return'<tr><td>'+_d+'</td><td style="font-family:monospace">'+_t+'</td><td style="color:'+(a.signOutTime||a.checkOut?'var(--grn)':'var(--gray)')+';font-family:monospace">'+(a.signOutTime||a.checkOut||'未簽退')+'</td></tr>';
+        var _so=(typeof fmtAttSignOut==='function')?fmtAttSignOut(a):(a.signOutTime||a.checkOut||'');
+        return'<tr><td>'+_d+'</td><td style="font-family:monospace">'+_t+'</td><td style="color:'+(_so?'var(--grn)':'var(--gray)')+';font-family:monospace">'+(_so||'未簽退')+'</td></tr>';
       }).join('')
       +'</tbody></table></div></div>';
   })()}
