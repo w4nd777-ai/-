@@ -5013,6 +5013,18 @@ function doLeaveReq(){
   if(addCount===0){ toast('所選日期都已申請過','err'); return; }
   logOp('請假申請',cur.name+' '+dates[0]+(dates.length>1?'~'+dates[dates.length-1]:'')+' ('+addCount+'天)');
   saveDB();
+  // 透過 BroadcastChannel 即時通知老師端
+  try {
+    if(typeof window._bc !== 'undefined' && window._bc && window._bc.postMessage){
+      window._bc.postMessage({
+        type: 'new-leave-request',
+        student: cur.name,
+        dates: dates,
+        reason: reason,
+        at: Date.now()
+      });
+    }
+  } catch(e){}
   document.getElementById('lv-date').value=td();
   document.getElementById('lv-date-end').value='';
   document.getElementById('lv-reason').value='';
@@ -5700,6 +5712,52 @@ function fixBrokenAttData(){
   }
 }
 
+// ═══════════ 清理 1899 epoch 垃圾資料 ═══════════
+function showCleanupUnreliable(){
+  var unreliableRecords = (DB.attendance||[]).filter(function(a){
+    return a._timeUnreliable || a._importedFrom === 'csv';
+  });
+  if(!unreliableRecords.length){
+    if(typeof toast === 'function') toast('✅ 沒有需要清理的垃圾資料','info');
+    return;
+  }
+  oM('🗑️ 清理匯入垃圾資料',
+    '<div class="ibox iamb" style="margin-bottom:10px"><span>⚠️</span><span style="font-size:.78rem">偵測到 <strong>'+unreliableRecords.length+'</strong> 筆從 CSV 匯入但時間不可靠的紀錄（顯示為「— 未記錄」）。這些可能不是真實簽到。</span></div>'
+    +'<div style="margin-bottom:10px;font-size:.82rem">請選擇處理方式：</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">'
+    +'<button class="btn br" onclick="doCleanupUnreliable(\'delete\')">🗑️ 全部刪除（清空這些紀錄）</button>'
+    +'<button class="btn bgh" onclick="doCleanupUnreliable(\'mark\')">📌 保留但標記為「匯入歷史」</button>'
+    +'<button class="btn bgh" onclick="cM()">取消</button>'
+    +'</div>');
+}
+
+function doCleanupUnreliable(action){
+  var before = (DB.attendance||[]).length;
+  if(action === 'delete'){
+    DB.attendance = (DB.attendance||[]).filter(function(a){
+      return !a._timeUnreliable && a._importedFrom !== 'csv';
+    });
+    var after = DB.attendance.length;
+    saveDB();
+    cM();
+    if(typeof toast === 'function') toast('✅ 已刪除 '+(before-after)+' 筆垃圾紀錄','info',4000);
+  } else if(action === 'mark'){
+    var marked = 0;
+    (DB.attendance||[]).forEach(function(a){
+      if(a._timeUnreliable && !a._archivedAt){
+        a._archivedAt = new Date().toISOString();
+        marked++;
+      }
+    });
+    saveDB();
+    cM();
+    if(typeof toast === 'function') toast('✅ 已標記 '+marked+' 筆為歷史','info');
+  }
+  // 重繪
+  var tc = document.getElementById('tc');
+  if(tc && typeof rAtt === 'function') tc.innerHTML = rAtt();
+}
+
 // ═══════════ 老師端自動刷新當前頁面（解決學生操作老師看不到的問題） ═══════════
 window._autoRefreshPages = ['overview','attendance','submissions','messages','pending'];
 
@@ -5791,6 +5849,28 @@ function stopTeacherAutoRefresh(){
                 tc.scrollTop = st;
               }
             }
+          }
+          // 順便刷新徽章
+          if(typeof checkTeacherUnreadMsgs === 'function') checkTeacherUnreadMsgs();
+        }
+      } else if(d.type === 'new-leave-request'){
+        // 學生剛剛送出請假，老師立即收到通知
+        if(window.cur && window.cur.role === 'teacher'){
+          // 1. 跳大 toast（持續顯示）
+          if(typeof toast === 'function'){
+            toast('🔔 新請假申請！\n'+(d.student||'')+' 申請 '+((d.dates&&d.dates[0])||'')+(d.dates&&d.dates.length>1?' ~ '+d.dates[d.dates.length-1]:'')+'\n原因：'+(d.reason||'').slice(0,60),'info',10000);
+          }
+          // 2. 桌面推播
+          if(typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted'){
+            showLocalNotification('📆 學生請假申請', (d.student||'')+' 申請 '+((d.dates&&d.dates[0])||'')+' 請假', {tag:'new-leave-' + (d.at||Date.now())});
+          }
+          // 3. 立即更新徽章
+          if(typeof checkTeacherUnreadMsgs === 'function') checkTeacherUnreadMsgs();
+          // 4. 視覺：閃動 nb-leave
+          var nbLeave = document.getElementById('nb-leave');
+          if(nbLeave){
+            nbLeave.style.animation = 'pulseDot 1s ease-in-out 5';
+            setTimeout(function(){ nbLeave.style.animation = ''; }, 5000);
           }
         }
       }
@@ -7251,6 +7331,7 @@ var COMMAND_PALETTE = [
   {label:'重看新手引導', icon:'🎓', action:'reShowOnboarding'},
   {label:'使用統計', icon:'📊', action:'showUsageStats', role:'teacher'},
   {label:'🔧 修復日期時間資料', icon:'🔧', action:'fixBrokenAttData', role:'teacher'},
+  {label:'🗑️ 清理 CSV 匯入垃圾資料', icon:'🗑️', action:'showCleanupUnreliable', role:'teacher'},
   {label:'設定', icon:'⚙️', action:'oSP', role:'teacher'},
   // 學生端
   {label:'簽到', icon:'📍', stab:'sa', role:'student'},
@@ -12901,6 +12982,8 @@ function rAtt(){
   var _ac=window._attCls||'all';
   var _ctatt=mkClsTabs2(_ac,'_attCls','rAtt','<button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()" style="margin-left:auto">📊 統計報表</button>');
   var _attHeader='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:900">出席管理</div><button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()">📊 統計報表</button></div>';
+  var unreliableCount = (DB.attendance||[]).filter(function(a){ return a._timeUnreliable; }).length;
+  var unreliableBanner = unreliableCount > 0 ? '<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:8px;padding:8px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="showCleanupUnreliable()"><div style="font-size:.82rem;color:#92400e"><strong>⚠️ 偵測到 '+unreliableCount+' 筆 CSV 匯入垃圾資料</strong>（顯示為「— 未記錄」）</div><button class="btn bgh bsm">🗑️ 清理</button></div>' : '';
   var attDates=[...new Set((DB.attendance||[]).map(function(a){return a.date;}))].sort();
   // 日期快捷篩選：今天 / 本週 / 本月 / 全部
   var _attRange=window._attRange||'all';
@@ -13021,7 +13104,7 @@ function rAtt(){
       }).join('')
       +'<span style="margin-left:auto;font-size:.7rem;color:var(--text-3)">共 '+list.length+' 筆</span>'
       +'</div>';
-    return trendCard+_rangeFilterBar+'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+    return unreliableBanner+trendCard+_rangeFilterBar+'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
     +'<div style="font-size:1.15rem;font-weight:900">出缺勤紀錄</div>'
     +'<div style="display:flex;gap:6px">'
     +'<button class="btn bgh bsm" onclick="openManualAtt()">➕ 手動簽到</button>'
@@ -15892,40 +15975,94 @@ setInterval(function(){updateMsgBadge();},3000);
 function checkTeacherUnreadMsgs(){
   if(!window.cur || window.cur.role !== 'teacher') return;
   try {
+    // === 未讀訊息 ===
     var unread = (DB.messages||[]).filter(function(m){ return m.from === 'student' && !m.read; });
     var nbBtn = document.getElementById('nb-messages');
-    if(!nbBtn) return;
-    var existing = nbBtn.querySelector('.nb-badge');
-    if(unread.length > 0){
-      if(!existing){
-        var b = document.createElement('span');
-        b.className = 'nb-badge';
-        b.style.cssText = 'background:#dc2626;color:#fff;border-radius:99px;padding:1px 6px;font-size:.6rem;font-weight:800;margin-left:6px;display:inline-block';
-        nbBtn.appendChild(b);
-        existing = b;
-      }
-      existing.textContent = unread.length > 99 ? '99+' : unread.length;
-      // 提示新訊息（與上次比較）
-      var lastSeen = parseInt(localStorage.getItem('cms_last_unread_count') || '0');
-      if(unread.length > lastSeen){
-        var newCount = unread.length - lastSeen;
-        var latest = unread[unread.length - 1];
-        if(typeof toast === 'function'){
-          toast('💬 '+newCount+' 則新訊息 (最近：'+(latest.studentName||'')+')','info',4000);
+    if(nbBtn){
+      var existing = nbBtn.querySelector('.nb-badge');
+      if(unread.length > 0){
+        if(!existing){
+          var b = document.createElement('span');
+          b.className = 'nb-badge';
+          b.style.cssText = 'background:#dc2626;color:#fff;border-radius:99px;padding:1px 6px;font-size:.6rem;font-weight:800;margin-left:6px;display:inline-block';
+          nbBtn.appendChild(b);
+          existing = b;
         }
-        // 推播
-        if(typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted'){
-          try {
+        existing.textContent = unread.length > 99 ? '99+' : unread.length;
+        var lastSeen = parseInt(localStorage.getItem('cms_last_unread_count') || '0');
+        if(unread.length > lastSeen){
+          var newCount = unread.length - lastSeen;
+          var latest = unread[unread.length - 1];
+          if(typeof toast === 'function'){
+            toast('💬 '+newCount+' 則新訊息 (最近：'+(latest.studentName||'')+')','info',4000);
+          }
+          if(typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted'){
             showLocalNotification('💬 '+newCount+' 則新訊息',
               (latest.studentName||'')+'：'+(latest.text||'').slice(0,60),
-              {tag:'new-msg', url:'?nav=messages'});
-          } catch(e){}
+              {tag:'new-msg'});
+          }
         }
+        localStorage.setItem('cms_last_unread_count', unread.length);
+      } else {
+        if(existing) existing.remove();
+        localStorage.setItem('cms_last_unread_count', '0');
       }
-      localStorage.setItem('cms_last_unread_count', unread.length);
-    } else {
-      if(existing) existing.remove();
-      localStorage.setItem('cms_last_unread_count', '0');
+    }
+
+    // === 新請假申請 ===
+    var pendingLeaves = (DB.pending||[]).filter(function(p){ return p.type === 'leave' && p.status === 'pending'; });
+    var nbLeave = document.getElementById('nb-leave');
+    if(nbLeave){
+      var lvBadge = nbLeave.querySelector('.nb-badge');
+      if(pendingLeaves.length > 0){
+        if(!lvBadge){
+          var lb = document.createElement('span');
+          lb.className = 'nb-badge';
+          lb.style.cssText = 'background:#f59e0b;color:#fff;border-radius:99px;padding:1px 6px;font-size:.6rem;font-weight:800;margin-left:6px;display:inline-block';
+          nbLeave.appendChild(lb);
+          lvBadge = lb;
+        }
+        lvBadge.textContent = pendingLeaves.length > 99 ? '99+' : pendingLeaves.length;
+        // 比較新增的請假
+        var lastSeenLv = parseInt(localStorage.getItem('cms_last_leave_count') || '0');
+        if(pendingLeaves.length > lastSeenLv){
+          var newLvCount = pendingLeaves.length - lastSeenLv;
+          var latestLv = pendingLeaves[pendingLeaves.length - 1];
+          if(typeof toast === 'function'){
+            toast('📆 '+newLvCount+' 件新請假申請 ('+(latestLv.studentName||'')+' '+(latestLv.date||'')+')\n點此查看','info',8000);
+          }
+          // 推播
+          if(typeof showLocalNotification === 'function' && typeof Notification !== 'undefined' && Notification.permission === 'granted'){
+            showLocalNotification('📆 '+newLvCount+' 件新請假申請',
+              (latestLv.studentName||'')+' 申請 '+(latestLv.date||'')+' 請假\n原因：'+(latestLv.reason||'').slice(0,40),
+              {tag:'new-leave'});
+          }
+          // 視覺：閃動 nb-leave
+          nbLeave.style.animation = 'pulseDot 1s ease-in-out 3';
+          setTimeout(function(){ nbLeave.style.animation = ''; }, 3000);
+        }
+        localStorage.setItem('cms_last_leave_count', pendingLeaves.length);
+      } else {
+        if(lvBadge) lvBadge.remove();
+        localStorage.setItem('cms_last_leave_count', '0');
+      }
+    }
+
+    // === 待審項目（合計提示） ===
+    var pendingTotal = (DB.pending||[]).filter(function(p){ return p.status === 'pending'; }).length;
+    var nbPending = document.getElementById('nb-pending');
+    if(nbPending){
+      var pBadge = nbPending.querySelector('.nb-badge');
+      if(pendingTotal > 0){
+        if(!pBadge){
+          var pb = document.createElement('span');
+          pb.className = 'nb-badge';
+          pb.style.cssText = 'background:#f59e0b;color:#fff;border-radius:99px;padding:1px 6px;font-size:.6rem;font-weight:800;margin-left:6px;display:inline-block';
+          nbPending.appendChild(pb);
+          pBadge = pb;
+        }
+        pBadge.textContent = pendingTotal > 99 ? '99+' : pendingTotal;
+      } else if(pBadge) pBadge.remove();
     }
   } catch(e){ console.warn('[checkTeacherUnreadMsgs]', e); }
 }
