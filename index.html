@@ -2010,6 +2010,7 @@ function loadPdfLibs(){
       <button class="nb" id="nb-messages" onclick="nbClick(this,'messages')"><span class="icon">📩</span><span>學生訊息</span></button>
       <button class="nb" id="nb-courses"  onclick="nbClick(this,'courses')"> <span class="icon">🎓</span><span>課程設定</span></button>
       <button class="nb" id="nb-pending"  onclick="nbClick(this,'pending')"> <span class="icon">🕐</span><span>待審核</span></button>
+      <button class="nb" id="nb-leave"  onclick="nbClick(this,'leave')"> <span class="icon">📆</span><span>請假管理</span></button>
       <button class="nb" id="nb-announce" onclick="nbClick(this,'announce')"><span class="icon">📢</span><span>公告管理</span></button>
       <div class="nb-divider"></div><div class="nb-group-title">📈 分析工具</div>
       <button class="nb" id="nb-analytics" onclick="nbClick(this,'analytics')"><span class="icon">📈</span><span>分析工具</span></button>
@@ -3413,13 +3414,32 @@ function toggleGraded(subId){
 }
 
 function broadcastMsg(){
-  var grpOpts='<option value="all">全班學生（'+DB.students.length+' 人）</option>'
-    +DB.groups.map(function(g){
-      return'<option value="grp_'+g.id+'">'+g.name+'（'+g.memberIds.length+' 人）</option>';
-    }).join('');
+  var classes=[...new Set((DB.students||[]).map(function(s){return s.cls||'未分班';}))].sort();
+  var grpOpts='<option value="all">📢 全班學生（'+DB.students.length+' 人）</option>';
+  // 加班級選項
+  classes.forEach(function(c){
+    var cnt=(DB.students||[]).filter(function(s){return (s.cls||'未分班')===c;}).length;
+    grpOpts+='<option value="cls_'+encodeURIComponent(c)+'">🏫 '+escapeHtml(c)+'班（'+cnt+' 人）</option>';
+  });
+  // 加群組選項
+  (DB.groups||[]).forEach(function(g){
+    grpOpts+='<option value="grp_'+g.id+'">👥 '+escapeHtml(g.name)+'（'+(g.memberIds||[]).length+' 人）</option>';
+  });
+  // 加多班級複選
+  var multiClsHtml='<div id="bc-multi-cls" style="display:none;margin-top:8px;padding:10px;background:var(--fill-2);border-radius:8px">'
+    +'<div style="font-size:.75rem;font-weight:700;margin-bottom:6px">勾選班級（可複選）：</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+    +classes.map(function(c){
+      var cnt=(DB.students||[]).filter(function(s){return (s.cls||'未分班')===c;}).length;
+      return '<label style="display:flex;align-items:center;gap:4px;font-size:.78rem;cursor:pointer;background:#fff;padding:4px 8px;border-radius:6px;border:1px solid var(--gray-b)"><input type="checkbox" class="bc-cls-chk" value="'+escapeHtml(c)+'"> '+escapeHtml(c)+'班 ('+cnt+')</label>';
+    }).join('')
+    +'</div></div>';
   oM('📣 廣播訊息',
     '<div class="fg"><label class="fl">傳送對象</label>'
-    +'<select class="sel" id="bc-target">'+grpOpts+'</select></div>'
+    +'<select class="sel" id="bc-target" onchange="document.getElementById(\'bc-multi-cls\').style.display=this.value===\'multi_cls\'?\'block\':\'none\'">'+grpOpts
+    +'<option value="multi_cls">🎯 自選多個班級</option>'
+    +'</select></div>'
+    + multiClsHtml
     +'<div class="fg"><label class="fl">訊息內容 <span class="fr">*</span></label>'
     +'<textarea class="ta" id="bc-msg" rows="4" placeholder="輸入要傳送給學生的訊息…"></textarea></div>'
     +'<div style="display:flex;gap:9px;margin-top:4px">'
@@ -3434,10 +3454,17 @@ function doBroadcast(){
   var recipients=[];
   if(target==='all'){
     recipients=DB.students.map(function(s){return s.id;});
+  } else if(target.startsWith('cls_')){
+    var cls=decodeURIComponent(target.replace('cls_',''));
+    recipients=DB.students.filter(function(s){return (s.cls||'未分班')===cls;}).map(function(s){return s.id;});
   } else if(target.startsWith('grp_')){
     var gid=Number(target.replace('grp_',''));
     var grp=DB.groups.find(function(g){return g.id===gid;});
     if(grp)recipients=grp.memberIds;
+  } else if(target==='multi_cls'){
+    var selectedCls=[].slice.call(document.querySelectorAll('.bc-cls-chk:checked')).map(function(c){return c.value;});
+    if(!selectedCls.length){toast('請至少勾選一個班級','warn');return;}
+    recipients=DB.students.filter(function(s){return selectedCls.indexOf(s.cls||'未分班')>=0;}).map(function(s){return s.id;});
   }
   if(!recipients.length){toast('找不到收件者','err');return;}
   var now=st();
@@ -11939,7 +11966,7 @@ function doTTab(tab){
   const R={
     overview:rOv,students:rStu,assignments:rAsgn,attendance:rAtt,
     submissions:rSub,matrix:rMatrix,scores:rSco,evals:rEv,groups:rGrp,
-    messages:rMsg,grades:rGrades,courses:rCrs,pending:rPend,
+    messages:rMsg,grades:rGrades,courses:rCrs,pending:rPend,leave:rLeave,
     announce:rAnn,export:rExp,sysset:rSys,branding:rBrand,accounts:rAcc,feedt:rFeedT,
     analytics:rAnalytics
   };
@@ -13217,6 +13244,11 @@ function rMsg(){
       +'</div></div>';
   }).join('');
 
+  var searchBar='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">'
+    +'<input id="msg-search" class="inp" placeholder="🔍 搜尋學生姓名或訊息內容…" value="'+escapeHtml(window._msgQ||'')+'" oninput="doSearch(\'_msgQ\',\'rMsg\',\'msg-search\',this.value)" style="flex:1;font-size:.82rem">'
+    +(_mq?'<button class="btn bgh bsm" onclick="doSearch(\'_msgQ\',\'rMsg\',\'msg-search\',\'\')">✕</button>':'')
+    +'</div>';
+
   return'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:13px">'
     +'<div style="display:flex;align-items:center;gap:8px">'
     +'<div style="font-size:1.15rem;font-weight:900">學生訊息</div>'
@@ -13224,7 +13256,8 @@ function rMsg(){
     +'</div>'
     +'<button class="btn bp bsm" onclick="broadcastMsg()">📣 廣播訊息</button>'
     +'</div>'
-    +(cards||nod('尚無學生訊息'));
+    + searchBar
+    +(cards||nod((_mq?'沒有符合搜尋的訊息':'尚無學生訊息')));
 }
 
 function repMsg(sid){
@@ -13515,6 +13548,99 @@ function svCrs(existingId){
 function upCrs(id){const n=document.getElementById('cn').value.trim();if(!n){toast('請輸入名稱','err');return;}const c=DB.courses.find(x=>x.id===id);c.name=n;c.code=document.getElementById('cc').value.trim();c.teacher=document.getElementById('ct').value.trim();cM();bLS();saveDB();document.getElementById('tc').innerHTML=rCrs();toast('✅ 已更新');}
 function dCrs(id){oC('確定刪除此課程？',()=>{DB.courses=DB.courses.filter(x=>x.id!==id);bLS();saveDB();document.getElementById('tc').innerHTML=rCrs();});}
 
+
+function rLeave(){
+  var _lq=(window._leaveQ||'').toLowerCase();
+  var _lcls=window._leaveCls||'all';
+  var _lstatus=window._leaveStatus||'all';
+
+  var allLeaves=(DB.pending||[]).filter(function(p){return p.type==='leave';});
+
+  // 篩選
+  var filtered=allLeaves.filter(function(p){
+    if(_lcls!=='all'){
+      var stu=(DB.students||[]).find(function(s){return s.id===p.studentId;});
+      var stuCls=(stu&&stu.cls)||p.cls||'未分班';
+      if(stuCls!==_lcls)return false;
+    }
+    if(_lstatus!=='all' && p.status!==_lstatus)return false;
+    if(_lq){
+      var s=(p.studentName||'').toLowerCase();
+      var r=(p.reason||'').toLowerCase();
+      var d=(p.date||'').toLowerCase();
+      if(!s.includes(_lq) && !r.includes(_lq) && !d.includes(_lq))return false;
+    }
+    return true;
+  }).sort(function(a,b){return (b.date||'').localeCompare(a.date||'');});
+
+  // 統計
+  var pending=allLeaves.filter(function(p){return p.status==='pending';}).length;
+  var approved=allLeaves.filter(function(p){return p.status==='approved';}).length;
+  var rejected=allLeaves.filter(function(p){return p.status==='rejected';}).length;
+
+  // 班級篩選
+  var classes=[...new Set((DB.students||[]).map(function(s){return s.cls||'未分班';}))].sort();
+  var clsTabs='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">'
+    +'<button onclick="window._leaveCls=\'all\';document.getElementById(\'tc\').innerHTML=rLeave()" style="background:'+(_lcls==='all'?'var(--brand)':'var(--fill-2)')+';color:'+(_lcls==='all'?'#fff':'var(--text-2)')+';border:none;border-radius:8px;padding:5px 12px;font-size:.76rem;font-weight:700;cursor:pointer">全部</button>'
+    +classes.map(function(c){
+      var cnt=allLeaves.filter(function(p){var st=(DB.students||[]).find(function(s){return s.id===p.studentId;});return ((st&&st.cls)||p.cls||'未分班')===c;}).length;
+      return '<button onclick="window._leaveCls=\''+c+'\';document.getElementById(\'tc\').innerHTML=rLeave()" style="background:'+(_lcls===c?'var(--brand)':'var(--fill-2)')+';color:'+(_lcls===c?'#fff':'var(--text-2)')+';border:none;border-radius:8px;padding:5px 12px;font-size:.76rem;font-weight:700;cursor:pointer">'+escapeHtml(c)+' ('+cnt+')</button>';
+    }).join('')
+    +'</div>';
+
+  // 狀態篩選
+  var statusTabs='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">'
+    +['all','pending','approved','rejected'].map(function(st){
+      var lbl=st==='all'?'全部':st==='pending'?'⏳ 待審':st==='approved'?'✅ 已核准':'✗ 已駁回';
+      var cnt=st==='all'?allLeaves.length:allLeaves.filter(function(p){return p.status===st;}).length;
+      return '<button onclick="window._leaveStatus=\''+st+'\';document.getElementById(\'tc\').innerHTML=rLeave()" style="background:'+(_lstatus===st?'var(--brand)':'var(--fill-2)')+';color:'+(_lstatus===st?'#fff':'var(--text-2)')+';border:none;border-radius:8px;padding:5px 10px;font-size:.74rem;font-weight:700;cursor:pointer">'+lbl+' ('+cnt+')</button>';
+    }).join('')
+    +'</div>';
+
+  // 統計卡
+  var statsCards='<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">'
+    +'<div class="card cb" style="flex:1;min-width:110px;padding:10px;text-align:center"><div style="font-size:1.5rem;font-weight:900;color:var(--amb)">'+pending+'</div><div style="font-size:.7rem;color:var(--text-3)">⏳ 待審核</div></div>'
+    +'<div class="card cb" style="flex:1;min-width:110px;padding:10px;text-align:center"><div style="font-size:1.5rem;font-weight:900;color:var(--grn)">'+approved+'</div><div style="font-size:.7rem;color:var(--text-3)">✅ 已核准</div></div>'
+    +'<div class="card cb" style="flex:1;min-width:110px;padding:10px;text-align:center"><div style="font-size:1.5rem;font-weight:900;color:var(--red)">'+rejected+'</div><div style="font-size:.7rem;color:var(--text-3)">✗ 已駁回</div></div>'
+    +'<div class="card cb" style="flex:1;min-width:110px;padding:10px;text-align:center"><div style="font-size:1.5rem;font-weight:900">'+allLeaves.length+'</div><div style="font-size:.7rem;color:var(--text-3)">📆 總數</div></div>'
+    +'</div>';
+
+  // 搜尋列
+  var searchBar='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">'
+    +'<input id="leave-search" class="inp" placeholder="🔍 搜尋學生、日期或原因…" value="'+escapeHtml(window._leaveQ||'')+'" oninput="doSearch(\'_leaveQ\',\'rLeave\',\'leave-search\',this.value)" style="flex:1;font-size:.82rem">'
+    +(_lq?'<button class="btn bgh bsm" onclick="doSearch(\'_leaveQ\',\'rLeave\',\'leave-search\',\'\')">✕</button>':'')
+    +'</div>';
+
+  // 列表
+  var rows=filtered.length?filtered.map(function(p){
+    var stu=(DB.students||[]).find(function(s){return s.id===p.studentId;});
+    var stuName=p.studentName||(stu&&stu.name)||'?';
+    var stuCls=(stu&&stu.cls)||p.cls||'';
+    var stuSid=(stu&&stu.sid)||'';
+    var statusBdg=p.status==='pending'?'<span style="color:var(--amb);font-weight:700">⏳ 待審核</span>'
+      :p.status==='approved'?'<span style="color:var(--grn);font-weight:700">✅ 已核准</span>'
+      :'<span style="color:var(--red);font-weight:700">✗ 已駁回</span>';
+    var actions=p.status==='pending'
+      ?'<button class="btn br bsm" onclick="approveLeave('+p.id+',false)">駁回</button> <button class="btn bp bsm" onclick="approveLeave('+p.id+',true)">✅ 核准</button>'
+      :'<button class="btn bgh bsm" onclick="if(confirm(\'重置為待審核？\')){var p=DB.pending.find(function(x){return x.id==='+p.id+';});if(p){p.status=\'pending\';saveDB();document.getElementById(\'tc\').innerHTML=rLeave();}}">↺ 重置</button>';
+    return '<tr><td><strong>'+escapeHtml(stuName)+'</strong></td>'
+      +'<td style="font-family:monospace;font-size:.78rem;color:var(--text-3)">'+escapeHtml(stuSid)+'</td>'
+      +'<td>'+escapeHtml(stuCls)+'</td>'
+      +'<td style="font-size:.85rem">'+escapeHtml(p.date||'')+'</td>'
+      +'<td style="max-width:200px;font-size:.82rem">'+escapeHtml(p.reason||'')+'</td>'
+      +'<td>'+statusBdg+'</td>'
+      +'<td>'+actions+'</td></tr>';
+  }).join(''):'<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-3)">沒有符合條件的請假紀錄</td></tr>';
+
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+    +'<div><div style="font-size:1.15rem;font-weight:900">📆 請假管理</div><div style="font-size:.77rem;color:var(--text-3)">共 '+filtered.length+' 筆紀錄（共 '+allLeaves.length+'）</div></div>'
+    +'</div>'
+    + statsCards
+    + searchBar
+    + statusTabs
+    + clsTabs
+    + '<div class="card"><div class="tbl"><table><thead><tr><th>學生</th><th>學號</th><th>班級</th><th>日期</th><th>原因</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
 
 function rPend(){
   var _pq=(window._pendQ||'').toLowerCase();
@@ -15413,6 +15539,7 @@ var TAB_META={
   'messages':{icon:'📩',title:'訊息',sub:'傳送訊息給學生'},
   'courses':{icon:'🎓',title:'課程設定',sub:'課程基本設定'},
   'pending':{icon:'🕐',title:'待審核',sub:'註冊申請審核'},
+  'leave':{icon:'📆',title:'請假管理',sub:'學生請假申請與紀錄'},
   'announce':{icon:'📢',title:'公告管理',sub:'發布課程公告'},
   'export':{icon:'📦',title:'匯出備份',sub:'資料匯出與備份'},
   'sysset':{icon:'⚙️',title:'系統設定',sub:'系統參數設定'},
