@@ -6977,11 +6977,21 @@ function pageBar(p, onPageChange){
 }
 
 // ═══════════ 多分頁資料同步 (A1) ═══════════
+// 改用 BroadcastChannel + 智能刷新，不再強制 reload 避免踢出使用者
 window.addEventListener('storage', function(e){
   if(e.key === 'cmsDB'){
     if(window._suppressStorageReload) return;
-    if(typeof toast === 'function') toast('🔄 偵測到其他分頁更新資料，3 秒後重新載入...','info',3000);
-    setTimeout(function(){ location.reload(); }, 3000);
+    // 不再強制 reload，改為提示使用者
+    if(typeof toast === 'function') {
+      toast('🔄 其他分頁更新了資料，請手動重整看最新狀態','info',5000);
+    }
+    // 觸發當前頁面 render（如果支援）
+    try {
+      if(typeof window._lastRender === 'function'){
+        var tc = document.getElementById('tc');
+        if(tc) tc.innerHTML = window._lastRender();
+      }
+    } catch(_){}
   }
 });
 
@@ -11302,23 +11312,56 @@ function loadDB(){
           fixBrokenAttData();
         }
 
-        // 二段：自動移除 _timeUnreliable 的垃圾資料
-        // 因為這些都是 CSV 匯入時時間為 garbage（1899 epoch）
-        // 既然連時間都不知道，這些根本不是真實簽到，自動刪除
+        // 二段：自動移除壞掉的出席紀錄
         setTimeout(function(){
           var beforeCount = DB.attendance.length;
           var keepAttendance = DB.attendance.filter(function(a){
-            // 保留條件：不是 unreliable, 或 是 unreliable 但已經被老師補登過
-            return !a._timeUnreliable;
+            // 刪除條件：
+            // 1. _timeUnreliable=true (新標記)
+            if(a._timeUnreliable) return false;
+            if(a._importedFrom === 'csv') return false;
+            // 2. 沒有 method 欄位 + 沒有 timestamp = 可能是 CSV 匯入
+            if(!a.method && !a.timestamp && !a.qrCode){
+              // 進一步檢查：time 是不是常見的 Excel 偽值（如全部 05:43 等）
+              // 如果 attendance 中有 >50% 的紀錄 time 完全相同，那肯定是 CSV
+              return true; // 暫時保留，下面集中判斷
+            }
+            return true;
           });
+
+          // 二次判斷：找出「同一個 time 值出現超過 5 次」的紀錄（CSV 匯入特徵）
+          var timeCount = {};
+          keepAttendance.forEach(function(a){
+            if(a.method) return; // 有 method 表示是真實簽到，跳過
+            var k = (a.date||'') + '|' + (a.time||'');
+            timeCount[k] = (timeCount[k]||0) + 1;
+          });
+          var suspiciousKeys = {};
+          Object.keys(timeCount).forEach(function(k){
+            if(timeCount[k] >= 5) suspiciousKeys[k] = true;
+          });
+          keepAttendance = keepAttendance.filter(function(a){
+            if(a.method) return true; // 有 method = 真實，保留
+            var k = (a.date||'') + '|' + (a.time||'');
+            if(suspiciousKeys[k]) return false; // 同日同時間 5+ 筆 = CSV 假資料
+            return true;
+          });
+
           var removed = beforeCount - keepAttendance.length;
           if(removed > 0){
             DB.attendance = keepAttendance;
             if(typeof saveDB === 'function') saveDB();
             console.log('[autoFix] 已自動清除 '+removed+' 筆 CSV 匯入垃圾資料');
             if(typeof toast === 'function' && window.cur && window.cur.role === 'teacher'){
-              toast('🗑️ 已自動清除 '+removed+' 筆無效的出席紀錄（CSV 匯入垃圾）','info',5000);
+              toast('🗑️ 已自動清除 '+removed+' 筆無效出席紀錄（CSV 匯入垃圾）','info',5000);
             }
+            // 觸發頁面重繪
+            try {
+              if(typeof window._lastRender === 'function'){
+                var tc = document.getElementById('tc');
+                if(tc) tc.innerHTML = window._lastRender();
+              }
+            } catch(_){}
           }
         }, 800);
       } catch(e){ console.warn('[autoFix]', e); }
@@ -12030,6 +12073,116 @@ function updBtn(){
 }
 
 var cur=null,curCo=null;
+
+// ═══════════ 登入狀態持久化（重整不丟失登入）═══════════
+function saveCurSession(){
+  try {
+    if(window.cur){
+      var snap = { id: cur.id, role: cur.role, name: cur.name, user: cur.user, cls: cur.cls, seat: cur.seat, at: Date.now() };
+      localStorage.setItem('cms_session', JSON.stringify(snap));
+    } else {
+      localStorage.removeItem('cms_session');
+    }
+  } catch(e){}
+}
+function restoreCurSession(){
+  try {
+    var raw = localStorage.getItem('cms_session');
+    if(!raw) return false;
+    var snap = JSON.parse(raw);
+    if(!snap || !snap.role) return false;
+    // 7 天有效
+    if(Date.now() - (snap.at||0) > 7*86400000){
+      localStorage.removeItem('cms_session');
+      return false;
+    }
+    if(snap.role === 'teacher'){
+      // 還原教師身份
+      var acc = (DB.accounts||[]).find(function(a){ return a.user === snap.user; });
+      if(!acc) return false;
+      window.cur = { role: 'teacher', name: acc.name, user: acc.user };
+      // 切到教師畫面
+      if(typeof goSc === 'function') goSc('sc-teacher');
+      var sbCourse = document.getElementById('sb-course');
+      if(sbCourse) sbCourse.textContent = (DB.courses[0]||{}).name||'';
+      var sbUn = document.getElementById('sb-un');
+      if(sbUn) sbUn.textContent = acc.name + ' · 管理員';
+      var tdb = document.getElementById('t-date-badge');
+      if(tdb) tdb.textContent = (typeof td==='function'?td():'');
+      // 預設導航到總覽
+      var nbOv = document.getElementById('nb-overview');
+      if(nbOv && typeof nbClick === 'function') nbClick(nbOv, 'overview');
+      return true;
+    } else if(snap.role === 'student'){
+      // 還原學生身份
+      var stu = (DB.students||[]).find(function(s){ return s.id === snap.id; });
+      if(!stu) return false;
+      window.cur = stu;
+      // 切到學生畫面
+      if(typeof goSc === 'function') goSc('sc-student');
+      // 還原 UI
+      var stNm = document.getElementById('st-nm');
+      if(stNm) stNm.textContent = stu.name;
+      var stNb = document.getElementById('st-nb');
+      if(stNb) stNb.textContent = (stu.cls||'') + (stu.seat?' 座號'+stu.seat:'');
+      var stCn = document.getElementById('st-cn');
+      if(stCn) stCn.textContent = (DB.courses[0]||{}).name || '課程';
+      // 預設停在簽到
+      setTimeout(function(){
+        var firstStab = document.querySelector('.stab[data-stab="sa"]');
+        if(firstStab && typeof stabClick === 'function') stabClick(firstStab, 'sa');
+      }, 100);
+      return true;
+    }
+    return false;
+  } catch(e){ console.warn('[restoreSession]', e); return false; }
+}
+
+// 啟動時嘗試還原
+setTimeout(function(){
+  try {
+    if(window.cur) return; // 已登入則不還原
+    if(typeof DB === 'undefined' || !DB.students) return;
+    restoreCurSession();
+  } catch(e){}
+}, 200);
+
+// 每次重要動作後儲存 session
+(function patchLoginSave(){
+  if(window._sessionPatched) return;
+  window._sessionPatched = true;
+  // 包裝 doTL（教師登入）
+  if(typeof doTL === 'function'){
+    var origDTL = doTL;
+    window.doTL = function(){
+      var r = origDTL.apply(this, arguments);
+      setTimeout(saveCurSession, 1000);
+      return r;
+    };
+  }
+  // 包裝 goStu（學生登入）
+  if(typeof goStu === 'function'){
+    var origGS = goStu;
+    window.goStu = function(){
+      var r = origGS.apply(this, arguments);
+      setTimeout(saveCurSession, 1000);
+      return r;
+    };
+  }
+  // 包裝 goSc 偵測登出
+  if(typeof goSc === 'function'){
+    var origGoSc = goSc;
+    window.goSc = function(id){
+      if(id === 'sc-login' || id === 'sc-tlogin'){
+        // 登出狀況
+        window.cur = null;
+        try { localStorage.removeItem('cms_session'); } catch(e){}
+      }
+      return origGoSc.apply(this, arguments);
+    };
+  }
+})();
+
 function goStu(){
   const nid2=parseInt(document.getElementById('sel-name').value);
   const cid=parseInt(document.getElementById('sel-course').value);
@@ -12990,11 +13143,45 @@ function addAsgn(){
 //  ATTENDANCE
 // ══════════════════════════════════════════════════
 var attQ='';
+// ═══════════ 清空出席紀錄（重置） ═══════════
+function confirmWipeAttendance(){
+  var total = (DB.attendance||[]).length;
+  if(!total){ toast('沒有出席紀錄','info'); return; }
+  var realCount = (DB.attendance||[]).filter(function(a){ return a.method; }).length;
+  var importCount = total - realCount;
+  oM('⚠️ 清空出席紀錄',
+    '<div class="ibox iamb" style="margin-bottom:14px"><span>⚠️</span><span style="font-size:.82rem">目前共有 <strong>'+total+'</strong> 筆出席紀錄'
+    +'<br>其中：</span></div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">'
+    +'<div style="padding:10px;background:var(--grn-l);border-radius:8px;font-size:.85rem">✅ 真實簽到：<strong>'+realCount+'</strong> 筆（有 method 標記）</div>'
+    +'<div style="padding:10px;background:var(--amb-l);border-radius:8px;font-size:.85rem">⚠️ 匯入資料：<strong>'+importCount+'</strong> 筆（可能是 CSV 垃圾）</div>'
+    +'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">'
+    +'<button class="btn br" onclick="doWipeAttendance(\'all\')">🗑️ 全部清空（'+total+' 筆）</button>'
+    +'<button class="btn bgh" onclick="doWipeAttendance(\'import\')">🗑️ 只清匯入垃圾（'+importCount+' 筆）</button>'
+    +'<button class="btn bgh" onclick="cM()">取消</button>'
+    +'</div>');
+}
+
+function doWipeAttendance(mode){
+  if(mode === 'all'){
+    if(!confirm('⚠️⚠️⚠️ 確定刪除全部出席紀錄？無法復原！')) return;
+    DB.attendance = [];
+  } else {
+    DB.attendance = (DB.attendance||[]).filter(function(a){ return a.method; });
+  }
+  saveDB();
+  cM();
+  toast('✅ 已清空','info');
+  var tc = document.getElementById('tc');
+  if(tc && typeof rAtt === 'function') tc.innerHTML = rAtt();
+}
+
 function rAtt(){
   // Attendance report shortcut
   var _ac=window._attCls||'all';
-  var _ctatt=mkClsTabs2(_ac,'_attCls','rAtt','<button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()" style="margin-left:auto">📊 統計報表</button>');
-  var _attHeader='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:900">出席管理</div><button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()">📊 統計報表</button></div>';
+  var _ctatt=mkClsTabs2(_ac,'_attCls','rAtt','<button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()" style="margin-left:auto">📊 統計報表</button><button class="btn br bsm" onclick="confirmWipeAttendance()" style="margin-left:8px" title="清空全部出席紀錄重新開始">🗑️ 清空所有</button>');
+  var _attHeader='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:900">出席管理</div><div style="display:flex;gap:8px"><button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()">📊 統計報表</button><button class="btn br bsm" onclick="confirmWipeAttendance()" title="清空全部出席紀錄重新開始">🗑️ 清空所有</button></div></div>';
   var unreliableCount = (DB.attendance||[]).filter(function(a){ return a._timeUnreliable; }).length;
   var unreliableBanner = unreliableCount > 0 ? '<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:8px;padding:8px 14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="showCleanupUnreliable()"><div style="font-size:.82rem;color:#92400e"><strong>⚠️ 偵測到 '+unreliableCount+' 筆 CSV 匯入垃圾資料</strong>（顯示為「— 未記錄」）</div><button class="btn bgh bsm">🗑️ 清理</button></div>' : '';
   var attDates=[...new Set((DB.attendance||[]).map(function(a){return a.date;}))].sort();
