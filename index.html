@@ -9900,6 +9900,41 @@ function doQuickLeave(studentId){
   toast('✅ 已標記為'+(ATT_TYPES[type]||{}).label,'info');
 }
 
+function quickSignIn(studentId){
+  var stu=(DB.students||[]).find(function(s){return s.id===studentId;});
+  if(!stu){toast('找不到學生','err');return;}
+  var today=(typeof td==='function'?td():new Date().toISOString().slice(0,10));
+  var now=new Date();
+  var timeStr=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  // 檢查重複
+  var existing=(DB.attendance||[]).find(function(a){return a.studentId===studentId&&a.date===today;});
+  if(existing){
+    toast(stu.name+' 今日已有簽到紀錄','warn');
+    return;
+  }
+  DB.attendance=DB.attendance||[];
+  DB.attendance.push({
+    id:(typeof nid==='function'?nid():Date.now()),
+    studentId:studentId,
+    studentName:stu.name,
+    cls:stu.cls||'',
+    seat:stu.seat||'',
+    date:today,
+    time:timeStr,
+    timestamp:Date.now(),
+    status:'present',
+    type:'present',
+    method:'teacher-manual', // 老師手動補簽
+    signOutTime:''
+  });
+  saveDB();
+  if(typeof logOp==='function') logOp('老師補簽到', stu.name+' '+timeStr);
+  toast('✅ 已補簽到 '+stu.name+' ('+timeStr+')','success');
+  // 重繪
+  var tc=document.getElementById('tc');
+  if(tc && typeof rAtt==='function') tc.innerHTML=rAtt();
+}
+
 // ═══ 批次請假 ═══
 function openBatchLeave(){
   var students=DB.students||[];
@@ -13193,12 +13228,63 @@ function rAtt(){
   var _monthAgo=new Date(_todayDate);_monthAgo.setMonth(_monthAgo.getMonth()-1);
   var _wkStr=_weekAgo.toISOString().slice(0,10);
   var _moStr=_monthAgo.toISOString().slice(0,10);
-  var list=[...DB.attendance].filter(function(a){if(_ac==='all')return true;var s=DB.students.find(function(x){return x.id===a.studentId;});return s&&(s.cls||'未分班')===_ac;});
-  // 套用日期範圍篩選
-  if(_attRange==='today') list=list.filter(function(a){return a.date===_today;});
-  else if(_attRange==='week') list=list.filter(function(a){return a.date>=_wkStr;});
-  else if(_attRange==='month') list=list.filter(function(a){return a.date>=_moStr;});
-  list=list.sort(function(a,b){return b.date.localeCompare(a.date)||((b.time||'').localeCompare(a.time||''));});
+  // 用 fmtAttDate 標準化比較（處理 ISO 字串格式問題）
+  function _normDate(a){
+    if(typeof fmtAttDate === 'function') return fmtAttDate(a) || '';
+    return a.date || '';
+  }
+
+  var list;
+  if(_attRange === 'today'){
+    // 「今天」特殊邏輯：顯示全班今日狀態（含未簽到的學生）
+    var todayAttMap = {};
+    (DB.attendance||[]).forEach(function(a){
+      if(_normDate(a) === _today){
+        todayAttMap[a.studentId] = a;
+      }
+    });
+    var stuList = (DB.students||[]).filter(function(s){
+      if(_ac === 'all') return true;
+      return (s.cls||'未分班') === _ac;
+    });
+    // 已簽到的優先排序
+    list = stuList.map(function(s){
+      var att = todayAttMap[s.id];
+      if(att) return att;
+      // 偽紀錄表示「未簽到」（不會寫入 DB）
+      return {
+        id: 'virtual-' + s.id,
+        studentId: s.id,
+        studentName: s.name,
+        cls: s.cls || '',
+        seat: s.seat || '',
+        date: _today,
+        time: '',
+        status: 'absent',
+        type: 'absent',
+        _virtual: true
+      };
+    });
+    // 排序：已簽到（present/late）在前，缺席在後
+    list.sort(function(a,b){
+      var aSigned = !a._virtual && (a.status === 'present' || a.status === 'late' || a.time);
+      var bSigned = !b._virtual && (b.status === 'present' || b.status === 'late' || b.time);
+      if(aSigned && !bSigned) return -1;
+      if(!aSigned && bSigned) return 1;
+      return (a.time||'').localeCompare(b.time||'');
+    });
+  } else {
+    // 其他模式：原本邏輯（顯示有紀錄的）
+    list = [...DB.attendance].filter(function(a){
+      if(_ac==='all') return true;
+      var s = DB.students.find(function(x){return x.id===a.studentId;});
+      return s && (s.cls||'未分班') === _ac;
+    });
+    if(_attRange === 'week') list = list.filter(function(a){return _normDate(a) >= _wkStr;});
+    else if(_attRange === 'month') list = list.filter(function(a){return _normDate(a) >= _moStr;});
+    // 'all' 不過濾日期
+    list = list.sort(function(a,b){return (_normDate(b)).localeCompare(_normDate(a)) || ((b.time||'').localeCompare(a.time||''));});
+  }
   if(attQ)list=list.filter(function(a){var s=gs(a.studentId);return(s.name||'').includes(attQ)||(s.sid||'').includes(attQ);});
   // B5：欄位排序套用
   if(window.UI && window.UI.sortKey){
@@ -13219,6 +13305,21 @@ function rAtt(){
 
   var rows=list.map(function(a){
     var s=gs(a.studentId);
+
+    // 虛擬記錄（未簽到的學生）特殊顯示
+    if(a._virtual){
+      var _escV = (typeof escapeHtml === 'function') ? escapeHtml : function(x){return String(x==null?'':x);};
+      return '<tr style="background:rgba(239,68,68,.04)">'
+        +'<td style="font-weight:600">'+_escV(s.name||'')+'</td>'
+        +'<td style="font-size:.73rem;color:var(--gray);font-family:monospace">'+_escV(s.sid||'')+'</td>'
+        +'<td style="font-size:.8rem">'+_escV(_today)+'</td>'
+        +'<td colspan="2" style="text-align:center;color:var(--red);font-weight:700;font-size:.82rem">⚠️ 尚未簽到</td>'
+        +'<td>'+bdg('未簽到','red')+'</td>'
+        +'<td style="text-align:center;color:var(--text-3)">—</td>'
+        +'<td><div style="display:flex;gap:4px"><button class="btn bp bsm" title="幫此學生補簽到" onclick="quickSignIn('+s.id+')">✅ 補簽</button><button class="btn bsm" style="background:#8b5cf6;color:#fff" title="改為請假" onclick="quickMarkLeave('+s.id+',\''+_today+'\')">📆</button></div></td>'
+        +'</tr>';
+    }
+
     // 統一日期時間格式化（用 fmtAttDate/fmtAttTime 處理缺失）
     var displayDate = (typeof fmtAttDate === 'function') ? (fmtAttDate(a) || '—') : (a.date || '—');
     var displayTime = (typeof fmtAttTime === 'function') ? (fmtAttTime(a) || (a.checkIn || '—')) : (a.time || a.checkIn || '—');
@@ -13298,11 +13399,15 @@ function rAtt(){
     var _rangeFilterBar='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">'
       +'<span style="font-size:.74rem;color:var(--text-3);font-weight:700">📅 時間範圍：</span>'
       +['all','today','week','month'].map(function(k){
-        var labels={all:'全部',today:'今天',week:'本週',month:'本月'};
+        var labels={all:'📋 全部紀錄',today:'📅 今天班況',week:'📆 本週',month:'🗓️ 本月'};
         var active=_attRange===k;
         return '<button class="btn '+(active?'bp':'bgh')+' bsm" style="font-size:.74rem;padding:4px 11px" onclick="window._attRange=\''+k+'\';document.getElementById(\'tc\').innerHTML=rAtt()">'+labels[k]+'</button>';
       }).join('')
-      +'<span style="margin-left:auto;font-size:.7rem;color:var(--text-3)">共 '+list.length+' 筆</span>'
+      +'<span style="margin-left:auto;font-size:.7rem;color:var(--text-3)">'+(_attRange==='today'?(function(){
+        var signed=list.filter(function(a){return !a._virtual;}).length;
+        var notSigned=list.filter(function(a){return a._virtual;}).length;
+        return '<span style="color:var(--grn);font-weight:700">✅ 已簽到 '+signed+'</span> · <span style="color:var(--red);font-weight:700">⚠️ 未簽到 '+notSigned+'</span>';
+      })():'共 '+list.length+' 筆')+'</span>'
       +'</div>';
     return unreliableBanner+trendCard+_rangeFilterBar+'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
     +'<div style="font-size:1.15rem;font-weight:900">出缺勤紀錄</div>'
