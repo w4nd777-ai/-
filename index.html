@@ -3992,18 +3992,8 @@ var _IDLE_MS=30*60*1000; // 30 minutes
 // 注意：此函式已被下方 6762 行的較新版本覆蓋（hoisting 後者勝出）。
 // 重新命名以避免函式重複定義警告，並保留原邏輯以供日後參考/手動切換。
 function resetIdleTimerLegacy(){
-  clearTimeout(_idleTimer);
-  _idleTimer=setTimeout(function(){
-    var onTeacher=!document.getElementById('sc-teacher').classList.contains('hidden');
-    var onStudent=!document.getElementById('sc-student').classList.contains('hidden');
-    if(onTeacher||onStudent){
-      toast('閒置超過30分鐘，已自動登出','warn',5000);
-      setTimeout(function(){
-        cur=null;
-        goSc('sc-login');addLoginParticles();
-      },1500);
-    }
-  },_IDLE_MS);
+  // 應使用者要求停用閒置自動登出
+  try{ clearTimeout(_idleTimer); }catch(e){}
 }
 
 function initIdleWatcher(){
@@ -9173,22 +9163,16 @@ function restoreTrash(id){
 
 // 工作階段逾時登出（30 分鐘無操作）
 window._idleLogoutMin = 30;
+// ═══════════ 閒置自動登出已停用（依使用者要求） ═══════════
+// 原邏輯：超過 N 分鐘無動作會自動登出
+// 應使用者要求完全停用，避免使用中被踢出
 function resetIdleTimer(){
-  if(window._idleTimer) clearTimeout(window._idleTimer);
-  // 只有登入後才啟動計時
-  if(!window.cur) return;
-  window._idleTimer=setTimeout(function(){
-    try{ if(typeof toast==='function') toast('⏰ 閒置逾時，已自動登出','err'); }catch(e){}
-    try{ window.cur=null; if(typeof goSc==='function') goSc('sc-login'); }catch(e){ location.reload(); }
-  }, window._idleLogoutMin*60*1000);
+  // 空函式：不再啟動計時器
+  if(window._idleTimer){ clearTimeout(window._idleTimer); window._idleTimer = null; }
 }
-// 綁定使用者活動
-if(!window._idleHookInstalled){
-  window._idleHookInstalled=true;
-  ['click','keydown','mousemove','touchstart'].forEach(function(ev){
-    document.addEventListener(ev, function(){ if(window.cur) resetIdleTimer(); }, {passive:true,capture:true});
-  });
-}
+// 不再安裝活動監聽（用旗標阻止任何重啟）
+window._idleHookInstalled = true;
+window._idleDisabled = true;
 
 // 出席率計算（依據實際課堂日數）
 function attendanceRate(studentId){
