@@ -88,6 +88,10 @@ body{
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes toastProgress{from{width:100%}to{width:0}}
 @keyframes pulseRing{0%{box-shadow:0 0 0 0 rgba(94,92,230,.4)}100%{box-shadow:0 0 0 14px rgba(94,92,230,0)}}
+@keyframes pulseDot{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.18);opacity:.75}}
+@keyframes checkInBurst{0%{transform:scale(0);opacity:0}40%{transform:scale(1.2);opacity:1}70%{transform:scale(.95);opacity:1}100%{transform:scale(1);opacity:1}}
+@keyframes checkInRipple{0%{transform:scale(0);opacity:.65}100%{transform:scale(3);opacity:0}}
+@keyframes confettiFall{0%{transform:translateY(-30px) rotate(0);opacity:1}100%{transform:translateY(140px) rotate(720deg);opacity:0}}
 
 /* Button micro-interaction */
 .btn{transition:transform var(--tr-fast),background var(--tr-fast),box-shadow var(--tr-fast),opacity var(--tr-fast)}
@@ -2555,12 +2559,29 @@ function enterStudent(){
   }
   document.getElementById('st-nm').textContent=cur.name;
   document.getElementById('st-nb').textContent=(cur.cls||'')+(cur.seat?' 座號'+cur.seat:'');
-  if(curCo)document.getElementById('st-cn').textContent=curCo.name;
+  // 在 st-cn 顯示課程名稱與授課老師（從 workspace 或 branding 取得）
+  if(curCo){
+    var _ti='';
+    try{
+      var _wsId=getCurrentWorkspace();
+      if(_wsId&&_wsId!=='default'){
+        var _meta=JSON.parse(localStorage.getItem('cms_workspaces_meta')||'[]');
+        var _w=_meta.find(function(w){return w.id===_wsId;});
+        if(_w&&_w.owner)_ti=_w.owner;
+      }
+    }catch(e){}
+    if(!_ti && DB.branding && DB.branding.subtitle) _ti=DB.branding.subtitle;
+    var _cn=document.getElementById('st-cn');
+    if(_cn){
+      _cn.textContent=curCo.name+(_ti?' · 👨‍🏫 '+_ti:'');
+      _cn.title=_ti?('授課老師：'+_ti):curCo.name;
+    }
+  }
   eDone=false;eS=0;eDailyS=0;window._evTab=null;window._tEvTab=null;
   saveStuLogin(cid,(document.getElementById('sel-cls')||{value:''}).value||'',parseInt((document.getElementById('sel-seat')||{value:'0'}).value)||0,cur.id);
   rememberLogin();
   goSc('sc-student');
-  setTimeout(function(){var smBtn=document.querySelector('[data-stab="sm"]');if(smBtn&&!document.getElementById('stu-msg-badge')){var sp=document.createElement('span');sp.id='stu-msg-badge';sp.style.cssText='display:none;background:var(--red);color:#fff;border-radius:99px;font-size:.58rem;padding:0 4px;font-weight:800;margin-left:2px;vertical-align:middle';smBtn.appendChild(sp);}},150);
+  setTimeout(function(){var smBtn=document.querySelector('[data-stab="sm"]');if(smBtn&&!document.getElementById('stu-msg-badge')){var sp=document.createElement('span');sp.id='stu-msg-badge';sp.style.cssText='display:none;background:var(--red);color:#fff;border-radius:99px;font-size:.58rem;padding:0 4px;font-weight:800;margin-left:2px;vertical-align:middle';smBtn.appendChild(sp);}if(typeof updStuTabBadges==='function')updStuTabBadges();},150);
   if(gasUrl())gasLoadStudent();
 
   // Motivational chip
@@ -4299,6 +4320,20 @@ function openSubFeedback(subId){
   var st=gs(sub.studentId);
   var a=ga(sub.assignmentId);
   sub.thread=sub.thread||[];
+  // 標記老師已看過此繳交（提供學生「已讀」回饋）
+  if(!sub.teacherSeen){
+    sub.teacherSeen=true;
+    sub.teacherSeenAt=new Date().toLocaleString('zh-TW');
+    try{saveDB();}catch(e){}
+  }
+  // 計算同一份作業中、依繳交時間排序的待批改清單（用於「儲存並下一位」）
+  var sameAsgnSubs=(DB.submissions||[]).filter(function(x){return Number(x.assignmentId)===Number(sub.assignmentId);})
+    .sort(function(x,y){return (x.date||'').localeCompare(y.date||'')||(x.id-y.id);});
+  var ungraded=sameAsgnSubs.filter(function(x){return !x.graded&&x.id!==subId;});
+  var nextSub=ungraded[0]||null;
+  var curIdx=sameAsgnSubs.findIndex(function(x){return x.id===subId;});
+  var prevSub=curIdx>0?sameAsgnSubs[curIdx-1]:null;
+  var nextAnySub=curIdx>=0&&curIdx<sameAsgnSubs.length-1?sameAsgnSubs[curIdx+1]:null;
   var threadHtml=sub.thread.length
     ? sub.thread.map(function(m){
         var col=m.from==='teacher'?'var(--ind-l)':'var(--grn-l)';
@@ -4307,8 +4342,17 @@ function openSubFeedback(subId){
         return '<div style="background:'+col+';padding:8px 12px;border-radius:8px;margin-bottom:6px"><div style="font-size:.7rem;color:'+fg+';font-weight:700;margin-bottom:3px">'+author+' <span style="color:var(--text-3);font-weight:400">· '+m.at+'</span></div><div style="font-size:.82rem;white-space:pre-wrap">'+m.text+'</div></div>';
       }).join('')
     : '<div style="color:var(--text-3);font-size:.76rem;text-align:center;padding:10px">尚無討論</div>';
+  // 顯示批改進度（第 X / Y 份；未批改 Z 份）
+  var totalIn=sameAsgnSubs.length;
+  var posInfo='<div style="display:flex;justify-content:space-between;align-items:center;background:var(--fill-2);padding:6px 10px;border-radius:8px;margin-bottom:10px">'
+    +'<span style="font-size:.74rem;color:var(--text-2)">第 <b>'+(curIdx+1)+'</b> / '+totalIn+' 份 · 尚有 <b style="color:var(--amb)">'+ungraded.length+'</b> 份待批</span>'
+    +'<div style="display:flex;gap:5px">'
+    +(prevSub?'<button class="btn bgh bsm" style="font-size:.7rem;padding:3px 8px" onclick="cM();setTimeout(function(){openSubFeedback('+prevSub.id+')},80)" title="上一位學生">◀ 上一位</button>':'')
+    +(nextAnySub?'<button class="btn bgh bsm" style="font-size:.7rem;padding:3px 8px" onclick="cM();setTimeout(function(){openSubFeedback('+nextAnySub.id+')},80)" title="下一位學生">下一位 ▶</button>':'')
+    +'</div></div>';
   oM('💬 批改評語與討論：'+st.name,
-    '<div style="font-size:.78rem;color:var(--text-3);margin-bottom:10px">作業：'+a.title+(sub.date?' · 繳交於 '+sub.date:'')+'</div>'
+    posInfo
+    +'<div style="font-size:.78rem;color:var(--text-3);margin-bottom:10px">作業：'+a.title+(sub.date?' · 繳交於 '+sub.date:'')+'</div>'
     +'<div class="fg"><label class="fl">📊 分數（0-100，留空為僅評語）</label>'
     +'<input class="inp" type="number" id="sub-fb-score" min="0" max="100" placeholder="例如：85" value="'+(typeof sub.score==='number'?sub.score:'')+'"></div>'
     +'<div class="fg"><label class="fl">主要評語（顯示於學生作業頁）</label>'
@@ -4317,13 +4361,14 @@ function openSubFeedback(subId){
     +'<div style="max-height:200px;overflow-y:auto;background:var(--fill-2);border-radius:8px;padding:8px">'+threadHtml+'</div></div>'
     +'<div class="fg"><label class="fl">新增討論訊息（選填）</label>'
     +'<textarea class="ta" id="sub-thread-new" rows="2" placeholder="補充說明、請學生澄清某點…"></textarea></div>'
-    +'<div style="display:flex;gap:9px">'
-    +'<button class="btn bgh" style="flex:1" onclick="cM()">取消</button>'
-    +'<button class="btn bp" style="flex:1" onclick="saveSubFeedback('+subId+')">💾 儲存 / 發送</button>'
+    +'<div style="display:flex;gap:7px;flex-wrap:wrap">'
+    +'<button class="btn bgh" style="flex:1;min-width:80px" onclick="cM()">取消</button>'
+    +'<button class="btn bp" style="flex:1;min-width:120px" onclick="saveSubFeedback('+subId+')">💾 儲存</button>'
+    +(nextSub?'<button class="btn bp" style="flex:1;min-width:140px;background:var(--grn);border-color:var(--grn)" onclick="saveSubFeedback('+subId+','+nextSub.id+')" title="儲存目前評分後直接打開下一份待批改的繳交">✅ 儲存並下一位 ▶</button>':'')
     +'</div>');
 }
 
-function saveSubFeedback(subId){
+function saveSubFeedback(subId,nextSubId){
   var txt=((document.getElementById('sub-fb-txt')||{value:''}).value||'').trim();
   var newMsg=((document.getElementById('sub-thread-new')||{value:''}).value||'').trim();
   var scoreEl=document.getElementById('sub-fb-score');
@@ -4357,8 +4402,18 @@ function saveSubFeedback(subId){
     }
   } catch(e){ console.warn('[gradeSync]', e); }
   saveDB();cM();
-  document.getElementById('tc').innerHTML=rSub();
-  toast('✅ 評語已儲存'+(newMsg?' + 討論訊息已發送':''));
+  // 若有下一位，直接打開；否則回繳交列表
+  if(nextSubId){
+    setTimeout(function(){
+      try{ openSubFeedback(nextSubId); }catch(e){
+        document.getElementById('tc').innerHTML=rSub();
+      }
+    },120);
+    toast('✅ 已儲存，繼續批改下一份'+(newMsg?'（討論已發送）':''),'info');
+  } else {
+    document.getElementById('tc').innerHTML=rSub();
+    toast('✅ 評語已儲存'+(newMsg?' + 討論訊息已發送':''));
+  }
 }
 
 // 學生回覆討論串
@@ -8521,6 +8576,11 @@ function saveDB(){
 
   // 3. GAS 自動同步（debounced 30s，僅在已設 GAS 端點時）
   if(typeof scheduleGasAutoSync === 'function') scheduleGasAutoSync();
+  // 4. 資料變更後重整側邊欄徽章 / 學生分頁徽章
+  try{
+    if(typeof updTeacherNavBadges === 'function') updTeacherNavBadges();
+    if(typeof updStuTabBadges === 'function') updStuTabBadges();
+  }catch(e){}
 }
 
 // 異步從 IDB 載入較新版本（如果有）
@@ -11141,14 +11201,39 @@ function toast(msg,type,dur){
   var el=document.getElementById('toast');
   if(!el)return;
   clearTimeout(el._t);
-  el.textContent=msg;
+  // 重要訊息支援「持續顯示 + X 關閉」：dur=0 或 'persist'
+  var persist = (dur===0||dur==='persist');
+  // 重新建立 innerHTML（包含 X 關閉鈕）
+  el.style.whiteSpace = persist?'normal':'nowrap';
+  el.style.pointerEvents = persist?'auto':'none';
+  el.style.maxWidth = persist?'min(90vw,420px)':'90vw';
+  el.innerHTML = '';
+  var span = document.createElement('span');
+  span.textContent = msg;
+  el.appendChild(span);
+  if(persist){
+    var x = document.createElement('button');
+    x.textContent = '✕';
+    x.setAttribute('aria-label','關閉');
+    x.style.cssText = 'background:rgba(255,255,255,.15);border:none;color:#fff;font-weight:700;margin-left:10px;border-radius:99px;width:22px;height:22px;cursor:pointer;line-height:1;padding:0;flex-shrink:0';
+    x.onclick = function(){el.classList.remove('show');};
+    el.style.display = 'inline-flex';
+    el.style.alignItems = 'center';
+    el.style.gap = '4px';
+    el.appendChild(x);
+  } else {
+    el.style.display = '';
+  }
   // Color by type
-  if(type==='err'||type==='error'){el.style.background='rgba(255,59,48,.9)';}
-  else if(type==='warn'||type==='warning'){el.style.background='rgba(255,149,0,.9)';}
-  else if(type==='info'){el.style.background='rgba(94,92,230,.9)';}
+  if(type==='err'||type==='error'){el.style.background='rgba(255,59,48,.92)';}
+  else if(type==='warn'||type==='warning'){el.style.background='rgba(255,149,0,.92)';}
+  else if(type==='info'){el.style.background='rgba(94,92,230,.92)';}
+  else if(type==='success'){el.style.background='rgba(52,199,89,.92)';}
   else{el.style.background='rgba(28,28,30,.88)';}
   el.classList.add('show');
-  el._t=setTimeout(function(){el.classList.remove('show');},dur||2600);
+  if(!persist){
+    el._t=setTimeout(function(){el.classList.remove('show');},dur||2600);
+  }
 }
 
 function oM(title,html,onEnter){
@@ -11676,10 +11761,14 @@ function doTTab(tab){
       el.innerHTML=R[tab]();
     }catch(err){
       console.error('[doTTab]', tab, err);
+      var _userMsg='請按下方「重試」，或回總覽。';
+      // 把技術錯誤訊息折疊起來，避免嚇到非技術使用者
       el.innerHTML='<div class="card cb" style="text-align:center;padding:40px 20px">'
         +'<div style="font-size:2.2rem;margin-bottom:10px">⚠️</div>'
         +'<div style="font-weight:800;font-size:1.1rem;margin-bottom:6px">此頁暫時無法載入</div>'
-        +'<div style="font-size:.82rem;color:var(--text-3);margin-bottom:14px">錯誤：'+(err&&err.message||err)+'</div>'
+        +'<div style="font-size:.82rem;color:var(--text-3);margin-bottom:6px">'+_userMsg+'</div>'
+        +'<details style="margin:8px auto 14px;max-width:480px;text-align:left;font-size:.7rem;color:var(--text-3)"><summary style="cursor:pointer;color:var(--text-3)">查看技術細節</summary>'
+        +'<pre style="white-space:pre-wrap;font-family:monospace;background:var(--fill-2);padding:8px;border-radius:6px;margin-top:6px;font-size:.66rem">'+(err&&err.message||String(err)).replace(/[<>&]/g,function(c){return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c];})+'</pre></details>'
         +'<div style="display:flex;gap:8px;justify-content:center">'
         +'<button class="btn bgh bsm" onclick="doTTab(\''+tab+'\')">🔄 重試</button>'
         +'<button class="btn bp bsm" onclick="nbClick(document.getElementById(\'nb-overview\'),\'overview\')">↩️ 回總覽</button>'
@@ -11687,6 +11776,8 @@ function doTTab(tab){
         +'</div></div>';
       if(typeof logOpDetailed==='function') logOpDetailed('頁面錯誤', null, err.message, tab);
     }
+    // 任何頁面切換後同步更新側邊欄徽章
+    setTimeout(function(){if(typeof updTeacherNavBadges==='function')updTeacherNavBadges();},50);
   }
 }
 
@@ -11827,13 +11918,20 @@ var statCards=[
     +'</div>';
 
   // Quick actions
+  // 統計待處理項目數量
+  var _pendCnt=(DB.pending||[]).filter(function(p){return p.status==='pending';}).length;
+  var _unreadCnt=(DB.messages||[]).filter(function(m){return !m.read&&m.from==='student';}).length;
+  var _ungradedCnt=(DB.submissions||[]).filter(function(s){return !s.graded;}).length;
   var quickActions='<div class="card cb" style="margin-bottom:12px">'
     +'<div style="font-size:.78rem;font-weight:700;color:var(--text-3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">快速操作</div>'
     +'<div style="display:flex;gap:7px;flex-wrap:wrap">'
-    +'<button class="btn bp bsm" onclick="openManualAtt()">✅ 手動簽到</button>'
+    +'<button class="btn bp bsm" onclick="openManualAtt()" title="一鍵開啟手動簽到面板（不需切換到出席頁）" accesskey="s">⚡ 快速簽到</button>'
+    +'<button class="btn bgh bsm" onclick="nbClick(document.getElementById(\'nb-attendance\'),\'attendance\')">📋 出席管理</button>'
     +'<button class="btn bgh bsm" onclick="nbClick(document.getElementById(\'nb-announce\'),\'announce\')">📢 發布公告</button>'
     +'<button class="btn bgh bsm" onclick="nbClick(document.getElementById(\'nb-assignments\'),\'assignments\')">📋 管理作業</button>'
     +'<button class="btn bgh bsm" onclick="nbClick(document.getElementById(\'nb-grades\'),\'grades\')">📝 查看成績</button>'
+    +'<button class="btn bgh bsm" onclick="rOpLog&&(document.getElementById(\'tc\').innerHTML=rOpLog())" title="查看最近的操作紀錄">📜 操作紀錄</button>'
+    +(_pendCnt+_unreadCnt+_ungradedCnt>0?'<button class="btn bgh bsm" style="background:var(--amb-l);color:var(--amb);font-weight:800" onclick="nbClick(document.getElementById(\'nb-pending\'),\'pending\')" title="有 '+(_pendCnt+_unreadCnt+_ungradedCnt)+' 項待處理">🔔 待處理 '+(_pendCnt+_unreadCnt+_ungradedCnt)+'</button>':'')
     +'</div></div>';
 
   // Recent evals summary
@@ -12441,7 +12539,20 @@ function rAtt(){
   var _ctatt=mkClsTabs2(_ac,'_attCls','rAtt','<button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()" style="margin-left:auto">📊 統計報表</button>');
   var _attHeader='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:900">出席管理</div><button class="btn bgh bsm" onclick="document.getElementById(\'tc\').innerHTML=rAttReport()">📊 統計報表</button></div>';
   var attDates=[...new Set((DB.attendance||[]).map(function(a){return a.date;}))].sort();
-  var list=[...DB.attendance].filter(function(a){if(_ac==='all')return true;var s=DB.students.find(function(x){return x.id===a.studentId;});return s&&(s.cls||'未分班')===_ac;}).sort(function(a,b){return b.date.localeCompare(a.date)||((b.time||'').localeCompare(a.time||''));});
+  // 日期快捷篩選：今天 / 本週 / 本月 / 全部
+  var _attRange=window._attRange||'all';
+  var _today=td();
+  var _todayDate=new Date(_today);_todayDate.setHours(0,0,0,0);
+  var _weekAgo=new Date(_todayDate);_weekAgo.setDate(_weekAgo.getDate()-7);
+  var _monthAgo=new Date(_todayDate);_monthAgo.setMonth(_monthAgo.getMonth()-1);
+  var _wkStr=_weekAgo.toISOString().slice(0,10);
+  var _moStr=_monthAgo.toISOString().slice(0,10);
+  var list=[...DB.attendance].filter(function(a){if(_ac==='all')return true;var s=DB.students.find(function(x){return x.id===a.studentId;});return s&&(s.cls||'未分班')===_ac;});
+  // 套用日期範圍篩選
+  if(_attRange==='today') list=list.filter(function(a){return a.date===_today;});
+  else if(_attRange==='week') list=list.filter(function(a){return a.date>=_wkStr;});
+  else if(_attRange==='month') list=list.filter(function(a){return a.date>=_moStr;});
+  list=list.sort(function(a,b){return b.date.localeCompare(a.date)||((b.time||'').localeCompare(a.time||''));});
   if(attQ)list=list.filter(function(a){var s=gs(a.studentId);return(s.name||'').includes(attQ)||(s.sid||'').includes(attQ);});
   // B5：欄位排序套用
   if(window.UI && window.UI.sortKey){
@@ -12530,7 +12641,17 @@ function rAtt(){
     +'<div style="display:flex;align-items:flex-end;height:70px;gap:3px">'+trendBars+'</div>'
     +'</div></div>':'';
 
-    return trendCard+'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+    // 日期快捷篩選按鈕
+    var _rangeFilterBar='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">'
+      +'<span style="font-size:.74rem;color:var(--text-3);font-weight:700">📅 時間範圍：</span>'
+      +['all','today','week','month'].map(function(k){
+        var labels={all:'全部',today:'今天',week:'本週',month:'本月'};
+        var active=_attRange===k;
+        return '<button class="btn '+(active?'bp':'bgh')+' bsm" style="font-size:.74rem;padding:4px 11px" onclick="window._attRange=\''+k+'\';document.getElementById(\'tc\').innerHTML=rAtt()">'+labels[k]+'</button>';
+      }).join('')
+      +'<span style="margin-left:auto;font-size:.7rem;color:var(--text-3)">共 '+list.length+' 筆</span>'
+      +'</div>';
+    return trendCard+_rangeFilterBar+'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
     +'<div style="font-size:1.15rem;font-weight:900">出缺勤紀錄</div>'
     +'<div style="display:flex;gap:6px">'
     +'<button class="btn bgh bsm" onclick="openManualAtt()">➕ 手動簽到</button>'
@@ -13846,12 +13967,26 @@ function rSAtt(){
   }).filter(function(a){
     return !DB.submissions.find(function(s){return s.studentId===cur.id&&Number(s.assignmentId)===a.id;});
   });
+  // 區分「24 小時內」與「3 天內」
+  var has24h=urgentAsgn.some(function(a){var h=(new Date(a.due)-new Date())/3600000;return h<=24&&h>0;});
   var deadlineBanner=urgentAsgn.length
-    ?'<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">'
-      +'<span style="font-size:1.2rem">⏰</span><div>'
-      +'<div style="font-weight:700;font-size:.83rem;color:#92400e">即將截止的作業</div>'
-      +urgentAsgn.map(function(a){var d=Math.ceil((new Date(a.due)-new Date())/86400000);return'<div style="font-size:.76rem;color:#b45309">'+a.title+'：'+(d===0?'今天截止':'還有'+d+'天')+'</div>';}).join('')
-      +'</div></div>':'';
+    ?'<div style="background:'+(has24h?'#fee2e2;border:1.5px solid #dc2626':'#fef3c7;border:1px solid #f59e0b')+';border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px'+(has24h?';animation:pulseDot 2s ease-in-out infinite':'')+'">'
+      +'<span style="font-size:1.2rem">'+(has24h?'🚨':'⏰')+'</span><div style="flex:1">'
+      +'<div style="font-weight:800;font-size:.83rem;color:'+(has24h?'#991b1b':'#92400e')+'">'+(has24h?'24 小時內截止！立即繳交':'即將截止的作業')+'</div>'
+      +urgentAsgn.map(function(a){
+        var h=(new Date(a.due)-new Date())/3600000;
+        var d=Math.ceil((new Date(a.due)-new Date())/86400000);
+        var label;
+        if(h<=24&&h>0){var hh=Math.floor(h);label='剩 '+(hh>0?hh+' 小時':'<1 小時');}
+        else if(d===0){label='今天截止';}
+        else {label='還有 '+d+' 天';}
+        var col=h<=24?'#991b1b':'#b45309';
+        var wt=h<=24?'700':'500';
+        return'<div style="font-size:.76rem;color:'+col+';font-weight:'+wt+'">'+a.title+'：'+label+'</div>';
+      }).join('')
+      +'</div>'
+      +'<button class="btn bp bsm" onclick="doSTab(\'sb\')" style="font-size:.72rem;white-space:nowrap">📤 立即繳交</button>'
+      +'</div>':'';
 
   // Pinned announcements
   var pinnedAnns=(DB.announcements||[]).filter(function(a){return a.pinned;});
@@ -13942,15 +14077,60 @@ function dkIn(status){
   var st=status||'present';
   DB.attendance.push({id:nid(),studentId:cur.id,studentName:cur.name,
     cls:cur.cls||'',seat:cur.seat||'',date:td(),time:nt(),signOutTime:'',status:st});
-  logOp('學生簽到',cur.name);saveDB();doSTab('sa');
+  logOp('學生簽到',cur.name);saveDB();
+  // 顯示成功動畫
+  if(typeof showCheckInSuccess==='function'){
+    try{showCheckInSuccess(st);}catch(e){}
+  }
+  doSTab('sa');
   var label=st==='late'?'遲到':st==='leave'?'請假':'簽到';
-  toast('✅ '+label+'成功 ('+nt()+')');
+  toast('✅ '+label+'成功 ('+nt()+')','success');
   // Sync to GAS
   if(gasUrl()){
     gasPost({action:'signIn',studentId:cur.id,studentName:cur.name,
       cls:cur.cls||'',seat:cur.seat||'',status:st,courseId:courseId()})
     .then(function(){}).catch(function(e){});
   }
+}
+
+// 學生簽到成功動畫（覆蓋層 + 漣漪 + 紙片）
+function showCheckInSuccess(status){
+  // 移除舊的（若有）
+  var old=document.getElementById('checkin-burst');
+  if(old)old.remove();
+  var bg=document.createElement('div');
+  bg.id='checkin-burst';
+  bg.style.cssText='position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:99998;background:radial-gradient(circle at center,rgba(52,199,89,.18) 0%,transparent 60%);opacity:0;transition:opacity .2s';
+  // 中央徽章
+  var emoji=status==='late'?'🕐':status==='leave'?'🏠':'✅';
+  var msg=status==='late'?'遲到登記':status==='leave'?'請假登記':'簽到成功';
+  var badge=document.createElement('div');
+  badge.style.cssText='position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;animation:checkInBurst .7s cubic-bezier(.16,1,.3,1)';
+  badge.innerHTML='<div style="width:120px;height:120px;border-radius:50%;background:linear-gradient(135deg,#34c759,#2db74f);display:flex;align-items:center;justify-content:center;font-size:3.5rem;box-shadow:0 18px 48px rgba(52,199,89,.5)">'+emoji+'</div>'
+    +'<div style="font-size:1.4rem;font-weight:900;color:#1c1c1e;letter-spacing:.05em">'+msg+'</div>'
+    +'<div style="font-size:.84rem;color:#1c1c1e;opacity:.7">'+(typeof nt==='function'?nt():'')+'</div>';
+  // 漣漪
+  var ripple=document.createElement('div');
+  ripple.style.cssText='position:absolute;width:120px;height:120px;border-radius:50%;background:rgba(52,199,89,.4);animation:checkInRipple .9s ease-out';
+  badge.appendChild(ripple);
+  // 紙片
+  var colors=['#34c759','#5e5ce6','#ff9500','#007aff','#af52de','#ff3b30'];
+  for(var i=0;i<14;i++){
+    var c=document.createElement('div');
+    var col=colors[i%colors.length];
+    var leftPct=(Math.random()*60+20);
+    var delay=Math.random()*0.3;
+    c.style.cssText='position:absolute;top:30%;left:'+leftPct+'%;width:8px;height:14px;background:'+col+';border-radius:2px;animation:confettiFall '+(1+Math.random()*0.5)+'s ease-in '+delay+'s both';
+    badge.appendChild(c);
+  }
+  bg.appendChild(badge);
+  document.body.appendChild(bg);
+  requestAnimationFrame(function(){bg.style.opacity='1';});
+  // 1.4s 後淡出
+  setTimeout(function(){
+    bg.style.opacity='0';
+    setTimeout(function(){if(bg.parentNode)bg.remove();},250);
+  },1400);
 }
 
 function dkOut(){
@@ -14083,15 +14263,37 @@ function rSAsgn(){
     var aid=Number(a.assignmentId||a.id);
     var due=a.due||'';
     var isOverdue=false;
+    // 同時計算「天」與「小時」，24h 內顯示更急迫
+    var hoursL=due?(new Date(due)-new Date())/3600000:null;
     var daysL=due?Math.ceil((new Date(due)-new Date())/86400000):null;
-    var dc=daysL===null?'var(--gray)':daysL<0?'var(--red)':daysL<=3?'var(--amb)':'var(--grn)';
+    var dc=daysL===null?'var(--gray)':daysL<0?'var(--red)':(hoursL!==null&&hoursL<=24)?'var(--red)':daysL<=3?'var(--amb)':'var(--grn)';
     isOverdue=daysL!==null&&daysL<0;
-    var dt=daysL===null?'':daysL<0?'已截止':daysL===0?'今天截止':'還有 '+daysL+' 天';
+    var dt;
+    if(daysL===null){dt='';}
+    else if(daysL<0){dt='已截止';}
+    else if(hoursL!==null&&hoursL<=24&&hoursL>0){
+      var hh=Math.floor(hoursL);
+      var mm=Math.floor((hoursL-hh)*60);
+      dt='🚨 剩 '+(hh>0?hh+'小時':'')+(mm>0?(hh>0?' ':'')+mm+'分':'')+'！';
+    }
+    else if(daysL===0){dt='今天截止';}
+    else {dt='還有 '+daysL+' 天';}
     var sub=mySubs.filter(function(s){return Number(s.assignmentId)===aid;})[0]||null;
     var _isLate=sub&&sub.isLate;
     var fileBadge=sub&&sub.file?'<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><span style="font-size:.72rem;background:var(--fill-2);padding:3px 8px;border-radius:6px;color:var(--text-2)">📎 '+sub.file+(sub.fileSize?' · '+(sub.fileSize/1024/1024).toFixed(2)+'MB':'')+'</span>'+(sub.localFileKey?'<button class="btn bgh bsm" style="font-size:.66rem;padding:2px 8px" onclick="downloadLocalSubmission('+sub.id+')">💾 下載</button>':'')+'</div>':'';
+    // 老師已讀狀態（提供學生回饋）
+    var seenChip='';
+    if(sub){
+      if(sub.graded){
+        seenChip='<span style="display:inline-flex;align-items:center;gap:3px;font-size:.66rem;background:var(--grn-l);color:var(--grn);padding:2px 7px;border-radius:99px;font-weight:700;margin-left:6px" title="老師已批改">📝 已批改</span>';
+      } else if(sub.teacherSeen){
+        seenChip='<span style="display:inline-flex;align-items:center;gap:3px;font-size:.66rem;background:var(--ind-l);color:var(--ind);padding:2px 7px;border-radius:99px;font-weight:700;margin-left:6px" title="老師已查看：'+(sub.teacherSeenAt||'')+'">👁️ 老師已查看</span>';
+      } else {
+        seenChip='<span style="display:inline-flex;align-items:center;gap:3px;font-size:.66rem;background:var(--fill-2);color:var(--text-3);padding:2px 7px;border-radius:99px;font-weight:700;margin-left:6px" title="尚未被老師查看">⏳ 等待老師查看</span>';
+      }
+    }
     var subInfo=sub
-      ?'<div class="ibox '+(_isLate?'iamb':'igrn')+'" style="margin-bottom:8px"><span>'+(_isLate?'⚠️':'✅')+'</span><span style="font-size:.8rem">'+(_isLate?'遲交':'已繳交')+''+(sub.link?'：<a href="'+sub.link+'" target="_blank" style="color:var(--ind)">查看</a>':'')+(sub.feedback?'</span></div><div class="ibox iind" style="margin-bottom:6px"><span>💬</span><span style="font-size:.78rem"><strong>老師評語：</strong>'+sub.feedback+'</span></div>':'')+'</span></div>'+fileBadge
+      ?'<div class="ibox '+(_isLate?'iamb':'igrn')+'" style="margin-bottom:8px"><span>'+(_isLate?'⚠️':'✅')+'</span><span style="font-size:.8rem">'+(_isLate?'遲交':'已繳交')+''+(sub.link?'：<a href="'+sub.link+'" target="_blank" style="color:var(--ind)">查看</a>':'')+seenChip+(sub.feedback?'</span></div><div class="ibox iind" style="margin-bottom:6px"><span>💬</span><span style="font-size:.78rem"><strong>老師評語：</strong>'+sub.feedback+'</span></div>':'')+'</span></div>'+fileBadge
       :(isOverdue?'<div class="ibox" style="background:var(--red-l);border-color:var(--red);margin-bottom:8px"><span>⚠️</span><span style="font-size:.78rem;color:var(--red);font-weight:700">已截止，尚未繳交</span></div>':'');
     var threadBtn=sub&&sub.thread&&sub.thread.length
       ? '<button class="btn bgh bsm" style="margin-left:6px" onclick="studentReplyThread('+sub.id+')">💬 討論 ('+sub.thread.length+')</button>'
@@ -15052,6 +15254,84 @@ function nbClick(btn,tab){window._curTab=tab;
   if(window.innerWidth <= 640){
     if(typeof closeMobSB === 'function') closeMobSB();
   }
+  // 切換後重整側邊欄徽章
+  setTimeout(function(){if(typeof updTeacherNavBadges==='function')updTeacherNavBadges();},80);
+}
+
+// 老師側邊欄徽章：待審核、學生訊息、未批繳交
+function updTeacherNavBadges(){
+  try{
+    var pendCnt=(DB.pending||[]).filter(function(p){return p.status==='pending';}).length;
+    var unreadMsg=(DB.messages||[]).filter(function(m){return !m.read&&m.from==='student';}).length;
+    var ungraded=(DB.submissions||[]).filter(function(s){return !s.graded;}).length;
+    var setBadge=function(navId,cnt,col){
+      var btn=document.getElementById(navId);
+      if(!btn)return;
+      var bId=navId+'-badge';
+      var b=document.getElementById(bId);
+      if(cnt>0){
+        if(!b){
+          b=document.createElement('span');
+          b.id=bId;
+          b.style.cssText='margin-left:auto;background:'+(col||'var(--red)')+';color:#fff;border-radius:99px;font-size:.6rem;padding:1px 7px;font-weight:800;min-width:18px;text-align:center;display:inline-block';
+          btn.appendChild(b);
+        }
+        b.textContent=cnt;
+        b.style.display='inline-block';
+        b.style.background=col||'var(--red)';
+      } else if(b){
+        b.style.display='none';
+      }
+    };
+    setBadge('nb-pending',pendCnt,'var(--amb)');
+    setBadge('nb-messages',unreadMsg,'var(--red)');
+    setBadge('nb-submissions',ungraded,'var(--ind)');
+    // 總覽顯示總和
+    var totalPending=pendCnt+unreadMsg+ungraded;
+    setBadge('nb-overview',totalPending>0?totalPending:0,'var(--red)');
+  }catch(e){console.warn('[updTeacherNavBadges]',e);}
+}
+
+// 對外暴露：所有資料變更後可呼叫
+window.updTeacherNavBadges=updTeacherNavBadges;
+
+// 統一更新學生分頁的紅點/數量徽章
+function updStuTabBadges(){
+  try{
+    if(!cur||!cur.id)return;
+    var _today=td();
+    // 訊息（老師→學生未讀）
+    var unreadMsg=(DB.messages||[]).filter(function(m){return m.studentId===cur.id&&m.from==='teacher'&&!m.read;}).length;
+    var smB=document.getElementById('stu-msg-badge');
+    if(smB){smB.style.display=unreadMsg?'inline-block':'none';smB.textContent=unreadMsg||'';}
+    // 公告（未讀）
+    var readIds=[];try{readIds=JSON.parse(localStorage.getItem('ann_read')||'[]');}catch(e){}
+    var unreadAnn=(DB.announcements||[]).filter(function(a){return (!a.expires||a.expires>=_today)&&!readIds.includes(a.id);}).length;
+    var saBtn=document.querySelector('[data-stab="sa"]');
+    if(saBtn){
+      var aB=document.getElementById('stu-ann-badge');
+      if(!aB){aB=document.createElement('span');aB.id='stu-ann-badge';aB.style.cssText='background:var(--red);color:#fff;border-radius:99px;font-size:.58rem;padding:0 4px;font-weight:800;margin-left:2px;vertical-align:middle;animation:pulseDot 1.6s ease-in-out infinite';saBtn.appendChild(aB);}
+      if(unreadAnn){aB.style.display='inline-block';aB.textContent=unreadAnn;}else{aB.style.display='none';}
+    }
+    // 作業（24h 內即將截止 / 已逾期未繳）
+    var urgentCnt=(DB.assignments||[]).filter(function(a){
+      if(!a.due)return false;
+      // 該作業是否分派給此學生
+      if(a.stuIds&&a.stuIds.length>0&&!a.stuIds.includes(cur.id))return false;
+      if(a.cls&&a.cls!==''&&!a.cls.split(',').includes(cur.cls||'未分班'))return false;
+      // 是否已繳
+      var has=(DB.submissions||[]).find(function(s){return s.studentId===cur.id&&Number(s.assignmentId)===a.id;});
+      if(has)return false;
+      var hoursLeft=(new Date(a.due)-new Date())/3600000;
+      return hoursLeft<=24;
+    }).length;
+    var sbBtn=document.querySelector('[data-stab="sb"]');
+    if(sbBtn){
+      var bB=document.getElementById('stu-asgn-badge');
+      if(!bB){bB=document.createElement('span');bB.id='stu-asgn-badge';bB.style.cssText='background:var(--red);color:#fff;border-radius:99px;font-size:.58rem;padding:0 4px;font-weight:800;margin-left:2px;vertical-align:middle;animation:pulseDot 1.6s ease-in-out infinite';sbBtn.appendChild(bB);}
+      if(urgentCnt){bB.style.display='inline-block';bB.textContent=urgentCnt;}else{bB.style.display='none';}
+    }
+  }catch(e){console.warn('[updStuTabBadges]',e);}
 }
 
 function stabClick(btn,tab){
@@ -15063,6 +15343,8 @@ function stabClick(btn,tab){
   document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   doSTab(tab);
+  // 切換分頁後重整徽章
+  setTimeout(function(){if(typeof updStuTabBadges==='function')updStuTabBadges();},100);
 }
 
 // Global Enter key in modals
