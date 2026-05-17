@@ -163,6 +163,18 @@ h3 { font-size: 16px; }
 .nav-btn .ic { font-size: 22px; line-height: 1; }
 .nav-btn.active { color: var(--primary); }
 .nav-btn:active { transform: scale(0.94); }
+.nav-badge {
+  position: absolute;
+  top: 2px; right: calc(50% - 22px);
+  min-width: 18px; height: 18px;
+  padding: 0 5px;
+  background: var(--danger);
+  color: white;
+  border-radius: 999px;
+  font-size: 10px; font-weight: 700;
+  display: grid; place-items: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
 
 /* ━━━ Cards ━━━ */
 .card {
@@ -469,14 +481,44 @@ textarea.input { height: auto; min-height: 80px; padding: 10px 12px; resize: ver
   border-radius: 50%;
   background: var(--text-faint);
   margin-right: 4px;
+  vertical-align: middle;
 }
 .status-dot.online { background: var(--success); box-shadow: 0 0 0 0 var(--success); animation: dot-pulse 2s infinite; }
 .status-dot.offline { background: var(--text-faint); }
+.status-dot.error { background: var(--danger); animation: dot-pulse-red 1.2s infinite; }
 @keyframes dot-pulse {
   0% { box-shadow: 0 0 0 0 rgba(22,163,74,0.5); }
   70% { box-shadow: 0 0 0 6px rgba(22,163,74,0); }
   100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); }
 }
+@keyframes dot-pulse-red {
+  0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(220,38,38,0); }
+  100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+}
+
+/* ━━━ Skeleton ━━━ */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--border) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: skel 1.2s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+@keyframes skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.skel-line { height: 16px; margin: 8px 0; }
+.skel-card { height: 80px; margin: 10px 0; }
+
+/* ━━━ Donut chart ━━━ */
+.donut-wrap { position: relative; width: 140px; height: 140px; margin: 0 auto; }
+.donut-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.donut-bg { fill: none; stroke: var(--surface-2); stroke-width: 14; }
+.donut-fg { fill: none; stroke: var(--success); stroke-width: 14; stroke-linecap: round; transition: stroke-dashoffset 600ms ease-out; }
+.donut-txt { position: absolute; inset: 0; display: grid; place-items: center; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+.donut-txt small { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-top: 2px; }
+
+/* ━━━ Read tick ━━━ */
+.msg-tick { margin-left: 4px; opacity: 0.8; font-size: 11px; }
+.msg-tick.read { color: #60a5fa; opacity: 1; }
 
 /* ━━━ Lists ━━━ */
 .list { display: flex; flex-direction: column; }
@@ -558,6 +600,20 @@ textarea.input { height: auto; min-height: 80px; padding: 10px 12px; resize: ver
   .huge { font-size: 40px; }
   .big { font-size: 28px; }
 }
+
+/* Keep input visible when keyboard opens */
+.input:focus, textarea.input:focus {
+  scroll-margin-bottom: 120px;
+  scroll-margin-top: 80px;
+}
+
+/* Smooth focus ring for buttons */
+.btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
 </style>
 </head>
 <body>
@@ -588,12 +644,16 @@ const App = {
   fb: null,         // Firebase app instance
   fbRef: null,      // Realtime DB room ref
   online: false,
+  fbStatus: 'idle', // 'idle' | 'connecting' | 'online' | 'offline' | 'error'
   view: 'today',    // current tab
-  listeners: []     // active firebase listeners (to detach on room switch)
+  listeners: [],    // active firebase listeners (to detach on room switch)
+  connListener: null, // .info/connected handler
+  msgUnreadKey: null
 };
 
 const LS_KEY = 'cms_v2';
 const ROOM_REGEX = /^[A-HJ-NP-Z2-9]{6}$/;  // avoids 0/O/1/I/l
+const HASH_REGEX = /join=([A-HJ-NP-Z2-9]{6})/i;
 
 // — Date helpers
 const pad2 = n => String(n).padStart(2, '0');
@@ -627,20 +687,30 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
-// — localStorage IO
-function saveCfg() { try { localStorage.setItem(LS_KEY + '_cfg', JSON.stringify(App.cfg)); } catch(e){} }
+// — localStorage IO (wrapped + cross-tab sync via storage event)
+function dbKey(roomCode) { return LS_KEY + '_db_' + (roomCode || 'local'); }
+function saveCfg() {
+  try { localStorage.setItem(LS_KEY + '_cfg', JSON.stringify(App.cfg)); }
+  catch(e) { toast('儲存設定失敗（瀏覽器空間不足？）', 'error'); }
+}
 function loadCfg() {
   try { return JSON.parse(localStorage.getItem(LS_KEY + '_cfg') || 'null'); }
   catch(e) { return null; }
 }
 function saveDB() {
-  try { localStorage.setItem(LS_KEY + '_db_' + (App.cfg && App.cfg.roomCode || 'local'), JSON.stringify(App.db)); }
-  catch(e){}
+  App.db.meta = App.db.meta || { createdAt: Date.now(), lastTouched: 0 };
   App.db.meta.lastTouched = Date.now();
+  try {
+    localStorage.setItem(dbKey(App.cfg && App.cfg.roomCode), JSON.stringify(App.db));
+  } catch(e) {
+    toast('本機儲存失敗', 'error');
+  }
 }
 function loadDB(roomCode) {
+  // reset to defaults first to avoid stale cross-room mixing
+  App.db = { students: [], attendance: [], messages: [], leaves: [], meta: { createdAt: Date.now(), lastTouched: Date.now() } };
   try {
-    const raw = localStorage.getItem(LS_KEY + '_db_' + (roomCode || 'local'));
+    const raw = localStorage.getItem(dbKey(roomCode));
     if (raw) {
       const j = JSON.parse(raw);
       Object.assign(App.db, j);
@@ -652,6 +722,21 @@ function loadDB(roomCode) {
     }
   } catch(e){}
 }
+
+// — Cross-tab / cross-window sync (essential for single-machine mode)
+window.addEventListener('storage', (ev) => {
+  if (!App.cfg) return;
+  if (ev.key === dbKey(App.cfg.roomCode) && ev.newValue) {
+    try {
+      const j = JSON.parse(ev.newValue);
+      Object.assign(App.db, j);
+      rerender();
+    } catch(e){}
+  } else if (ev.key === LS_KEY + '_cfg' && !ev.newValue) {
+    // cfg removed in another tab → reload to landing
+    location.reload();
+  }
+});
 
 // — Toast
 function toast(msg, kind) {
@@ -681,26 +766,45 @@ function closeModal() {
   while (host.firstChild) host.removeChild(host.firstChild);
 }
 
-// — Confirm dialog
-function confirmDialog(msg, onYes) {
+// — Confirm dialog (msg supports literal \n → <br>)
+function confirmDialog(msg, onYes, opts) {
+  opts = opts || {};
+  const safeMsg = esc(msg).replace(/\n/g, '<br>');
   openModal(`
     <div class="modal-body">
-      <h3 style="margin-bottom:8px">確認操作</h3>
-      <p class="muted" style="margin:0">${esc(msg)}</p>
+      <h3 style="margin-bottom:8px">${esc(opts.title || '確認操作')}</h3>
+      <p class="muted" style="margin:0">${safeMsg}</p>
     </div>
     <div class="modal-foot">
-      <button class="btn" onclick="closeModal()">取消</button>
-      <button class="btn btn-primary" id="cf-yes">確定</button>
+      <button class="btn" onclick="closeModal()">${esc(opts.cancel || '取消')}</button>
+      <button class="btn ${opts.danger ? 'btn-danger' : 'btn-primary'}" id="cf-yes">${esc(opts.ok || '確定')}</button>
     </div>
   `);
-  document.getElementById('cf-yes').onclick = () => { closeModal(); onYes && onYes(); };
+  const y = document.getElementById('cf-yes');
+  if (y) y.onclick = () => { closeModal(); onYes && onYes(); };
 }
 
 // — Network status indicator update
-function setOnline(state) {
-  App.online = state;
-  const el = document.querySelector('.status-dot');
-  if (el) el.className = 'status-dot ' + (state ? 'online' : 'offline');
+function setOnline(state, kind) {
+  App.online = !!state;
+  App.fbStatus = kind || (state ? 'online' : (App.cfg && App.cfg.firebaseConfig ? 'connecting' : 'idle'));
+  document.querySelectorAll('.status-dot').forEach(el => {
+    el.className = 'status-dot ' + (kind === 'error' ? 'error' : (state ? 'online' : 'offline'));
+  });
+  // Also update text labels next to dots if present
+  document.querySelectorAll('[data-conn-label]').forEach(el => {
+    el.textContent = connLabel();
+  });
+}
+function connLabel() {
+  if (!App.cfg) return '';
+  if (!App.cfg.firebaseConfig) return '單機模式';
+  switch (App.fbStatus) {
+    case 'online': return '即時同步中';
+    case 'connecting': return '連線中…';
+    case 'error': return '連線失敗';
+    default: return '離線';
+  }
 }
 
 // — Confetti spray
@@ -726,9 +830,16 @@ function confetti(x, y) {
    - graceful fallback: works fully offline if no config
    ──────────────────────────────────────────────────────────── */
 const Sync = (() => {
+  let connectTimer = null;
+
   function detachAll() {
     App.listeners.forEach(fn => { try { fn(); } catch(e){} });
     App.listeners = [];
+    if (App.connListener && firebase && firebase.apps && firebase.apps.length) {
+      try { firebase.database().ref('.info/connected').off('value', App.connListener); } catch(e){}
+    }
+    App.connListener = null;
+    if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
   }
 
   function init() {
@@ -736,24 +847,37 @@ const Sync = (() => {
     if (App.fb) { try { App.fb.delete(); } catch(e){} App.fb = null; }
     App.fbRef = null;
 
+    if (typeof firebase === 'undefined') {
+      // SDK didn't load (offline first visit, blocked CDN). Run in standalone.
+      setOnline(false, 'idle');
+      return false;
+    }
+
     if (!App.cfg || !App.cfg.firebaseConfig || !App.cfg.firebaseConfig.databaseURL) {
-      setOnline(false);
+      setOnline(false, 'idle');
       return false;
     }
     try {
       // Re-use existing app if exists
       if (firebase.apps.length) {
-        App.fb = firebase.app();
-      } else {
-        App.fb = firebase.initializeApp(App.cfg.firebaseConfig);
+        try { firebase.app().delete(); } catch(e){}
       }
+      App.fb = firebase.initializeApp(App.cfg.firebaseConfig);
       App.fbRef = firebase.database().ref('classroom/' + App.cfg.roomCode);
-      setOnline(true);
+      setOnline(false, 'connecting');
       attachListeners();
+      // 8s timeout — if still not connected, mark as error
+      connectTimer = setTimeout(() => {
+        if (App.fbStatus === 'connecting') {
+          setOnline(false, 'error');
+          toast('Firebase 連線逾時，請檢查 databaseURL 或網路', 'error');
+          if (App.cfg.role === 'teacher') rerender();
+        }
+      }, 8000);
       return true;
     } catch (e) {
-      console.warn('Firebase init failed:', e);
-      setOnline(false);
+      setOnline(false, 'error');
+      toast('Firebase 設定錯誤：' + (e && e.message ? e.message : '未知錯誤'), 'error');
       return false;
     }
   }
@@ -761,7 +885,6 @@ const Sync = (() => {
   function attachListeners() {
     if (!App.fbRef) return;
 
-    // Listen for full snapshot on first connect, then individual updates
     const studentsRef = App.fbRef.child('students');
     const attRef = App.fbRef.child('attendance');
     const msgRef = App.fbRef.child('messages');
@@ -785,13 +908,13 @@ const Sync = (() => {
       const v = snap.val();
       App.db.messages = v ? Object.values(v) : [];
       saveDB();
-      if (App.view === 'msg') rerender();
+      // mark messages as read if currently viewing
+      if (App.view === 'msg') { markMessagesRead(); rerender(); }
     });
     const onLeave = leaveRef.on('value', snap => {
       const v = snap.val();
       App.db.leaves = v ? Object.values(v) : [];
       saveDB();
-      if (App.view === 'leave') rerender();
     });
 
     App.listeners.push(() => studentsRef.off('value', onStu));
@@ -800,33 +923,78 @@ const Sync = (() => {
     App.listeners.push(() => leaveRef.off('value', onLeave));
 
     // Connection status
-    firebase.database().ref('.info/connected').on('value', snap => {
-      setOnline(!!snap.val());
+    App.connListener = firebase.database().ref('.info/connected').on('value', snap => {
+      const ok = !!snap.val();
+      if (connectTimer && ok) { clearTimeout(connectTimer); connectTimer = null; }
+      setOnline(ok, ok ? 'online' : (App.fbStatus === 'error' ? 'error' : 'connecting'));
     });
   }
 
   function push(node, data) {
-    saveDB(); // always local first
+    saveDB();
     if (!App.fbRef) return Promise.resolve(false);
-    return App.fbRef.child(node).push(data).then(() => true).catch(e => { console.warn(e); return false; });
+    return App.fbRef.child(node).push(data).then(() => true).catch(e => { return false; });
   }
 
   function set(node, data) {
     saveDB();
     if (!App.fbRef) return Promise.resolve(false);
-    return App.fbRef.child(node).set(data).then(() => true).catch(e => { console.warn(e); return false; });
+    return App.fbRef.child(node).set(data).then(() => true).catch(e => { return false; });
   }
 
-  // Replace a whole list (used when modifying students)
   function syncStudents() {
-    if (!App.fbRef) { saveDB(); return Promise.resolve(false); }
+    saveDB();
+    if (!App.fbRef) return Promise.resolve(false);
     const obj = {};
     App.db.students.forEach(s => obj[String(s.id)] = s);
-    return App.fbRef.child('students').set(obj).then(() => true);
+    return App.fbRef.child('students').set(obj).then(() => true).catch(() => false);
   }
 
-  return { init, push, set, syncStudents, detachAll };
+  // Best-effort retry of pending writes after reconnect
+  function flushPending() {
+    if (!App.fbRef) return;
+    syncStudents();
+    const attObj = {}; App.db.attendance.forEach(a => attObj[a.id] = a);
+    App.fbRef.child('attendance').set(attObj).catch(()=>{});
+    const msgObj = {}; App.db.messages.forEach(m => msgObj[m.id] = m);
+    App.fbRef.child('messages').set(msgObj).catch(()=>{});
+  }
+
+  return { init, push, set, syncStudents, detachAll, flushPending };
 })();
+
+// — Mark messages as read (local + Firebase)
+function markMessagesRead() {
+  if (!App.cfg) return;
+  const meId = App.cfg.role === 'teacher' ? 'teacher' : App.cfg.myStudentId;
+  if (!meId) return;
+  const key = LS_KEY + '_read_' + App.cfg.roomCode + '_' + meId;
+  try {
+    const lastTs = App.db.messages.reduce((m, x) => Math.max(m, x.ts || 0), 0);
+    localStorage.setItem(key, String(lastTs));
+    App.msgUnreadKey = key;
+  } catch(e){}
+  // Also update readBy on others' messages → for tick
+  let changed = false;
+  App.db.messages.forEach(m => {
+    if (m.from === meId) return;
+    m.readBy = m.readBy || [];
+    if (!m.readBy.includes(meId)) {
+      m.readBy.push(meId);
+      changed = true;
+      if (App.fbRef) App.fbRef.child('messages/' + m.id + '/readBy').set(m.readBy).catch(()=>{});
+    }
+  });
+  if (changed) saveDB();
+}
+function unreadCount() {
+  if (!App.cfg) return 0;
+  const key = LS_KEY + '_read_' + App.cfg.roomCode + '_' + (App.cfg.role === 'teacher' ? 'teacher' : App.cfg.myStudentId);
+  let lastTs = 0;
+  try { lastTs = parseInt(localStorage.getItem(key) || '0') || 0; } catch(e){}
+  const mineId = App.cfg.role === 'teacher' ? 'teacher' : App.cfg.myStudentId;
+  return App.db.messages.filter(m => (m.ts || 0) > lastTs && m.from !== mineId).length;
+}
 
 /* ════════════════════════════════════════════════════════════
    ROUTER / RENDER
@@ -987,8 +1155,21 @@ function renderWizardStep() {
   }
 }
 
-function wizNext() { wizardState.step++; renderWizardStep(); document.querySelectorAll('.step-dot').forEach((d,i)=>{d.className='step-dot'+(i===wizardState.step-1?' active':'');}); }
-function wizBack() { wizardState.step = Math.max(1, wizardState.step-1); renderWizardStep(); document.querySelectorAll('.step-dot').forEach((d,i)=>{d.className='step-dot'+(i===wizardState.step-1?' active':'');}); }
+function refreshDots() {
+  document.querySelectorAll('.step-dot').forEach((d,i) => {
+    d.className = 'step-dot' + (i === wizardState.step - 1 ? ' active' : '');
+  });
+}
+function wizNext() { wizardState.step++; renderWizardStep(); refreshDots(); }
+function wizBack() {
+  // From step 3 (role-specific), go back to step 2 (role select), clear role-specific data
+  if (wizardState.step === 3) {
+    wizardState.roomCode = '';
+  }
+  wizardState.step = Math.max(1, wizardState.step - 1);
+  renderWizardStep();
+  refreshDots();
+}
 function wizPickRole(r) { wizardState.role = r; wizNext(); }
 
 function wizSaveTeacherName() {
@@ -1076,31 +1257,36 @@ function wizSkipFirebase() {
 }
 
 function wizFinish() {
-  // build cfg
+  // Validate
+  if (!wizardState.roomCode || !ROOM_REGEX.test(wizardState.roomCode)) {
+    toast('房間代碼無效', 'error'); return;
+  }
+  if (!wizardState.role) { toast('未選擇身分', 'error'); return; }
+
   App.cfg = {
     roomCode: wizardState.roomCode,
     role: wizardState.role,
-    name: wizardState.name,
+    name: wizardState.name || (wizardState.role === 'teacher' ? '老師' : '學生'),
     studentId: wizardState.studentId,
     firebaseConfig: wizardState.firebaseConfig,
     dark: false,
     createdAt: Date.now()
   };
-  // If teacher creating new room: seed students nothing; sync minimal meta
   loadDB(App.cfg.roomCode);
   if (!App.db.meta.createdAt) App.db.meta.createdAt = Date.now();
   saveCfg();
   saveDB();
+  App.view = (App.cfg.role === 'teacher') ? 'today' : 'home';
   Sync.init();
-  // If teacher, push room marker
   if (App.cfg.role === 'teacher' && App.fbRef) {
-    App.fbRef.child('meta').set({ createdAt: App.db.meta.createdAt, teacher: App.cfg.name });
+    App.fbRef.child('meta').set({ createdAt: App.db.meta.createdAt, teacher: App.cfg.name }).catch(()=>{});
   }
-  // If student, register themselves into students list
   if (App.cfg.role === 'student') {
     autoRegisterSelf();
   }
-  toast('✓ 設定完成，歡迎！', 'success');
+  // If a v1 import was queued, apply now (after cfg/fb ready)
+  applyV1ImportIfPending();
+  toast('設定完成，歡迎！', 'success');
   rerender();
 }
 
@@ -1148,61 +1334,58 @@ function wizImportV1Do() {
   let v1 = null;
   try { v1 = JSON.parse(localStorage.getItem('cmsDB') || 'null'); } catch(e){}
   if (!v1) { closeModal(); return; }
-  // stash to apply after wizFinish
+  // Stash for post-wizard injection
   wizardState._v1 = v1;
   closeModal();
   wizardState.role = 'teacher';
   wizardState.step = 3;
   wizardState.roomCode = genRoomCode();
-  // After wizFinish, we'll inject the v1 data; hook by overriding wizFinish path
-  const origFinish = wizFinish;
-  window.wizFinish = function() {
-    origFinish();
-    const v = wizardState._v1;
-    if (!v) return;
-    // Convert students: strip _timeUnreliable & other v1 junk
-    App.db.students = (v.students || []).map(s => ({
-      id: s.id || uid(),
-      name: s.name || '',
-      sid: s.sid || '',
-      cls: s.cls || '',
-      seat: s.seat || 0
-    }));
-    App.db.attendance = (v.attendance || [])
-      .filter(a => a && a.studentId && a.date && a.time)
-      .map(a => ({
-        id: a.id || uid(),
-        studentId: a.studentId,
-        studentName: a.studentName || '',
-        date: a.date,
-        time: a.time,
-        type: a.type || 'present',
-        method: a.manual ? 'teacher-manual' : 'imported'
-      }));
-    App.db.messages = (v.messages || []).map(m => ({
-      id: m.id || uid(),
-      from: m.from || 'unknown',
-      fromName: m.fromName || '',
-      to: m.to || 'all',
-      text: m.text || '',
-      ts: m.ts || Date.now()
-    }));
-    saveDB();
-    if (App.fbRef) {
-      Sync.syncStudents();
-      // Bulk push attendance
-      const attObj = {};
-      App.db.attendance.forEach(a => attObj[a.id] = a);
-      App.fbRef.child('attendance').set(attObj);
-      const msgObj = {};
-      App.db.messages.forEach(m => msgObj[m.id] = m);
-      App.fbRef.child('messages').set(msgObj);
-    }
-    toast(`✓ 已匯入 ${App.db.students.length} 位學生 / ${App.db.attendance.length} 筆出席`, 'success');
-    rerender();
-    window.wizFinish = origFinish;
-  };
   renderWizardStep();
+  refreshDots();
+}
+
+// Apply v1 import after wizFinish has set up cfg
+function applyV1ImportIfPending() {
+  const v = wizardState._v1;
+  if (!v) return;
+  wizardState._v1 = null;
+  App.db.students = (v.students || []).map(s => ({
+    id: s.id || uid(),
+    name: s.name || '',
+    sid: s.sid || '',
+    cls: s.cls || '',
+    seat: s.seat || 0,
+    joinedAt: s.joinedAt || Date.now()
+  }));
+  App.db.attendance = (v.attendance || [])
+    .filter(a => a && a.studentId && a.date && a.time && !a._timeUnreliable)
+    .map(a => ({
+      id: a.id || uid(),
+      studentId: a.studentId,
+      studentName: a.studentName || '',
+      date: a.date,
+      time: a.time,
+      type: a.type || 'present',
+      method: a.manual ? 'teacher-manual' : 'imported',
+      ts: a.ts || Date.now()
+    }));
+  App.db.messages = (v.messages || []).map(m => ({
+    id: m.id || uid(),
+    from: m.from || 'unknown',
+    fromName: m.fromName || '',
+    to: m.to || 'all',
+    text: m.text || '',
+    ts: m.ts || Date.now()
+  }));
+  saveDB();
+  if (App.fbRef) {
+    Sync.syncStudents();
+    const attObj = {}; App.db.attendance.forEach(a => attObj[a.id] = a);
+    App.fbRef.child('attendance').set(attObj).catch(()=>{});
+    const msgObj = {}; App.db.messages.forEach(m => msgObj[m.id] = m);
+    App.fbRef.child('messages').set(msgObj).catch(()=>{});
+  }
+  toast(`已匯入 ${App.db.students.length} 位學生 / ${App.db.attendance.length} 筆出席`, 'success');
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1210,14 +1393,16 @@ function wizImportV1Do() {
    ──────────────────────────────────────────────────────────── */
 function renderTeacher(root) {
   const view = App.view;
+  const dotClass = App.online ? 'online' : (App.fbStatus === 'error' ? 'error' : 'offline');
+  const dotTitle = connLabel();
   root.innerHTML = `
     <div class="topbar">
       <div class="topbar-l">
         <div class="brand">
           <div class="brand-mark">課</div>
-          <div style="line-height:1.1">
-            <div>${esc(App.cfg.name)}</div>
-            <div class="tiny muted"><span class="status-dot ${App.online?'online':'offline'}"></span>${App.online?'即時同步中':(App.cfg.firebaseConfig?'重連中…':'單機模式')}</div>
+          <div style="line-height:1.1;min-width:0">
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${esc(App.cfg.name)}</div>
+            <div class="tiny muted"><span class="status-dot ${dotClass}" title="${esc(dotTitle)}"></span><span data-conn-label>${esc(dotTitle)}</span></div>
           </div>
         </div>
       </div>
@@ -1236,10 +1421,21 @@ function renderTeacher(root) {
   `;
 }
 function tNav(key, ic, label) {
-  return `<button class="nav-btn ${App.view===key?'active':''}" onclick="setView('${key}')">
-    <div class="ic">${ic}</div><div>${label}</div></button>`;
+  const badge = (key === 'msg') ? unreadCount() : 0;
+  const badgeHtml = badge > 0 ? `<span class="nav-badge">${badge>9?'9+':badge}</span>` : '';
+  return `<button class="nav-btn ${App.view===key?'active':''}" onclick="setView('${key}')" style="position:relative">
+    <div class="ic">${ic}</div><div>${label}</div>${badgeHtml}</button>`;
 }
-function setView(v) { App.view = v; rerender(); }
+function setView(v) {
+  App.view = v;
+  if (v === 'msg') markMessagesRead();
+  rerender();
+  // Scroll to bottom of msg view
+  if (v === 'msg') setTimeout(() => {
+    const s = document.getElementById('msg-scroll');
+    if (s) s.scrollTop = s.scrollHeight;
+  }, 50);
+}
 
 function renderTeacherMain(view) {
   if (view === 'today') return renderTodayBoard();
@@ -1306,19 +1502,32 @@ function renderQRPage() {
   const code = App.cfg.roomCode;
   const url = location.href.split('#')[0] + '#join=' + code;
   const qr = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(url)}&margin=10`;
+  const canShare = !!(navigator.share);
   return `
     <div class="qr-page">
       <h2>掃 QR 即可簽到</h2>
       <p class="muted small">學生掃描或輸入下方代碼加入</p>
-      <img src="${qr}" alt="QR Code">
-      <div class="room-code-big">${esc(code)}</div>
-      <p class="muted small" style="margin-top:12px">${esc(url)}</p>
-      <div class="row" style="justify-content:center;margin-top:12px">
-        <button class="btn" onclick="copyText('${esc(url)}')">📋 複製連結</button>
+      <img src="${qr}" alt="QR Code" onerror="this.style.opacity=0.3;this.alt='⚠ QR 載入失敗（離線中）'">
+      <div class="room-code-big" onclick="copyText('${esc(code)}')" title="點擊複製" style="cursor:pointer">${esc(code)}</div>
+      <p class="muted small" style="margin-top:12px;word-break:break-all">${esc(url)}</p>
+      <div class="row" style="justify-content:center;margin-top:12px;flex-wrap:wrap">
+        <button class="btn" onclick="copyText('${esc(url).replace(/'/g, "\\'")}')">📋 複製連結</button>
         <button class="btn" onclick="copyText('${esc(code)}')">📋 複製代碼</button>
+        ${canShare ? `<button class="btn btn-primary" onclick="shareRoom()">📤 分享</button>` : ''}
       </div>
     </div>
   `;
+}
+
+function shareRoom() {
+  if (!navigator.share) { toast('此裝置不支援分享', 'warn'); return; }
+  const code = App.cfg.roomCode;
+  const url = location.href.split('#')[0] + '#join=' + code;
+  navigator.share({
+    title: '加入課堂',
+    text: `房間代碼：${code}`,
+    url: url
+  }).catch(() => {});
 }
 
 // ── Students admin
@@ -1345,18 +1554,80 @@ function renderStudentsAdmin() {
 function renderStuListInner() {
   const q = stuSearch.trim().toLowerCase();
   const list = App.db.students.filter(s => !q || (s.name||'').toLowerCase().includes(q) || (s.sid||'').toLowerCase().includes(q));
-  if (!list.length) return `<div class="empty"><span class="em">🔍</span><div class="t">沒有符合的學生</div></div>`;
+  if (!list.length) {
+    return App.db.students.length
+      ? `<div class="empty"><span class="em">🔍</span><div class="t">沒有符合的學生</div></div>`
+      : `<div class="empty"><span class="em">👥</span><div class="t">尚無學生</div><div class="small">點右上「+ 新增」或請學生掃 QR 加入</div></div>`;
+  }
   return list.map(s => `
     <div class="list-item">
       <div class="avatar">${esc((s.name||'?').slice(0,1))}</div>
-      <div class="body">
+      <div class="body" style="cursor:pointer" onclick="viewStudentDetail('${esc(s.id)}')">
         <div class="name">${esc(s.name||'(未命名)')}</div>
         <div class="sub">${esc(s.sid||'—')} · 座號 ${s.seat||'?'} ${s.cls?'· '+esc(s.cls):''}</div>
       </div>
-      <button class="btn btn-sm btn-ghost" onclick="editStudent('${s.id}')">✏️</button>
-      <button class="btn btn-sm btn-ghost" onclick="delStudent('${s.id}')">🗑</button>
+      <button class="btn btn-sm btn-ghost" title="編輯" onclick="editStudent('${esc(s.id)}')">✏️</button>
+      <button class="btn btn-sm btn-ghost" title="刪除" onclick="delStudent('${esc(s.id)}')">🗑</button>
     </div>
   `).join('');
+}
+
+// — Single student attendance history (teacher view)
+function viewStudentDetail(id) {
+  const s = App.db.students.find(x => x.id === id);
+  if (!s) return;
+  const records = App.db.attendance.filter(a => a.studentId === id).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  const totalDays = new Set(App.db.attendance.map(a => a.date)).size;
+  const myDays = new Set(records.filter(r => r.type !== 'leave').map(r => r.date)).size;
+  const rate = totalDays ? Math.round(myDays / totalDays * 100) : 0;
+  openModal(`
+    <div class="modal-head">
+      <h3>${esc(s.name)} 的紀錄</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="row-between" style="margin-bottom:12px">
+        <div>
+          <div class="small muted">學號 ${esc(s.sid||'—')} · 座號 ${s.seat||'?'}</div>
+          <div class="big" style="color:var(--success)">${rate}<span class="muted" style="font-size:14px">%</span></div>
+        </div>
+        ${donutSvg(rate)}
+      </div>
+      <div class="kpi-row">
+        <div class="kpi kpi-success"><div class="v">${myDays}</div><div class="l">出席</div></div>
+        <div class="kpi kpi-warn"><div class="v">${records.filter(r=>r.type==='leave').length}</div><div class="l">請假</div></div>
+        <div class="kpi"><div class="v">${totalDays}</div><div class="l">課堂數</div></div>
+      </div>
+      <hr class="divider">
+      <div class="list" style="max-height:300px;overflow-y:auto">
+        ${records.length ? records.map(r => `
+          <div class="list-item">
+            <div class="avatar">${r.type==='leave'?'📝':'✅'}</div>
+            <div class="body">
+              <div class="name mono">${esc(r.date)}</div>
+              <div class="sub">${r.type==='leave'?'請假':'已簽到'} · ${esc(r.time||'')} ${r.reason?'· '+esc(r.reason):''}</div>
+            </div>
+          </div>
+        `).join('') : '<div class="empty"><span class="em">📭</span><div class="t">尚無紀錄</div></div>'}
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" onclick="closeModal()">關閉</button>
+    </div>
+  `);
+}
+
+// — Donut SVG generator
+function donutSvg(percent) {
+  const r = 50, c = 2 * Math.PI * r;
+  const off = c * (1 - Math.max(0, Math.min(100, percent)) / 100);
+  return `<div class="donut-wrap">
+    <svg class="donut-svg" viewBox="0 0 120 120">
+      <circle class="donut-bg" cx="60" cy="60" r="${r}"></circle>
+      <circle class="donut-fg" cx="60" cy="60" r="${r}" stroke-dasharray="${c}" stroke-dashoffset="${off}"></circle>
+    </svg>
+    <div class="donut-txt">${percent}%<small>出席</small></div>
+  </div>`;
 }
 
 // ── Messages
@@ -1366,25 +1637,30 @@ function renderMessages() {
     <div class="card" style="display:flex;flex-direction:column;height:calc(100dvh - 200px);min-height:400px">
       <div class="card-title"><h3>訊息</h3><span class="pill">${msgs.length}</span></div>
       <div style="flex:1;overflow-y:auto;padding:8px 4px" id="msg-scroll">
-        ${msgs.length ? msgs.map(m => {
-          const me = (m.from === 'teacher');
-          return `<div class="msg ${me?'msg-me':''}">
-            <div>
-              <div class="msg-bubble">${esc(m.text)}</div>
-              <div class="msg-meta">${esc(m.fromName||m.from)} · ${new Date(m.ts).toLocaleString('zh-TW',{hour:'2-digit',minute:'2-digit',month:'numeric',day:'numeric'})}</div>
-            </div>
-          </div>`;
-        }).join('') : '<div class="empty"><span class="em">💬</span><div class="t">尚無訊息</div></div>'}
+        ${msgs.length ? msgs.map(m => renderMsgBubble(m, 'teacher')).join('') : '<div class="empty"><span class="em">💬</span><div class="t">尚無訊息</div><div class="small">在下方傳訊給全班</div></div>'}
       </div>
       <div class="row" style="padding-top:8px;border-top:1px solid var(--border);margin-top:8px">
-        <input class="input" id="msg-input" placeholder="輸入訊息給全班…" onkeydown="if(event.key==='Enter')sendMessage()">
+        <input class="input" id="msg-input" placeholder="輸入訊息給全班…" maxlength="500" onkeydown="if(event.key==='Enter'){event.preventDefault();sendMessage();}">
         <button class="btn btn-primary" onclick="sendMessage()">送出</button>
       </div>
     </div>
   `;
 }
 
-// ── Settings
+// — Render a single message bubble with consistent style + tick
+function renderMsgBubble(m, myId) {
+  const me = (m.from === myId);
+  const t = m.ts ? new Date(m.ts).toLocaleString('zh-TW',{hour:'2-digit',minute:'2-digit',month:'numeric',day:'numeric'}) : '';
+  const tick = me ? `<span class="msg-tick ${(m.readBy && m.readBy.length) ? 'read' : ''}">${(m.readBy && m.readBy.length) ? '✓✓' : '✓'}</span>` : '';
+  return `<div class="msg ${me?'msg-me':''}">
+    <div>
+      <div class="msg-bubble">${esc(m.text)}</div>
+      <div class="msg-meta">${esc(m.fromName||m.from)} · ${t}${tick}</div>
+    </div>
+  </div>`;
+}
+
+// ── Settings (teacher)
 function renderSettings() {
   return `
     <div class="card">
@@ -1397,7 +1673,7 @@ function renderSettings() {
         <hr class="divider">
         <div class="row-between">
           <div><b>即時同步</b>
-            <div class="small muted">${App.cfg.firebaseConfig?(App.online?'✓ 已連線':'重連中…'):'尚未設定'}</div>
+            <div class="small muted"><span class="status-dot ${App.online?'online':(App.fbStatus==='error'?'error':'offline')}"></span><span data-conn-label>${connLabel()}</span></div>
           </div>
           <button class="btn btn-sm" onclick="editFirebaseSettings()">設定</button>
         </div>
@@ -1408,8 +1684,16 @@ function renderSettings() {
         </div>
         <hr class="divider">
         <div class="row-between">
-          <div><b>匯出全部資料</b><div class="small muted">JSON 備份</div></div>
-          <button class="btn btn-sm" onclick="exportAll()">⬇ 下載</button>
+          <div><b>匯出全部資料</b><div class="small muted">JSON / CSV 備份</div></div>
+          <div class="row">
+            <button class="btn btn-sm" onclick="exportAll()">JSON</button>
+            <button class="btn btn-sm" onclick="exportAttendanceCSV()">CSV</button>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="row-between">
+          <div><b>還原備份</b><div class="small muted">匯入 JSON 檔</div></div>
+          <button class="btn btn-sm" onclick="importBackup()">📥 上傳</button>
         </div>
         <hr class="divider">
         <div class="row-between">
@@ -1418,15 +1702,25 @@ function renderSettings() {
         </div>
         <hr class="divider">
         <div class="row-between">
-          <div><b>切換房間 / 重設</b><div class="small muted danger">清除本地設定</div></div>
+          <div><b>重置房間資料</b><div class="small muted" style="color:var(--danger)">清空全部出席紀錄與訊息（保留學生名單）</div></div>
+          <button class="btn btn-sm btn-danger" onclick="resetRoomData()">重置</button>
+        </div>
+        <hr class="divider">
+        <div class="row-between">
+          <div><b>切換房間 / 登出</b><div class="small muted">清除本地設定</div></div>
           <button class="btn btn-sm btn-danger" onclick="resetAll()">登出</button>
         </div>
       </div>
     </div>
     <div class="card" style="margin-top:12px">
-      <h3>關於</h3>
-      <p class="small muted">課程管理系統 v2 · 純前端 + Firebase Realtime DB<br>
-      設計：mobile-first, offline-first, 跨裝置即時同步。</p>
+      <h3>使用說明</h3>
+      <ol style="padding-left:18px;line-height:1.8;color:var(--text-muted);font-size:14px;margin:0">
+        <li>在「點名」頁顯示 QR，學生掃描即可加入</li>
+        <li>學生簽到後，「今天」頁面會即時更新</li>
+        <li>輕點學生方格可手動補簽 / 取消</li>
+        <li>輕點學生名字可看個人歷史紀錄</li>
+        <li>沒設定 Firebase 時為單機模式（仍可跨分頁同步）</li>
+      </ol>
     </div>
   `;
 }
@@ -1435,19 +1729,21 @@ function renderSettings() {
    STUDENT UI
    ──────────────────────────────────────────────────────────── */
 function renderStudent(root) {
+  const dotClass = App.online ? 'online' : (App.fbStatus === 'error' ? 'error' : 'offline');
+  const dotTitle = connLabel();
   root.innerHTML = `
     <div class="topbar">
       <div class="topbar-l">
         <div class="brand">
           <div class="brand-mark">課</div>
-          <div style="line-height:1.1">
-            <div>${esc(App.cfg.name)}</div>
-            <div class="tiny muted"><span class="status-dot ${App.online?'online':'offline'}"></span>${App.online?'已連線':'離線'}</div>
+          <div style="line-height:1.1;min-width:0">
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${esc(App.cfg.name)}</div>
+            <div class="tiny muted"><span class="status-dot ${dotClass}" title="${esc(dotTitle)}"></span><span data-conn-label>${esc(dotTitle)}</span></div>
           </div>
         </div>
       </div>
       <div class="topbar-r">
-        <div class="room-chip" onclick="copyText('${esc(App.cfg.roomCode)}')">🔗 ${esc(App.cfg.roomCode)}</div>
+        <div class="room-chip" onclick="copyText('${esc(App.cfg.roomCode)}')" title="複製代碼">🔗 ${esc(App.cfg.roomCode)}</div>
       </div>
     </div>
     <div class="main" id="s-main">${renderStudentMain()}</div>
@@ -1460,7 +1756,9 @@ function renderStudent(root) {
   `;
 }
 function sNav(k, ic, l) {
-  return `<button class="nav-btn ${App.view===k?'active':''}" onclick="setView('${k}')"><div class="ic">${ic}</div><div>${l}</div></button>`;
+  const badge = (k === 'msg') ? unreadCount() : 0;
+  const badgeHtml = badge > 0 ? `<span class="nav-badge">${badge>9?'9+':badge}</span>` : '';
+  return `<button class="nav-btn ${App.view===k?'active':''}" onclick="setView('${k}')" style="position:relative"><div class="ic">${ic}</div><div>${l}</div>${badgeHtml}</button>`;
 }
 
 function renderStudentMain() {
@@ -1501,9 +1799,9 @@ function renderStudentRecord() {
   const myDays = new Set(mine.filter(a => a.type !== 'leave').map(a => a.date)).size;
   const rate = totalDays ? Math.round(myDays / totalDays * 100) : 0;
   return `
-    <div class="card-hero" style="margin-bottom:12px">
-      <div class="muted small">出席率</div>
-      <h1 class="huge" style="margin-top:4px">${rate}<span class="muted" style="font-size:24px">%</span></h1>
+    <div class="card-hero" style="margin-bottom:12px;text-align:center">
+      <div class="muted small">我的出席率</div>
+      ${donutSvg(rate)}
       <div class="kpi-row" style="margin-top:8px">
         <div class="kpi kpi-success"><div class="v">${myDays}</div><div class="l">出席</div></div>
         <div class="kpi kpi-warn"><div class="v">${mine.filter(a=>a.type==='leave').length}</div><div class="l">請假</div></div>
@@ -1511,15 +1809,15 @@ function renderStudentRecord() {
       </div>
     </div>
     <div class="card">
-      <h3>歷史紀錄</h3>
+      <div class="card-title"><h3>歷史紀錄</h3>${mine.length?`<button class="btn btn-sm btn-ghost" onclick="exportMyRecordCSV()">⬇ CSV</button>`:''}</div>
       ${mine.length ? `<div class="list">${mine.map(a => `
         <div class="list-item">
           <div class="avatar">${a.type==='leave'?'📝':'✅'}</div>
           <div class="body">
             <div class="name mono">${esc(a.date)}</div>
-            <div class="sub">${a.type==='leave'?'請假':'已簽到'} · ${esc(a.time||'')}</div>
+            <div class="sub">${a.type==='leave'?'請假':'已簽到'} · ${esc(a.time||'')}${a.reason?' · '+esc(a.reason):''}</div>
           </div>
-        </div>`).join('')}</div>` : '<div class="empty"><span class="em">📭</span><div class="t">尚無紀錄</div></div>'}
+        </div>`).join('')}</div>` : '<div class="empty"><span class="em">📭</span><div class="t">尚無紀錄</div><div class="small">完成第一次簽到後會顯示在這裡</div></div>'}
     </div>
   `;
 }
@@ -1530,19 +1828,11 @@ function renderStudentMessages() {
   return `
     <div class="card" style="display:flex;flex-direction:column;height:calc(100dvh - 200px);min-height:400px">
       <div class="card-title"><h3>與老師對話</h3></div>
-      <div style="flex:1;overflow-y:auto;padding:8px 4px">
-        ${msgs.length ? msgs.map(m => {
-          const me = (m.from === myId);
-          return `<div class="msg ${me?'msg-me':''}">
-            <div>
-              <div class="msg-bubble">${esc(m.text)}</div>
-              <div class="msg-meta">${esc(m.fromName||m.from)} · ${new Date(m.ts).toLocaleString('zh-TW',{hour:'2-digit',minute:'2-digit',month:'numeric',day:'numeric'})}</div>
-            </div>
-          </div>`;
-        }).join('') : '<div class="empty"><span class="em">💬</span><div class="t">尚無訊息</div></div>'}
+      <div style="flex:1;overflow-y:auto;padding:8px 4px" id="msg-scroll">
+        ${msgs.length ? msgs.map(m => renderMsgBubble(m, myId)).join('') : '<div class="empty"><span class="em">💬</span><div class="t">尚無訊息</div><div class="small">在下方傳訊給老師</div></div>'}
       </div>
       <div class="row" style="padding-top:8px;border-top:1px solid var(--border);margin-top:8px">
-        <input class="input" id="msg-input" placeholder="想對老師說…" onkeydown="if(event.key==='Enter')sendStudentMessage()">
+        <input class="input" id="msg-input" placeholder="想對老師說…" maxlength="500" onkeydown="if(event.key==='Enter'){event.preventDefault();sendStudentMessage();}">
         <button class="btn btn-primary" onclick="sendStudentMessage()">送</button>
       </div>
     </div>
@@ -1560,11 +1850,18 @@ function renderStudentSettings() {
         <div class="row-between"><div><b>房間代碼</b><div class="small muted mono">${esc(App.cfg.roomCode)}</div></div>
           <button class="btn btn-sm" onclick="copyText('${esc(App.cfg.roomCode)}')">📋 複製</button></div>
         <hr class="divider">
-        <div class="row-between"><div><b>外觀</b></div>
-          <button class="btn btn-sm" onclick="toggleDark()">${App.cfg.dark?'☀️':'🌙'}</button></div>
+        <div class="row-between"><div><b>連線狀態</b>
+          <div class="small muted"><span class="status-dot ${App.online?'online':(App.fbStatus==='error'?'error':'offline')}"></span><span data-conn-label>${connLabel()}</span></div></div>
+        </div>
         <hr class="divider">
-        <div class="row-between"><div><b>離開房間</b><div class="small muted danger">清除設定重新加入</div></div>
-          <button class="btn btn-sm btn-danger" onclick="resetAll()">登出</button></div>
+        <div class="row-between"><div><b>外觀</b></div>
+          <button class="btn btn-sm" onclick="toggleDark()">${App.cfg.dark?'☀️ 淺色':'🌙 深色'}</button></div>
+        <hr class="divider">
+        <div class="row-between"><div><b>匯出我的紀錄</b><div class="small muted">CSV</div></div>
+          <button class="btn btn-sm" onclick="exportMyRecordCSV()">⬇ 下載</button></div>
+        <hr class="divider">
+        <div class="row-between"><div><b>離開房間</b><div class="small muted" style="color:var(--danger)">清除設定重新加入</div></div>
+          <button class="btn btn-sm btn-danger" onclick="leaveRoom()">離開</button></div>
       </div>
     </div>
   `;
@@ -1577,15 +1874,19 @@ function renderStudentSettings() {
 function doSignIn(ev) {
   const btn = document.getElementById('signin');
   if (!btn || btn.disabled) return;
+  if (!App.cfg) { toast('尚未設定', 'error'); return; }
   const myId = App.cfg.myStudentId;
-  if (!myId) { toast('找不到您的學生資料，請重新加入房間', 'error'); return; }
+  if (!myId) {
+    // self-heal: re-register if missing
+    autoRegisterSelf();
+    if (!App.cfg.myStudentId) { toast('找不到您的學生資料，請重新加入房間', 'error'); return; }
+  }
   const d = today(), t = nowTime();
-  // local optimistic
-  const exists = App.db.attendance.find(a => a.studentId === myId && a.date === d);
-  if (exists) { toast('今日已簽到', 'warn'); return; }
+  const exists = App.db.attendance.find(a => a.studentId === App.cfg.myStudentId && a.date === d);
+  if (exists) { toast('今日已簽到 ' + (exists.time||'').slice(0,5), 'warn'); return; }
   const entry = {
     id: uid(),
-    studentId: myId,
+    studentId: App.cfg.myStudentId,
     studentName: App.cfg.name,
     date: d, time: t,
     type: 'present',
@@ -1595,26 +1896,23 @@ function doSignIn(ev) {
   btn.classList.add('is-pending');
   App.db.attendance.push(entry);
   saveDB();
-  if (App.fbRef) {
-    App.fbRef.child('attendance/' + entry.id).set(entry).then(() => {
-      btn.classList.remove('is-pending');
-      btn.classList.add('is-done');
-      toast('✅ 已簽到 ' + t.slice(0,5), 'success');
-      const r = btn.getBoundingClientRect();
-      confetti(r.left + r.width/2, r.top + r.height/2);
-      rerender();
-    }).catch(() => {
-      btn.classList.remove('is-pending');
-      toast('離線中：已暫存，連線後自動同步', 'warn');
-      rerender();
-    });
-  } else {
+  const r = btn.getBoundingClientRect();
+
+  const onDone = (synced) => {
     btn.classList.remove('is-pending');
     btn.classList.add('is-done');
-    toast('✅ 已簽到 ' + t.slice(0,5) + '（單機）', 'success');
-    const r = btn.getBoundingClientRect();
     confetti(r.left + r.width/2, r.top + r.height/2);
+    toast('已簽到 ' + t.slice(0,5) + (synced ? '' : '（離線暫存）'), 'success');
     rerender();
+  };
+
+  if (App.fbRef) {
+    Promise.race([
+      App.fbRef.child('attendance/' + entry.id).set(entry).then(() => true),
+      new Promise(res => setTimeout(() => res(false), 3500))
+    ]).then(ok => onDone(!!ok)).catch(() => onDone(false));
+  } else {
+    onDone(true);
   }
 }
 
@@ -1623,13 +1921,14 @@ function toggleMark(sid) {
   const d = today();
   const exists = App.db.attendance.find(a => a.studentId === sid && a.date === d);
   const stu = App.db.students.find(s => s.id === sid);
-  const name = stu ? stu.name : '';
+  if (!stu) { toast('找不到該學生', 'error'); return; }
+  const name = stu.name || '';
   if (exists) {
     confirmDialog(`要清除 ${name} 今日的簽到嗎？`, () => {
       App.db.attendance = App.db.attendance.filter(a => a.id !== exists.id);
       saveDB();
-      if (App.fbRef) App.fbRef.child('attendance/' + exists.id).remove();
-      else rerender();
+      if (App.fbRef) App.fbRef.child('attendance/' + exists.id).remove().catch(()=>{});
+      rerender();
       toast('已清除', 'warn');
     });
   } else {
@@ -1640,36 +1939,40 @@ function toggleMark(sid) {
     };
     App.db.attendance.push(entry);
     saveDB();
-    if (App.fbRef) App.fbRef.child('attendance/' + entry.id).set(entry);
-    else rerender();
-    toast(`✓ 已幫 ${name} 補簽`, 'success');
+    if (App.fbRef) App.fbRef.child('attendance/' + entry.id).set(entry).catch(()=>{});
+    rerender();
+    toast('已幫 ' + name + ' 補簽', 'success');
   }
 }
 
 // — Send message (teacher)
 function sendMessage() {
   const inp = document.getElementById('msg-input');
+  if (!inp) return;
   const text = (inp.value || '').trim();
   if (!text) return;
+  if (text.length > 500) { toast('訊息過長（最多 500 字）', 'error'); return; }
   const m = { id: uid(), from: 'teacher', fromName: App.cfg.name, to: 'all', text, ts: Date.now() };
   App.db.messages.push(m);
   saveDB();
-  if (App.fbRef) App.fbRef.child('messages/' + m.id).set(m);
-  else rerender();
   inp.value = '';
-  if (!App.fbRef) rerender();
+  if (App.fbRef) App.fbRef.child('messages/' + m.id).set(m).catch(()=>{});
+  markMessagesRead();
+  rerender();
 }
 function sendStudentMessage() {
   const inp = document.getElementById('msg-input');
+  if (!inp) return;
   const text = (inp.value || '').trim();
   if (!text) return;
+  if (text.length > 500) { toast('訊息過長（最多 500 字）', 'error'); return; }
   const m = { id: uid(), from: App.cfg.myStudentId, fromName: App.cfg.name, to: 'teacher', text, ts: Date.now() };
   App.db.messages.push(m);
   saveDB();
-  if (App.fbRef) App.fbRef.child('messages/' + m.id).set(m);
-  else rerender();
   inp.value = '';
-  if (!App.fbRef) rerender();
+  if (App.fbRef) App.fbRef.child('messages/' + m.id).set(m).catch(()=>{});
+  markMessagesRead();
+  rerender();
 }
 
 // — Leave request (student)
@@ -1695,23 +1998,23 @@ function submitLeave() {
   const date = document.getElementById('lv-date').value;
   const reason = document.getElementById('lv-reason').value.trim();
   if (!date) { toast('請選日期', 'error'); return; }
-  // Insert attendance entry of type=leave
+  if (!App.cfg.myStudentId) { toast('找不到您的學生資料', 'error'); return; }
+  // Remove existing attendance on same day first
+  const toRemove = App.db.attendance.filter(a => a.studentId === App.cfg.myStudentId && a.date === date);
+  App.db.attendance = App.db.attendance.filter(a => !(a.studentId === App.cfg.myStudentId && a.date === date));
   const entry = {
     id: uid(), studentId: App.cfg.myStudentId, studentName: App.cfg.name,
     date, time: nowHM(), type: 'leave', reason, method: 'student-leave', ts: Date.now()
   };
-  // remove existing on same day first
-  App.db.attendance = App.db.attendance.filter(a => !(a.studentId === entry.studentId && a.date === date));
   App.db.attendance.push(entry);
   saveDB();
   if (App.fbRef) {
-    // simplest: rewrite whole attendance node (small data)
-    const obj = {};
-    App.db.attendance.forEach(a => obj[a.id] = a);
-    App.fbRef.child('attendance').set(obj);
-  } else rerender();
-  toast('✓ 已送出請假', 'success');
+    toRemove.forEach(a => App.fbRef.child('attendance/' + a.id).remove().catch(()=>{}));
+    App.fbRef.child('attendance/' + entry.id).set(entry).catch(()=>{});
+  }
   closeModal();
+  rerender();
+  toast('已送出請假', 'success');
 }
 
 // — Student admin: add/edit/delete
@@ -1732,16 +2035,21 @@ function addStudent() {
 function saveStudent() {
   const name = document.getElementById('ns-name').value.trim();
   if (!name) { toast('請填姓名', 'error'); return; }
+  const sid = document.getElementById('ns-sid').value.trim();
+  // Dedupe (same name+sid)
+  const dup = App.db.students.find(s => s.name === name && (s.sid || '') === sid);
+  if (dup) { toast('已存在同名學生', 'warn'); return; }
   const stu = {
     id: uid(),
     name,
-    sid: document.getElementById('ns-sid').value.trim(),
-    seat: parseInt(document.getElementById('ns-seat').value) || 0
+    sid,
+    seat: parseInt(document.getElementById('ns-seat').value, 10) || (App.db.students.length + 1),
+    joinedAt: Date.now()
   };
   App.db.students.push(stu);
   Sync.syncStudents();
   closeModal();
-  toast('✓ 已新增', 'success');
+  toast('已新增', 'success');
   rerender();
 }
 function editStudent(id) {
@@ -1762,13 +2070,15 @@ function editStudent(id) {
 }
 function updateStudent(id) {
   const s = App.db.students.find(x => x.id === id);
-  if (!s) return;
-  s.name = document.getElementById('es-name').value.trim() || s.name;
+  if (!s) { toast('找不到該學生', 'error'); return; }
+  const nm = document.getElementById('es-name').value.trim();
+  if (!nm) { toast('姓名不可空', 'error'); return; }
+  s.name = nm;
   s.sid = document.getElementById('es-sid').value.trim();
-  s.seat = parseInt(document.getElementById('es-seat').value) || 0;
+  s.seat = parseInt(document.getElementById('es-seat').value, 10) || s.seat || 0;
   Sync.syncStudents();
   closeModal();
-  toast('✓ 已更新', 'success');
+  toast('已更新', 'success');
   rerender();
 }
 function delStudent(id) {
@@ -1956,7 +2266,8 @@ function openHistoryView(d) {
 }
 function toggleDark() {
   App.cfg.dark = !App.cfg.dark;
-  document.documentElement.setAttribute('data-theme', App.cfg.dark ? 'dark' : 'light');
+  if (App.cfg.dark) document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
   saveCfg();
   rerender();
 }
@@ -1986,53 +2297,233 @@ function saveMyName() {
 }
 
 function resetAll() {
-  confirmDialog('登出將清除本機設定（房間資料仍保留在雲端）。確定？', () => {
-    try { localStorage.removeItem(LS_KEY + '_cfg'); } catch(e){}
-    Sync.detachAll();
-    if (App.fb) { try { App.fb.delete(); } catch(e){} }
-    App.cfg = null;
-    App.fb = null;
-    App.fbRef = null;
-    wizardState = { step:1, role:null, mode:null, roomCode:'', name:'', studentId:'', firebaseConfig:null };
-    rerender();
+  confirmDialog(
+    '登出將清除本機設定（房間資料仍保留在雲端）。確定？',
+    () => {
+      try { localStorage.removeItem(LS_KEY + '_cfg'); } catch(e){}
+      Sync.detachAll();
+      if (App.fb) { try { App.fb.delete(); } catch(e){} }
+      App.cfg = null;
+      App.fb = null;
+      App.fbRef = null;
+      App.db = { students: [], attendance: [], messages: [], leaves: [], meta: { createdAt: Date.now(), lastTouched: Date.now() } };
+      wizardState = { step:1, role:null, mode:null, roomCode:'', name:'', studentId:'', firebaseConfig:null };
+      document.documentElement.removeAttribute('data-theme');
+      rerender();
+    },
+    { title: '登出', danger: true, ok: '登出' }
+  );
+}
+
+// — Student: leave room (alias with friendlier label)
+function leaveRoom() {
+  confirmDialog(
+    '離開後將需要重新輸入房間代碼才能加入。\n本機已簽到的紀錄仍會保留在雲端。',
+    () => {
+      try { localStorage.removeItem(LS_KEY + '_cfg'); } catch(e){}
+      Sync.detachAll();
+      if (App.fb) { try { App.fb.delete(); } catch(e){} }
+      App.cfg = null;
+      App.fb = null;
+      App.fbRef = null;
+      App.db = { students: [], attendance: [], messages: [], leaves: [], meta: { createdAt: Date.now(), lastTouched: Date.now() } };
+      wizardState = { step:1, role:null, mode:null, roomCode:'', name:'', studentId:'', firebaseConfig:null };
+      document.documentElement.removeAttribute('data-theme');
+      rerender();
+    },
+    { title: '離開房間', danger: true, ok: '離開' }
+  );
+}
+
+// — Teacher: reset room data (keeps students, clears attendance/messages)
+function resetRoomData() {
+  confirmDialog(
+    '此操作會清空本房間「全部出席紀錄與訊息」，無法復原。\n（學生名單會保留）',
+    () => {
+      App.db.attendance = [];
+      App.db.messages = [];
+      App.db.leaves = [];
+      saveDB();
+      if (App.fbRef) {
+        App.fbRef.child('attendance').remove().catch(()=>{});
+        App.fbRef.child('messages').remove().catch(()=>{});
+        App.fbRef.child('leaves').remove().catch(()=>{});
+      }
+      toast('已重置房間資料', 'warn');
+      rerender();
+    },
+    { title: '重置房間', danger: true, ok: '確定清空' }
+  );
+}
+
+// — Export full attendance as CSV (all dates)
+function exportAttendanceCSV() {
+  const dates = [...new Set(App.db.attendance.map(a => a.date))].sort();
+  if (!dates.length) { toast('尚無出席紀錄', 'warn'); return; }
+  const rows = [['日期','座號','姓名','學號','狀態','時間','備註']];
+  dates.forEach(d => {
+    const dayMap = {};
+    App.db.attendance.filter(a => a.date === d).forEach(a => dayMap[a.studentId] = a);
+    App.db.students.forEach(s => {
+      const a = dayMap[s.id];
+      rows.push([
+        d, s.seat||'', s.name||'', s.sid||'',
+        a ? (a.type==='leave'?'請假':'出席') : '缺席',
+        a ? (a.time||'') : '',
+        a ? (a.reason||a.method||'') : ''
+      ]);
+    });
   });
+  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `attendance_full_${App.cfg.roomCode}_${today()}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('已下載', 'success');
+}
+
+// — Student: export own record
+function exportMyRecordCSV() {
+  const myId = App.cfg.myStudentId;
+  const mine = App.db.attendance.filter(a => a.studentId === myId);
+  if (!mine.length) { toast('您尚無紀錄', 'warn'); return; }
+  const rows = [['日期','狀態','時間','備註']];
+  mine.sort((a,b) => (a.date||'').localeCompare(b.date||'')).forEach(a => {
+    rows.push([ a.date, a.type==='leave'?'請假':'出席', a.time||'', a.reason||a.method||'' ]);
+  });
+  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `my_attendance_${esc(App.cfg.name)}_${today()}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('已下載', 'success');
+}
+
+// — Import backup JSON
+function importBackup() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.onchange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let j = null;
+      try { j = JSON.parse(reader.result); }
+      catch(err) { toast('檔案格式錯誤', 'error'); return; }
+      const bdb = j.db || j;
+      if (!bdb || !Array.isArray(bdb.students)) { toast('找不到學生資料', 'error'); return; }
+      confirmDialog(
+        `將還原 ${bdb.students.length} 位學生與 ${(bdb.attendance||[]).length} 筆出席紀錄。\n目前資料會被覆蓋。`,
+        () => {
+          App.db.students = bdb.students || [];
+          App.db.attendance = bdb.attendance || [];
+          App.db.messages = bdb.messages || [];
+          App.db.leaves = bdb.leaves || [];
+          saveDB();
+          if (App.fbRef) Sync.flushPending();
+          toast('已還原', 'success');
+          rerender();
+        },
+        { title: '還原備份', ok: '還原' }
+      );
+    };
+    reader.readAsText(f, 'utf-8');
+  };
+  input.click();
 }
 
 /* ════════════════════════════════════════════════════════════
    DEEP LINK: #join=ABC123 (auto-fill room code on student wizard)
    ──────────────────────────────────────────────────────────── */
 function handleHash() {
-  const h = location.hash;
-  const m = h.match(/join=([A-Z2-9]{6})/);
-  if (m && !App.cfg) {
-    wizardState.roomCode = m[1];
+  const h = location.hash || '';
+  const m = h.match(HASH_REGEX);
+  if (!m) return;
+  const code = m[1].toUpperCase();
+  if (!ROOM_REGEX.test(code)) return;
+  // Clear hash so refresh doesn't re-trigger
+  try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
+
+  if (!App.cfg) {
+    // Pre-fill wizard at student step 3
+    wizardState.roomCode = code;
     wizardState.role = 'student';
     wizardState.step = 3;
+    return;
   }
+
+  // Already logged in elsewhere — offer to switch
+  if (App.cfg.roomCode === code) {
+    toast('已在房間 ' + code, 'success');
+    return;
+  }
+  confirmDialog(
+    `偵測到房間代碼 ${code}\n要切換到此房間嗎？\n（目前房間 ${App.cfg.roomCode} 的設定會被清除）`,
+    () => {
+      try { localStorage.removeItem(LS_KEY + '_cfg'); } catch(e){}
+      Sync.detachAll();
+      if (App.fb) { try { App.fb.delete(); } catch(e){} App.fb = null; }
+      App.cfg = null;
+      wizardState = { step: 3, role: 'student', mode: null, roomCode: code, name: '', studentId: '', firebaseConfig: null };
+      rerender();
+    },
+    { title: '切換房間', danger: true, ok: '切換', cancel: '留在此房' }
+  );
 }
+window.addEventListener('hashchange', handleHash);
 
 /* ════════════════════════════════════════════════════════════
    BOOT
    ──────────────────────────────────────────────────────────── */
 (function boot() {
-  // Load cfg
-  App.cfg = loadCfg();
-  if (App.cfg && App.cfg.roomCode) {
-    loadDB(App.cfg.roomCode);
-    if (App.cfg.dark) document.documentElement.setAttribute('data-theme', 'dark');
-    Sync.init();
-    // pick default view per role
-    App.view = (App.cfg.role === 'teacher') ? 'today' : 'home';
-  } else {
-    handleHash();
+  // Wrap to surface unexpected errors instead of silent failure
+  try {
+    App.cfg = loadCfg();
+    if (App.cfg && App.cfg.roomCode) {
+      if (App.cfg.dark) document.documentElement.setAttribute('data-theme', 'dark');
+      loadDB(App.cfg.roomCode);
+      App.view = (App.cfg.role === 'teacher') ? 'today' : 'home';
+      Sync.init();
+      // Handle any incoming join hash AFTER cfg loaded (offer switch)
+      handleHash();
+    } else {
+      handleHash();
+    }
+    rerender();
+  } catch (e) {
+    document.getElementById('app').innerHTML = `
+      <div class="setup-wrap"><div class="setup-hero">
+        <div class="setup-mark" style="background:var(--danger)">!</div>
+        <h2>啟動失敗</h2>
+        <p class="muted small">${esc((e && e.message) || '未知錯誤')}</p>
+        <button class="btn btn-primary" onclick="localStorage.clear();location.reload()">重置並重新整理</button>
+      </div></div>`;
   }
-  rerender();
 })();
 
-// Register service worker (existing one from v1 is OK)
+// Service worker (best-effort; ignored if missing)
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+// Reconnect listener: flush pending writes when network returns
+window.addEventListener('online', () => {
+  if (App.cfg && App.cfg.firebaseConfig) {
+    toast('網路恢復，重新連線中…', 'success');
+    Sync.init();
+    setTimeout(() => { try { Sync.flushPending(); } catch(e){} }, 1500);
+  }
+});
+window.addEventListener('offline', () => {
+  setOnline(false, App.cfg && App.cfg.firebaseConfig ? 'connecting' : 'idle');
+  toast('已離線：操作會暫存於本機', 'warn');
+});
 </script>
 </body>
 </html>
