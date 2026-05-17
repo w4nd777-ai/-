@@ -478,6 +478,111 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
 
 .kbd{ font-family:ui-monospace,monospace; background:var(--surface-2); padding:1px 6px; border-radius:4px; font-size:12px; border:1px solid var(--border); }
 
+/* ════════ phase 2 additions ════════ */
+.tabs-line{ display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:14px; overflow-x:auto; }
+.tabs-line button{
+  background:none; border:none; padding:10px 14px; cursor:pointer;
+  font-weight:600; font-size:13px; color:var(--text-muted);
+  border-bottom:2px solid transparent; white-space:nowrap;
+  transition:color var(--tx),border-color var(--tx);
+}
+.tabs-line button.active{ color:var(--primary); border-color:var(--primary); }
+.tabs-line button:hover{ color:var(--text); }
+
+.pill{ display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; background:var(--surface-2); color:var(--text-muted); }
+.pill.urgent{ background:var(--danger-soft); color:var(--danger); }
+.pill.ok{ background:var(--success-soft); color:var(--success); }
+.pill.warn{ background:var(--warn-soft); color:var(--warn); }
+
+.stars{ display:inline-flex; gap:2px; font-size:16px; }
+.stars .s{ cursor:pointer; color:var(--text-faint); transition:color var(--tx); }
+.stars .s.on{ color:#facc15; }
+.stars.readonly .s{ cursor:default; }
+
+.matrix{ width:100%; border-collapse:collapse; font-size:13px; }
+.matrix th,.matrix td{ padding:8px 10px; text-align:center; border-bottom:1px solid var(--border); border-right:1px solid var(--border); }
+.matrix th:first-child,.matrix td:first-child{ text-align:left; font-weight:600; position:sticky; left:0; background:var(--surface); z-index:1; }
+.matrix th{ background:var(--surface-2); font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); }
+.matrix td input{ width:60px; padding:4px 6px; border:1px solid var(--border-strong); border-radius:6px; text-align:center; background:transparent; color:var(--text); }
+.matrix td.total{ font-weight:700; color:var(--primary); background:var(--primary-soft); }
+
+.chart-svg{ width:100%; height:auto; max-height:240px; display:block; }
+.chart-card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); padding:16px; }
+.chart-legend{ display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--text-muted); margin-top:8px; }
+.chart-legend .lg{ display:inline-flex; align-items:center; gap:4px; }
+.chart-legend .sw{ width:10px; height:10px; border-radius:2px; }
+
+.bar-row{ display:flex; align-items:center; gap:10px; padding:6px 0; }
+.bar-row .lab{ flex:0 0 80px; font-size:13px; font-weight:600; }
+.bar-row .bar-wrap{ flex:1; height:18px; background:var(--surface-2); border-radius:9px; overflow:hidden; position:relative; }
+.bar-row .bar{ height:100%; background:linear-gradient(90deg,var(--primary),var(--accent)); border-radius:9px; transition:width .4s ease-out; }
+.bar-row .val{ flex:0 0 50px; font-size:12px; text-align:right; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+
+.heatmap{ display:grid; grid-template-columns:repeat(7,1fr); gap:3px; max-width:340px; }
+.heatmap .cell{ aspect-ratio:1; border-radius:3px; background:var(--surface-2); }
+.heatmap .cell.l1{ background:var(--success-soft); }
+.heatmap .cell.l2{ background:rgba(22,163,74,.4); }
+.heatmap .cell.l3{ background:rgba(22,163,74,.65); }
+.heatmap .cell.l4{ background:var(--success); }
+
+.upload-area{
+  border:2px dashed var(--border-strong); border-radius:var(--r-md);
+  padding:24px 12px; text-align:center; cursor:pointer;
+  transition:all var(--tx);
+}
+.upload-area:hover{ border-color:var(--primary); background:var(--primary-soft); }
+.upload-area.has-file{ border-style:solid; border-color:var(--success); background:var(--success-soft); }
+.upload-area input[type=file]{ display:none; }
+.file-chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px; background:var(--surface-2);
+  border-radius:999px; font-size:12px;
+}
+.file-chip .x{ cursor:pointer; color:var(--text-muted); }
+.file-chip .x:hover{ color:var(--danger); }
+
+.kanban{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+@media(max-width:680px){ .kanban{ grid-template-columns:1fr; } }
+.kanban-col{ background:var(--surface-2); border-radius:var(--r-md); padding:10px; }
+.kanban-col h4{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.kanban-card{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-sm); padding:10px; margin-bottom:8px; cursor:pointer;
+  transition:all var(--tx);
+}
+.kanban-card:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+
+.search-box{
+  position:relative; margin-bottom:12px;
+}
+.search-box input{ padding-left:36px; }
+.search-box::before{
+  content:'🔍'; position:absolute; left:12px; top:50%;
+  transform:translateY(-50%); opacity:.5; pointer-events:none;
+}
+
+.feed-msg{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:12px; margin-bottom:8px;
+}
+.feed-msg .who{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.feed-msg .who .avatar{ width:28px; height:28px; font-size:12px; }
+.feed-msg .text{ font-size:14px; white-space:pre-wrap; word-break:break-word; }
+.feed-msg .when{ font-size:11px; color:var(--text-muted); margin-top:4px; }
+
+.ann-card{
+  border-left:4px solid var(--primary); padding:12px 14px;
+  background:var(--surface); border-radius:var(--r-sm);
+  margin-bottom:8px; box-shadow:var(--shadow-sm);
+}
+.ann-card.pinned{ border-left-color:var(--warn); background:var(--warn-soft); }
+.ann-card h4{ margin-bottom:4px; }
+
+@media (max-width:680px){
+  .matrix{ font-size:12px; }
+  .matrix th,.matrix td{ padding:6px 4px; }
+}
+
 </style>
 </head>
 <body>
@@ -684,7 +789,8 @@ function defaultDB(){
       schoolName: '我的課程',
       teacherName: '老師',
       lateMinutes: 10,     // 上課後幾分鐘算遲到
-      startTime: '08:00'
+      startTime: '08:00',
+      gradeWeights: { att:30, asgn:30, mid:20, final:20 }
     },
     branding: {
       title: '課程管理系統',
@@ -805,7 +911,7 @@ const Sync = (() => {
   }
   function attachListeners(){
     if(!App.fbRef) return;
-    const nodes = ['students','attendance','messages','leaves','pending','announcements','assignments','submissions'];
+    const nodes = ['students','attendance','messages','leaves','pending','announcements','assignments','submissions','evals'];
     nodes.forEach(node => {
       const ref = App.fbRef.child(node);
       const cb = ref.on('value', snap => {
@@ -823,6 +929,13 @@ const Sync = (() => {
       if(v){ App.db.settings = Object.assign(defaultDB().settings, v); saveDB(); }
     });
     App.listeners.push(()=> sref.off('value', scb));
+    // grades is object keyed by studentId
+    const gref = App.fbRef.child('grades');
+    const gcb = gref.on('value', snap => {
+      const v = snap.val();
+      if(v){ App.db.grades = v; saveDB(); }
+    });
+    App.listeners.push(()=> gref.off('value', gcb));
 
     // connection
     const cref = firebase.database().ref('.info/connected');
@@ -955,6 +1068,239 @@ function markMessagesRead(){
   const key = LS_KEY + '_lastread_' + (App.cfg?.roomCode||'local') + '_' + meId;
   const latest = App.db.messages.reduce((m,x)=> Math.max(m, x.ts||0), 0);
   try { localStorage.setItem(key, String(latest)); } catch(e){}
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2: DOMAIN HELPERS
+   ──────────────────────────────────────────────────────────── */
+const FILE_LIMIT = 1024 * 1024; // 1MB
+
+function defaultWeights(){
+  return { att:30, asgn:30, mid:20, final:20 };
+}
+
+function attendanceRate(studentId){
+  // total days = unique dates with at least one attendance
+  const allDates = Array.from(new Set(App.db.attendance.map(a=>a.date))).sort();
+  if(!allDates.length) return 0;
+  const myDays = new Set(App.db.attendance.filter(a => a.studentId === studentId).map(a=>a.date));
+  const leaveDays = new Set(App.db.leaves.filter(l => l.studentId === studentId && l.status === 'approved').map(l=>l.date));
+  let attended = 0;
+  allDates.forEach(d => {
+    if(myDays.has(d) || leaveDays.has(d)) attended++;
+  });
+  return Math.round(100 * attended / allDates.length);
+}
+
+function submissionAvg(studentId){
+  const subs = App.db.submissions.filter(s => s.studentId === studentId && typeof s.score === 'number');
+  if(!subs.length) return 0;
+  const sum = subs.reduce((t,s)=> t + (s.score||0), 0);
+  return Math.round(sum / subs.length);
+}
+
+function submissionRate(studentId){
+  const total = App.db.assignments.filter(a => assignmentTargets(a).has(studentId)).length;
+  if(!total) return 0;
+  const sent = App.db.submissions.filter(s => s.studentId === studentId).length;
+  return Math.round(100 * sent / total);
+}
+
+function assignmentTargets(asg){
+  // returns Set of studentIds this assignment applies to
+  const set = new Set();
+  if(!asg || !asg.target || asg.target === 'all'){
+    App.db.students.forEach(s => set.add(s.id));
+  } else if(asg.target === 'class' && asg.targetCls){
+    App.db.students.filter(s => s.cls === asg.targetCls).forEach(s => set.add(s.id));
+  } else if(asg.target === 'students' && Array.isArray(asg.targetIds)){
+    asg.targetIds.forEach(id => set.add(id));
+  } else {
+    App.db.students.forEach(s => set.add(s.id));
+  }
+  return set;
+}
+
+function assignmentStats(asg){
+  const targets = assignmentTargets(asg);
+  const total = targets.size;
+  const subs = App.db.submissions.filter(s => s.assignmentId === asg.id && targets.has(s.studentId));
+  const submitted = subs.length;
+  const graded = subs.filter(s => typeof s.score === 'number').length;
+  const scores = subs.filter(s => typeof s.score === 'number').map(s => s.score);
+  const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
+  const late = subs.filter(s => isSubmissionLate(asg, s)).length;
+  return { total, submitted, graded, avg, late, rate: total ? Math.round(100*submitted/total) : 0 };
+}
+
+function isSubmissionLate(asg, sub){
+  if(!asg || !asg.dueAt || !sub || !sub.ts) return false;
+  return sub.ts > new Date(asg.dueAt).getTime();
+}
+
+function isAssignmentDueSoon(asg){
+  if(!asg.dueAt) return false;
+  const ms = new Date(asg.dueAt).getTime() - Date.now();
+  return ms > 0 && ms < 24 * 3600 * 1000;
+}
+function isAssignmentOverdue(asg){
+  if(!asg.dueAt) return false;
+  return new Date(asg.dueAt).getTime() < Date.now();
+}
+
+function calcGrade(studentId){
+  const w = (App.db.settings.gradeWeights) || defaultWeights();
+  const att = attendanceRate(studentId);
+  const asgn = submissionAvg(studentId);
+  const g = App.db.grades[studentId] || {};
+  const mid = Number(g.midterm) || 0;
+  const final = Number(g.final) || 0;
+  const total = att * (w.att||0)/100 + asgn * (w.asgn||0)/100
+              + mid * (w.mid||0)/100 + final * (w.final||0)/100;
+  return { att, asgn, mid, final, total: Math.round(total), w };
+}
+
+function studentRank(studentId){
+  const rows = App.db.students.map(s => ({ id:s.id, total: calcGrade(s.id).total }))
+    .sort((a,b) => b.total - a.total);
+  const idx = rows.findIndex(r => r.id === studentId);
+  return { rank: idx < 0 ? null : idx+1, of: rows.length };
+}
+
+function readFileAsBase64(file){
+  return new Promise((resolve, reject) => {
+    if(!file) return resolve(null);
+    if(file.size > FILE_LIMIT) return reject(new Error('檔案超過 1MB 限制'));
+    const fr = new FileReader();
+    fr.onload = () => resolve({
+      name: file.name, type: file.type, size: file.size, data: fr.result
+    });
+    fr.onerror = () => reject(new Error('讀取失敗'));
+    fr.readAsDataURL(file);
+  });
+}
+
+function downloadDataUrl(dataUrl, filename){
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = filename || 'download';
+  a.click();
+}
+
+function downloadCSV(rows, filename){
+  const csv = '﻿' + rows.map(r => r.map(v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"').join(',')).join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  downloadDataUrl(url, filename || ('export_' + td() + '.csv'));
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+}
+
+function downloadPDF(title, htmlContent){
+  // Open a popup window with print-friendly HTML; user can Save-as-PDF.
+  // Avoids huge external lib dependencies.
+  const w = window.open('', '_blank');
+  if(!w) return toast('請允許彈窗以匯出 PDF','warn');
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title||'') + '</title>');
+  w.document.write('<style>body{font-family:-apple-system,"Noto Sans TC",sans-serif;padding:24px;color:#111;}h1{font-size:20px;}h2{font-size:16px;}table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}th,td{padding:6px 8px;border:1px solid #ddd;text-align:left;}th{background:#f4f4f5;}.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;background:#eee;}@media print{button{display:none;}}</style>');
+  w.document.write('</head><body>');
+  w.document.write('<button style="position:fixed;top:10px;right:10px;padding:6px 12px;cursor:pointer;" onclick="window.print()">🖨 列印 / 存 PDF</button>');
+  w.document.write(htmlContent || '');
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(()=> { try { w.print(); } catch(e){} }, 400);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2: SVG CHART HELPERS
+   ──────────────────────────────────────────────────────────── */
+function lineChart(data, opts={}){
+  // data: array of {label, value} or numbers
+  if(!data || !data.length) return '<div class="empty"><div class="ico">📊</div><div>無資料</div></div>';
+  const pts = data.map(d => typeof d === 'number' ? d : (d.value||0));
+  const labels = data.map((d,i) => typeof d === 'object' ? (d.label||String(i)) : String(i));
+  const w = opts.width || 480, h = opts.height || 180;
+  const padL = 36, padR = 12, padT = 14, padB = 26;
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const max = opts.max || Math.max.apply(null, pts.concat([1]));
+  const min = opts.min || 0;
+  const stepX = pts.length > 1 ? innerW / (pts.length - 1) : 0;
+  const sy = v => padT + innerH - (innerH * (v - min) / (max - min || 1));
+  const sx = i => padL + i * stepX;
+  const poly = pts.map((v,i) => sx(i)+','+sy(v)).join(' ');
+  const area = poly + ' ' + sx(pts.length-1) + ',' + (padT+innerH) + ' ' + padL + ',' + (padT+innerH);
+  let g = `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">`;
+  // grid
+  for(let i=0;i<=4;i++){
+    const y = padT + (innerH * i / 4);
+    g += `<line x1="${padL}" y1="${y}" x2="${w-padR}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`;
+    g += `<text x="${padL-6}" y="${y+4}" font-size="10" text-anchor="end" fill="var(--text-muted)">${Math.round(max - (max-min)*i/4)}</text>`;
+  }
+  g += `<polygon points="${area}" fill="var(--primary-soft)" opacity=".5"/>`;
+  g += `<polyline points="${poly}" fill="none" stroke="var(--primary)" stroke-width="2"/>`;
+  pts.forEach((v,i) => {
+    g += `<circle cx="${sx(i)}" cy="${sy(v)}" r="3" fill="var(--primary)"/>`;
+    if(labels[i] && pts.length <= 14){
+      g += `<text x="${sx(i)}" y="${h-8}" font-size="10" text-anchor="middle" fill="var(--text-muted)">${esc(labels[i])}</text>`;
+    }
+  });
+  g += `</svg>`;
+  return g;
+}
+
+function barChart(data, opts={}){
+  if(!data || !data.length) return '<div class="empty"><div class="ico">📊</div><div>無資料</div></div>';
+  const labels = data.map(d => d.label||'');
+  const vals = data.map(d => d.value||0);
+  const w = opts.width || 480, h = opts.height || 180;
+  const padL = 36, padR = 12, padT = 14, padB = 30;
+  const innerW = w - padL - padR, innerH = h - padT - padB;
+  const max = opts.max || Math.max.apply(null, vals.concat([1]));
+  const bw = innerW / vals.length * 0.7;
+  const gap = innerW / vals.length * 0.3;
+  let g = `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">`;
+  for(let i=0;i<=4;i++){
+    const y = padT + (innerH * i / 4);
+    g += `<line x1="${padL}" y1="${y}" x2="${w-padR}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`;
+    g += `<text x="${padL-6}" y="${y+4}" font-size="10" text-anchor="end" fill="var(--text-muted)">${Math.round(max - max*i/4)}</text>`;
+  }
+  vals.forEach((v,i) => {
+    const x = padL + i * (bw + gap) + gap/2;
+    const bh = innerH * v / (max||1);
+    const y = padT + innerH - bh;
+    const color = (opts.colors && opts.colors[i]) || 'var(--primary)';
+    g += `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="${color}" rx="3"><title>${esc(labels[i])}: ${v}</title></rect>`;
+    g += `<text x="${x+bw/2}" y="${h-12}" font-size="10" text-anchor="middle" fill="var(--text-muted)">${esc(labels[i])}</text>`;
+    if(v > 0){
+      g += `<text x="${x+bw/2}" y="${y-3}" font-size="10" text-anchor="middle" fill="var(--text)">${v}</text>`;
+    }
+  });
+  g += `</svg>`;
+  return g;
+}
+
+function donutChart(parts, opts={}){
+  // parts: [{label, value, color}]
+  const total = parts.reduce((a,b)=> a + (b.value||0), 0);
+  if(!total) return '<div class="empty"><div class="ico">🍩</div><div>無資料</div></div>';
+  const r = 60, cx = 80, cy = 80;
+  let acc = 0;
+  let g = `<svg class="chart-svg" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg" style="max-width:200px">`;
+  parts.forEach(p => {
+    const v = p.value||0;
+    if(!v) return;
+    const a0 = acc/total * Math.PI*2 - Math.PI/2;
+    const a1 = (acc+v)/total * Math.PI*2 - Math.PI/2;
+    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+    const large = (v/total > 0.5) ? 1 : 0;
+    g += `<path d="M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z" fill="${p.color||'var(--primary)'}"><title>${esc(p.label||'')}: ${v}</title></path>`;
+    acc += v;
+  });
+  g += `<circle cx="${cx}" cy="${cy}" r="${r*0.55}" fill="var(--surface)"/>`;
+  g += `<text x="${cx}" y="${cy-2}" font-size="22" font-weight="700" text-anchor="middle" fill="var(--text)">${total}</text>`;
+  g += `<text x="${cx}" y="${cy+14}" font-size="10" text-anchor="middle" fill="var(--text-muted)">${esc(opts.label||'總計')}</text>`;
+  g += `</svg>`;
+  return g;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1314,6 +1660,13 @@ function renderSidebarTeacher(){
   side.appendChild(sideItem('attendance','✅','出席管理'));
   side.appendChild(sideItem('leave','📆','請假管理'));
   side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
+  side.appendChild(el('div', { class:'side-section-title' }, '教學'));
+  side.appendChild(sideItem('assignments','📋','作業管理'));
+  side.appendChild(sideItem('submissions','📥','繳交記錄', pendingGradeCount() || null));
+  side.appendChild(sideItem('grades','🎯','學期成績'));
+  side.appendChild(sideItem('evals','💬','課程評價'));
+  side.appendChild(sideItem('announcements','📢','公告管理'));
+  side.appendChild(sideItem('analytics','📈','分析工具'));
   side.appendChild(el('div', { class:'side-section-title' }, '系統'));
   side.appendChild(sideItem('settings','⚙️','設定'));
   side.appendChild(sideItem('firebase','☁️','跨裝置同步'));
@@ -1347,6 +1700,11 @@ function renderSidebarStudent(){
   side.appendChild(sideItem('myatt','📅','出席紀錄'));
   side.appendChild(sideItem('myleave','📆','請假'));
   side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
+  side.appendChild(el('div', { class:'side-section-title' }, '學習'));
+  side.appendChild(sideItem('sasgn','📤','作業', studentNewAssignmentCount() || null));
+  side.appendChild(sideItem('sgrade','🎯','我的成績'));
+  side.appendChild(sideItem('sev','⭐','課程評價'));
+  side.appendChild(sideItem('sann','📢','公告', studentUnreadAnnouncements() || null));
   side.appendChild(sideItem('me','👤','個人'));
 
   side.appendChild(el('div', { style:{flex:'1'} }));
@@ -1366,9 +1724,12 @@ function renderTopbar(role){
   const titles = role === 'teacher' ? {
     overview:'📊 今日總覽', students:'👥 學生名單', attendance:'✅ 出席管理',
     leave:'📆 請假管理', messages:'💬 訊息', settings:'⚙️ 設定', firebase:'☁️ 同步設定',
-    pending:'📥 待審核註冊'
+    pending:'📥 待審核註冊',
+    assignments:'📋 作業管理', submissions:'📥 繳交記錄', grades:'🎯 學期成績',
+    evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具'
   } : {
-    checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人'
+    checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
+    sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告'
   };
   const t = titles[App.view] || (role === 'teacher' ? '課程管理' : '學生');
   bar.appendChild(el('h1', null, t));
@@ -1399,13 +1760,14 @@ function renderBottomNavTeacher(){
   const nav = el('nav', { class:'bottom-nav' });
   const items = [
     { v:'overview', i:'📊', t:'總覽' },
-    { v:'students', i:'👥', t:'學生' },
     { v:'attendance', i:'✅', t:'出席' },
-    { v:'leave', i:'📆', t:'請假' },
-    { v:'messages', i:'💬', t:'訊息', badge: unreadMessages() }
+    { v:'assignments', i:'📋', t:'作業' },
+    { v:'submissions', i:'📥', t:'批改', badge: pendingGradeCount() },
+    { v:'more', i:'⋯', t:'更多' }
   ];
   items.forEach(it => {
-    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''), onclick:()=> go(it.v) },
+    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''),
+      onclick: ()=> it.v === 'more' ? openMoreMenuTeacher() : go(it.v) },
       el('span', { class:'ico' }, it.i),
       el('span', null, it.t)
     );
@@ -1418,13 +1780,14 @@ function renderBottomNavStudent(){
   const nav = el('nav', { class:'bottom-nav' });
   const items = [
     { v:'checkin', i:'✋', t:'簽到' },
-    { v:'myatt', i:'📅', t:'紀錄' },
-    { v:'myleave', i:'📆', t:'請假' },
-    { v:'messages', i:'💬', t:'訊息', badge: unreadMessages() },
-    { v:'me', i:'👤', t:'我' }
+    { v:'sasgn', i:'📤', t:'作業', badge: studentNewAssignmentCount() },
+    { v:'sgrade', i:'🎯', t:'成績' },
+    { v:'sann', i:'📢', t:'公告', badge: studentUnreadAnnouncements() },
+    { v:'more', i:'⋯', t:'更多' }
   ];
   items.forEach(it => {
-    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''), onclick:()=> go(it.v) },
+    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''),
+      onclick: ()=> it.v === 'more' ? openMoreMenuStudent() : go(it.v) },
       el('span', { class:'ico' }, it.i),
       el('span', null, it.t)
     );
@@ -1432,6 +1795,63 @@ function renderBottomNavStudent(){
     nav.appendChild(b);
   });
   return nav;
+}
+
+function openMoreMenuTeacher(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '更多'));
+  const items = [
+    ['students','👥 學生名單'],['leave','📆 請假管理'],['messages','💬 訊息'],
+    ['grades','🎯 學期成績'],['evals','💬 課程評價'],
+    ['announcements','📢 公告管理'],['analytics','📈 分析工具'],
+    ['settings','⚙️ 設定'],['firebase','☁️ 跨裝置同步']
+  ];
+  const grid = el('div', { class:'grid grid-2' });
+  items.forEach(([v,t]) => {
+    grid.appendChild(el('button', { class:'btn', style:{height:'56px'}, onclick:()=> { m.close(); go(v); } }, t));
+  });
+  m.root.appendChild(grid);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(actions);
+}
+
+function openMoreMenuStudent(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '更多'));
+  const items = [
+    ['myatt','📅 出席紀錄'],['myleave','📆 請假'],
+    ['messages','💬 訊息'],['sev','⭐ 課程評價'],['me','👤 個人']
+  ];
+  const grid = el('div', { class:'grid grid-2' });
+  items.forEach(([v,t]) => {
+    grid.appendChild(el('button', { class:'btn', style:{height:'56px'}, onclick:()=> { m.close(); go(v); } }, t));
+  });
+  m.root.appendChild(grid);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(actions);
+}
+
+function pendingGradeCount(){
+  return App.db.submissions ? App.db.submissions.filter(s => typeof s.score !== 'number').length : 0;
+}
+function studentNewAssignmentCount(){
+  if(!App.session || App.session.role !== 'student') return 0;
+  const me = currentStudent(); if(!me) return 0;
+  const subs = new Set(App.db.submissions.filter(s => s.studentId === me.id).map(s => s.assignmentId));
+  return App.db.assignments.filter(a => assignmentTargets(a).has(me.id) && !subs.has(a.id) && !isAssignmentOverdue(a)).length;
+}
+function studentUnreadAnnouncements(){
+  if(!App.session || App.session.role !== 'student') return 0;
+  const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + App.session.id;
+  let last = 0;
+  try { last = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e){}
+  return App.db.announcements.filter(a => (a.ts||0) > last && !isAnnouncementExpired(a)).length;
+}
+function isAnnouncementExpired(a){
+  if(!a.expireAt) return false;
+  return new Date(a.expireAt).getTime() < Date.now();
 }
 
 function toggleTheme(){
@@ -2656,6 +3076,1525 @@ function rMe(content){
 }
 
 /* ════════════════════════════════════════════════════════════
+   PHASE 2 — TEACHER: ASSIGNMENTS (rAsgn)
+   ──────────────────────────────────────────────────────────── */
+function rAsgn(content){
+  const sub = App.subview;
+  if(sub && sub !== 'all' && sub !== 'active' && sub !== 'past'){
+    // detail view
+    const asg = App.db.assignments.find(a => a.id === sub);
+    if(asg) return rAsgnDetail(content, asg);
+  }
+  const tab = (sub === 'past' || sub === 'active') ? sub : 'all';
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '作業管理'),
+      el('div', { class:'muted small' }, '共 ' + App.db.assignments.length + ' 份作業')
+    ),
+    el('div', { class:'flex' },
+      el('button', { class:'btn btn-sm', onclick: exportAssignmentsCSV }, '📤 CSV'),
+      el('button', { class:'btn btn-primary', onclick:()=> openAssignmentEdit() }, '＋ 新增作業')
+    )
+  ));
+
+  const tabs = el('div', { class:'tabs-line' });
+  [['all','全部'],['active','進行中'],['past','已截止']].forEach(([v,t]) => {
+    tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('assignments', v==='all'?null:v) }, t));
+  });
+  content.appendChild(tabs);
+
+  // search
+  const sBox = el('div', { class:'search-box' });
+  const sInp = el('input', { class:'input', placeholder:'搜尋作業標題 / 說明', oninput: e => {
+    App._asgnSearch = e.target.value.toLowerCase();
+    renderList();
+  }});
+  if(App._asgnSearch) sInp.value = App._asgnSearch;
+  sBox.appendChild(sInp);
+  content.appendChild(sBox);
+
+  const listWrap = el('div');
+  content.appendChild(listWrap);
+
+  function renderList(){
+    listWrap.innerHTML = '';
+    let list = App.db.assignments.slice().sort((a,b)=> (b.ts||0)-(a.ts||0));
+    if(tab === 'active') list = list.filter(a => !isAssignmentOverdue(a));
+    else if(tab === 'past') list = list.filter(a => isAssignmentOverdue(a));
+    const q = App._asgnSearch || '';
+    if(q) list = list.filter(a => (a.title||'').toLowerCase().includes(q) || (a.desc||'').toLowerCase().includes(q));
+    if(list.length === 0){
+      listWrap.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '📋'),
+        el('div', null, '沒有作業'),
+        el('button', { class:'btn btn-primary', style:{marginTop:'12px'}, onclick:()=> openAssignmentEdit() }, '＋ 新增第一份作業')
+      ));
+      return;
+    }
+    list.forEach(a => {
+      const st = assignmentStats(a);
+      const overdue = isAssignmentOverdue(a);
+      const soon = isAssignmentDueSoon(a);
+      const card = el('div', { class:'card card-hover', style:{marginBottom:'8px'}, onclick:()=> go('assignments', a.id) });
+      card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'6px'} },
+        el('h3', null, a.title || '(未命名)'),
+        el('div', { class:'flex', style:{gap:'4px'} },
+          overdue ? el('span', { class:'pill urgent' }, '已截止') :
+          soon ? el('span', { class:'pill warn' }, '24h 內到期') :
+          el('span', { class:'pill ok' }, '進行中')
+        )
+      ));
+      if(a.desc) card.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px',whiteSpace:'pre-wrap'} }, (a.desc||'').slice(0,80) + (a.desc.length>80?'...':'')));
+      card.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px',fontSize:'12px'} },
+        el('span', { class:'tag' }, '⏰ ' + (a.dueAt ? new Date(a.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無截止')),
+        el('span', { class:'tag' }, '💯 ' + (a.points||100) + ' 分'),
+        el('span', { class:'tag t-primary' }, '📊 ' + st.submitted + '/' + st.total + ' (' + st.rate + '%)'),
+        st.graded > 0 ? el('span', { class:'tag t-success' }, '平均 ' + st.avg) : null,
+        st.late > 0 ? el('span', { class:'tag t-warn' }, '遲交 ' + st.late) : null
+      ));
+      listWrap.appendChild(card);
+    });
+  }
+  renderList();
+}
+
+function rAsgnDetail(content, asg){
+  const st = assignmentStats(asg);
+  const targets = assignmentTargets(asg);
+  const subsByStu = new Map();
+  App.db.submissions.filter(s => s.assignmentId === asg.id).forEach(s => subsByStu.set(s.studentId, s));
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)'}, onclick:()=> go('assignments') }, '← 返回'),
+      el('h1', null, asg.title || '作業'),
+      el('div', { class:'muted small' }, '截止：' + (asg.dueAt ? new Date(asg.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無'))
+    ),
+    el('div', { class:'flex' },
+      el('button', { class:'btn btn-sm', onclick:()=> openAssignmentEdit(asg) }, '✏️ 編輯'),
+      el('button', { class:'btn btn-sm btn-danger', onclick:()=> deleteAssignment(asg) }, '🗑 刪除')
+    )
+  ));
+
+  if(asg.desc){
+    content.appendChild(el('div', { class:'card', style:{marginBottom:'12px'} },
+      el('h3', null, '📝 作業說明'),
+      el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'6px'} }, asg.desc)
+    ));
+  }
+  if(asg.attach){
+    content.appendChild(el('div', { class:'card', style:{marginBottom:'12px'} },
+      el('h3', null, '📎 附件'),
+      el('div', { class:'flex', style:{marginTop:'6px'} },
+        el('button', { class:'btn btn-sm', onclick:()=> downloadDataUrl(asg.attach.data, asg.attach.name) }, '⬇ ' + asg.attach.name)
+      )
+    ));
+  }
+
+  // stats
+  const grid = el('div', { class:'grid grid-4', style:{marginBottom:'12px'} });
+  grid.appendChild(el('div', { class:'stat s-primary' }, el('div',{class:'num'}, String(st.total)), el('div',{class:'lbl'}, '應繳人數')));
+  grid.appendChild(el('div', { class:'stat s-success' }, el('div',{class:'num'}, String(st.submitted)), el('div',{class:'lbl'}, '已繳交 ('+st.rate+'%)')));
+  grid.appendChild(el('div', { class:'stat s-warn' }, el('div',{class:'num'}, String(st.late)), el('div',{class:'lbl'}, '遲交')));
+  grid.appendChild(el('div', { class:'stat s-accent' }, el('div',{class:'num'}, String(st.avg)), el('div',{class:'lbl'}, '平均分')));
+  content.appendChild(grid);
+
+  // kanban: not submitted / submitted / graded
+  const board = el('div', { class:'kanban' });
+  const colNot = el('div', { class:'kanban-col' });
+  colNot.appendChild(el('h4', null, el('span',null,'❌ 未繳'), el('span', { class:'pill urgent' }, String(st.total - st.submitted))));
+  const colSub = el('div', { class:'kanban-col' });
+  colSub.appendChild(el('h4', null, el('span',null,'📥 已繳·待批'), el('span', { class:'pill warn' }, String(st.submitted - st.graded))));
+  const colGr = el('div', { class:'kanban-col' });
+  colGr.appendChild(el('h4', null, el('span',null,'✅ 已批改'), el('span', { class:'pill ok' }, String(st.graded))));
+
+  App.db.students.filter(s => targets.has(s.id)).sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0)).forEach(s => {
+    const sub = subsByStu.get(s.id);
+    const k = el('div', { class:'kanban-card', onclick: ()=> sub ? openSubmissionGrade(sub) : null });
+    k.appendChild(el('div', { style:{fontWeight:'600'} }, s.name + (s.seat?` (${s.seat})`:'')));
+    k.appendChild(el('div', { class:'tiny muted' }, s.cls || ''));
+    if(!sub){
+      colNot.appendChild(k);
+    } else {
+      const late = isSubmissionLate(asg, sub);
+      k.appendChild(el('div', { class:'tiny', style:{marginTop:'4px'} }, '繳交：' + relTime(sub.ts||0) + (late?' ⚠遲':'') ));
+      if(typeof sub.score === 'number'){
+        k.appendChild(el('div', { style:{marginTop:'4px',fontWeight:'700',color:'var(--success)'} }, sub.score + ' / ' + (asg.points||100)));
+        colGr.appendChild(k);
+      } else {
+        colSub.appendChild(k);
+      }
+    }
+  });
+  board.appendChild(colNot); board.appendChild(colSub); board.appendChild(colGr);
+  content.appendChild(board);
+}
+
+function openAssignmentEdit(asg){
+  const isNew = !asg;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew?'新增作業':'編輯作業'));
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '標題 *'));
+  const iT = el('input', { class:'input', value: asg?.title || '' });
+  fT.appendChild(iT); m.root.appendChild(fT);
+
+  const fD = el('div', { class:'field' });
+  fD.appendChild(el('label', { class:'label' }, '說明'));
+  const iD = el('textarea', { class:'textarea', placeholder:'作業內容、評分標準...' });
+  iD.value = asg?.desc || '';
+  fD.appendChild(iD); m.root.appendChild(fD);
+
+  const row1 = el('div', { class:'row' });
+  const fDue = el('div', { class:'field' });
+  fDue.appendChild(el('label', { class:'label' }, '截止日期時間'));
+  const iDue = el('input', { class:'input', type:'datetime-local', value: asg?.dueAt || '' });
+  fDue.appendChild(iDue); row1.appendChild(fDue);
+  const fPts = el('div', { class:'field' });
+  fPts.appendChild(el('label', { class:'label' }, '滿分'));
+  const iPts = el('input', { class:'input', type:'number', value: asg?.points || 100 });
+  fPts.appendChild(iPts); row1.appendChild(fPts);
+  m.root.appendChild(row1);
+
+  const row2 = el('div', { class:'row' });
+  const fLate = el('div', { class:'field' });
+  fLate.appendChild(el('label', { class:'label' }, '遲交扣分 (%)'));
+  const iLate = el('input', { class:'input', type:'number', value: asg?.latePenalty || 0, min:0, max:100 });
+  fLate.appendChild(iLate); row2.appendChild(fLate);
+  const fTgt = el('div', { class:'field' });
+  fTgt.appendChild(el('label', { class:'label' }, '派發對象'));
+  const iTgt = el('select', { class:'select' });
+  ['all','class','students'].forEach(v => {
+    const opt = el('option', { value:v }, { all:'全班', class:'指定班級', students:'指定學生' }[v]);
+    iTgt.appendChild(opt);
+  });
+  iTgt.value = asg?.target || 'all';
+  fTgt.appendChild(iTgt); row2.appendChild(fTgt);
+  m.root.appendChild(row2);
+
+  // class picker (only when target=class)
+  const fCls = el('div', { class:'field', style:{display:'none'} });
+  fCls.appendChild(el('label', { class:'label' }, '班級'));
+  const iCls = el('select', { class:'select' });
+  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean)));
+  classes.forEach(c => iCls.appendChild(el('option', { value:c }, c)));
+  iCls.value = asg?.targetCls || (classes[0]||'');
+  fCls.appendChild(iCls); m.root.appendChild(fCls);
+
+  // student multi-select (when target=students)
+  const fStu = el('div', { class:'field', style:{display:'none'} });
+  fStu.appendChild(el('label', { class:'label' }, '選擇學生'));
+  const stuBox = el('div', { style:{maxHeight:'160px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
+  const stuChecks = {};
+  App.db.students.forEach(s => {
+    const row = el('label', { class:'flex', style:{padding:'4px'} });
+    const cb = el('input', { type:'checkbox' });
+    if(asg?.targetIds && asg.targetIds.includes(s.id)) cb.checked = true;
+    stuChecks[s.id] = cb;
+    row.appendChild(cb);
+    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + s.name));
+    stuBox.appendChild(row);
+  });
+  fStu.appendChild(stuBox); m.root.appendChild(fStu);
+
+  function syncTgt(){
+    fCls.style.display = iTgt.value === 'class' ? '' : 'none';
+    fStu.style.display = iTgt.value === 'students' ? '' : 'none';
+  }
+  iTgt.addEventListener('change', syncTgt);
+  syncTgt();
+
+  // attachment
+  const fAtt = el('div', { class:'field' });
+  fAtt.appendChild(el('label', { class:'label' }, '題目附件 (≤ 1MB，可選)'));
+  let attached = asg?.attach || null;
+  const upBox = el('div', { class:'upload-area' + (attached?' has-file':'') });
+  function refreshAtt(){
+    upBox.innerHTML = '';
+    if(attached){
+      const chip = el('div', { class:'file-chip' },
+        el('span', null, '📎 ' + attached.name),
+        el('span', { class:'x', onclick: e => { e.stopPropagation(); attached = null; upBox.classList.remove('has-file'); refreshAtt(); } }, '✗')
+      );
+      upBox.appendChild(chip);
+    } else {
+      upBox.appendChild(el('div', null, '點此選擇檔案或拖曳'));
+      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 1MB'));
+    }
+  }
+  const fInp = el('input', { type:'file' });
+  fInp.addEventListener('change', async e => {
+    try {
+      const file = e.target.files[0];
+      const data = await readFileAsBase64(file);
+      if(data){ attached = data; upBox.classList.add('has-file'); refreshAtt(); toast('已加入附件','success'); }
+    } catch(err){ toast(err.message || '上傳失敗','danger'); }
+  });
+  upBox.appendChild(fInp);
+  upBox.addEventListener('click', ()=> fInp.click());
+  fAtt.appendChild(upBox); m.root.appendChild(fAtt);
+  refreshAtt();
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const title = iT.value.trim();
+    if(!title) return toast('標題必填','danger');
+    const rec = isNew ? { id: nid(), ts: Date.now() } : asg;
+    rec.title = title;
+    rec.desc = iD.value;
+    rec.dueAt = iDue.value;
+    rec.points = parseInt(iPts.value,10) || 100;
+    rec.latePenalty = parseInt(iLate.value,10) || 0;
+    rec.target = iTgt.value;
+    rec.targetCls = iCls.value;
+    rec.targetIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
+    rec.attach = attached;
+    rec.createdBy = App.session?.name || '老師';
+    if(isNew) App.db.assignments.push(rec);
+    saveDB();
+    Sync.setMap('assignments', App.db.assignments);
+    bcNotify();
+    toast(isNew?'已新增':'已更新','success');
+    m.close();
+    rerender();
+  }}, isNew?'新增':'儲存'));
+  m.root.appendChild(actions);
+}
+
+async function deleteAssignment(asg){
+  const ok = await confirmDlg('確定刪除「' + asg.title + '」？所有相關繳交也會清除', { danger:true });
+  if(!ok) return;
+  App.db.assignments = App.db.assignments.filter(a => a.id !== asg.id);
+  App.db.submissions = App.db.submissions.filter(s => s.assignmentId !== asg.id);
+  saveDB();
+  Sync.setMap('assignments', App.db.assignments);
+  Sync.setMap('submissions', App.db.submissions);
+  bcNotify();
+  toast('已刪除','warn');
+  go('assignments');
+}
+
+function exportAssignmentsCSV(){
+  const rows = [['標題','截止','滿分','應繳','已繳','繳交率','平均分','遲交']];
+  App.db.assignments.forEach(a => {
+    const st = assignmentStats(a);
+    rows.push([a.title, a.dueAt||'', a.points||100, st.total, st.submitted, st.rate+'%', st.avg, st.late]);
+  });
+  downloadCSV(rows, 'assignments_' + td() + '.csv');
+  toast('已匯出','success');
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — TEACHER: SUBMISSIONS (rSub)
+   ──────────────────────────────────────────────────────────── */
+function rSub(content){
+  const tab = App.subview || 'pending';
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '繳交記錄'),
+      el('div', { class:'muted small' }, '共 ' + App.db.submissions.length + ' 筆繳交')
+    )
+  ));
+
+  const tabs = el('div', { class:'tabs-line' });
+  [['pending','🟡 待批改'],['graded','✅ 已批改'],['late','⚠️ 遲交'],['all','全部']].forEach(([v,t]) => {
+    tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('submissions', v) }, t));
+  });
+  content.appendChild(tabs);
+
+  const sBox = el('div', { class:'search-box' });
+  const sInp = el('input', { class:'input', placeholder:'搜尋學生 / 作業', oninput: e => {
+    App._subSearch = e.target.value.toLowerCase();
+    renderList();
+  }});
+  if(App._subSearch) sInp.value = App._subSearch;
+  sBox.appendChild(sInp);
+  content.appendChild(sBox);
+
+  const listWrap = el('div');
+  content.appendChild(listWrap);
+
+  function renderList(){
+    listWrap.innerHTML = '';
+    let list = App.db.submissions.slice();
+    if(tab === 'pending') list = list.filter(s => typeof s.score !== 'number');
+    else if(tab === 'graded') list = list.filter(s => typeof s.score === 'number');
+    else if(tab === 'late') list = list.filter(s => {
+      const asg = App.db.assignments.find(a => a.id === s.assignmentId);
+      return asg && isSubmissionLate(asg, s);
+    });
+    list.sort((a,b) => (b.ts||0)-(a.ts||0));
+    const q = App._subSearch || '';
+    if(q){
+      list = list.filter(s => {
+        const stu = findStudent(s.studentId);
+        const asg = App.db.assignments.find(x => x.id === s.assignmentId);
+        return (stu?.name||'').toLowerCase().includes(q) || (asg?.title||'').toLowerCase().includes(q);
+      });
+    }
+    if(list.length === 0){
+      listWrap.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '📭'),
+        el('div', null, '沒有符合的繳交記錄')
+      ));
+      return;
+    }
+    const card = el('div', { class:'card' });
+    list.forEach((s, i) => {
+      const stu = findStudent(s.studentId);
+      const asg = App.db.assignments.find(x => x.id === s.assignmentId);
+      const late = asg && isSubmissionLate(asg, s);
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'avatar' }, initials(stu?.name||'?')));
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, (stu?.name||'?') + ' · ' + (asg?.title||'?')),
+        el('div', { class:'sub' },
+          '繳交於 ' + relTime(s.ts||0) +
+          (late?' · ⚠遲交':'') +
+          (typeof s.score === 'number' ? ' · 分數 ' + s.score + '/' + (asg?.points||100) : '')
+        )
+      ));
+      const acts = el('div', { class:'actions' });
+      if(typeof s.score === 'number'){
+        acts.appendChild(el('span', { class:'tag t-success' }, '✓ 已批'));
+      } else {
+        acts.appendChild(el('span', { class:'tag t-warn' }, '待批'));
+      }
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openSubmissionGrade(s, list, i) }, '批改'));
+      row.appendChild(acts);
+      card.appendChild(row);
+    });
+    listWrap.appendChild(card);
+  }
+  renderList();
+}
+
+function openSubmissionGrade(sub, list=null, idx=0){
+  const asg = App.db.assignments.find(a => a.id === sub.assignmentId);
+  const stu = findStudent(sub.studentId);
+  if(!asg || !stu) return toast('找不到資料','danger');
+  const late = isSubmissionLate(asg, sub);
+
+  const m = modal('');
+  m.root.style.maxWidth = '600px';
+  m.root.appendChild(el('h2', null, '批改：' + stu.name));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    asg.title + ' · 滿分 ' + (asg.points||100) + (late?' · ⚠遲交':'')
+  ));
+
+  // submission content
+  const subCard = el('div', { class:'card', style:{marginBottom:'10px',background:'var(--surface-2)'} });
+  subCard.appendChild(el('h4', null, '📥 學生繳交'));
+  if(sub.text){
+    subCard.appendChild(el('div', { style:{whiteSpace:'pre-wrap',marginTop:'6px',fontSize:'13px'} }, sub.text));
+  }
+  if(sub.link){
+    subCard.appendChild(el('div', { style:{marginTop:'6px'} }, el('a', { href: sub.link, target:'_blank' }, '🔗 ' + sub.link)));
+  }
+  if(sub.attach){
+    subCard.appendChild(el('div', { style:{marginTop:'6px'} },
+      el('button', { class:'btn btn-sm', onclick:()=> downloadDataUrl(sub.attach.data, sub.attach.name) }, '⬇ ' + sub.attach.name)
+    ));
+  }
+  if(!sub.text && !sub.link && !sub.attach){
+    subCard.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} }, '(無內容)'));
+  }
+  m.root.appendChild(subCard);
+
+  // grade fields
+  const points = asg.points || 100;
+  let rawScore = typeof sub.score === 'number' ? sub.score : '';
+  const fScore = el('div', { class:'field' });
+  fScore.appendChild(el('label', { class:'label' }, '分數 (0 - ' + points + ')'));
+  const iScore = el('input', { class:'input', type:'number', min:0, max:points, value: rawScore });
+  fScore.appendChild(iScore);
+  m.root.appendChild(fScore);
+
+  if(late && asg.latePenalty > 0){
+    m.root.appendChild(el('div', { class:'small muted', style:{margin:'-8px 0 8px'} },
+      '⚠ 遲交將自動扣 ' + asg.latePenalty + '%（最終分數會自動計算）'
+    ));
+  }
+
+  const fCmt = el('div', { class:'field' });
+  fCmt.appendChild(el('label', { class:'label' }, '評語'));
+  const iCmt = el('textarea', { class:'textarea', placeholder:'寫給學生看的回饋...' });
+  iCmt.value = sub.comment || '';
+  fCmt.appendChild(iCmt);
+  m.root.appendChild(fCmt);
+
+  // AI suggest button (placeholder)
+  m.root.appendChild(el('div', { class:'flex', style:{marginBottom:'10px'} },
+    el('button', { class:'btn btn-sm', onclick: ()=> {
+      const suggestions = [
+        '寫得很完整，論點清晰，條理分明，請繼續保持！',
+        '基本內容正確，但可以再多舉幾個例子佐證。',
+        '架構不錯，建議再加強結論部分的論述。',
+        '想法很有創意！下次可以更注意細節。',
+        '完成度高，文字表達流暢，給予肯定。'
+      ];
+      iCmt.value = suggestions[Math.floor(Math.random()*suggestions.length)];
+      toast('已套用建議評語（可手動修改）','success');
+    }}, '🤖 評語建議')
+  ));
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+
+  function saveGrade(advance){
+    const sc = parseFloat(iScore.value);
+    if(isNaN(sc)) return toast('請輸入分數','danger');
+    let finalScore = sc;
+    if(late && asg.latePenalty > 0){
+      finalScore = Math.round(sc * (1 - asg.latePenalty/100));
+    }
+    sub.score = finalScore;
+    sub.rawScore = sc;
+    sub.comment = iCmt.value;
+    sub.gradedAt = Date.now();
+    sub.gradedBy = App.session?.name || '老師';
+    saveDB();
+    Sync.push('submissions', sub);
+    bcNotify();
+    toast('已儲存批改','success');
+    m.close();
+    if(advance && list && list.length){
+      // find next pending
+      const after = list.slice(idx+1).find(x => typeof x.score !== 'number');
+      if(after){
+        setTimeout(()=> openSubmissionGrade(after, list, list.indexOf(after)), 200);
+      } else {
+        toast('沒有更多待批改！','success');
+        rerender();
+      }
+    } else {
+      rerender();
+    }
+  }
+
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> saveGrade(false) }, '儲存'));
+  if(list && list.length > 1){
+    actions.appendChild(el('button', { class:'btn btn-success', onclick:()=> saveGrade(true) }, '儲存並下一位 →'));
+  }
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — TEACHER: GRADES (rGrades)
+   ──────────────────────────────────────────────────────────── */
+function rGrades(content){
+  if(!App.db.settings.gradeWeights) App.db.settings.gradeWeights = defaultWeights();
+  const w = App.db.settings.gradeWeights;
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '學期成績'),
+      el('div', { class:'muted small' }, '加權公式：出席 ' + w.att + '% + 作業 ' + w.asgn + '% + 期中 ' + w.mid + '% + 期末 ' + w.final + '%')
+    ),
+    el('div', { class:'flex' },
+      el('button', { class:'btn btn-sm', onclick: openGradeWeights }, '⚖ 加權設定'),
+      el('button', { class:'btn btn-sm', onclick: exportGradesCSV }, '📤 CSV'),
+      el('button', { class:'btn btn-sm', onclick: exportGradesPDF }, '📄 PDF')
+    )
+  ));
+
+  if(App.db.students.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '🎯'),
+      el('div', null, '尚無學生')
+    ));
+    return;
+  }
+
+  // search
+  const sBox = el('div', { class:'search-box' });
+  const sInp = el('input', { class:'input', placeholder:'搜尋學生', oninput: e => {
+    App._grSearch = e.target.value.toLowerCase();
+    renderTbl();
+  }});
+  if(App._grSearch) sInp.value = App._grSearch;
+  sBox.appendChild(sInp);
+  content.appendChild(sBox);
+
+  const wrap = el('div', { class:'scroll-x card', style:{padding:'0'} });
+  content.appendChild(wrap);
+  function renderTbl(){
+    wrap.innerHTML = '';
+    const q = App._grSearch || '';
+    let stus = App.db.students.slice();
+    if(q) stus = stus.filter(s => (s.name||'').toLowerCase().includes(q) || (s.cls||'').toLowerCase().includes(q));
+    stus.sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0));
+
+    const tbl = el('table', { class:'matrix' });
+    const thead = el('thead');
+    const trh = el('tr');
+    ['學生','班級','出席','作業','期中','期末','總分','排名',''].forEach(h => trh.appendChild(el('th', null, h)));
+    thead.appendChild(trh); tbl.appendChild(thead);
+
+    const tbody = el('tbody');
+    stus.forEach(s => {
+      const g = calcGrade(s.id);
+      const r = studentRank(s.id);
+      const tr = el('tr');
+      tr.appendChild(el('td', null, s.name + (s.seat?` (${s.seat})`:'')));
+      tr.appendChild(el('td', null, s.cls || '—'));
+      tr.appendChild(el('td', null, g.att + '%'));
+      tr.appendChild(el('td', null, String(g.asgn)));
+      // mid input
+      const tdMid = el('td');
+      const iMid = el('input', { type:'number', min:0, max:100, value: g.mid });
+      iMid.addEventListener('change', () => {
+        if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+        App.db.grades[s.id].midterm = parseFloat(iMid.value) || 0;
+        saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+        renderTbl();
+      });
+      tdMid.appendChild(iMid); tr.appendChild(tdMid);
+      // final input
+      const tdFinal = el('td');
+      const iFinal = el('input', { type:'number', min:0, max:100, value: g.final });
+      iFinal.addEventListener('change', () => {
+        if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+        App.db.grades[s.id].final = parseFloat(iFinal.value) || 0;
+        saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+        renderTbl();
+      });
+      tdFinal.appendChild(iFinal); tr.appendChild(tdFinal);
+      tr.appendChild(el('td', { class:'total' }, String(g.total)));
+      tr.appendChild(el('td', null, r.rank ? '#' + r.rank : '-'));
+      const tdActs = el('td');
+      tdActs.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openGradeComment(s) }, '💬'));
+      tr.appendChild(tdActs);
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    wrap.appendChild(tbl);
+  }
+  renderTbl();
+}
+
+function openGradeWeights(){
+  const w = App.db.settings.gradeWeights || defaultWeights();
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '⚖ 加權設定'));
+  m.root.appendChild(el('p', { class:'small muted' }, '四項權重總和需為 100%'));
+  const inps = {};
+  [['att','出席'],['asgn','作業'],['mid','期中'],['final','期末']].forEach(([k,t]) => {
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, t + ' 權重 (%)'));
+    const i = el('input', { class:'input', type:'number', min:0, max:100, value: w[k]||0 });
+    inps[k] = i; f.appendChild(i);
+    m.root.appendChild(f);
+  });
+  const tot = el('div', { class:'small muted', style:{marginBottom:'10px'} });
+  function recalc(){
+    const s = Object.keys(inps).reduce((t,k) => t + (parseFloat(inps[k].value)||0), 0);
+    tot.textContent = '目前總和：' + s + '%' + (s !== 100 ? ' ⚠ 不等於 100%':'');
+    tot.style.color = s === 100 ? 'var(--success)' : 'var(--warn)';
+  }
+  Object.values(inps).forEach(i => i.addEventListener('input', recalc));
+  recalc();
+  m.root.appendChild(tot);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    App.db.settings.gradeWeights = {
+      att: parseFloat(inps.att.value)||0,
+      asgn: parseFloat(inps.asgn.value)||0,
+      mid: parseFloat(inps.mid.value)||0,
+      final: parseFloat(inps.final.value)||0
+    };
+    saveDB(); Sync.setNode('settings', App.db.settings); bcNotify();
+    toast('已儲存','success');
+    m.close(); rerender();
+  }}, '儲存'));
+  m.root.appendChild(actions);
+}
+
+function openGradeComment(s){
+  if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+  promptDlg('給 ' + s.name + ' 的評語', App.db.grades[s.id].comment || '', { multiline:true }).then(v => {
+    if(v === null) return;
+    App.db.grades[s.id].comment = v;
+    saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+    toast('已儲存','success');
+  });
+}
+
+function exportGradesCSV(){
+  const rows = [['學生','班級','座號','出席%','作業','期中','期末','總分','排名']];
+  App.db.students.forEach(s => {
+    const g = calcGrade(s.id);
+    const r = studentRank(s.id);
+    rows.push([s.name, s.cls||'', s.seat||'', g.att, g.asgn, g.mid, g.final, g.total, r.rank||'-']);
+  });
+  downloadCSV(rows, 'grades_' + td() + '.csv');
+  toast('已下載','success');
+}
+
+function exportGradesPDF(){
+  let html = '<h1>學期成績單</h1><p>' + esc(App.db.settings.schoolName||'') + ' · ' + td() + '</p>';
+  html += '<table><thead><tr><th>學生</th><th>班級</th><th>出席%</th><th>作業</th><th>期中</th><th>期末</th><th>總分</th><th>排名</th></tr></thead><tbody>';
+  App.db.students.forEach(s => {
+    const g = calcGrade(s.id);
+    const r = studentRank(s.id);
+    html += '<tr><td>' + esc(s.name) + '</td><td>' + esc(s.cls||'') + '</td>'
+         + '<td>' + g.att + '</td><td>' + g.asgn + '</td>'
+         + '<td>' + g.mid + '</td><td>' + g.final + '</td>'
+         + '<td><b>' + g.total + '</b></td><td>' + (r.rank||'-') + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  downloadPDF('成績單', html);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — TEACHER: COURSE EVALS (rEv)
+   ──────────────────────────────────────────────────────────── */
+function rEv(content){
+  const tab = App.subview || 'semester';
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px'} },
+    el('div', null,
+      el('h1', null, '課程評價'),
+      el('div', { class:'muted small' }, '學生對課程的回饋')
+    )
+  ));
+
+  const tabs = el('div', { class:'tabs-line' });
+  [['semester','⭐ 學期評價'],['daily','📅 每日評價'],['wall','💬 留言牆']].forEach(([v,t]) => {
+    tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('evals', v) }, t));
+  });
+  content.appendChild(tabs);
+
+  // search
+  const sBox = el('div', { class:'search-box' });
+  const sInp = el('input', { class:'input', placeholder:'搜尋評語 / 學生', oninput: e => {
+    App._evSearch = e.target.value.toLowerCase();
+    renderInner();
+  }});
+  if(App._evSearch) sInp.value = App._evSearch;
+  sBox.appendChild(sInp);
+  content.appendChild(sBox);
+
+  const inner = el('div'); content.appendChild(inner);
+
+  function renderInner(){
+    inner.innerHTML = '';
+    const all = App.db.evals.filter(e => e.type === tab);
+    const q = App._evSearch || '';
+    let list = all.slice();
+    if(q) list = list.filter(e => (e.text||'').toLowerCase().includes(q) || (e.fromName||'').toLowerCase().includes(q));
+    list.sort((a,b)=> (b.ts||0)-(a.ts||0));
+
+    if(tab === 'semester' || tab === 'daily'){
+      // stats
+      const stars = list.filter(e => typeof e.stars === 'number').map(e => e.stars);
+      const avg = stars.length ? (stars.reduce((a,b)=>a+b,0)/stars.length).toFixed(1) : '—';
+      const dist = [1,2,3,4,5].map(n => stars.filter(s => s === n).length);
+      const statCard = el('div', { class:'card', style:{marginBottom:'12px'} });
+      statCard.appendChild(el('div', { class:'flex-between' },
+        el('h3', null, '⭐ 平均評分：' + avg + ' / 5 · 共 ' + list.length + ' 則'),
+        el('span', null)
+      ));
+      const barWrap = el('div', { style:{marginTop:'8px'} });
+      [5,4,3,2,1].forEach(n => {
+        const c = dist[n-1] || 0;
+        const pct = stars.length ? 100 * c / stars.length : 0;
+        const row = el('div', { class:'bar-row' },
+          el('div', { class:'lab' }, '★'.repeat(n)),
+          el('div', { class:'bar-wrap' }, el('div', { class:'bar', style:{width: pct + '%'} })),
+          el('div', { class:'val' }, String(c))
+        );
+        barWrap.appendChild(row);
+      });
+      statCard.appendChild(barWrap);
+      inner.appendChild(statCard);
+    }
+
+    if(list.length === 0){
+      inner.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '💬'),
+        el('div', null, '尚無內容')
+      ));
+      return;
+    }
+    list.forEach(e => {
+      const card = el('div', { class:'feed-msg' });
+      const who = el('div', { class:'who' });
+      who.appendChild(el('div', { class:'avatar' }, initials(e.fromName||'?')));
+      who.appendChild(el('div', null,
+        el('div', { style:{fontWeight:'600'} }, (e.anonymous?'匿名':e.fromName) || '匿名'),
+        el('div', { class:'tiny muted' }, (e.date||'') + ' · ' + relTime(e.ts||0))
+      ));
+      card.appendChild(who);
+      if(typeof e.stars === 'number'){
+        card.appendChild(el('div', { class:'stars readonly' },
+          ...Array.from({length:5}, (_,i) => el('span', { class: 's ' + (i < e.stars?'on':'') }, '★'))
+        ));
+      }
+      if(e.text) card.appendChild(el('div', { class:'text', style:{marginTop:'4px'} }, e.text));
+      inner.appendChild(card);
+    });
+  }
+  renderInner();
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — TEACHER: ANNOUNCEMENTS (rAnn)
+   ──────────────────────────────────────────────────────────── */
+function rAnn(content){
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '公告管理'),
+      el('div', { class:'muted small' }, '發布給全班學生')
+    ),
+    el('button', { class:'btn btn-primary', onclick:()=> openAnnouncementEdit() }, '＋ 新公告')
+  ));
+
+  const sBox = el('div', { class:'search-box' });
+  const sInp = el('input', { class:'input', placeholder:'搜尋', oninput: e => {
+    App._annSearch = e.target.value.toLowerCase(); renderList();
+  }});
+  if(App._annSearch) sInp.value = App._annSearch;
+  sBox.appendChild(sInp);
+  content.appendChild(sBox);
+
+  const listWrap = el('div');
+  content.appendChild(listWrap);
+  function renderList(){
+    listWrap.innerHTML = '';
+    let list = App.db.announcements.slice();
+    const q = App._annSearch || '';
+    if(q) list = list.filter(a => (a.title||'').toLowerCase().includes(q) || (a.body||'').toLowerCase().includes(q));
+    list.sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (b.ts||0)-(a.ts||0));
+    if(list.length === 0){
+      listWrap.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '📢'),
+        el('div', null, '尚無公告')
+      ));
+      return;
+    }
+    list.forEach(a => {
+      const expired = isAnnouncementExpired(a);
+      const card = el('div', { class:'ann-card' + (a.pinned?' pinned':'') });
+      card.appendChild(el('div', { class:'flex-between' },
+        el('h4', null, (a.pinned?'📌 ':'') + (a.title||'') + (expired?' (已過期)':'')),
+        el('div', { class:'flex', style:{gap:'4px'} },
+          el('button', { class:'btn btn-sm', onclick:()=> openAnnouncementEdit(a) }, '✏️'),
+          el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+            const ok = await confirmDlg('刪除這則公告？', { danger:true });
+            if(!ok) return;
+            App.db.announcements = App.db.announcements.filter(x => x.id !== a.id);
+            saveDB(); Sync.setMap('announcements', App.db.announcements); bcNotify();
+            toast('已刪除','warn'); rerender();
+          }}, '🗑')
+        )
+      ));
+      if(a.body) card.appendChild(el('div', { class:'small', style:{marginTop:'4px',whiteSpace:'pre-wrap'} }, a.body));
+      card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+        relTime(a.ts||0) + ' · 由 ' + (a.author||'老師') + ' 發布' +
+        (a.expireAt ? ' · 期限 ' + a.expireAt : '')
+      ));
+      listWrap.appendChild(card);
+    });
+  }
+  renderList();
+}
+
+function openAnnouncementEdit(a){
+  const isNew = !a;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew?'新增公告':'編輯公告'));
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '標題 *'));
+  const iT = el('input', { class:'input', value: a?.title||'' });
+  fT.appendChild(iT); m.root.appendChild(fT);
+
+  const fB = el('div', { class:'field' });
+  fB.appendChild(el('label', { class:'label' }, '內容'));
+  const iB = el('textarea', { class:'textarea', placeholder:'公告內容...' });
+  iB.value = a?.body||''; iB.style.minHeight = '120px';
+  fB.appendChild(iB); m.root.appendChild(fB);
+
+  const row = el('div', { class:'row' });
+  const fE = el('div', { class:'field' });
+  fE.appendChild(el('label', { class:'label' }, '過期日期（可選）'));
+  const iE = el('input', { class:'input', type:'date', value: a?.expireAt||'' });
+  fE.appendChild(iE); row.appendChild(fE);
+  const fP = el('div', { class:'field' });
+  fP.appendChild(el('label', { class:'label' }, '置頂'));
+  const lblP = el('label', { class:'flex', style:{height:'44px',alignItems:'center',padding:'0 12px',border:'1px solid var(--border-strong)',borderRadius:'8px'} });
+  const iP = el('input', { type:'checkbox' });
+  if(a?.pinned) iP.checked = true;
+  lblP.appendChild(iP);
+  lblP.appendChild(el('span', null, ' 釘選此公告'));
+  fP.appendChild(lblP); row.appendChild(fP);
+  m.root.appendChild(row);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const t = iT.value.trim();
+    if(!t) return toast('標題必填','danger');
+    const rec = isNew ? { id:nid(), ts:Date.now() } : a;
+    rec.title = t;
+    rec.body = iB.value;
+    rec.expireAt = iE.value;
+    rec.pinned = iP.checked;
+    rec.author = App.session?.name || '老師';
+    if(isNew) App.db.announcements.push(rec);
+    saveDB();
+    Sync.setMap('announcements', App.db.announcements);
+    bcNotify();
+    toast(isNew?'已發布':'已更新','success');
+    m.close(); rerender();
+  }}, isNew?'發布':'儲存'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — TEACHER: ANALYTICS (rAnalytics)
+   ──────────────────────────────────────────────────────────── */
+function rAnalytics(content){
+  const sub = App.subview || 'main';
+
+  // sub navigation
+  const subnav = el('div', { class:'tabs-line' });
+  [
+    ['main','🏠 主頁'],['health','💚 整體健康度'],['low-att','📉 低出席'],
+    ['overdue','⌛ 逾期未繳'],['dist','📊 成績分布'],['trend','📈 出席趨勢'],
+    ['compare','🔬 班級比較']
+  ].forEach(([v,t]) => {
+    subnav.appendChild(el('button', { class: sub===v?'active':'', onclick:()=> go('analytics', v==='main'?null:v) }, t));
+  });
+  content.appendChild(subnav);
+
+  if(sub === 'main') return rAnalyticsMain(content);
+  if(sub === 'health') return rAnalyticsHealth(content);
+  if(sub === 'low-att') return rAnalyticsLowAtt(content);
+  if(sub === 'overdue') return rAnalyticsOverdue(content);
+  if(sub === 'dist') return rAnalyticsDist(content);
+  if(sub === 'trend') return rAnalyticsTrend(content);
+  if(sub === 'compare') return rAnalyticsCompare(content);
+}
+
+function rAnalyticsMain(content){
+  const total = App.db.students.length;
+  const allAtt = App.db.attendance;
+  const totalAtt = allAtt.length;
+  const totalAsg = App.db.assignments.length;
+  const totalSub = App.db.submissions.length;
+  const grid = el('div', { class:'grid grid-4', style:{marginBottom:'12px'} });
+  grid.appendChild(el('div', { class:'stat s-primary', onclick:()=> go('analytics','health') }, el('div',{class:'num'},String(total)),el('div',{class:'lbl'},'學生數')));
+  grid.appendChild(el('div', { class:'stat s-success' }, el('div',{class:'num'},String(totalAtt)),el('div',{class:'lbl'},'出席紀錄')));
+  grid.appendChild(el('div', { class:'stat s-accent', onclick:()=> go('analytics','dist') }, el('div',{class:'num'},String(totalAsg)),el('div',{class:'lbl'},'作業')));
+  grid.appendChild(el('div', { class:'stat s-warn', onclick:()=> go('analytics','overdue') }, el('div',{class:'num'},String(totalSub)),el('div',{class:'lbl'},'繳交')));
+  content.appendChild(grid);
+
+  // mini links
+  const cards = el('div', { class:'grid grid-3' });
+  [
+    ['health','💚','整體健康度','一眼看完整體狀況'],
+    ['low-att','📉','低出席學生','找出需要關心的同學'],
+    ['overdue','⌛','逾期未繳排行','缺繳作業最多的學生'],
+    ['dist','📊','成績分布','成績段直方圖'],
+    ['trend','📈','出席趨勢','每日出席率折線'],
+    ['compare','🔬','班級比較','跨班級表現對比']
+  ].forEach(([v,i,t,d]) => {
+    cards.appendChild(el('div', { class:'card card-hover', onclick:()=> go('analytics', v) },
+      el('div', { class:'huge' }, i),
+      el('h3', null, t),
+      el('div', { class:'small muted' }, d)
+    ));
+  });
+  content.appendChild(cards);
+}
+
+function rAnalyticsHealth(content){
+  // simple health: attendance rate, submission rate, avg grade
+  const allStu = App.db.students;
+  const totalStu = allStu.length || 1;
+  const att = Math.round(allStu.reduce((t,s)=> t + attendanceRate(s.id), 0) / totalStu);
+  const sub = Math.round(allStu.reduce((t,s)=> t + submissionRate(s.id), 0) / totalStu);
+  const grade = Math.round(allStu.reduce((t,s)=> t + calcGrade(s.id).total, 0) / totalStu);
+  const health = Math.round((att + sub + grade) / 3);
+
+  content.appendChild(el('div', { class:'card', style:{marginBottom:'12px',textAlign:'center'} },
+    el('h2', null, '💚 整體健康度'),
+    el('div', { class:'huge', style:{color: health>=80?'var(--success)':health>=60?'var(--warn)':'var(--danger)'} }, String(health)),
+    el('div', { class:'muted' }, '綜合分數（0-100）')
+  ));
+
+  const grid = el('div', { class:'grid grid-3' });
+  grid.appendChild(el('div', { class:'stat s-success' }, el('div',{class:'num'}, att+'%'), el('div',{class:'lbl'},'平均出席率')));
+  grid.appendChild(el('div', { class:'stat s-primary' }, el('div',{class:'num'}, sub+'%'), el('div',{class:'lbl'},'平均繳交率')));
+  grid.appendChild(el('div', { class:'stat s-accent' }, el('div',{class:'num'}, String(grade)), el('div',{class:'lbl'},'平均成績')));
+  content.appendChild(grid);
+
+  // donut of today's stats
+  const stats = computeTodayStats();
+  const donutCard = el('div', { class:'chart-card', style:{marginTop:'12px'} });
+  donutCard.appendChild(el('h3', null, '🎯 今日班況分布'));
+  donutCard.innerHTML += donutChart([
+    { label:'已簽', value: stats.signed, color:'var(--success)' },
+    { label:'未簽', value: stats.absent, color:'var(--danger)' },
+    { label:'請假', value: stats.leave, color:'var(--accent)' }
+  ], { label:'今日' });
+  donutCard.innerHTML += '<div class="chart-legend"><span class="lg"><span class="sw" style="background:var(--success)"></span>已簽 '+stats.signed+'</span><span class="lg"><span class="sw" style="background:var(--danger)"></span>未簽 '+stats.absent+'</span><span class="lg"><span class="sw" style="background:var(--accent)"></span>請假 '+stats.leave+'</span></div>';
+  content.appendChild(donutCard);
+}
+
+function rAnalyticsLowAtt(content){
+  const rows = App.db.students.map(s => ({ s, rate: attendanceRate(s.id) }))
+    .sort((a,b) => a.rate - b.rate);
+  content.appendChild(el('h2', null, '📉 低出席學生（由低到高）'));
+  if(rows.length === 0) {
+    content.appendChild(el('div', { class:'empty card' }, el('div',{class:'ico'},'📉'),el('div',null,'無資料')));
+    return;
+  }
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  rows.slice(0, 20).forEach(({s, rate}) => {
+    const row = el('div', { class:'bar-row' },
+      el('div', { class:'lab' }, s.name),
+      el('div', { class:'bar-wrap' }, el('div', { class:'bar', style:{
+        width: rate + '%',
+        background: rate < 50 ? 'var(--danger)' : rate < 75 ? 'var(--warn)' : 'var(--success)'
+      }})),
+      el('div', { class:'val' }, rate + '%')
+    );
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+}
+
+function rAnalyticsOverdue(content){
+  // students with most missing submissions
+  const rows = App.db.students.map(s => {
+    const required = App.db.assignments.filter(a => assignmentTargets(a).has(s.id));
+    const submittedIds = new Set(App.db.submissions.filter(x => x.studentId === s.id).map(x => x.assignmentId));
+    const missing = required.filter(a => !submittedIds.has(a.id) && isAssignmentOverdue(a)).length;
+    return { s, missing, total: required.length };
+  }).filter(r => r.missing > 0).sort((a,b) => b.missing - a.missing);
+
+  content.appendChild(el('h2', null, '⌛ 逾期未繳排行'));
+  if(rows.length === 0){
+    content.appendChild(el('div', { class:'empty card' }, el('div',{class:'ico'},'✨'),el('div',null,'沒有人逾期未繳！')));
+    return;
+  }
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  rows.forEach(({s,missing,total}) => {
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'avatar' }, initials(s.name)));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, s.name),
+      el('div', { class:'sub' }, s.cls||'—')
+    ));
+    row.appendChild(el('span', { class:'tag t-danger' }, '⚠ ' + missing + ' / ' + total + ' 份未繳'));
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+}
+
+function rAnalyticsDist(content){
+  // distribution buckets
+  const buckets = [0,0,0,0,0]; // 0-59, 60-69, 70-79, 80-89, 90-100
+  App.db.students.forEach(s => {
+    const t = calcGrade(s.id).total;
+    if(t < 60) buckets[0]++;
+    else if(t < 70) buckets[1]++;
+    else if(t < 80) buckets[2]++;
+    else if(t < 90) buckets[3]++;
+    else buckets[4]++;
+  });
+  content.appendChild(el('h2', null, '📊 成績分布'));
+  const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
+  card.innerHTML += barChart([
+    { label:'0-59', value: buckets[0] },
+    { label:'60-69', value: buckets[1] },
+    { label:'70-79', value: buckets[2] },
+    { label:'80-89', value: buckets[3] },
+    { label:'90-100', value: buckets[4] }
+  ], { colors:['var(--danger)','var(--warn)','#facc15','var(--success)','var(--primary)'] });
+  content.appendChild(card);
+}
+
+function rAnalyticsTrend(content){
+  // last 14 days attendance rate
+  const dates = [];
+  for(let i = 13; i >= 0; i--){
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const ds = d.toISOString().slice(0,10);
+    dates.push(ds);
+  }
+  const totalStu = App.db.students.length || 1;
+  const data = dates.map(ds => {
+    const signed = new Set(App.db.attendance.filter(a => a.date === ds).map(a => a.studentId)).size;
+    return { label: ds.slice(5), value: Math.round(100 * signed / totalStu) };
+  });
+  content.appendChild(el('h2', null, '📈 14 日出席率趨勢'));
+  const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
+  card.innerHTML += lineChart(data, { max:100, min:0 });
+  content.appendChild(card);
+}
+
+function rAnalyticsCompare(content){
+  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean)));
+  content.appendChild(el('h2', null, '🔬 班級比較'));
+  if(classes.length === 0){
+    content.appendChild(el('div', { class:'empty card' }, el('div',{class:'ico'},'🏫'),el('div',null,'學生未分班')));
+    return;
+  }
+  const data = classes.map(c => {
+    const stus = App.db.students.filter(s => s.cls === c);
+    if(!stus.length) return { label:c, att:0, sub:0, grade:0 };
+    return {
+      label: c,
+      att: Math.round(stus.reduce((t,s)=> t + attendanceRate(s.id), 0) / stus.length),
+      sub: Math.round(stus.reduce((t,s)=> t + submissionRate(s.id), 0) / stus.length),
+      grade: Math.round(stus.reduce((t,s)=> t + calcGrade(s.id).total, 0) / stus.length)
+    };
+  });
+
+  const card1 = el('div', { class:'chart-card', style:{marginTop:'10px'} });
+  card1.appendChild(el('h3', null, '出席率比較'));
+  card1.innerHTML += barChart(data.map(d => ({ label:d.label, value:d.att })), { max:100 });
+  content.appendChild(card1);
+
+  const card2 = el('div', { class:'chart-card', style:{marginTop:'10px'} });
+  card2.appendChild(el('h3', null, '繳交率比較'));
+  card2.innerHTML += barChart(data.map(d => ({ label:d.label, value:d.sub })), { max:100, colors: data.map(()=>'var(--accent)') });
+  content.appendChild(card2);
+
+  const card3 = el('div', { class:'chart-card', style:{marginTop:'10px'} });
+  card3.appendChild(el('h3', null, '平均成績比較'));
+  card3.innerHTML += barChart(data.map(d => ({ label:d.label, value:d.grade })), { max:100, colors: data.map(()=>'var(--success)') });
+  content.appendChild(card3);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — STUDENT: ASSIGNMENTS (rSAsgn)
+   ──────────────────────────────────────────────────────────── */
+function rSAsgn(content){
+  const me = currentStudent(); if(!me) return;
+
+  // detail?
+  if(App.subview && !['all','pending','done','overdue'].includes(App.subview)){
+    const asg = App.db.assignments.find(a => a.id === App.subview);
+    if(asg) return rSAsgnDetail(content, asg, me);
+  }
+
+  const tab = App.subview || 'pending';
+  content.appendChild(el('h1', null, '📤 我的作業'));
+
+  const all = App.db.assignments.filter(a => assignmentTargets(a).has(me.id));
+  const subs = App.db.submissions.filter(s => s.studentId === me.id);
+  const subMap = new Map(subs.map(s => [s.assignmentId, s]));
+
+  const tabs = el('div', { class:'tabs-line' });
+  const counts = {
+    pending: all.filter(a => !subMap.has(a.id) && !isAssignmentOverdue(a)).length,
+    done: all.filter(a => subMap.has(a.id)).length,
+    overdue: all.filter(a => !subMap.has(a.id) && isAssignmentOverdue(a)).length,
+    all: all.length
+  };
+  [['pending','未繳','urgent'],['done','已繳','ok'],['overdue','逾期','urgent'],['all','全部','']].forEach(([v,t,p]) => {
+    const b = el('button', { class: tab===v?'active':'', onclick:()=> go('sasgn', v) }, t);
+    if(counts[v] > 0) b.appendChild(el('span', { class:'pill ' + p, style:{marginLeft:'4px'} }, String(counts[v])));
+    tabs.appendChild(b);
+  });
+  content.appendChild(tabs);
+
+  let list = all.slice();
+  if(tab === 'pending') list = list.filter(a => !subMap.has(a.id) && !isAssignmentOverdue(a));
+  else if(tab === 'done') list = list.filter(a => subMap.has(a.id));
+  else if(tab === 'overdue') list = list.filter(a => !subMap.has(a.id) && isAssignmentOverdue(a));
+  list.sort((a,b) => {
+    const da = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
+    const db = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
+    return da - db;
+  });
+
+  if(list.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '✨'),
+      el('div', null, '沒有作業')
+    ));
+    return;
+  }
+  list.forEach(a => {
+    const sub = subMap.get(a.id);
+    const soon = isAssignmentDueSoon(a);
+    const overdue = isAssignmentOverdue(a) && !sub;
+    const card = el('div', { class:'card card-hover', style:{marginBottom:'8px', borderColor: soon&&!sub ? 'var(--danger)' : ''}, onclick:()=> go('sasgn', a.id) });
+    card.appendChild(el('div', { class:'flex-between' },
+      el('h3', null, a.title || ''),
+      sub ?
+        (typeof sub.score === 'number' ? el('span', { class:'pill ok' }, '✓ 已批 ' + sub.score + '/' + (a.points||100))
+                                       : el('span', { class:'pill warn' }, '已繳·待批'))
+      : overdue ? el('span', { class:'pill urgent' }, '已逾期')
+      : soon ? el('span', { class:'pill urgent' }, '⚠ 24h 內到期')
+      : el('span', { class:'pill' }, '未繳')
+    ));
+    if(a.desc) card.appendChild(el('div', { class:'small muted', style:{margin:'4px 0',whiteSpace:'pre-wrap'} }, (a.desc||'').slice(0,80)));
+    card.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px',fontSize:'12px'} },
+      el('span', { class:'tag' }, '⏰ ' + (a.dueAt ? new Date(a.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無截止')),
+      el('span', { class:'tag' }, '💯 ' + (a.points||100))
+    ));
+    content.appendChild(card);
+  });
+}
+
+function rSAsgnDetail(content, asg, me){
+  content.appendChild(el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',marginBottom:'8px'}, onclick:()=> go('sasgn') }, '← 返回'));
+  content.appendChild(el('h1', null, asg.title || ''));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '截止：' + (asg.dueAt ? new Date(asg.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無') + ' · 滿分 ' + (asg.points||100)
+  ));
+
+  const soon = isAssignmentDueSoon(asg);
+  const overdue = isAssignmentOverdue(asg);
+  if(soon){
+    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--danger)',background:'var(--danger-soft)',marginBottom:'10px'} },
+      el('div', { style:{color:'var(--danger)',fontWeight:'700'} }, '⚠ 24 小時內到期！請盡快繳交')
+    ));
+  }
+
+  if(asg.desc){
+    content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
+      el('h3', null, '📝 作業說明'),
+      el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'4px'} }, asg.desc)
+    ));
+  }
+  if(asg.attach){
+    content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
+      el('h3', null, '📎 老師附件'),
+      el('button', { class:'btn btn-sm', style:{marginTop:'4px'}, onclick:()=> downloadDataUrl(asg.attach.data, asg.attach.name) }, '⬇ ' + asg.attach.name)
+    ));
+  }
+
+  const existing = App.db.submissions.find(s => s.studentId === me.id && s.assignmentId === asg.id);
+
+  if(existing && typeof existing.score === 'number'){
+    // graded view
+    const card = el('div', { class:'card', style:{borderColor:'var(--success)',background:'var(--success-soft)'} });
+    card.appendChild(el('h3', null, '✅ 已批改'));
+    card.appendChild(el('div', { class:'huge', style:{color:'var(--success)',textAlign:'center',marginTop:'4px'} }, existing.score + ' / ' + (asg.points||100)));
+    if(existing.comment){
+      card.appendChild(el('div', { style:{marginTop:'8px',padding:'8px',background:'var(--surface)',borderRadius:'8px'} },
+        el('div', { class:'small', style:{fontWeight:'600',marginBottom:'4px'} }, '💬 老師評語'),
+        el('div', { class:'small', style:{whiteSpace:'pre-wrap'} }, existing.comment)
+      ));
+    }
+    card.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'8px'}, onclick: ()=> markSubmissionRead(existing) }, '✓ 標記已讀'));
+    content.appendChild(card);
+    return;
+  }
+
+  if(existing){
+    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'10px'} },
+      el('h3', null, '⌛ 已繳交，等待批改'),
+      el('div', { class:'small muted', style:{marginTop:'4px'} }, '繳交於 ' + relTime(existing.ts||0))
+    ));
+    content.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+      const ok = await confirmDlg('要撤回這次繳交以重新提交嗎？', { danger:true });
+      if(!ok) return;
+      App.db.submissions = App.db.submissions.filter(x => x.id !== existing.id);
+      saveDB(); Sync.setMap('submissions', App.db.submissions); bcNotify();
+      toast('已撤回','warn'); rerender();
+    }}, '🔄 撤回繳交'));
+    return;
+  }
+
+  // submission form
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '📤 ' + (overdue?'(已逾期) ':'') + '繳交作業'));
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '文字內容（可選）'));
+  const iT = el('textarea', { class:'textarea', placeholder:'寫下你的回答...' });
+  fT.appendChild(iT); card.appendChild(fT);
+
+  const fL = el('div', { class:'field' });
+  fL.appendChild(el('label', { class:'label' }, '連結（可選）'));
+  const iL = el('input', { class:'input', placeholder:'https://...' });
+  fL.appendChild(iL); card.appendChild(fL);
+
+  // file
+  const fF = el('div', { class:'field' });
+  fF.appendChild(el('label', { class:'label' }, '檔案（≤ 1MB，可選）'));
+  let attached = null;
+  const upBox = el('div', { class:'upload-area' });
+  const fInp = el('input', { type:'file' });
+  function refresh(){
+    upBox.innerHTML = '';
+    if(attached){
+      upBox.classList.add('has-file');
+      const chip = el('div', { class:'file-chip' },
+        el('span', null, '📎 ' + attached.name),
+        el('span', { class:'x', onclick: e => { e.stopPropagation(); attached = null; upBox.classList.remove('has-file'); refresh(); }}, '✗')
+      );
+      upBox.appendChild(chip);
+    } else {
+      upBox.appendChild(el('div', null, '點此選擇檔案'));
+      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 1MB'));
+    }
+  }
+  fInp.addEventListener('change', async e => {
+    try {
+      const file = e.target.files[0];
+      const data = await readFileAsBase64(file);
+      if(data){ attached = data; refresh(); }
+    } catch(err){ toast(err.message,'danger'); }
+  });
+  upBox.appendChild(fInp);
+  upBox.addEventListener('click', ()=> fInp.click());
+  fF.appendChild(upBox); card.appendChild(fF);
+  refresh();
+
+  card.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick:()=> {
+    const txt = iT.value.trim();
+    const lnk = iL.value.trim();
+    if(!txt && !lnk && !attached) return toast('至少填一項內容','danger');
+    const rec = {
+      id: nid(), assignmentId: asg.id,
+      studentId: me.id, studentName: me.name,
+      text: txt, link: lnk, attach: attached,
+      ts: Date.now()
+    };
+    App.db.submissions.push(rec);
+    saveDB();
+    Sync.push('submissions', rec);
+    bcNotify();
+    toast('已繳交！','success');
+    rerender();
+  }}, '✅ 送出繳交'));
+  content.appendChild(card);
+}
+
+function markSubmissionRead(sub){
+  sub.read = true;
+  saveDB();
+  Sync.push('submissions', sub);
+  bcNotify();
+  toast('已標記','success');
+  rerender();
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — STUDENT: MY GRADE (rSGrade)
+   ──────────────────────────────────────────────────────────── */
+function rSGrade(content){
+  const me = currentStudent(); if(!me) return;
+  const g = calcGrade(me.id);
+  const r = studentRank(me.id);
+
+  content.appendChild(el('h1', null, '🎯 我的成績'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '加權公式：出席 ' + g.w.att + '% + 作業 ' + g.w.asgn + '% + 期中 ' + g.w.mid + '% + 期末 ' + g.w.final + '%'
+  ));
+
+  const big = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
+  big.appendChild(el('div', { class:'muted' }, '學期總分'));
+  big.appendChild(el('div', { class:'huge', style:{color:g.total>=80?'var(--success)':g.total>=60?'var(--warn)':'var(--danger)'} }, String(g.total)));
+  if(r.rank){
+    big.appendChild(el('div', { class:'muted small' }, '班級排名：第 ' + r.rank + ' / ' + r.of + ' 名'));
+  }
+  content.appendChild(big);
+
+  const grid = el('div', { class:'grid grid-2', style:{marginTop:'12px'} });
+  [
+    ['出席率', g.att+'%', 'success'],
+    ['作業平均', g.asgn, 'primary'],
+    ['期中', g.mid, 'accent'],
+    ['期末', g.final, 'warn']
+  ].forEach(([lbl,val,clr]) => {
+    grid.appendChild(el('div', { class:'stat s-'+clr },
+      el('div', { class:'num' }, String(val)),
+      el('div', { class:'lbl' }, lbl)
+    ));
+  });
+  content.appendChild(grid);
+
+  // teacher comment
+  const comment = App.db.grades[me.id]?.comment;
+  if(comment){
+    content.appendChild(el('div', { class:'card', style:{marginTop:'12px',background:'var(--accent-soft)',borderColor:'var(--accent)'} },
+      el('h3', null, '💬 老師評語'),
+      el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'4px'} }, comment)
+    ));
+  }
+
+  // submission list
+  const subs = App.db.submissions.filter(s => s.studentId === me.id && typeof s.score === 'number')
+    .sort((a,b)=> (b.gradedAt||0)-(a.gradedAt||0));
+  if(subs.length){
+    const card = el('div', { class:'card', style:{marginTop:'12px'} });
+    card.appendChild(el('h3', null, '📋 作業成績'));
+    subs.forEach(s => {
+      const asg = App.db.assignments.find(x => x.id === s.assignmentId);
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, asg?.title || '?'),
+        el('div', { class:'sub' }, relTime(s.gradedAt||s.ts||0))
+      ));
+      row.appendChild(el('span', { class:'tag t-success' }, s.score + ' / ' + (asg?.points||100)));
+      card.appendChild(row);
+    });
+    content.appendChild(card);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — STUDENT: EVALS (rSEv)
+   ──────────────────────────────────────────────────────────── */
+function rSEv(content){
+  const me = currentStudent(); if(!me) return;
+  const tab = App.subview || 'semester';
+
+  content.appendChild(el('h1', null, '⭐ 課程評價'));
+  const tabs = el('div', { class:'tabs-line' });
+  [['semester','⭐ 學期評價'],['daily','📅 每日評價'],['wall','💬 留言牆']].forEach(([v,t]) => {
+    tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('sev', v) }, t));
+  });
+  content.appendChild(tabs);
+
+  // entry form
+  const formCard = el('div', { class:'card', style:{marginBottom:'12px'} });
+  if(tab === 'semester' || tab === 'daily'){
+    formCard.appendChild(el('h3', null, tab==='semester'?'給學期評分':'今日課程感想'));
+    let chosen = 5;
+    const starsEl = el('div', { class:'stars' });
+    function paintStars(){
+      starsEl.innerHTML = '';
+      for(let i=1;i<=5;i++){
+        const s = el('span', { class:'s ' + (i<=chosen?'on':'') }, '★');
+        s.addEventListener('click', ()=> { chosen = i; paintStars(); });
+        starsEl.appendChild(s);
+      }
+    }
+    paintStars();
+    formCard.appendChild(starsEl);
+    const ta = el('textarea', { class:'textarea', placeholder:'分享你的想法（可選）', style:{marginTop:'8px'} });
+    formCard.appendChild(ta);
+    const lblAnon = el('label', { class:'flex', style:{marginTop:'8px',fontSize:'13px'} });
+    const cbAnon = el('input', { type:'checkbox' });
+    lblAnon.appendChild(cbAnon);
+    lblAnon.appendChild(el('span', null, ' 匿名提交'));
+    formCard.appendChild(lblAnon);
+    formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick:()=> {
+      const rec = {
+        id: nid(), type: tab,
+        stars: chosen, text: ta.value.trim(),
+        date: td(),
+        fromId: me.id, fromName: me.name,
+        anonymous: cbAnon.checked,
+        ts: Date.now()
+      };
+      App.db.evals.push(rec);
+      saveDB(); Sync.push('evals', rec); bcNotify();
+      toast('已送出！','success');
+      ta.value = '';
+      rerender();
+    }}, '📤 送出'));
+  } else {
+    // wall
+    formCard.appendChild(el('h3', null, '✍️ 發表留言'));
+    const ta = el('textarea', { class:'textarea', placeholder:'寫下任何想說的話...', style:{marginTop:'8px'} });
+    formCard.appendChild(ta);
+    formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick:()=> {
+      const text = ta.value.trim();
+      if(!text) return toast('內容不可空','danger');
+      const rec = {
+        id: nid(), type:'wall', text, date:td(),
+        fromId: me.id, fromName: me.name, ts: Date.now()
+      };
+      App.db.evals.push(rec);
+      saveDB(); Sync.push('evals', rec); bcNotify();
+      toast('已發布！','success');
+      ta.value = '';
+      rerender();
+    }}, '📤 發布'));
+  }
+  content.appendChild(formCard);
+
+  // existing
+  const list = App.db.evals.filter(e => e.type === tab).slice().sort((a,b)=> (b.ts||0)-(a.ts||0));
+  if(list.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '💬'),
+      el('div', null, '尚無內容，成為第一個吧')
+    ));
+    return;
+  }
+  list.forEach(e => {
+    const card = el('div', { class:'feed-msg' });
+    const who = el('div', { class:'who' });
+    who.appendChild(el('div', { class:'avatar' }, initials(e.anonymous?'?':e.fromName||'?')));
+    who.appendChild(el('div', null,
+      el('div', { style:{fontWeight:'600'} }, e.anonymous?'匿名':e.fromName),
+      el('div', { class:'tiny muted' }, (e.date||'') + ' · ' + relTime(e.ts||0))
+    ));
+    card.appendChild(who);
+    if(typeof e.stars === 'number'){
+      card.appendChild(el('div', { class:'stars readonly' },
+        ...Array.from({length:5}, (_,i) => el('span', { class: 's ' + (i < e.stars?'on':'') }, '★'))
+      ));
+    }
+    if(e.text) card.appendChild(el('div', { class:'text' }, e.text));
+    if(e.fromId === me.id){
+      card.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
+        const ok = await confirmDlg('刪除你的這則？', { danger:true });
+        if(!ok) return;
+        App.db.evals = App.db.evals.filter(x => x.id !== e.id);
+        saveDB(); Sync.setMap('evals', App.db.evals); bcNotify();
+        toast('已刪除','warn'); rerender();
+      }}, '🗑'));
+    }
+    content.appendChild(card);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 2 — STUDENT: ANNOUNCEMENTS (rSAnn)
+   ──────────────────────────────────────────────────────────── */
+function rSAnn(content){
+  const me = currentStudent(); if(!me) return;
+  content.appendChild(el('h1', null, '📢 公告'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '老師發布的最新訊息'));
+
+  // mark read on entry
+  try {
+    const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + me.id;
+    const latest = App.db.announcements.reduce((m,a)=> Math.max(m, a.ts||0), 0);
+    localStorage.setItem(key, String(latest));
+  } catch(e){}
+
+  let list = App.db.announcements.slice().sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (b.ts||0)-(a.ts||0));
+  list = list.filter(a => !isAnnouncementExpired(a));
+  if(list.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📭'),
+      el('div', null, '目前沒有公告')
+    ));
+    return;
+  }
+  list.forEach(a => {
+    const card = el('div', { class:'ann-card' + (a.pinned?' pinned':'') });
+    card.appendChild(el('h4', null, (a.pinned?'📌 ':'') + (a.title||'')));
+    if(a.body) card.appendChild(el('div', { class:'small', style:{marginTop:'4px',whiteSpace:'pre-wrap'} }, a.body));
+    card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px'} },
+      relTime(a.ts||0) + ' · 由 ' + (a.author||'老師')
+    ));
+    content.appendChild(card);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
    ROUTING / RENDER
    ──────────────────────────────────────────────────────────── */
 function rerender(){
@@ -2710,6 +4649,12 @@ function rerender(){
       else if(v === 'settings') rSettings(content);
       else if(v === 'firebase') rFirebase(content);
       else if(v === 'pending') rPending(content);
+      else if(v === 'assignments') rAsgn(content);
+      else if(v === 'submissions') rSub(content);
+      else if(v === 'grades') rGrades(content);
+      else if(v === 'evals') rEv(content);
+      else if(v === 'announcements') rAnn(content);
+      else if(v === 'analytics') rAnalytics(content);
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -2718,6 +4663,10 @@ function rerender(){
       else if(v === 'myleave') rMyLeave(content);
       else if(v === 'messages') rMsg(content);
       else if(v === 'me') rMe(content);
+      else if(v === 'sasgn') rSAsgn(content);
+      else if(v === 'sgrade') rSGrade(content);
+      else if(v === 'sev') rSEv(content);
+      else if(v === 'sann') rSAnn(content);
       else { App.view = 'checkin'; rCheckIn(content); }
     }
   } catch(e){
