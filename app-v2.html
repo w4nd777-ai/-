@@ -1,0 +1,2038 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<title>課程管理系統 v2</title>
+<link rel="manifest" href="manifest.json">
+<style>
+/* ════════════════════════════════════════════════════
+   課程管理系統 v2 — Linear/Notion 風格極簡 UI
+   設計：mobile-first + 跨裝置即時同步 (Firebase RTDB)
+   ──────────────────────────────────────────────────── */
+
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --text: #18181b;
+  --text-muted: #71717a;
+  --text-faint: #a1a1aa;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: #dbeafe;
+  --success: #16a34a;
+  --success-soft: #dcfce7;
+  --warn: #ea580c;
+  --warn-soft: #ffedd5;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+  --accent: #8b5cf6;
+  --accent-soft: #ede9fe;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 25px rgba(0,0,0,0.08), 0 4px 10px rgba(0,0,0,0.04);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --tx: 150ms ease-out;
+}
+
+[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --surface: #18181b;
+  --surface-2: #27272a;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-faint: #71717a;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --primary-soft: #1e3a8a;
+  --success-soft: #14532d;
+  --warn-soft: #7c2d12;
+  --danger-soft: #7f1d1d;
+  --accent-soft: #4c1d95;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-lg: 0 10px 25px rgba(0,0,0,0.5);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+body { min-height: 100vh; min-height: 100dvh; }
+
+/* ━━━ Typography ━━━ */
+h1, h2, h3 { margin: 0; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+h1 { font-size: 24px; }
+h2 { font-size: 20px; }
+h3 { font-size: 16px; }
+.mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0; }
+.muted { color: var(--text-muted); }
+.faint { color: var(--text-faint); }
+.tiny { font-size: 12px; }
+.small { font-size: 13px; }
+.big { font-size: 32px; font-weight: 700; letter-spacing: -0.03em; }
+.huge { font-size: 48px; font-weight: 800; letter-spacing: -0.04em; }
+
+/* ━━━ Layout ━━━ */
+.app {
+  max-width: 760px;
+  margin: 0 auto;
+  min-height: 100vh; min-height: 100dvh;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  position: relative;
+}
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 50;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.topbar-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-r { display: flex; align-items: center; gap: 6px; }
+.brand {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 700; font-size: 16px;
+  color: var(--text);
+}
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  display: grid; place-items: center;
+  color: white; font-weight: 800; font-size: 14px;
+}
+.room-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 999px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 700; font-size: 13px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all var(--tx);
+}
+.room-chip:hover { background: var(--primary); color: white; }
+.room-chip:active { transform: scale(0.96); }
+
+.main {
+  flex: 1;
+  padding: 16px;
+  padding-bottom: 96px;
+  overflow-y: auto;
+}
+.bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  max-width: 760px; margin: 0 auto;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  z-index: 40;
+  backdrop-filter: blur(12px);
+}
+.nav-btn {
+  flex: 1;
+  background: none; border: none;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 4px;
+  color: var(--text-muted);
+  font-size: 11px; font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--tx);
+}
+.nav-btn .ic { font-size: 22px; line-height: 1; }
+.nav-btn.active { color: var(--primary); }
+.nav-btn:active { transform: scale(0.94); }
+
+/* ━━━ Cards ━━━ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--tx);
+}
+.card + .card { margin-top: 12px; }
+.card-tight { padding: 12px; }
+.card-hero {
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+}
+.card-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+
+/* ━━━ Buttons ━━━ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 44px;
+  padding: 0 16px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit; font-weight: 600; font-size: 14px;
+  cursor: pointer;
+  transition: all var(--tx);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+  background: var(--primary); border-color: var(--primary); color: white;
+}
+.btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); color: white; }
+.btn-success { background: var(--success); border-color: var(--success); color: white; }
+.btn-success:hover { background: #15803d; border-color: #15803d; color: white; }
+.btn-danger { background: var(--danger); border-color: var(--danger); color: white; }
+.btn-danger:hover { background: #b91c1c; border-color: #b91c1c; color: white; }
+.btn-ghost { background: transparent; border: 1px solid transparent; }
+.btn-ghost:hover { background: var(--surface-2); }
+.btn-icon { width: 40px; padding: 0; }
+.btn-sm { height: 34px; padding: 0 12px; font-size: 13px; }
+.btn-lg { height: 56px; font-size: 16px; padding: 0 22px; }
+.btn-xl { height: 80px; font-size: 20px; font-weight: 700; padding: 0 28px; border-radius: var(--radius-lg); }
+.btn-block { width: 100%; display: flex; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ━━━ Inputs ━━━ */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field + .field { margin-top: 12px; }
+.label { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.input, .select, textarea.input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit; font-size: 15px; font-weight: 500;
+  transition: all var(--tx);
+}
+textarea.input { height: auto; min-height: 80px; padding: 10px 12px; resize: vertical; }
+.input:focus, .select:focus, textarea.input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+.input.mono { font-family: "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.1em; text-align: center; }
+.input-lg { height: 56px; font-size: 18px; }
+.input-xl { height: 72px; font-size: 28px; font-weight: 700; }
+
+/* ━━━ Pills / Badges ━━━ */
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  background: var(--surface-2); color: var(--text-muted);
+}
+.pill-success { background: var(--success-soft); color: var(--success); }
+.pill-danger { background: var(--danger-soft); color: var(--danger); }
+.pill-warn { background: var(--warn-soft); color: var(--warn); }
+.pill-primary { background: var(--primary-soft); color: var(--primary); }
+.pill-accent { background: var(--accent-soft); color: var(--accent); }
+
+/* ━━━ Grid / Stack ━━━ */
+.row { display: flex; align-items: center; gap: 8px; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.grid-auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+
+/* ━━━ Student / Attendance grid ━━━ */
+.stu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.stu-cell {
+  position: relative;
+  padding: 10px 8px;
+  background: var(--danger-soft);
+  border: 1.5px solid var(--danger);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--tx);
+  min-height: 64px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+}
+.stu-cell .nm { font-size: 14px; line-height: 1.15; }
+.stu-cell .tm { font-size: 11px; opacity: 0.85; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.stu-cell.signed {
+  background: var(--success-soft);
+  border-color: var(--success);
+  color: var(--success);
+  animation: pulse-green 0.6s ease-out;
+}
+.stu-cell.leave {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.stu-cell:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+.stu-cell:active { transform: scale(0.96); }
+
+@keyframes pulse-green {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(22,163,74,0.5); }
+  50% { transform: scale(1.06); box-shadow: 0 0 0 12px rgba(22,163,74,0); }
+  100% { transform: scale(1); }
+}
+
+/* ━━━ Stats / KPI ━━━ */
+.kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.kpi {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+.kpi .v { font-size: 28px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
+.kpi .l { font-size: 11px; color: var(--text-muted); margin-top: 4px; font-weight: 600; }
+.kpi-success .v { color: var(--success); }
+.kpi-danger .v { color: var(--danger); }
+.kpi-warn .v { color: var(--warn); }
+
+/* ━━━ Modal ━━━ */
+.modal-bg {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  animation: fade-in 200ms ease-out;
+}
+.modal {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  width: 100%; max-width: 480px;
+  max-height: 90vh; max-height: 90dvh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+  animation: slide-up 250ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.modal-head {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.modal-body { padding: 16px; }
+.modal-foot { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ━━━ Toast ━━━ */
+.toast-stack {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 200; display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none;
+  width: calc(100% - 32px); max-width: 420px;
+}
+.toast {
+  background: var(--text);
+  color: var(--bg);
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-weight: 600; font-size: 14px;
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 250ms cubic-bezier(0.2, 0.9, 0.3, 1), toast-out 200ms ease-in forwards;
+  animation-delay: 0s, 2.5s;
+  display: flex; align-items: center; gap: 8px;
+}
+.toast-success { background: var(--success); color: white; }
+.toast-error { background: var(--danger); color: white; }
+.toast-warn { background: var(--warn); color: white; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-12px); } }
+
+/* ━━━ Welcome / Setup ━━━ */
+.setup-wrap {
+  min-height: 100vh; min-height: 100dvh;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  padding: 16px;
+}
+.setup-hero {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 20px;
+  padding: 32px 16px;
+}
+.setup-mark {
+  width: 80px; height: 80px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  display: grid; place-items: center;
+  color: white; font-size: 40px; font-weight: 800;
+  box-shadow: var(--shadow-lg);
+}
+.step-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 16px; }
+.step-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); transition: all var(--tx); }
+.step-dot.active { background: var(--primary); width: 24px; border-radius: 4px; }
+
+/* ━━━ Role select ━━━ */
+.role-card {
+  padding: 24px;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--tx);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  text-align: center;
+}
+.role-card:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.role-card:active { transform: scale(0.98); }
+.role-card .ic { font-size: 48px; }
+
+/* ━━━ Sign in big button ━━━ */
+.signin-btn {
+  width: 100%;
+  height: 200px;
+  border: none;
+  border-radius: 32px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  font-size: 28px; font-weight: 800;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  box-shadow: 0 10px 40px rgba(37, 99, 235, 0.35);
+  transition: all var(--tx);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+}
+.signin-btn .em { font-size: 56px; line-height: 1; }
+.signin-btn:active { transform: scale(0.96); }
+.signin-btn:disabled { opacity: 0.7; cursor: default; transform: none; }
+.signin-btn.is-done {
+  background: linear-gradient(135deg, var(--success), #0ea5e9);
+  box-shadow: 0 10px 40px rgba(22, 163, 74, 0.35);
+}
+.signin-btn.is-pending { animation: signin-pulse 1.2s ease-in-out infinite; }
+@keyframes signin-pulse {
+  0%, 100% { box-shadow: 0 10px 40px rgba(37, 99, 235, 0.35); }
+  50% { box-shadow: 0 10px 60px rgba(37, 99, 235, 0.65); }
+}
+
+/* ━━━ QR Code page ━━━ */
+.qr-page {
+  background: var(--surface);
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+.qr-page img {
+  width: 100%; max-width: 320px;
+  height: auto;
+  display: block; margin: 16px auto;
+  border-radius: var(--radius-md);
+  background: white;
+}
+.room-code-big {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 48px; font-weight: 800;
+  letter-spacing: 0.2em;
+  color: var(--primary);
+  padding: 8px 16px;
+  background: var(--primary-soft);
+  border-radius: var(--radius-md);
+  display: inline-block;
+}
+
+/* ━━━ Status indicator ━━━ */
+.status-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  margin-right: 4px;
+}
+.status-dot.online { background: var(--success); box-shadow: 0 0 0 0 var(--success); animation: dot-pulse 2s infinite; }
+.status-dot.offline { background: var(--text-faint); }
+@keyframes dot-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(22,163,74,0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(22,163,74,0); }
+  100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); }
+}
+
+/* ━━━ Lists ━━━ */
+.list { display: flex; flex-direction: column; }
+.list-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+}
+.list-item:last-child { border-bottom: none; }
+.list-item .avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--surface-2);
+  display: grid; place-items: center;
+  font-weight: 700; color: var(--text-muted);
+  flex-shrink: 0;
+}
+.list-item .body { flex: 1; min-width: 0; }
+.list-item .body .name { font-weight: 600; }
+.list-item .body .sub { font-size: 12px; color: var(--text-muted); }
+
+/* ━━━ Confetti ━━━ */
+.confetti {
+  position: fixed;
+  width: 8px; height: 14px;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 300;
+  animation: confetti-fall 1.6s ease-out forwards;
+}
+@keyframes confetti-fall {
+  0% { opacity: 1; transform: translate(-50%, -50%) rotate(0deg); }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(720deg); }
+}
+
+/* ━━━ Misc ━━━ */
+.divider { height: 1px; background: var(--border); margin: 12px 0; border: none; }
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.center { text-align: center; }
+.spacer { flex: 1; }
+.hidden { display: none !important; }
+
+/* ━━━ Empty state ━━━ */
+.empty {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--text-muted);
+}
+.empty .em { font-size: 56px; margin-bottom: 12px; display: block; }
+.empty .t { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+
+/* ━━━ Message bubbles ━━━ */
+.msg { display: flex; gap: 8px; margin-bottom: 10px; }
+.msg-me { flex-direction: row-reverse; }
+.msg-bubble {
+  max-width: 70%;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-radius: 16px;
+  border-bottom-left-radius: 4px;
+  font-size: 14px;
+}
+.msg-me .msg-bubble {
+  background: var(--primary);
+  color: white;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 4px;
+}
+.msg-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* Mobile fine-tune */
+@media (max-width: 480px) {
+  .main { padding: 12px; }
+  .card { padding: 14px; border-radius: var(--radius-md); }
+  .stu-grid { grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); gap: 6px; }
+  .stu-cell { min-height: 56px; padding: 8px 4px; }
+  .stu-cell .nm { font-size: 13px; }
+  .signin-btn { height: 180px; font-size: 26px; }
+  .room-code-big { font-size: 36px; }
+  .huge { font-size: 40px; }
+  .big { font-size: 28px; }
+}
+</style>
+</head>
+<body>
+
+<div id="app" class="app"></div>
+<div id="modal-host"></div>
+<div id="toast-host" class="toast-stack"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+/* ════════════════════════════════════════════════════════════
+   APP STATE & UTILS
+   ──────────────────────────────────────────────────────────── */
+'use strict';
+
+// Global state — kept in a single namespace
+const App = {
+  cfg: null,        // {roomCode, role, name, studentId, firebaseConfig, dark}
+  db: {             // local DB cache (mirrors Firebase or stands alone)
+    students: [],
+    attendance: [],
+    messages: [],
+    leaves: [],
+    meta: { createdAt: 0, lastTouched: 0 }
+  },
+  fb: null,         // Firebase app instance
+  fbRef: null,      // Realtime DB room ref
+  online: false,
+  view: 'today',    // current tab
+  listeners: []     // active firebase listeners (to detach on room switch)
+};
+
+const LS_KEY = 'cms_v2';
+const ROOM_REGEX = /^[A-HJ-NP-Z2-9]{6}$/;  // avoids 0/O/1/I/l
+
+// — Date helpers
+const pad2 = n => String(n).padStart(2, '0');
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+};
+const nowTime = () => {
+  const d = new Date();
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+};
+const nowHM = () => {
+  const d = new Date();
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+
+// — Random room code generator (6 chars, no 0/O/1/I/l)
+function genRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random()*chars.length)];
+  return out;
+}
+
+// — UUID-ish id
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+// — Escape HTML
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// — localStorage IO
+function saveCfg() { try { localStorage.setItem(LS_KEY + '_cfg', JSON.stringify(App.cfg)); } catch(e){} }
+function loadCfg() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY + '_cfg') || 'null'); }
+  catch(e) { return null; }
+}
+function saveDB() {
+  try { localStorage.setItem(LS_KEY + '_db_' + (App.cfg && App.cfg.roomCode || 'local'), JSON.stringify(App.db)); }
+  catch(e){}
+  App.db.meta.lastTouched = Date.now();
+}
+function loadDB(roomCode) {
+  try {
+    const raw = localStorage.getItem(LS_KEY + '_db_' + (roomCode || 'local'));
+    if (raw) {
+      const j = JSON.parse(raw);
+      Object.assign(App.db, j);
+      App.db.students = App.db.students || [];
+      App.db.attendance = App.db.attendance || [];
+      App.db.messages = App.db.messages || [];
+      App.db.leaves = App.db.leaves || [];
+      App.db.meta = App.db.meta || { createdAt: Date.now(), lastTouched: Date.now() };
+    }
+  } catch(e){}
+}
+
+// — Toast
+function toast(msg, kind) {
+  const host = document.getElementById('toast-host');
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' toast-' + kind : '');
+  el.textContent = msg;
+  host.appendChild(el);
+  setTimeout(() => el.remove(), 2900);
+}
+
+// — Modal
+function openModal(html, opts) {
+  opts = opts || {};
+  const host = document.getElementById('modal-host');
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `<div class="modal" role="dialog">${html}</div>`;
+  host.appendChild(bg);
+  if (!opts.locked) {
+    bg.addEventListener('click', e => { if (e.target === bg) closeModal(); });
+  }
+  return bg;
+}
+function closeModal() {
+  const host = document.getElementById('modal-host');
+  while (host.firstChild) host.removeChild(host.firstChild);
+}
+
+// — Confirm dialog
+function confirmDialog(msg, onYes) {
+  openModal(`
+    <div class="modal-body">
+      <h3 style="margin-bottom:8px">確認操作</h3>
+      <p class="muted" style="margin:0">${esc(msg)}</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="cf-yes">確定</button>
+    </div>
+  `);
+  document.getElementById('cf-yes').onclick = () => { closeModal(); onYes && onYes(); };
+}
+
+// — Network status indicator update
+function setOnline(state) {
+  App.online = state;
+  const el = document.querySelector('.status-dot');
+  if (el) el.className = 'status-dot ' + (state ? 'online' : 'offline');
+}
+
+// — Confetti spray
+function confetti(x, y) {
+  const colors = ['#2563eb', '#16a34a', '#ea580c', '#8b5cf6', '#f59e0b'];
+  for (let i = 0; i < 18; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.background = colors[i % colors.length];
+    c.style.left = x + 'px';
+    c.style.top = y + 'px';
+    const dx = (Math.random() - 0.5) * 360;
+    const dy = -150 - Math.random() * 200;
+    c.style.setProperty('--dx', `calc(-50% + ${dx}px)`);
+    c.style.setProperty('--dy', `calc(-50% + ${dy + 400}px)`);
+    document.body.appendChild(c);
+    setTimeout(() => c.remove(), 1700);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   FIREBASE SYNC LAYER
+   - graceful fallback: works fully offline if no config
+   ──────────────────────────────────────────────────────────── */
+const Sync = (() => {
+  function detachAll() {
+    App.listeners.forEach(fn => { try { fn(); } catch(e){} });
+    App.listeners = [];
+  }
+
+  function init() {
+    detachAll();
+    if (App.fb) { try { App.fb.delete(); } catch(e){} App.fb = null; }
+    App.fbRef = null;
+
+    if (!App.cfg || !App.cfg.firebaseConfig || !App.cfg.firebaseConfig.databaseURL) {
+      setOnline(false);
+      return false;
+    }
+    try {
+      // Re-use existing app if exists
+      if (firebase.apps.length) {
+        App.fb = firebase.app();
+      } else {
+        App.fb = firebase.initializeApp(App.cfg.firebaseConfig);
+      }
+      App.fbRef = firebase.database().ref('classroom/' + App.cfg.roomCode);
+      setOnline(true);
+      attachListeners();
+      return true;
+    } catch (e) {
+      console.warn('Firebase init failed:', e);
+      setOnline(false);
+      return false;
+    }
+  }
+
+  function attachListeners() {
+    if (!App.fbRef) return;
+
+    // Listen for full snapshot on first connect, then individual updates
+    const studentsRef = App.fbRef.child('students');
+    const attRef = App.fbRef.child('attendance');
+    const msgRef = App.fbRef.child('messages');
+    const leaveRef = App.fbRef.child('leaves');
+
+    const onStu = studentsRef.on('value', snap => {
+      const v = snap.val();
+      if (v) {
+        App.db.students = Object.values(v).sort((a,b) => (a.seat||0)-(b.seat||0));
+        saveDB();
+        rerender();
+      }
+    });
+    const onAtt = attRef.on('value', snap => {
+      const v = snap.val();
+      App.db.attendance = v ? Object.values(v) : [];
+      saveDB();
+      rerender();
+    });
+    const onMsg = msgRef.on('value', snap => {
+      const v = snap.val();
+      App.db.messages = v ? Object.values(v) : [];
+      saveDB();
+      if (App.view === 'msg') rerender();
+    });
+    const onLeave = leaveRef.on('value', snap => {
+      const v = snap.val();
+      App.db.leaves = v ? Object.values(v) : [];
+      saveDB();
+      if (App.view === 'leave') rerender();
+    });
+
+    App.listeners.push(() => studentsRef.off('value', onStu));
+    App.listeners.push(() => attRef.off('value', onAtt));
+    App.listeners.push(() => msgRef.off('value', onMsg));
+    App.listeners.push(() => leaveRef.off('value', onLeave));
+
+    // Connection status
+    firebase.database().ref('.info/connected').on('value', snap => {
+      setOnline(!!snap.val());
+    });
+  }
+
+  function push(node, data) {
+    saveDB(); // always local first
+    if (!App.fbRef) return Promise.resolve(false);
+    return App.fbRef.child(node).push(data).then(() => true).catch(e => { console.warn(e); return false; });
+  }
+
+  function set(node, data) {
+    saveDB();
+    if (!App.fbRef) return Promise.resolve(false);
+    return App.fbRef.child(node).set(data).then(() => true).catch(e => { console.warn(e); return false; });
+  }
+
+  // Replace a whole list (used when modifying students)
+  function syncStudents() {
+    if (!App.fbRef) { saveDB(); return Promise.resolve(false); }
+    const obj = {};
+    App.db.students.forEach(s => obj[String(s.id)] = s);
+    return App.fbRef.child('students').set(obj).then(() => true);
+  }
+
+  return { init, push, set, syncStudents, detachAll };
+})();
+
+/* ════════════════════════════════════════════════════════════
+   ROUTER / RENDER
+   ──────────────────────────────────────────────────────────── */
+function rerender() {
+  const root = document.getElementById('app');
+  if (!App.cfg) {
+    renderSetup(root);
+    return;
+  }
+  if (App.cfg.role === 'teacher') {
+    renderTeacher(root);
+  } else {
+    renderStudent(root);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   SETUP WIZARD (first-run)
+   ──────────────────────────────────────────────────────────── */
+let wizardState = { step: 1, role: null, mode: null, roomCode: '', name: '', studentId: '', firebaseConfig: null };
+
+function renderSetup(root) {
+  const s = wizardState.step;
+  root.innerHTML = `
+    <div class="setup-wrap">
+      <div class="setup-hero">
+        <div class="setup-mark">課</div>
+        <div>
+          <h1 style="font-size:32px;margin-bottom:6px">課程管理系統 <span class="pill pill-primary mono">v2</span></h1>
+          <p class="muted">輕量 · 即時同步 · 跨裝置</p>
+        </div>
+        <div class="step-dots">
+          ${[1,2,3,4,5].map(i => `<div class="step-dot ${i===s?'active':''}"></div>`).join('')}
+        </div>
+        <div id="wiz-step" style="width:100%;max-width:420px"></div>
+      </div>
+    </div>
+  `;
+  renderWizardStep();
+}
+
+function renderWizardStep() {
+  const host = document.getElementById('wiz-step');
+  if (!host) return;
+  const s = wizardState.step;
+
+  if (s === 1) {
+    // Welcome
+    host.innerHTML = `
+      <div class="card stack">
+        <h2 style="text-align:center">歡迎使用</h2>
+        <p class="muted center">透過 6 碼房間代碼，老師與學生瞬間連線。<br>離線可用、上線同步、無須帳號。</p>
+        <button class="btn btn-primary btn-lg btn-block" onclick="wizNext()">開始設定 →</button>
+        <button class="btn btn-ghost btn-block small" onclick="wizImportV1Check()">📥 我有舊版資料想匯入</button>
+      </div>
+    `;
+  } else if (s === 2) {
+    // Role select
+    host.innerHTML = `
+      <div class="stack">
+        <h2 style="text-align:center;margin-bottom:8px">您是？</h2>
+        <div class="grid-2">
+          <div class="role-card" onclick="wizPickRole('teacher')">
+            <div class="ic">👩‍🏫</div>
+            <h3>老師</h3>
+            <p class="small muted">建立房間、管理學生與點名</p>
+          </div>
+          <div class="role-card" onclick="wizPickRole('student')">
+            <div class="ic">🧑‍🎓</div>
+            <h3>學生</h3>
+            <p class="small muted">加入房間並簽到</p>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-block" onclick="wizBack()">← 上一步</button>
+      </div>
+    `;
+  } else if (s === 3) {
+    // Teacher: create room. Student: enter room code
+    if (wizardState.role === 'teacher') {
+      if (!wizardState.roomCode) wizardState.roomCode = genRoomCode();
+      host.innerHTML = `
+        <div class="card stack">
+          <h2 style="text-align:center">建立教室</h2>
+          <p class="muted center">這組代碼分享給學生即可加入。</p>
+          <div class="center" style="padding:8px 0">
+            <div class="room-code-big" id="wiz-room">${wizardState.roomCode}</div>
+          </div>
+          <button class="btn btn-block" onclick="wizardState.roomCode=genRoomCode();document.getElementById('wiz-room').textContent=wizardState.roomCode">🎲 換一組代碼</button>
+          <div class="field">
+            <label class="label">您的稱呼（顯示用）</label>
+            <input class="input" id="wiz-tname" value="${esc(wizardState.name||'李老師')}" placeholder="例如：李老師">
+          </div>
+          <div class="row">
+            <button class="btn btn-block" onclick="wizBack()">← 上一步</button>
+            <button class="btn btn-primary btn-block" onclick="wizSaveTeacherName()">下一步 →</button>
+          </div>
+        </div>
+      `;
+    } else {
+      host.innerHTML = `
+        <div class="card stack">
+          <h2 style="text-align:center">加入教室</h2>
+          <p class="muted center">向老師索取 6 碼房間代碼。</p>
+          <div class="field">
+            <label class="label">房間代碼</label>
+            <input class="input input-xl mono" id="wiz-room-in" maxlength="6" placeholder="ABC123" value="${esc(wizardState.roomCode)}" oninput="this.value=this.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g,'')">
+          </div>
+          <div class="field">
+            <label class="label">您的姓名</label>
+            <input class="input input-lg" id="wiz-sname" value="${esc(wizardState.name)}" placeholder="請輸入姓名">
+          </div>
+          <div class="field">
+            <label class="label">學號（選填）</label>
+            <input class="input" id="wiz-sid" value="${esc(wizardState.studentId)}" placeholder="例如：113001">
+          </div>
+          <div class="row">
+            <button class="btn btn-block" onclick="wizBack()">← 上一步</button>
+            <button class="btn btn-primary btn-block" onclick="wizSaveStudent()">下一步 →</button>
+          </div>
+        </div>
+      `;
+    }
+  } else if (s === 4) {
+    // Firebase config
+    const hasCfg = wizardState.firebaseConfig && wizardState.firebaseConfig.databaseURL;
+    host.innerHTML = `
+      <div class="card stack">
+        <h2 style="text-align:center">啟用即時同步</h2>
+        <p class="muted center small">設定 Firebase 即可跨裝置即時同步。<br>不設定也能運作（單機模式）。</p>
+        ${hasCfg ? `<div class="pill pill-success" style="align-self:center">✓ 已偵測到設定</div>` : ''}
+        <div class="stack" style="gap:8px">
+          <button class="btn btn-primary btn-block" onclick="wizFirebaseEnter()">🔑 我有 Firebase 設定（貼上 JSON）</button>
+          <button class="btn btn-block" onclick="wizFirebaseHelp()">📘 教我如何取得（5 分鐘）</button>
+          <button class="btn btn-ghost btn-block" onclick="wizSkipFirebase()">⏭ 先不設定（單機模式）</button>
+        </div>
+        <button class="btn btn-ghost btn-block small" onclick="wizBack()">← 上一步</button>
+      </div>
+    `;
+  } else if (s === 5) {
+    // Finish
+    const onlineMode = wizardState.firebaseConfig && wizardState.firebaseConfig.databaseURL;
+    host.innerHTML = `
+      <div class="card stack center">
+        <div style="font-size:64px">${onlineMode ? '🌐' : '💾'}</div>
+        <h2>${onlineMode ? '即時同步已啟用' : '單機模式準備就緒'}</h2>
+        <p class="muted small">${onlineMode
+          ? '此裝置會與 Firebase 即時同步資料。'
+          : '資料僅儲存在這台裝置。日後可在「設定」啟用同步。'}</p>
+        <div class="card-tight" style="background:var(--surface-2);text-align:left">
+          <div class="small"><b>身分：</b>${wizardState.role==='teacher'?'老師':'學生'}</div>
+          ${wizardState.role==='student' ? `<div class="small"><b>姓名：</b>${esc(wizardState.name)}</div>` : ''}
+          <div class="small"><b>房間代碼：</b><span class="mono">${wizardState.roomCode}</span></div>
+        </div>
+        <button class="btn btn-primary btn-lg btn-block" onclick="wizFinish()">完成並進入系統 →</button>
+      </div>
+    `;
+  }
+}
+
+function wizNext() { wizardState.step++; renderWizardStep(); document.querySelectorAll('.step-dot').forEach((d,i)=>{d.className='step-dot'+(i===wizardState.step-1?' active':'');}); }
+function wizBack() { wizardState.step = Math.max(1, wizardState.step-1); renderWizardStep(); document.querySelectorAll('.step-dot').forEach((d,i)=>{d.className='step-dot'+(i===wizardState.step-1?' active':'');}); }
+function wizPickRole(r) { wizardState.role = r; wizNext(); }
+
+function wizSaveTeacherName() {
+  const n = document.getElementById('wiz-tname').value.trim() || '老師';
+  wizardState.name = n;
+  wizNext();
+}
+function wizSaveStudent() {
+  const code = document.getElementById('wiz-room-in').value.trim().toUpperCase();
+  const nm = document.getElementById('wiz-sname').value.trim();
+  const sid = document.getElementById('wiz-sid').value.trim();
+  if (!ROOM_REGEX.test(code)) { toast('房間代碼格式錯誤（6 碼英數，不含 0/O/1/I/l）', 'error'); return; }
+  if (!nm) { toast('請輸入姓名', 'error'); return; }
+  wizardState.roomCode = code;
+  wizardState.name = nm;
+  wizardState.studentId = sid;
+  wizNext();
+}
+
+function wizFirebaseEnter() {
+  openModal(`
+    <div class="modal-head">
+      <h3>貼上 Firebase 設定</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="small muted">從 Firebase Console → 專案設定 → 一般 → 您的應用程式，複製 firebaseConfig JSON。</p>
+      <div class="field">
+        <textarea class="input mono small" id="fb-json" rows="9" placeholder='{
+  "apiKey": "...",
+  "authDomain": "xxx.firebaseapp.com",
+  "databaseURL": "https://xxx-default-rtdb.firebaseio.com",
+  "projectId": "xxx"
+}'></textarea>
+      </div>
+      <p class="tiny muted">⚠ 必填欄位：databaseURL。Realtime DB 規則建議設成 .read/.write = true（教學用途）。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="wizFirebaseSave()">儲存</button>
+    </div>
+  `);
+}
+function wizFirebaseSave() {
+  const txt = document.getElementById('fb-json').value.trim();
+  if (!txt) { toast('請貼上設定', 'error'); return; }
+  let cfg;
+  try {
+    // Tolerate JS object literal (single quotes / no quotes on keys)
+    cfg = JSON.parse(txt);
+  } catch(e) {
+    try { cfg = (new Function('return (' + txt + ')'))(); } catch(e2) { toast('JSON 解析失敗', 'error'); return; }
+  }
+  if (!cfg || !cfg.databaseURL) { toast('缺少 databaseURL', 'error'); return; }
+  wizardState.firebaseConfig = cfg;
+  closeModal();
+  toast('✓ 已儲存 Firebase 設定', 'success');
+  renderWizardStep();
+}
+function wizFirebaseHelp() {
+  openModal(`
+    <div class="modal-head">
+      <h3>📘 5 步取得 Firebase 設定</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <ol style="padding-left:18px;line-height:1.9">
+        <li>前往 <a href="https://console.firebase.google.com/" target="_blank">Firebase Console</a> 並登入 Google 帳號</li>
+        <li>點「新增專案」→ 命名後完成（可關閉 Analytics）</li>
+        <li>左側選單 → <b>Realtime Database</b> → 建立 → 選擇位置 → 選「測試模式」開始</li>
+        <li>左側「專案設定」（齒輪）→ 一般 → 下拉到「您的應用程式」→ 加入網頁應用程式 → 取得 <b>firebaseConfig</b> JSON</li>
+        <li>複製整段 firebaseConfig，回到本系統按「貼上 Firebase 設定」</li>
+      </ol>
+      <hr class="divider">
+      <p class="small muted">完成後跨裝置同步可在 0.3–0.5 秒內生效。免費 Spark 方案足夠一般班級使用。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary" onclick="closeModal()">了解了</button>
+    </div>
+  `);
+}
+function wizSkipFirebase() {
+  wizardState.firebaseConfig = null;
+  wizNext();
+}
+
+function wizFinish() {
+  // build cfg
+  App.cfg = {
+    roomCode: wizardState.roomCode,
+    role: wizardState.role,
+    name: wizardState.name,
+    studentId: wizardState.studentId,
+    firebaseConfig: wizardState.firebaseConfig,
+    dark: false,
+    createdAt: Date.now()
+  };
+  // If teacher creating new room: seed students nothing; sync minimal meta
+  loadDB(App.cfg.roomCode);
+  if (!App.db.meta.createdAt) App.db.meta.createdAt = Date.now();
+  saveCfg();
+  saveDB();
+  Sync.init();
+  // If teacher, push room marker
+  if (App.cfg.role === 'teacher' && App.fbRef) {
+    App.fbRef.child('meta').set({ createdAt: App.db.meta.createdAt, teacher: App.cfg.name });
+  }
+  // If student, register themselves into students list
+  if (App.cfg.role === 'student') {
+    autoRegisterSelf();
+  }
+  toast('✓ 設定完成，歡迎！', 'success');
+  rerender();
+}
+
+// Student auto-register on first run
+function autoRegisterSelf() {
+  const cur = App.db.students.find(s => s.name === App.cfg.name && (App.cfg.studentId ? s.sid === App.cfg.studentId : true));
+  if (cur) { App.cfg.myStudentId = cur.id; saveCfg(); return; }
+  const id = uid();
+  const seat = (App.db.students.length || 0) + 1;
+  const stu = { id, name: App.cfg.name, sid: App.cfg.studentId || '', seat, joinedAt: Date.now() };
+  App.db.students.push(stu);
+  App.cfg.myStudentId = id;
+  saveCfg();
+  Sync.syncStudents();
+}
+
+/* ════════════════════════════════════════════════════════════
+   V1 IMPORT
+   ──────────────────────────────────────────────────────────── */
+function wizImportV1Check() {
+  let v1 = null;
+  try { v1 = JSON.parse(localStorage.getItem('cmsDB') || 'null'); } catch(e){}
+  if (!v1 || !v1.students) { toast('找不到舊版資料（cmsDB）', 'warn'); return; }
+  openModal(`
+    <div class="modal-head">
+      <h3>📥 從舊版匯入</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p>已偵測到舊版資料：</p>
+      <ul class="small muted">
+        <li>學生：${v1.students.length} 人</li>
+        <li>出席紀錄：${(v1.attendance||[]).length} 筆</li>
+        <li>訊息：${(v1.messages||[]).length} 筆</li>
+      </ul>
+      <p class="small">將會把舊資料保留在「下一步建立的新房間」中。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="wizImportV1Do()">繼續匯入並建立房間</button>
+    </div>
+  `);
+}
+function wizImportV1Do() {
+  let v1 = null;
+  try { v1 = JSON.parse(localStorage.getItem('cmsDB') || 'null'); } catch(e){}
+  if (!v1) { closeModal(); return; }
+  // stash to apply after wizFinish
+  wizardState._v1 = v1;
+  closeModal();
+  wizardState.role = 'teacher';
+  wizardState.step = 3;
+  wizardState.roomCode = genRoomCode();
+  // After wizFinish, we'll inject the v1 data; hook by overriding wizFinish path
+  const origFinish = wizFinish;
+  window.wizFinish = function() {
+    origFinish();
+    const v = wizardState._v1;
+    if (!v) return;
+    // Convert students: strip _timeUnreliable & other v1 junk
+    App.db.students = (v.students || []).map(s => ({
+      id: s.id || uid(),
+      name: s.name || '',
+      sid: s.sid || '',
+      cls: s.cls || '',
+      seat: s.seat || 0
+    }));
+    App.db.attendance = (v.attendance || [])
+      .filter(a => a && a.studentId && a.date && a.time)
+      .map(a => ({
+        id: a.id || uid(),
+        studentId: a.studentId,
+        studentName: a.studentName || '',
+        date: a.date,
+        time: a.time,
+        type: a.type || 'present',
+        method: a.manual ? 'teacher-manual' : 'imported'
+      }));
+    App.db.messages = (v.messages || []).map(m => ({
+      id: m.id || uid(),
+      from: m.from || 'unknown',
+      fromName: m.fromName || '',
+      to: m.to || 'all',
+      text: m.text || '',
+      ts: m.ts || Date.now()
+    }));
+    saveDB();
+    if (App.fbRef) {
+      Sync.syncStudents();
+      // Bulk push attendance
+      const attObj = {};
+      App.db.attendance.forEach(a => attObj[a.id] = a);
+      App.fbRef.child('attendance').set(attObj);
+      const msgObj = {};
+      App.db.messages.forEach(m => msgObj[m.id] = m);
+      App.fbRef.child('messages').set(msgObj);
+    }
+    toast(`✓ 已匯入 ${App.db.students.length} 位學生 / ${App.db.attendance.length} 筆出席`, 'success');
+    rerender();
+    window.wizFinish = origFinish;
+  };
+  renderWizardStep();
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER UI
+   ──────────────────────────────────────────────────────────── */
+function renderTeacher(root) {
+  const view = App.view;
+  root.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-l">
+        <div class="brand">
+          <div class="brand-mark">課</div>
+          <div style="line-height:1.1">
+            <div>${esc(App.cfg.name)}</div>
+            <div class="tiny muted"><span class="status-dot ${App.online?'online':'offline'}"></span>${App.online?'即時同步中':(App.cfg.firebaseConfig?'重連中…':'單機模式')}</div>
+          </div>
+        </div>
+      </div>
+      <div class="topbar-r">
+        <div class="room-chip" onclick="showRoomShare()" title="顯示 QR / 分享代碼">🔗 ${esc(App.cfg.roomCode)}</div>
+      </div>
+    </div>
+    <div class="main" id="t-main">${renderTeacherMain(view)}</div>
+    <div class="bottom-nav">
+      ${tNav('today','📅','今天')}
+      ${tNav('qr','📲','點名')}
+      ${tNav('stu','👥','學生')}
+      ${tNav('msg','💬','訊息')}
+      ${tNav('set','⚙️','設定')}
+    </div>
+  `;
+}
+function tNav(key, ic, label) {
+  return `<button class="nav-btn ${App.view===key?'active':''}" onclick="setView('${key}')">
+    <div class="ic">${ic}</div><div>${label}</div></button>`;
+}
+function setView(v) { App.view = v; rerender(); }
+
+function renderTeacherMain(view) {
+  if (view === 'today') return renderTodayBoard();
+  if (view === 'qr')    return renderQRPage();
+  if (view === 'stu')   return renderStudentsAdmin();
+  if (view === 'msg')   return renderMessages();
+  if (view === 'set')   return renderSettings();
+  return renderTodayBoard();
+}
+
+// ── Today's class board (LIVE)
+function renderTodayBoard() {
+  const d = today();
+  const att = App.db.attendance.filter(a => a.date === d);
+  const map = {};
+  att.forEach(a => { map[a.studentId] = a; });
+  const total = App.db.students.length;
+  const present = att.filter(a => a.type !== 'leave').length;
+  const leave = att.filter(a => a.type === 'leave').length;
+  const absent = Math.max(0, total - present - leave);
+  return `
+    <div class="card-hero" style="margin-bottom:12px">
+      <div class="row-between" style="margin-bottom:10px">
+        <div>
+          <div class="muted small">今日班況 · <span class="mono">${d}</span></div>
+          <h1 style="margin-top:4px">${total ? Math.round(present/total*100) : 0}<span class="muted" style="font-size:18px">%</span></h1>
+        </div>
+        <div class="row">
+          <button class="btn btn-sm" onclick="setView('qr')">📲 顯示 QR</button>
+          <button class="btn btn-sm" onclick="exportTodayCSV()">⬇ CSV</button>
+        </div>
+      </div>
+      <div class="kpi-row">
+        <div class="kpi kpi-success"><div class="v">${present}</div><div class="l">已到</div></div>
+        <div class="kpi kpi-warn"><div class="v">${leave}</div><div class="l">請假</div></div>
+        <div class="kpi kpi-danger"><div class="v">${absent}</div><div class="l">未到</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">
+        <h3>學生狀態 <span class="pill">${present}/${total}</span></h3>
+        <button class="btn btn-sm btn-ghost" onclick="historyPicker()">📆 看其他日期</button>
+      </div>
+      ${total === 0 ? `<div class="empty"><span class="em">👥</span><div class="t">尚無學生</div><div class="small">從「學生」分頁新增，或請學生用房間碼自行加入。</div><br><button class="btn btn-primary" onclick="setView('stu')">+ 新增學生</button></div>`
+      : `<div class="stu-grid">${App.db.students.map(s => {
+          const a = map[s.id];
+          let cls = 'stu-cell';
+          let tm = '';
+          if (a) {
+            if (a.type === 'leave') { cls += ' leave'; tm = '請假'; }
+            else { cls += ' signed'; tm = (a.time||'').slice(0,5); }
+          }
+          return `<div class="${cls}" onclick="toggleMark('${s.id}')" title="${esc(s.name)}${a?' '+(a.time||''):''}">
+            <div class="nm">${esc(s.name)}</div>
+            <div class="tm">${esc(tm)||'未簽'}</div>
+          </div>`;
+        }).join('')}</div>`}
+    </div>
+  `;
+}
+
+// ── QR Code page (large)
+function renderQRPage() {
+  const code = App.cfg.roomCode;
+  const url = location.href.split('#')[0] + '#join=' + code;
+  const qr = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=${encodeURIComponent(url)}&margin=10`;
+  return `
+    <div class="qr-page">
+      <h2>掃 QR 即可簽到</h2>
+      <p class="muted small">學生掃描或輸入下方代碼加入</p>
+      <img src="${qr}" alt="QR Code">
+      <div class="room-code-big">${esc(code)}</div>
+      <p class="muted small" style="margin-top:12px">${esc(url)}</p>
+      <div class="row" style="justify-content:center;margin-top:12px">
+        <button class="btn" onclick="copyText('${esc(url)}')">📋 複製連結</button>
+        <button class="btn" onclick="copyText('${esc(code)}')">📋 複製代碼</button>
+      </div>
+    </div>
+  `;
+}
+
+// ── Students admin
+let stuSearch = '';
+function renderStudentsAdmin() {
+  const q = stuSearch.trim().toLowerCase();
+  const list = App.db.students.filter(s => !q || (s.name||'').toLowerCase().includes(q) || (s.sid||'').toLowerCase().includes(q));
+  return `
+    <div class="card">
+      <div class="card-title">
+        <h3>學生名單 <span class="pill">${App.db.students.length}</span></h3>
+        <div class="row">
+          <button class="btn btn-sm" onclick="importCSV()">📥 CSV</button>
+          <button class="btn btn-sm btn-primary" onclick="addStudent()">+ 新增</button>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:8px">
+        <input class="input" placeholder="搜尋姓名 / 學號…" value="${esc(stuSearch)}" oninput="stuSearch=this.value;document.getElementById('stu-list').innerHTML=renderStuListInner()">
+      </div>
+      <div class="list" id="stu-list">${renderStuListInner()}</div>
+    </div>
+  `;
+}
+function renderStuListInner() {
+  const q = stuSearch.trim().toLowerCase();
+  const list = App.db.students.filter(s => !q || (s.name||'').toLowerCase().includes(q) || (s.sid||'').toLowerCase().includes(q));
+  if (!list.length) return `<div class="empty"><span class="em">🔍</span><div class="t">沒有符合的學生</div></div>`;
+  return list.map(s => `
+    <div class="list-item">
+      <div class="avatar">${esc((s.name||'?').slice(0,1))}</div>
+      <div class="body">
+        <div class="name">${esc(s.name||'(未命名)')}</div>
+        <div class="sub">${esc(s.sid||'—')} · 座號 ${s.seat||'?'} ${s.cls?'· '+esc(s.cls):''}</div>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick="editStudent('${s.id}')">✏️</button>
+      <button class="btn btn-sm btn-ghost" onclick="delStudent('${s.id}')">🗑</button>
+    </div>
+  `).join('');
+}
+
+// ── Messages
+function renderMessages() {
+  const msgs = (App.db.messages || []).slice().sort((a,b) => (a.ts||0)-(b.ts||0));
+  return `
+    <div class="card" style="display:flex;flex-direction:column;height:calc(100dvh - 200px);min-height:400px">
+      <div class="card-title"><h3>訊息</h3><span class="pill">${msgs.length}</span></div>
+      <div style="flex:1;overflow-y:auto;padding:8px 4px" id="msg-scroll">
+        ${msgs.length ? msgs.map(m => {
+          const me = (m.from === 'teacher');
+          return `<div class="msg ${me?'msg-me':''}">
+            <div>
+              <div class="msg-bubble">${esc(m.text)}</div>
+              <div class="msg-meta">${esc(m.fromName||m.from)} · ${new Date(m.ts).toLocaleString('zh-TW',{hour:'2-digit',minute:'2-digit',month:'numeric',day:'numeric'})}</div>
+            </div>
+          </div>`;
+        }).join('') : '<div class="empty"><span class="em">💬</span><div class="t">尚無訊息</div></div>'}
+      </div>
+      <div class="row" style="padding-top:8px;border-top:1px solid var(--border);margin-top:8px">
+        <input class="input" id="msg-input" placeholder="輸入訊息給全班…" onkeydown="if(event.key==='Enter')sendMessage()">
+        <button class="btn btn-primary" onclick="sendMessage()">送出</button>
+      </div>
+    </div>
+  `;
+}
+
+// ── Settings
+function renderSettings() {
+  return `
+    <div class="card">
+      <div class="card-title"><h3>設定</h3></div>
+      <div class="stack">
+        <div class="row-between">
+          <div><b>房間代碼</b><div class="small muted mono">${esc(App.cfg.roomCode)}</div></div>
+          <button class="btn btn-sm" onclick="setView('qr')">顯示 QR</button>
+        </div>
+        <hr class="divider">
+        <div class="row-between">
+          <div><b>即時同步</b>
+            <div class="small muted">${App.cfg.firebaseConfig?(App.online?'✓ 已連線':'重連中…'):'尚未設定'}</div>
+          </div>
+          <button class="btn btn-sm" onclick="editFirebaseSettings()">設定</button>
+        </div>
+        <hr class="divider">
+        <div class="row-between">
+          <div><b>外觀</b><div class="small muted">深色 / 淺色</div></div>
+          <button class="btn btn-sm" onclick="toggleDark()">${App.cfg.dark?'☀️ 淺色':'🌙 深色'}</button>
+        </div>
+        <hr class="divider">
+        <div class="row-between">
+          <div><b>匯出全部資料</b><div class="small muted">JSON 備份</div></div>
+          <button class="btn btn-sm" onclick="exportAll()">⬇ 下載</button>
+        </div>
+        <hr class="divider">
+        <div class="row-between">
+          <div><b>從舊版 (v1) 匯入</b><div class="small muted">讀取 localStorage 中的 cmsDB</div></div>
+          <button class="btn btn-sm" onclick="importV1Now()">📥 匯入</button>
+        </div>
+        <hr class="divider">
+        <div class="row-between">
+          <div><b>切換房間 / 重設</b><div class="small muted danger">清除本地設定</div></div>
+          <button class="btn btn-sm btn-danger" onclick="resetAll()">登出</button>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>關於</h3>
+      <p class="small muted">課程管理系統 v2 · 純前端 + Firebase Realtime DB<br>
+      設計：mobile-first, offline-first, 跨裝置即時同步。</p>
+    </div>
+  `;
+}
+
+/* ════════════════════════════════════════════════════════════
+   STUDENT UI
+   ──────────────────────────────────────────────────────────── */
+function renderStudent(root) {
+  root.innerHTML = `
+    <div class="topbar">
+      <div class="topbar-l">
+        <div class="brand">
+          <div class="brand-mark">課</div>
+          <div style="line-height:1.1">
+            <div>${esc(App.cfg.name)}</div>
+            <div class="tiny muted"><span class="status-dot ${App.online?'online':'offline'}"></span>${App.online?'已連線':'離線'}</div>
+          </div>
+        </div>
+      </div>
+      <div class="topbar-r">
+        <div class="room-chip" onclick="copyText('${esc(App.cfg.roomCode)}')">🔗 ${esc(App.cfg.roomCode)}</div>
+      </div>
+    </div>
+    <div class="main" id="s-main">${renderStudentMain()}</div>
+    <div class="bottom-nav">
+      ${sNav('home','✋','簽到')}
+      ${sNav('myatt','📅','紀錄')}
+      ${sNav('msg','💬','訊息')}
+      ${sNav('set','⚙️','設定')}
+    </div>
+  `;
+}
+function sNav(k, ic, l) {
+  return `<button class="nav-btn ${App.view===k?'active':''}" onclick="setView('${k}')"><div class="ic">${ic}</div><div>${l}</div></button>`;
+}
+
+function renderStudentMain() {
+  if (App.view === 'home') return renderStudentSign();
+  if (App.view === 'myatt') return renderStudentRecord();
+  if (App.view === 'msg') return renderStudentMessages();
+  if (App.view === 'set') return renderStudentSettings();
+  return renderStudentSign();
+}
+
+function renderStudentSign() {
+  const myId = App.cfg.myStudentId;
+  const d = today();
+  const mine = App.db.attendance.find(a => a.studentId === myId && a.date === d);
+  const done = !!mine;
+  const t = done ? mine.time : '';
+  return `
+    <div class="card-hero center" style="margin-bottom:12px">
+      <div class="muted small">今天 · <span class="mono">${d}</span></div>
+      <h1 style="margin-top:4px">${nowHM()}</h1>
+    </div>
+    <button id="signin" class="signin-btn ${done?'is-done':''}" ${done?'disabled':''} onclick="doSignIn(event)">
+      <div class="em">${done?'✅':'✋'}</div>
+      <div>${done?'已簽到':'點我簽到'}</div>
+      ${done?`<div style="font-size:14px;font-weight:600;opacity:0.9" class="mono">${esc(t)}</div>`:''}
+    </button>
+    <div style="margin-top:14px" class="grid-2">
+      <button class="btn btn-lg" onclick="askLeave()">📝 我要請假</button>
+      <button class="btn btn-lg" onclick="setView('myatt')">📅 看紀錄</button>
+    </div>
+  `;
+}
+
+function renderStudentRecord() {
+  const myId = App.cfg.myStudentId;
+  const mine = App.db.attendance.filter(a => a.studentId === myId).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  const totalDays = new Set(App.db.attendance.map(a => a.date)).size;
+  const myDays = new Set(mine.filter(a => a.type !== 'leave').map(a => a.date)).size;
+  const rate = totalDays ? Math.round(myDays / totalDays * 100) : 0;
+  return `
+    <div class="card-hero" style="margin-bottom:12px">
+      <div class="muted small">出席率</div>
+      <h1 class="huge" style="margin-top:4px">${rate}<span class="muted" style="font-size:24px">%</span></h1>
+      <div class="kpi-row" style="margin-top:8px">
+        <div class="kpi kpi-success"><div class="v">${myDays}</div><div class="l">出席</div></div>
+        <div class="kpi kpi-warn"><div class="v">${mine.filter(a=>a.type==='leave').length}</div><div class="l">請假</div></div>
+        <div class="kpi"><div class="v">${totalDays}</div><div class="l">總天數</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>歷史紀錄</h3>
+      ${mine.length ? `<div class="list">${mine.map(a => `
+        <div class="list-item">
+          <div class="avatar">${a.type==='leave'?'📝':'✅'}</div>
+          <div class="body">
+            <div class="name mono">${esc(a.date)}</div>
+            <div class="sub">${a.type==='leave'?'請假':'已簽到'} · ${esc(a.time||'')}</div>
+          </div>
+        </div>`).join('')}</div>` : '<div class="empty"><span class="em">📭</span><div class="t">尚無紀錄</div></div>'}
+    </div>
+  `;
+}
+
+function renderStudentMessages() {
+  const msgs = (App.db.messages || []).slice().sort((a,b) => (a.ts||0)-(b.ts||0));
+  const myId = App.cfg.myStudentId;
+  return `
+    <div class="card" style="display:flex;flex-direction:column;height:calc(100dvh - 200px);min-height:400px">
+      <div class="card-title"><h3>與老師對話</h3></div>
+      <div style="flex:1;overflow-y:auto;padding:8px 4px">
+        ${msgs.length ? msgs.map(m => {
+          const me = (m.from === myId);
+          return `<div class="msg ${me?'msg-me':''}">
+            <div>
+              <div class="msg-bubble">${esc(m.text)}</div>
+              <div class="msg-meta">${esc(m.fromName||m.from)} · ${new Date(m.ts).toLocaleString('zh-TW',{hour:'2-digit',minute:'2-digit',month:'numeric',day:'numeric'})}</div>
+            </div>
+          </div>`;
+        }).join('') : '<div class="empty"><span class="em">💬</span><div class="t">尚無訊息</div></div>'}
+      </div>
+      <div class="row" style="padding-top:8px;border-top:1px solid var(--border);margin-top:8px">
+        <input class="input" id="msg-input" placeholder="想對老師說…" onkeydown="if(event.key==='Enter')sendStudentMessage()">
+        <button class="btn btn-primary" onclick="sendStudentMessage()">送</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStudentSettings() {
+  return `
+    <div class="card">
+      <div class="card-title"><h3>設定</h3></div>
+      <div class="stack">
+        <div class="row-between"><div><b>姓名</b><div class="small muted">${esc(App.cfg.name)}</div></div>
+          <button class="btn btn-sm" onclick="editMyName()">修改</button></div>
+        <hr class="divider">
+        <div class="row-between"><div><b>房間代碼</b><div class="small muted mono">${esc(App.cfg.roomCode)}</div></div>
+          <button class="btn btn-sm" onclick="copyText('${esc(App.cfg.roomCode)}')">📋 複製</button></div>
+        <hr class="divider">
+        <div class="row-between"><div><b>外觀</b></div>
+          <button class="btn btn-sm" onclick="toggleDark()">${App.cfg.dark?'☀️':'🌙'}</button></div>
+        <hr class="divider">
+        <div class="row-between"><div><b>離開房間</b><div class="small muted danger">清除設定重新加入</div></div>
+          <button class="btn btn-sm btn-danger" onclick="resetAll()">登出</button></div>
+      </div>
+    </div>
+  `;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ACTIONS
+   ──────────────────────────────────────────────────────────── */
+// — Sign in (student)
+function doSignIn(ev) {
+  const btn = document.getElementById('signin');
+  if (!btn || btn.disabled) return;
+  const myId = App.cfg.myStudentId;
+  if (!myId) { toast('找不到您的學生資料，請重新加入房間', 'error'); return; }
+  const d = today(), t = nowTime();
+  // local optimistic
+  const exists = App.db.attendance.find(a => a.studentId === myId && a.date === d);
+  if (exists) { toast('今日已簽到', 'warn'); return; }
+  const entry = {
+    id: uid(),
+    studentId: myId,
+    studentName: App.cfg.name,
+    date: d, time: t,
+    type: 'present',
+    method: 'student-self',
+    ts: Date.now()
+  };
+  btn.classList.add('is-pending');
+  App.db.attendance.push(entry);
+  saveDB();
+  if (App.fbRef) {
+    App.fbRef.child('attendance/' + entry.id).set(entry).then(() => {
+      btn.classList.remove('is-pending');
+      btn.classList.add('is-done');
+      toast('✅ 已簽到 ' + t.slice(0,5), 'success');
+      const r = btn.getBoundingClientRect();
+      confetti(r.left + r.width/2, r.top + r.height/2);
+      rerender();
+    }).catch(() => {
+      btn.classList.remove('is-pending');
+      toast('離線中：已暫存，連線後自動同步', 'warn');
+      rerender();
+    });
+  } else {
+    btn.classList.remove('is-pending');
+    btn.classList.add('is-done');
+    toast('✅ 已簽到 ' + t.slice(0,5) + '（單機）', 'success');
+    const r = btn.getBoundingClientRect();
+    confetti(r.left + r.width/2, r.top + r.height/2);
+    rerender();
+  }
+}
+
+// — Teacher: toggle/mark a student
+function toggleMark(sid) {
+  const d = today();
+  const exists = App.db.attendance.find(a => a.studentId === sid && a.date === d);
+  const stu = App.db.students.find(s => s.id === sid);
+  const name = stu ? stu.name : '';
+  if (exists) {
+    confirmDialog(`要清除 ${name} 今日的簽到嗎？`, () => {
+      App.db.attendance = App.db.attendance.filter(a => a.id !== exists.id);
+      saveDB();
+      if (App.fbRef) App.fbRef.child('attendance/' + exists.id).remove();
+      else rerender();
+      toast('已清除', 'warn');
+    });
+  } else {
+    const entry = {
+      id: uid(), studentId: sid, studentName: name,
+      date: d, time: nowTime(), type: 'present',
+      method: 'teacher-manual', ts: Date.now()
+    };
+    App.db.attendance.push(entry);
+    saveDB();
+    if (App.fbRef) App.fbRef.child('attendance/' + entry.id).set(entry);
+    else rerender();
+    toast(`✓ 已幫 ${name} 補簽`, 'success');
+  }
+}
+
+// — Send message (teacher)
+function sendMessage() {
+  const inp = document.getElementById('msg-input');
+  const text = (inp.value || '').trim();
+  if (!text) return;
+  const m = { id: uid(), from: 'teacher', fromName: App.cfg.name, to: 'all', text, ts: Date.now() };
+  App.db.messages.push(m);
+  saveDB();
+  if (App.fbRef) App.fbRef.child('messages/' + m.id).set(m);
+  else rerender();
+  inp.value = '';
+  if (!App.fbRef) rerender();
+}
+function sendStudentMessage() {
+  const inp = document.getElementById('msg-input');
+  const text = (inp.value || '').trim();
+  if (!text) return;
+  const m = { id: uid(), from: App.cfg.myStudentId, fromName: App.cfg.name, to: 'teacher', text, ts: Date.now() };
+  App.db.messages.push(m);
+  saveDB();
+  if (App.fbRef) App.fbRef.child('messages/' + m.id).set(m);
+  else rerender();
+  inp.value = '';
+  if (!App.fbRef) rerender();
+}
+
+// — Leave request (student)
+function askLeave() {
+  openModal(`
+    <div class="modal-head">
+      <h3>📝 請假申請</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label class="label">日期</label>
+        <input class="input" type="date" id="lv-date" value="${today()}"></div>
+      <div class="field"><label class="label">原因</label>
+        <textarea class="input" id="lv-reason" placeholder="例如：感冒在家休息"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitLeave()">送出</button>
+    </div>
+  `);
+}
+function submitLeave() {
+  const date = document.getElementById('lv-date').value;
+  const reason = document.getElementById('lv-reason').value.trim();
+  if (!date) { toast('請選日期', 'error'); return; }
+  // Insert attendance entry of type=leave
+  const entry = {
+    id: uid(), studentId: App.cfg.myStudentId, studentName: App.cfg.name,
+    date, time: nowHM(), type: 'leave', reason, method: 'student-leave', ts: Date.now()
+  };
+  // remove existing on same day first
+  App.db.attendance = App.db.attendance.filter(a => !(a.studentId === entry.studentId && a.date === date));
+  App.db.attendance.push(entry);
+  saveDB();
+  if (App.fbRef) {
+    // simplest: rewrite whole attendance node (small data)
+    const obj = {};
+    App.db.attendance.forEach(a => obj[a.id] = a);
+    App.fbRef.child('attendance').set(obj);
+  } else rerender();
+  toast('✓ 已送出請假', 'success');
+  closeModal();
+}
+
+// — Student admin: add/edit/delete
+function addStudent() {
+  openModal(`
+    <div class="modal-head"><h3>新增學生</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label class="label">姓名 *</label><input class="input" id="ns-name" placeholder="王小明"></div>
+      <div class="field"><label class="label">學號</label><input class="input" id="ns-sid" placeholder="113001"></div>
+      <div class="field"><label class="label">座號</label><input class="input" id="ns-seat" type="number" value="${App.db.students.length+1}"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveStudent()">儲存</button>
+    </div>
+  `);
+}
+function saveStudent() {
+  const name = document.getElementById('ns-name').value.trim();
+  if (!name) { toast('請填姓名', 'error'); return; }
+  const stu = {
+    id: uid(),
+    name,
+    sid: document.getElementById('ns-sid').value.trim(),
+    seat: parseInt(document.getElementById('ns-seat').value) || 0
+  };
+  App.db.students.push(stu);
+  Sync.syncStudents();
+  closeModal();
+  toast('✓ 已新增', 'success');
+  rerender();
+}
+function editStudent(id) {
+  const s = App.db.students.find(x => x.id === id);
+  if (!s) return;
+  openModal(`
+    <div class="modal-head"><h3>編輯學生</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label class="label">姓名</label><input class="input" id="es-name" value="${esc(s.name)}"></div>
+      <div class="field"><label class="label">學號</label><input class="input" id="es-sid" value="${esc(s.sid||'')}"></div>
+      <div class="field"><label class="label">座號</label><input class="input" id="es-seat" type="number" value="${s.seat||0}"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="updateStudent('${id}')">更新</button>
+    </div>
+  `);
+}
+function updateStudent(id) {
+  const s = App.db.students.find(x => x.id === id);
+  if (!s) return;
+  s.name = document.getElementById('es-name').value.trim() || s.name;
+  s.sid = document.getElementById('es-sid').value.trim();
+  s.seat = parseInt(document.getElementById('es-seat').value) || 0;
+  Sync.syncStudents();
+  closeModal();
+  toast('✓ 已更新', 'success');
+  rerender();
+}
+function delStudent(id) {
+  const s = App.db.students.find(x => x.id === id);
+  if (!s) return;
+  confirmDialog(`確定刪除 ${s.name}？該學生的出席紀錄會保留。`, () => {
+    App.db.students = App.db.students.filter(x => x.id !== id);
+    Sync.syncStudents();
+    toast('已刪除', 'warn');
+    rerender();
+  });
+}
+
+// — CSV import / export
+function importCSV() {
+  openModal(`
+    <div class="modal-head"><h3>📥 匯入 CSV</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <p class="small muted">每行一位學生，格式：<code>姓名,學號,座號</code></p>
+      <textarea class="input mono small" id="csv-data" rows="10" placeholder="王小明,113001,1
+陳大華,113002,2"></textarea>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="doImportCSV()">匯入</button>
+    </div>
+  `);
+}
+function doImportCSV() {
+  const txt = document.getElementById('csv-data').value.trim();
+  if (!txt) return;
+  const lines = txt.split(/\r?\n/).filter(l => l.trim());
+  let n = 0;
+  lines.forEach(l => {
+    const parts = l.split(/,|\t/).map(x => x.trim());
+    if (!parts[0]) return;
+    App.db.students.push({
+      id: uid(),
+      name: parts[0],
+      sid: parts[1] || '',
+      seat: parseInt(parts[2]) || (App.db.students.length+1)
+    });
+    n++;
+  });
+  Sync.syncStudents();
+  closeModal();
+  toast(`✓ 匯入 ${n} 位學生`, 'success');
+  rerender();
+}
+
+function exportTodayCSV() {
+  const d = today();
+  const att = App.db.attendance.filter(a => a.date === d);
+  const map = {}; att.forEach(a => map[a.studentId] = a);
+  const rows = [['座號','姓名','學號','狀態','時間','備註']];
+  App.db.students.forEach(s => {
+    const a = map[s.id];
+    rows.push([
+      s.seat||'', s.name||'', s.sid||'',
+      a ? (a.type==='leave'?'請假':'出席') : '缺席',
+      a ? (a.time||'') : '',
+      a ? (a.reason||a.method||'') : ''
+    ]);
+  });
+  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `attendance_${d}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  toast('✓ 已下載', 'success');
+}
+
+function exportAll() {
+  const blob = new Blob([JSON.stringify({ cfg: App.cfg, db: App.db }, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `cms_v2_${App.cfg.roomCode}_${today()}.json`;
+  a.click();
+  toast('✓ 已下載備份', 'success');
+}
+
+// — V1 import from settings
+function importV1Now() {
+  let v1 = null;
+  try { v1 = JSON.parse(localStorage.getItem('cmsDB') || 'null'); } catch(e){}
+  if (!v1 || !v1.students) { toast('找不到舊版資料', 'warn'); return; }
+  confirmDialog(`將匯入 ${v1.students.length} 位學生與 ${(v1.attendance||[]).length} 筆出席紀錄到目前房間。`, () => {
+    App.db.students = (v1.students || []).map(s => ({
+      id: s.id || uid(), name: s.name||'', sid: s.sid||'', cls: s.cls||'', seat: s.seat||0
+    }));
+    App.db.attendance = (v1.attendance || [])
+      .filter(a => a && a.studentId && a.date && a.time)
+      .map(a => ({
+        id: a.id || uid(), studentId: a.studentId, studentName: a.studentName||'',
+        date: a.date, time: a.time, type: a.type||'present', method: 'imported'
+      }));
+    saveDB();
+    if (App.fbRef) {
+      Sync.syncStudents();
+      const obj = {}; App.db.attendance.forEach(a => obj[a.id] = a);
+      App.fbRef.child('attendance').set(obj);
+    }
+    toast(`✓ 匯入 ${App.db.students.length} 學生 / ${App.db.attendance.length} 出席`, 'success');
+    rerender();
+  });
+}
+
+// — Firebase settings (post-setup)
+function editFirebaseSettings() {
+  const cur = App.cfg.firebaseConfig ? JSON.stringify(App.cfg.firebaseConfig, null, 2) : '';
+  openModal(`
+    <div class="modal-head"><h3>即時同步設定</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <p class="small muted">貼上 Firebase 設定即可啟用跨裝置同步。</p>
+      <textarea class="input mono small" id="fb-cfg" rows="9">${esc(cur)}</textarea>
+      <button class="btn btn-ghost btn-block small" onclick="wizFirebaseHelp()" style="margin-top:8px">📘 如何取得？</button>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" onclick="clearFirebase()">清除（單機模式）</button>
+      <button class="btn btn-primary" onclick="saveFirebaseCfg()">儲存並重連</button>
+    </div>
+  `);
+}
+function saveFirebaseCfg() {
+  const txt = document.getElementById('fb-cfg').value.trim();
+  if (!txt) { closeModal(); return; }
+  let cfg;
+  try { cfg = JSON.parse(txt); }
+  catch(e) { try { cfg = (new Function('return (' + txt + ')'))(); } catch(e2){ toast('JSON 解析失敗','error'); return; } }
+  App.cfg.firebaseConfig = cfg;
+  saveCfg();
+  Sync.init();
+  closeModal();
+  toast('✓ 已套用，正在連線…', 'success');
+  rerender();
+}
+function clearFirebase() {
+  App.cfg.firebaseConfig = null;
+  saveCfg();
+  Sync.detachAll();
+  if (App.fb) { try { App.fb.delete(); } catch(e){} App.fb = null; App.fbRef = null; }
+  setOnline(false);
+  closeModal();
+  toast('已切換為單機模式', 'warn');
+  rerender();
+}
+
+// — Misc actions
+function showRoomShare() { setView('qr'); }
+function copyText(t) {
+  navigator.clipboard.writeText(t).then(() => toast('✓ 已複製', 'success')).catch(() => toast('複製失敗', 'error'));
+}
+function historyPicker() {
+  const dates = [...new Set(App.db.attendance.map(a => a.date))].sort().reverse();
+  openModal(`
+    <div class="modal-head"><h3>📆 選擇日期</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <input class="input" type="date" id="hp-date" value="${today()}" max="${today()}">
+      ${dates.length ? `<p class="small muted" style="margin-top:8px">有紀錄的日期：</p>
+        <div class="row" style="flex-wrap:wrap;gap:6px">${dates.slice(0,20).map(d => `<button class="pill pill-primary mono" onclick="closeModal();openHistoryView('${d}')">${d}</button>`).join('')}</div>`:''}
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="openHistoryView(document.getElementById('hp-date').value);closeModal()">查看</button>
+    </div>
+  `);
+}
+function openHistoryView(d) {
+  const att = App.db.attendance.filter(a => a.date === d);
+  const map = {}; att.forEach(a => map[a.studentId] = a);
+  const rows = App.db.students.map(s => {
+    const a = map[s.id];
+    return `<div class="list-item">
+      <div class="avatar">${a ? (a.type==='leave'?'📝':'✅') : '❌'}</div>
+      <div class="body"><div class="name">${esc(s.name)}</div>
+      <div class="sub">${a ? (a.type==='leave'?'請假':'已簽到 '+esc(a.time||'')) : '未到'}</div></div>
+    </div>`;
+  }).join('');
+  openModal(`
+    <div class="modal-head"><h3>${d} · 班況</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button></div>
+    <div class="modal-body"><div class="list">${rows||'<div class="empty">無學生</div>'}</div></div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal()">關閉</button></div>
+  `);
+}
+function toggleDark() {
+  App.cfg.dark = !App.cfg.dark;
+  document.documentElement.setAttribute('data-theme', App.cfg.dark ? 'dark' : 'light');
+  saveCfg();
+  rerender();
+}
+function editMyName() {
+  openModal(`
+    <div class="modal-head"><h3>修改姓名</h3><button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label class="label">您的姓名</label><input class="input" id="mn-name" value="${esc(App.cfg.name)}"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveMyName()">儲存</button>
+    </div>
+  `);
+}
+function saveMyName() {
+  const n = document.getElementById('mn-name').value.trim();
+  if (!n) { toast('姓名不可空', 'error'); return; }
+  App.cfg.name = n;
+  // update student record
+  const me = App.db.students.find(s => s.id === App.cfg.myStudentId);
+  if (me) { me.name = n; Sync.syncStudents(); }
+  saveCfg();
+  closeModal();
+  toast('✓ 已更新', 'success');
+  rerender();
+}
+
+function resetAll() {
+  confirmDialog('登出將清除本機設定（房間資料仍保留在雲端）。確定？', () => {
+    try { localStorage.removeItem(LS_KEY + '_cfg'); } catch(e){}
+    Sync.detachAll();
+    if (App.fb) { try { App.fb.delete(); } catch(e){} }
+    App.cfg = null;
+    App.fb = null;
+    App.fbRef = null;
+    wizardState = { step:1, role:null, mode:null, roomCode:'', name:'', studentId:'', firebaseConfig:null };
+    rerender();
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   DEEP LINK: #join=ABC123 (auto-fill room code on student wizard)
+   ──────────────────────────────────────────────────────────── */
+function handleHash() {
+  const h = location.hash;
+  const m = h.match(/join=([A-Z2-9]{6})/);
+  if (m && !App.cfg) {
+    wizardState.roomCode = m[1];
+    wizardState.role = 'student';
+    wizardState.step = 3;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   BOOT
+   ──────────────────────────────────────────────────────────── */
+(function boot() {
+  // Load cfg
+  App.cfg = loadCfg();
+  if (App.cfg && App.cfg.roomCode) {
+    loadDB(App.cfg.roomCode);
+    if (App.cfg.dark) document.documentElement.setAttribute('data-theme', 'dark');
+    Sync.init();
+    // pick default view per role
+    App.view = (App.cfg.role === 'teacher') ? 'today' : 'home';
+  } else {
+    handleHash();
+  }
+  rerender();
+})();
+
+// Register service worker (existing one from v1 is OK)
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
