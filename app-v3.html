@@ -1,0 +1,2771 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<title>課程管理系統 v3</title>
+<link rel="manifest" href="manifest.json">
+
+<!-- Firebase (optional) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<style>
+/* ════════════════════════════════════════════════════════════
+   課程管理系統 v3  —  完整重寫版（階段 1 核心基礎）
+   --------------------------------------------------------
+   - 保留 v1 60+ 功能、套用 v2 乾淨架構
+   - 內建 Firebase 跨裝置同步（可選）
+   - 手機優先 + 桌面完美
+   - Linear / Notion 風格極簡
+   ──────────────────────────────────────────────────────── */
+
+/* ---------- design tokens ---------- */
+:root{
+  --bg:#fafafa; --surface:#ffffff; --surface-2:#f4f4f5; --surface-3:#ececef;
+  --text:#18181b; --text-muted:#71717a; --text-faint:#a1a1aa;
+  --border:#e4e4e7; --border-strong:#d4d4d8;
+  --primary:#2563eb; --primary-hover:#1d4ed8; --primary-soft:#dbeafe; --primary-fg:#fff;
+  --success:#16a34a; --success-soft:#dcfce7;
+  --warn:#ea580c; --warn-soft:#ffedd5;
+  --danger:#dc2626; --danger-soft:#fee2e2;
+  --accent:#8b5cf6; --accent-soft:#ede9fe;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);
+  --shadow:0 1px 3px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.04);
+  --shadow-lg:0 10px 25px rgba(0,0,0,.08),0 4px 10px rgba(0,0,0,.04);
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-xl:24px;
+  --tx:150ms ease-out;
+  --sidebar-w:220px;
+  --topbar-h:56px;
+  --nav-h:64px;
+}
+[data-theme="dark"]{
+  --bg:#0a0a0a; --surface:#18181b; --surface-2:#27272a; --surface-3:#3f3f46;
+  --text:#fafafa; --text-muted:#a1a1aa; --text-faint:#71717a;
+  --border:#27272a; --border-strong:#3f3f46;
+  --primary-soft:#1e3a8a; --success-soft:#14532d; --warn-soft:#7c2d12;
+  --danger-soft:#7f1d1d; --accent-soft:#4c1d95;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3);
+  --shadow:0 1px 3px rgba(0,0,0,.4);
+  --shadow-lg:0 10px 25px rgba(0,0,0,.5);
+}
+[data-accent="green"]{ --primary:#16a34a; --primary-hover:#15803d; --primary-soft:#dcfce7;}
+[data-accent="violet"]{ --primary:#8b5cf6; --primary-hover:#7c3aed; --primary-soft:#ede9fe;}
+
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body{
+  margin:0; padding:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  font-weight:500; font-size:15px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+body{ min-height:100vh; min-height:100dvh; }
+button,input,select,textarea{ font:inherit; color:inherit; }
+a{ color:var(--primary); text-decoration:none; }
+img{ max-width:100%; display:block; }
+
+/* ---------- typography ---------- */
+h1,h2,h3,h4{ margin:0; font-weight:700; letter-spacing:-.02em; line-height:1.2; }
+h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:14px; }
+.muted{ color:var(--text-muted); }
+.faint{ color:var(--text-faint); }
+.tiny{ font-size:12px; }
+.small{ font-size:13px; }
+.big{ font-size:32px; font-weight:700; letter-spacing:-.03em; }
+.huge{ font-size:48px; font-weight:800; letter-spacing:-.04em; }
+.mono{ font-family:ui-monospace,"SF Mono",Menlo,monospace; }
+
+/* ---------- layout ---------- */
+.app{
+  min-height:100vh; min-height:100dvh;
+  display:grid; grid-template-columns:1fr;
+  background:var(--bg);
+}
+.sidebar{ display:none; }
+.main-area{ display:flex; flex-direction:column; min-width:0; }
+.topbar{
+  height:var(--topbar-h);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 16px; background:var(--surface);
+  border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:30;
+  padding-top:env(safe-area-inset-top);
+  height:calc(var(--topbar-h) + env(safe-area-inset-top));
+}
+.topbar h1{ font-size:17px; font-weight:600; }
+.topbar-actions{ display:flex; gap:8px; align-items:center; }
+.content{
+  flex:1; padding:16px;
+  padding-bottom:calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
+  max-width:1200px; margin:0 auto; width:100%;
+}
+.bottom-nav{
+  position:fixed; bottom:0; left:0; right:0; z-index:25;
+  height:calc(var(--nav-h) + env(safe-area-inset-bottom));
+  padding-bottom:env(safe-area-inset-bottom);
+  background:var(--surface); border-top:1px solid var(--border);
+  display:flex; align-items:stretch;
+}
+.nav-item{
+  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:none; border:none; cursor:pointer; padding:8px 4px;
+  color:var(--text-muted); transition:color var(--tx);
+  position:relative;
+  font-size:11px; font-weight:500;
+}
+.nav-item .ico{ font-size:22px; margin-bottom:2px; line-height:1; }
+.nav-item.active{ color:var(--primary); }
+.nav-item .badge{
+  position:absolute; top:6px; right:calc(50% - 20px);
+  background:var(--danger); color:#fff; font-size:10px;
+  padding:1px 5px; border-radius:8px; min-width:16px; text-align:center;
+}
+
+@media (min-width:900px){
+  .app{ grid-template-columns:var(--sidebar-w) 1fr; }
+  .sidebar{
+    display:flex; flex-direction:column;
+    background:var(--surface); border-right:1px solid var(--border);
+    height:100vh; height:100dvh; position:sticky; top:0;
+    padding:16px 12px;
+  }
+  .brand{ display:flex; align-items:center; gap:8px; padding:6px 8px 16px; }
+  .brand-logo{ width:32px; height:32px; border-radius:8px; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; }
+  .brand-title{ font-weight:700; font-size:15px; }
+  .side-section-title{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); padding:12px 8px 4px; font-weight:600; }
+  .side-item{
+    display:flex; align-items:center; gap:10px; padding:9px 10px;
+    border-radius:8px; cursor:pointer; color:var(--text-muted);
+    transition:background var(--tx),color var(--tx); font-size:14px;
+    border:none; background:none; width:100%; text-align:left; font-weight:500;
+    position:relative;
+  }
+  .side-item:hover{ background:var(--surface-2); color:var(--text); }
+  .side-item.active{ background:var(--primary-soft); color:var(--primary); font-weight:600; }
+  .side-item .ico{ font-size:18px; width:20px; text-align:center; }
+  .side-item .badge{
+    position:absolute; right:10px; background:var(--danger); color:#fff;
+    font-size:10px; padding:1px 6px; border-radius:8px; min-width:18px; text-align:center;
+  }
+  .bottom-nav{ display:none; }
+  .content{ padding:24px 32px; padding-bottom:32px; }
+}
+
+/* ---------- buttons & inputs ---------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:44px; padding:0 18px; border-radius:var(--r-sm);
+  border:1px solid var(--border-strong); background:var(--surface);
+  color:var(--text); font-weight:600; font-size:14px;
+  cursor:pointer; transition:all var(--tx); white-space:nowrap;
+}
+.btn:hover{ background:var(--surface-2); }
+.btn:active{ transform:scale(.98); }
+.btn:disabled{ opacity:.45; cursor:not-allowed; }
+.btn-primary{ background:var(--primary); color:var(--primary-fg); border-color:transparent; }
+.btn-primary:hover{ background:var(--primary-hover); }
+.btn-success{ background:var(--success); color:#fff; border-color:transparent; }
+.btn-danger{ background:var(--danger); color:#fff; border-color:transparent; }
+.btn-ghost{ background:transparent; border-color:transparent; }
+.btn-ghost:hover{ background:var(--surface-2); }
+.btn-sm{ height:32px; padding:0 10px; font-size:13px; border-radius:6px; }
+.btn-lg{ height:56px; padding:0 28px; font-size:17px; font-weight:700; }
+.btn-icon{ width:40px; padding:0; }
+.btn-block{ width:100%; }
+.input,.select,.textarea{
+  height:44px; padding:0 12px; width:100%;
+  border-radius:var(--r-sm); border:1px solid var(--border-strong);
+  background:var(--surface); color:var(--text); font-size:15px;
+  transition:border-color var(--tx),box-shadow var(--tx);
+}
+.input:focus,.select:focus,.textarea:focus{
+  outline:none; border-color:var(--primary);
+  box-shadow:0 0 0 3px var(--primary-soft);
+}
+.textarea{ height:auto; padding:10px 12px; resize:vertical; min-height:80px; }
+.label{ display:block; font-size:13px; font-weight:600; color:var(--text-muted); margin-bottom:6px; }
+.field{ margin-bottom:14px; }
+.row{ display:flex; gap:10px; flex-wrap:wrap; }
+.row > *{ flex:1; min-width:0; }
+
+/* ---------- cards & lists ---------- */
+.card{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:16px;
+  box-shadow:var(--shadow-sm);
+}
+.card-hover{ transition:transform var(--tx),box-shadow var(--tx); cursor:pointer; }
+.card-hover:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+.card h2{ margin-bottom:6px; }
+.card h3{ margin-bottom:4px; }
+
+.grid{ display:grid; gap:12px; }
+.grid-2{ grid-template-columns:repeat(2,1fr); }
+.grid-3{ grid-template-columns:repeat(3,1fr); }
+.grid-4{ grid-template-columns:repeat(4,1fr); }
+@media (max-width:680px){
+  .grid-3,.grid-4{ grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:420px){
+  .grid-2,.grid-3,.grid-4{ grid-template-columns:1fr; }
+}
+
+/* stat tiles */
+.stat{
+  display:flex; flex-direction:column; gap:4px;
+  padding:14px 16px; border-radius:var(--r-md);
+  background:var(--surface); border:1px solid var(--border);
+  cursor:pointer; transition:all var(--tx);
+}
+.stat:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+.stat .num{ font-size:28px; font-weight:800; letter-spacing:-.03em; }
+.stat .lbl{ color:var(--text-muted); font-size:12px; font-weight:600; }
+.stat.s-success .num{ color:var(--success); }
+.stat.s-warn .num{ color:var(--warn); }
+.stat.s-danger .num{ color:var(--danger); }
+.stat.s-accent .num{ color:var(--accent); }
+.stat.s-primary .num{ color:var(--primary); }
+
+/* tag / badge */
+.tag{
+  display:inline-flex; align-items:center; gap:4px;
+  padding:2px 8px; border-radius:999px;
+  font-size:11px; font-weight:600;
+  background:var(--surface-2); color:var(--text-muted);
+}
+.tag.t-success{ background:var(--success-soft); color:var(--success); }
+.tag.t-warn{ background:var(--warn-soft); color:var(--warn); }
+.tag.t-danger{ background:var(--danger-soft); color:var(--danger); }
+.tag.t-primary{ background:var(--primary-soft); color:var(--primary); }
+.tag.t-accent{ background:var(--accent-soft); color:var(--accent); }
+.dot{ width:8px; height:8px; border-radius:50%; background:var(--text-faint); display:inline-block; }
+.dot.d-success{ background:var(--success); }
+.dot.d-warn{ background:var(--warn); }
+.dot.d-danger{ background:var(--danger); }
+
+/* ---------- student card / list rows ---------- */
+.stu-grid{ display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); }
+.stu-card{
+  padding:12px; border-radius:var(--r-md);
+  background:var(--surface); border:1px solid var(--border);
+  display:flex; flex-direction:column; gap:6px;
+  transition:all var(--tx);
+}
+.stu-card.signed{ background:var(--success-soft); border-color:var(--success); }
+.stu-card.late{ background:var(--warn-soft); border-color:var(--warn); }
+.stu-card.absent{ background:var(--danger-soft); border-color:var(--danger); }
+.stu-card.leave{ background:var(--accent-soft); border-color:var(--accent); }
+.stu-card .name{ font-weight:700; font-size:15px; }
+.stu-card .meta{ font-size:12px; color:var(--text-muted); }
+.stu-card .actions{ margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+
+.list-row{
+  display:flex; align-items:center; gap:12px;
+  padding:12px 14px; background:var(--surface);
+  border:1px solid var(--border); border-radius:var(--r-sm);
+  transition:background var(--tx);
+}
+.list-row + .list-row{ margin-top:6px; }
+.list-row:hover{ background:var(--surface-2); }
+.list-row .avatar{
+  width:38px; height:38px; border-radius:50%;
+  background:var(--primary-soft); color:var(--primary);
+  display:flex; align-items:center; justify-content:center;
+  font-weight:700; flex-shrink:0;
+}
+.list-row .info{ flex:1; min-width:0; }
+.list-row .info .name{ font-weight:600; }
+.list-row .info .sub{ font-size:12px; color:var(--text-muted); }
+.list-row .actions{ display:flex; gap:4px; flex-shrink:0; }
+
+/* ---------- toast ---------- */
+.toast-host{
+  position:fixed; top:env(safe-area-inset-top); left:0; right:0; z-index:9000;
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  padding:12px; pointer-events:none;
+}
+.toast{
+  background:var(--surface); color:var(--text);
+  border:1px solid var(--border); border-radius:var(--r-sm);
+  padding:10px 16px; box-shadow:var(--shadow-lg);
+  font-weight:600; font-size:14px;
+  animation:toastIn .25s ease-out;
+  pointer-events:auto;
+  max-width:90vw;
+}
+.toast.t-success{ border-color:var(--success); color:var(--success); }
+.toast.t-warn{ border-color:var(--warn); color:var(--warn); }
+.toast.t-danger{ border-color:var(--danger); color:var(--danger); }
+@keyframes toastIn{
+  from{ opacity:0; transform:translateY(-12px); }
+  to{ opacity:1; transform:translateY(0); }
+}
+
+/* ---------- modal ---------- */
+.modal-host{
+  position:fixed; inset:0; z-index:8000;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.5);
+  padding:16px; animation:fadeIn .2s ease-out;
+}
+@keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+.modal{
+  background:var(--surface); border-radius:var(--r-lg);
+  padding:20px; max-width:480px; width:100%;
+  max-height:90vh; overflow:auto;
+  box-shadow:var(--shadow-lg);
+  animation:modalIn .25s ease-out;
+}
+@keyframes modalIn{
+  from{ opacity:0; transform:translateY(20px) scale(.96); }
+  to{ opacity:1; transform:none; }
+}
+.modal h2{ margin-bottom:12px; }
+.modal-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
+.modal-actions .btn{ flex:0 1 auto; }
+@media(max-width:480px){ .modal-actions .btn{ flex:1; } }
+
+/* ---------- check-in big button ---------- */
+.checkin-wrap{
+  display:flex; flex-direction:column; align-items:center;
+  padding:32px 16px;
+}
+.checkin-btn{
+  width:240px; height:240px; border-radius:50%;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  color:#fff; font-size:28px; font-weight:800;
+  display:flex; align-items:center; justify-content:center;
+  border:none; cursor:pointer;
+  box-shadow:0 12px 40px rgba(37,99,235,.35);
+  transition:transform .15s ease-out;
+  position:relative; overflow:hidden;
+  letter-spacing:.04em;
+}
+.checkin-btn:hover{ transform:scale(1.03); }
+.checkin-btn:active{ transform:scale(.96); }
+.checkin-btn.pulse{ animation:pulse 1.4s infinite; }
+@keyframes pulse{
+  0%,100%{ box-shadow:0 12px 40px rgba(37,99,235,.35); }
+  50%{ box-shadow:0 12px 48px rgba(37,99,235,.6); }
+}
+.checkin-btn.done{
+  background:var(--success);
+  animation:doneShrink .6s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+@keyframes doneShrink{
+  0%{ transform:scale(1); }
+  40%{ transform:scale(.85); }
+  100%{ transform:scale(1); background:var(--success); }
+}
+.success-check{
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  font-size:120px; color:var(--success); z-index:9999;
+  animation:successPop .8s ease-out forwards;
+  pointer-events:none;
+  text-shadow:0 8px 24px rgba(22,163,74,.4);
+}
+@keyframes successPop{
+  0%{ transform:translate(-50%,-50%) scale(.3); opacity:0; }
+  30%{ transform:translate(-50%,-50%) scale(1.2); opacity:1; }
+  60%{ transform:translate(-50%,-50%) scale(1); }
+  100%{ transform:translate(-50%,-50%) scale(1); opacity:0; }
+}
+.confetti{
+  position:fixed; width:8px; height:14px; z-index:9998;
+  pointer-events:none; border-radius:2px;
+  animation:fall 1.5s ease-out forwards;
+}
+@keyframes fall{
+  to{ transform:translateY(110vh) rotate(720deg); opacity:0; }
+}
+
+/* ---------- tables ---------- */
+.tbl{ width:100%; border-collapse:collapse; font-size:14px; }
+.tbl th,.tbl td{ padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); }
+.tbl th{ font-weight:600; color:var(--text-muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; background:var(--surface-2); }
+.tbl tr:hover td{ background:var(--surface-2); }
+
+/* ---------- wizard / login ---------- */
+.center-wrap{
+  min-height:100vh; min-height:100dvh;
+  display:flex; align-items:center; justify-content:center;
+  padding:16px; background:linear-gradient(160deg,var(--bg) 0%,var(--surface-2) 100%);
+}
+.login-card{
+  background:var(--surface); border-radius:var(--r-lg);
+  padding:32px 24px; max-width:420px; width:100%;
+  box-shadow:var(--shadow-lg); border:1px solid var(--border);
+}
+.login-card .brand-big{
+  display:flex; align-items:center; gap:12px; margin-bottom:24px;
+}
+.login-card .brand-big .logo{
+  width:48px; height:48px; border-radius:12px;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  color:#fff; font-weight:800; font-size:22px;
+  display:flex; align-items:center; justify-content:center;
+}
+.tab-bar{
+  display:flex; gap:4px; padding:4px;
+  background:var(--surface-2); border-radius:var(--r-sm);
+  margin-bottom:18px;
+}
+.tab-bar button{
+  flex:1; height:36px; border:none; background:none;
+  border-radius:6px; cursor:pointer; font-weight:600; font-size:13px;
+  color:var(--text-muted); transition:all var(--tx);
+}
+.tab-bar button.active{ background:var(--surface); color:var(--text); box-shadow:var(--shadow-sm); }
+
+.role-card{
+  padding:20px; border:2px solid var(--border);
+  border-radius:var(--r-md); cursor:pointer;
+  transition:all var(--tx); text-align:center;
+}
+.role-card:hover{ border-color:var(--primary); transform:translateY(-2px); }
+.role-card .ico{ font-size:48px; margin-bottom:8px; }
+.role-card h3{ margin-bottom:4px; }
+
+/* ---------- misc ---------- */
+.sep{ height:1px; background:var(--border); margin:16px 0; border:none; }
+.flex{ display:flex; gap:10px; align-items:center; }
+.flex-between{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.flex-col{ display:flex; flex-direction:column; gap:8px; }
+.space{ height:12px; }
+.scroll-x{ overflow-x:auto; }
+.empty{
+  padding:48px 16px; text-align:center; color:var(--text-muted);
+}
+.empty .ico{ font-size:48px; opacity:.5; margin-bottom:8px; }
+
+/* connection indicator */
+.conn{
+  display:inline-flex; align-items:center; gap:5px;
+  font-size:11px; font-weight:600; color:var(--text-muted);
+  padding:4px 8px; border-radius:999px; background:var(--surface-2);
+}
+.conn .dot{ width:6px; height:6px; }
+.conn.online .dot{ background:var(--success); }
+.conn.connecting .dot{ background:var(--warn); animation:blink 1s infinite; }
+.conn.error .dot{ background:var(--danger); }
+.conn.offline .dot{ background:var(--text-faint); }
+@keyframes blink{ 50%{opacity:.3;} }
+
+/* signed status row */
+.status-row{
+  display:flex; align-items:center; gap:8px;
+  padding:10px 12px; border-radius:var(--r-sm);
+  background:var(--surface);
+}
+.status-row.signed{ background:var(--success-soft); }
+.status-row.absent{ background:var(--danger-soft); }
+.status-row.leave{ background:var(--accent-soft); }
+
+/* drawer (mobile sidebar) - reserved */
+.drawer-host{
+  position:fixed; inset:0; z-index:7000;
+  background:rgba(0,0,0,.45); display:flex;
+  animation:fadeIn .2s ease-out;
+}
+.drawer{
+  width:280px; max-width:80%; background:var(--surface);
+  display:flex; flex-direction:column; padding:16px 12px;
+  animation:drawerIn .25s ease-out;
+}
+@keyframes drawerIn{ from{ transform:translateX(-100%);} to{ transform:none;} }
+
+.kbd{ font-family:ui-monospace,monospace; background:var(--surface-2); padding:1px 6px; border-radius:4px; font-size:12px; border:1px solid var(--border); }
+
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="toast-host" class="toast-host"></div>
+<div id="modal-host"></div>
+
+<script>
+/* ════════════════════════════════════════════════════════════
+   APP STATE & CONSTANTS
+   ──────────────────────────────────────────────────────────── */
+"use strict";
+
+const LS_KEY = 'cms_v3';
+const LS_CFG = LS_KEY + '_cfg';
+const LS_DB  = LS_KEY + '_db';
+const LS_FB  = LS_KEY + '_fb_cfg';
+const LS_THEME = LS_KEY + '_theme';
+const LS_ACCENT = LS_KEY + '_accent';
+const LS_SESSION = LS_KEY + '_session';
+
+const App = {
+  cfg: null,           // workspace config: {roomCode, role, ...}
+  session: null,       // {role:'teacher'|'student', id, name, ...}
+  db: null,            // the database object
+  view: 'overview',    // current view id
+  subview: null,       // sub-view (for drill-downs)
+  theme: 'light',
+  accent: 'blue',
+  fb: null,
+  fbRef: null,
+  fbStatus: 'idle',    // idle|connecting|online|error
+  listeners: [],
+  bc: null,            // BroadcastChannel
+  pendingSync: [],
+};
+
+/* ════════════════════════════════════════════════════════════
+   TINY UTILITIES
+   ──────────────────────────────────────────────────────────── */
+const $  = (sel, root=document) => root.querySelector(sel);
+const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+function el(tag, attrs, ...children){
+  const e = document.createElement(tag);
+  if(attrs){
+    for(const k in attrs){
+      const v = attrs[k];
+      if(v == null || v === false) continue;
+      if(k === 'class' || k === 'className') e.className = v;
+      else if(k === 'style' && typeof v === 'object') Object.assign(e.style, v);
+      else if(k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2).toLowerCase(), v);
+      else if(k === 'html') e.innerHTML = v;
+      else e.setAttribute(k, v);
+    }
+  }
+  children.flat().forEach(c => {
+    if(c == null || c === false) return;
+    if(typeof c === 'string' || typeof c === 'number') e.appendChild(document.createTextNode(String(c)));
+    else e.appendChild(c);
+  });
+  return e;
+}
+
+function esc(s){
+  if(s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function td(){
+  const d = new Date();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+function nt(){
+  const d = new Date();
+  const h = String(d.getHours()).padStart(2,'0');
+  const m = String(d.getMinutes()).padStart(2,'0');
+  const s = String(d.getSeconds()).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+function nid(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,9);
+}
+function fmtDateTime(ts){
+  const d = new Date(ts);
+  return d.toLocaleString('zh-TW', { hour12:false });
+}
+function relTime(ts){
+  const diff = Date.now() - ts;
+  const s = Math.floor(diff/1000);
+  if(s < 60) return s + ' 秒前';
+  const m = Math.floor(s/60);
+  if(m < 60) return m + ' 分前';
+  const h = Math.floor(m/60);
+  if(h < 24) return h + ' 小時前';
+  const dd = Math.floor(h/24);
+  if(dd < 7) return dd + ' 天前';
+  return new Date(ts).toLocaleDateString('zh-TW');
+}
+function hash(str){
+  let h = 0;
+  for(let i=0;i<str.length;i++){
+    h = ((h << 5) - h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return h.toString(36);
+}
+function initials(name){
+  if(!name) return '?';
+  return name.trim().slice(0,2);
+}
+
+/* ════════════════════════════════════════════════════════════
+   TOAST + MODAL + CONFIRM
+   ──────────────────────────────────────────────────────────── */
+function toast(msg, type='', dur=2400){
+  const host = $('#toast-host');
+  const cls = type ? `toast t-${type}` : 'toast';
+  const t = el('div', { class: cls }, msg);
+  host.appendChild(t);
+  setTimeout(()=> {
+    t.style.transition = 'all .25s ease-out';
+    t.style.opacity = '0';
+    t.style.transform = 'translateY(-10px)';
+    setTimeout(()=> t.remove(), 280);
+  }, dur);
+}
+
+function modal(content, opts={}){
+  const host = $('#modal-host');
+  host.innerHTML = '';
+  const wrap = el('div', { class:'modal-host', onclick: e => {
+    if(e.target === wrap && opts.dismissable !== false) close();
+  }});
+  const m = el('div', { class:'modal' });
+  if(typeof content === 'string') m.innerHTML = content;
+  else if(Array.isArray(content)) content.forEach(c => m.appendChild(c));
+  else m.appendChild(content);
+  wrap.appendChild(m);
+  host.appendChild(wrap);
+  function close(){ wrap.style.animation = 'fadeIn .2s ease-out reverse'; setTimeout(()=> { host.innerHTML=''; }, 180); }
+  return { close, root:m };
+}
+
+function closeModal(){ $('#modal-host').innerHTML = ''; }
+
+function confirmDlg(msg, opts={}){
+  return new Promise(resolve => {
+    const m = modal('', { dismissable:false });
+    m.root.appendChild(el('h2', null, opts.title || '確認'));
+    m.root.appendChild(el('p', null, msg));
+    const actions = el('div', { class:'modal-actions' });
+    actions.appendChild(el('button', { class:'btn', onclick:()=> { m.close(); resolve(false); } }, opts.cancelText || '取消'));
+    actions.appendChild(el('button', { class: opts.danger ? 'btn btn-danger' : 'btn btn-primary', onclick:()=> { m.close(); resolve(true); } }, opts.okText || '確定'));
+    m.root.appendChild(actions);
+  });
+}
+
+function promptDlg(label, defaultVal='', opts={}){
+  return new Promise(resolve => {
+    const m = modal('', { dismissable:false });
+    m.root.appendChild(el('h2', null, opts.title || '輸入'));
+    const lbl = el('label', { class:'label' }, label);
+    const inp = el(opts.multiline?'textarea':'input', { class: opts.multiline?'textarea':'input', value:defaultVal });
+    if(!opts.multiline) inp.setAttribute('value', defaultVal);
+    inp.value = defaultVal;
+    if(opts.type) inp.setAttribute('type', opts.type);
+    if(opts.placeholder) inp.setAttribute('placeholder', opts.placeholder);
+    m.root.appendChild(lbl); m.root.appendChild(inp);
+    const actions = el('div', { class:'modal-actions' });
+    actions.appendChild(el('button', { class:'btn', onclick:()=> { m.close(); resolve(null); } }, '取消'));
+    actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> { const v = inp.value; m.close(); resolve(v); } }, '確定'));
+    m.root.appendChild(actions);
+    setTimeout(()=> inp.focus(), 60);
+    inp.addEventListener('keydown', e => { if(e.key==='Enter' && !opts.multiline){ const v=inp.value; m.close(); resolve(v); } });
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   STORAGE LAYER
+   ──────────────────────────────────────────────────────────── */
+function defaultDB(){
+  return {
+    courses: [],
+    students: [],
+    accounts: [],          // teacher accounts {id, username, password, name, role}
+    attendance: [],        // {id, studentId, studentName, cls, date, time, ts, status, method}
+    assignments: [],
+    submissions: [],
+    scores: [],
+    grades: {},
+    evals: [],
+    feeds: [],
+    groups: [],
+    messages: [],
+    announcements: [],
+    leaves: [],            // {id, studentId, name, date, reason, status, ts}
+    pending: [],           // pending student registrations
+    settings: {
+      schoolName: '我的課程',
+      teacherName: '老師',
+      lateMinutes: 10,     // 上課後幾分鐘算遲到
+      startTime: '08:00'
+    },
+    branding: {
+      title: '課程管理系統',
+      logo: ''
+    }
+  };
+}
+
+function saveCfg(){
+  try { localStorage.setItem(LS_CFG, JSON.stringify(App.cfg)); } catch(e){}
+}
+function loadCfg(){
+  try { return JSON.parse(localStorage.getItem(LS_CFG) || 'null'); } catch(e){ return null; }
+}
+function dbKey(){
+  const room = (App.cfg && App.cfg.roomCode) || 'local';
+  return LS_DB + '_' + room;
+}
+function saveDB(){
+  if(!App.db) return;
+  try { localStorage.setItem(dbKey(), JSON.stringify(App.db)); } catch(e){
+    // quota: try without messages/feeds
+    try {
+      const trimmed = JSON.parse(JSON.stringify(App.db));
+      trimmed.messages = trimmed.messages.slice(-200);
+      trimmed.feeds = trimmed.feeds.slice(-50);
+      localStorage.setItem(dbKey(), JSON.stringify(trimmed));
+    } catch(e2){}
+  }
+}
+function loadDB(){
+  try {
+    const raw = localStorage.getItem(dbKey());
+    if(!raw){
+      App.db = defaultDB();
+      saveDB();
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    App.db = Object.assign(defaultDB(), parsed);
+    // ensure all arrays exist
+    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending'];
+    arrFields.forEach(f => { if(!Array.isArray(App.db[f])) App.db[f] = []; });
+    if(!App.db.settings || typeof App.db.settings !== 'object') App.db.settings = defaultDB().settings;
+    if(!App.db.branding || typeof App.db.branding !== 'object') App.db.branding = defaultDB().branding;
+    if(!App.db.grades || typeof App.db.grades !== 'object') App.db.grades = {};
+  } catch(e){
+    console.warn('loadDB failed', e);
+    App.db = defaultDB();
+  }
+}
+
+function saveSession(){
+  try {
+    if(App.session) localStorage.setItem(LS_SESSION, JSON.stringify(App.session));
+    else localStorage.removeItem(LS_SESSION);
+  } catch(e){}
+}
+function loadSession(){
+  try { return JSON.parse(localStorage.getItem(LS_SESSION) || 'null'); } catch(e){ return null; }
+}
+
+function saveTheme(){
+  try {
+    localStorage.setItem(LS_THEME, App.theme);
+    localStorage.setItem(LS_ACCENT, App.accent);
+  } catch(e){}
+  applyTheme();
+}
+function applyTheme(){
+  document.documentElement.setAttribute('data-theme', App.theme);
+  document.documentElement.setAttribute('data-accent', App.accent);
+}
+
+/* ════════════════════════════════════════════════════════════
+   FIREBASE SYNC
+   ──────────────────────────────────────────────────────────── */
+const Sync = (() => {
+  let connectTimer = null;
+  function detachAll(){
+    App.listeners.forEach(fn => { try{fn();}catch(e){} });
+    App.listeners = [];
+    if(App.fb){
+      try { App.fb.delete(); } catch(e){}
+      App.fb = null; App.fbRef = null;
+    }
+    App.fbStatus = 'idle';
+    if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
+  }
+  function init(){
+    detachAll();
+    if(typeof firebase === 'undefined') return false;
+    const fbCfg = (() => { try{ return JSON.parse(localStorage.getItem(LS_FB) || 'null'); }catch(e){return null;} })();
+    if(!fbCfg || !fbCfg.databaseURL){
+      App.fbStatus = 'idle';
+      return false;
+    }
+    try {
+      if(firebase.apps.length){ try{firebase.app().delete();}catch(e){} }
+      App.fb = firebase.initializeApp(fbCfg);
+      const room = (App.cfg && App.cfg.roomCode) || 'default';
+      App.fbRef = firebase.database().ref('cms-v3/' + room);
+      App.fbStatus = 'connecting';
+      attachListeners();
+      connectTimer = setTimeout(()=> {
+        if(App.fbStatus === 'connecting'){
+          App.fbStatus = 'error';
+          toast('Firebase 連線逾時', 'warn');
+          rerender();
+        }
+      }, 8000);
+      return true;
+    } catch(e){
+      App.fbStatus = 'error';
+      toast('Firebase 設定錯誤：' + (e.message || e), 'danger');
+      return false;
+    }
+  }
+  function attachListeners(){
+    if(!App.fbRef) return;
+    const nodes = ['students','attendance','messages','leaves','pending','announcements','assignments','submissions'];
+    nodes.forEach(node => {
+      const ref = App.fbRef.child(node);
+      const cb = ref.on('value', snap => {
+        const v = snap.val();
+        App.db[node] = v ? Object.values(v) : [];
+        saveDB();
+        rerender();
+      });
+      App.listeners.push(()=> ref.off('value', cb));
+    });
+    // settings is object
+    const sref = App.fbRef.child('settings');
+    const scb = sref.on('value', snap => {
+      const v = snap.val();
+      if(v){ App.db.settings = Object.assign(defaultDB().settings, v); saveDB(); }
+    });
+    App.listeners.push(()=> sref.off('value', scb));
+
+    // connection
+    const cref = firebase.database().ref('.info/connected');
+    const ccb = cref.on('value', snap => {
+      const ok = !!snap.val();
+      if(connectTimer && ok){ clearTimeout(connectTimer); connectTimer = null; }
+      App.fbStatus = ok ? 'online' : (App.fbStatus === 'error' ? 'error' : 'connecting');
+      rerender();
+    });
+    App.listeners.push(()=> cref.off('value', ccb));
+  }
+  function push(node, data){
+    saveDB();
+    if(!App.fbRef) return Promise.resolve(false);
+    // use the data's id as the key for idempotency
+    const key = data.id || App.fbRef.child(node).push().key;
+    return App.fbRef.child(node).child(key).set(data).then(()=>true).catch(()=>false);
+  }
+  function setNode(node, data){
+    saveDB();
+    if(!App.fbRef) return Promise.resolve(false);
+    return App.fbRef.child(node).set(data).then(()=>true).catch(()=>false);
+  }
+  function setMap(node, arr, keyField='id'){
+    saveDB();
+    if(!App.fbRef) return Promise.resolve(false);
+    const obj = {};
+    arr.forEach(x => { obj[String(x[keyField])] = x; });
+    return App.fbRef.child(node).set(obj).then(()=>true).catch(()=>false);
+  }
+  function remove(node, id){
+    saveDB();
+    if(!App.fbRef) return Promise.resolve(false);
+    return App.fbRef.child(node).child(String(id)).remove().then(()=>true).catch(()=>false);
+  }
+  return { init, push, setNode, setMap, remove, detachAll };
+})();
+
+/* ---- BroadcastChannel for same-domain multi-tab ---- */
+function initBC(){
+  try {
+    if(App.bc) App.bc.close();
+    App.bc = new BroadcastChannel('cms-v3');
+    App.bc.onmessage = e => {
+      const msg = e.data;
+      if(!msg) return;
+      if(msg.type === 'db-update'){
+        loadDB();
+        rerender();
+      }
+    };
+  } catch(e){ App.bc = null; }
+}
+function bcNotify(){
+  if(App.bc){ try{ App.bc.postMessage({ type:'db-update', ts:Date.now() }); }catch(e){} }
+}
+
+/* ---- storage event for cross-tab ---- */
+window.addEventListener('storage', e => {
+  if(!e.key) return;
+  if(e.key === dbKey()){
+    loadDB(); rerender();
+  } else if(e.key === LS_SESSION){
+    App.session = loadSession();
+    rerender();
+  } else if(e.key === LS_THEME || e.key === LS_ACCENT){
+    App.theme = localStorage.getItem(LS_THEME) || 'light';
+    App.accent = localStorage.getItem(LS_ACCENT) || 'blue';
+    applyTheme();
+  }
+});
+
+/* ════════════════════════════════════════════════════════════
+   DATA HELPERS
+   ──────────────────────────────────────────────────────────── */
+function currentStudent(){
+  if(!App.session || App.session.role !== 'student') return null;
+  return App.db.students.find(s => s.id === App.session.id) || null;
+}
+function findStudent(id){ return App.db.students.find(s => s.id === id); }
+
+function todayAttendance(){
+  const today = td();
+  return App.db.attendance.filter(a => a.date === today);
+}
+function studentSignedToday(studentId){
+  return todayAttendance().find(a => a.studentId === studentId) || null;
+}
+function studentOnLeaveToday(studentId){
+  const today = td();
+  return App.db.leaves.find(l => l.studentId === studentId && l.date === today && l.status === 'approved') || null;
+}
+
+function computeTodayStats(){
+  const today = td();
+  const todayAtt = todayAttendance();
+  const signedIds = new Set(todayAtt.map(a => a.studentId));
+  const leaveIds = new Set(App.db.leaves.filter(l => l.date === today && l.status === 'approved').map(l => l.studentId));
+  const lateMin = App.db.settings.lateMinutes || 10;
+  const start = App.db.settings.startTime || '08:00';
+  const [sh, sm] = start.split(':').map(Number);
+  const lateThreshold = sh*60 + sm + lateMin;
+  let lateCount = 0;
+  todayAtt.forEach(a => {
+    if(a.time){
+      const [h,m] = a.time.split(':').map(Number);
+      if(h*60+m > lateThreshold) lateCount++;
+    }
+  });
+  return {
+    total: App.db.students.length,
+    signed: signedIds.size,
+    absent: App.db.students.filter(s => !signedIds.has(s.id) && !leaveIds.has(s.id)).length,
+    leave: leaveIds.size,
+    late: lateCount,
+    signedIds, leaveIds
+  };
+}
+
+function unreadMessages(){
+  if(!App.session) return 0;
+  const meId = App.session.role === 'teacher' ? 'teacher' : App.session.id;
+  const key = LS_KEY + '_lastread_' + (App.cfg?.roomCode||'local') + '_' + meId;
+  const lastRead = parseInt(localStorage.getItem(key) || '0', 10);
+  return App.db.messages.filter(m => (m.ts||0) > lastRead && m.fromId !== meId).length;
+}
+function markMessagesRead(){
+  if(!App.session) return;
+  const meId = App.session.role === 'teacher' ? 'teacher' : App.session.id;
+  const key = LS_KEY + '_lastread_' + (App.cfg?.roomCode||'local') + '_' + meId;
+  const latest = App.db.messages.reduce((m,x)=> Math.max(m, x.ts||0), 0);
+  try { localStorage.setItem(key, String(latest)); } catch(e){}
+}
+
+/* ════════════════════════════════════════════════════════════
+   ROUTER
+   ──────────────────────────────────────────────────────────── */
+function go(view, subview=null){
+  App.view = view;
+  App.subview = subview;
+  const hash = '#' + view + (subview ? '/' + subview : '');
+  if(location.hash !== hash) location.hash = hash;
+  rerender();
+}
+window.addEventListener('hashchange', () => {
+  const h = location.hash.slice(1);
+  if(!h) return;
+  const [v, sv] = h.split('/');
+  App.view = v;
+  App.subview = sv || null;
+  rerender();
+});
+
+/* ════════════════════════════════════════════════════════════
+   SETUP WIZARD
+   ──────────────────────────────────────────────────────────── */
+function renderWizard(root){
+  root.innerHTML = '';
+  const wrap = el('div', { class:'center-wrap' });
+  const card = el('div', { class:'login-card' });
+  card.appendChild(el('div', { class:'brand-big' },
+    el('div', { class:'logo' }, 'V3'),
+    el('div', null,
+      el('h2', null, '歡迎使用'),
+      el('div', { class:'muted small' }, '課程管理系統 v3 — 初次設定')
+    )
+  ));
+  card.appendChild(el('p', { class:'muted small' }, '請選擇您的身份'));
+
+  const grid = el('div', { class:'grid grid-2', style:{marginTop:'12px'} });
+  grid.appendChild(el('div', { class:'role-card', onclick: ()=> setupTeacher() },
+    el('div', { class:'ico' }, '🧑‍🏫'),
+    el('h3', null, '我是老師'),
+    el('div', { class:'muted tiny' }, '建立課程 · 管理學生 · 點名計分')
+  ));
+  grid.appendChild(el('div', { class:'role-card', onclick: ()=> setupStudent() },
+    el('div', { class:'ico' }, '🧑‍🎓'),
+    el('h3', null, '我是學生'),
+    el('div', { class:'muted tiny' }, '加入課程 · 簽到 · 看作業')
+  ));
+  card.appendChild(grid);
+
+  card.appendChild(el('hr', { class:'sep' }));
+  const helpBox = el('div', { class:'small muted' },
+    '已經有設定？',
+    el('button', { class:'btn-ghost', style:{textDecoration:'underline',background:'none',border:'none',cursor:'pointer',color:'var(--primary)'}, onclick: ()=> joinExisting() }, '加入既有教室')
+  );
+  card.appendChild(helpBox);
+  wrap.appendChild(card);
+  root.appendChild(wrap);
+}
+
+async function setupTeacher(){
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '建立老師帳號'));
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '學校 / 課程名稱'));
+  const i1 = el('input', { class:'input', placeholder:'例：王老師班', value:'我的課程' });
+  f1.appendChild(i1);
+
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '老師姓名'));
+  const i2 = el('input', { class:'input', placeholder:'王老師', value:'老師' });
+  f2.appendChild(i2);
+
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '帳號'));
+  const i3 = el('input', { class:'input', placeholder:'admin', value:'admin' });
+  f3.appendChild(i3);
+
+  const f4 = el('div', { class:'field' });
+  f4.appendChild(el('label', { class:'label' }, '密碼（請務必修改！）'));
+  const i4 = el('input', { class:'input', type:'password', placeholder:'至少 4 字', value:'admin' });
+  f4.appendChild(i4);
+
+  const f5 = el('div', { class:'field' });
+  f5.appendChild(el('label', { class:'label' }, '教室代碼（多裝置同步用）'));
+  const i5 = el('input', { class:'input', placeholder:'自動產生', value: 'room-' + Math.random().toString(36).slice(2,7) });
+  f5.appendChild(i5);
+
+  [f1,f2,f3,f4,f5].forEach(f => m.root.appendChild(f));
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const school = i1.value.trim() || '我的課程';
+    const tname = i2.value.trim() || '老師';
+    const user = i3.value.trim();
+    const pw = i4.value.trim();
+    const room = (i5.value.trim() || 'room-' + Math.random().toString(36).slice(2,7));
+    if(!user || !pw){ toast('帳號密碼不可空','danger'); return; }
+    App.cfg = { roomCode: room, role:'teacher' };
+    saveCfg();
+    loadDB();
+    App.db.settings.schoolName = school;
+    App.db.settings.teacherName = tname;
+    App.db.branding.title = school;
+    // create teacher account
+    App.db.accounts = [{
+      id: nid(), username:user, password:pw, name:tname, role:'teacher', ts:Date.now()
+    }];
+    saveDB();
+    App.session = { role:'teacher', id:App.db.accounts[0].id, name:tname, username:user };
+    saveSession();
+    initBC();
+    Sync.init();
+    m.close();
+    toast('建立成功！','success');
+    go('overview');
+  } }, '建立 →'));
+  m.root.appendChild(actions);
+}
+
+async function setupStudent(){
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '加入課程'));
+  m.root.appendChild(el('p', { class:'small muted' }, '請輸入老師提供的「教室代碼」'));
+
+  const f = el('div', { class:'field' });
+  f.appendChild(el('label', { class:'label' }, '教室代碼'));
+  const i = el('input', { class:'input', placeholder:'room-xxxxx' });
+  f.appendChild(i);
+  m.root.appendChild(f);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '返回'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const room = i.value.trim();
+    if(!room){ toast('請輸入教室代碼','danger'); return; }
+    App.cfg = { roomCode: room, role:'student' };
+    saveCfg();
+    loadDB();
+    initBC();
+    Sync.init();
+    m.close();
+    // proceed to student registration
+    studentRegisterFlow();
+  } }, '下一步 →'));
+  m.root.appendChild(actions);
+}
+
+async function joinExisting(){
+  const room = await promptDlg('教室代碼', '', { title:'加入既有教室', placeholder:'room-xxxxx' });
+  if(room === null) return;
+  if(!room.trim()) return toast('請輸入教室代碼','danger');
+  App.cfg = { roomCode: room.trim(), role:'student' };
+  saveCfg();
+  loadDB();
+  initBC();
+  Sync.init();
+  rerender();
+}
+
+function studentRegisterFlow(){
+  // simple: ask name + password, if approved/no-pending → student record
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '學生註冊'));
+
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '姓名'));
+  const i1 = el('input', { class:'input', placeholder:'王小明' });
+  f1.appendChild(i1);
+
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '班級（可空）'));
+  const i2 = el('input', { class:'input', placeholder:'例：A班' });
+  f2.appendChild(i2);
+
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '座號（可空）'));
+  const i3 = el('input', { class:'input', type:'number', placeholder:'1' });
+  f3.appendChild(i3);
+
+  const f4 = el('div', { class:'field' });
+  f4.appendChild(el('label', { class:'label' }, '密碼'));
+  const i4 = el('input', { class:'input', type:'password', placeholder:'至少 4 字' });
+  f4.appendChild(i4);
+
+  [f1,f2,f3,f4].forEach(f => m.root.appendChild(f));
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick: ()=> { m.close(); }}, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const name = i1.value.trim();
+    const cls = i2.value.trim();
+    const seat = parseInt(i3.value,10) || 0;
+    const pw = i4.value.trim();
+    if(!name || !pw){ toast('姓名與密碼不可空','danger'); return; }
+    // create pending entry
+    const pending = {
+      id: nid(), name, cls, seat, password: pw, ts: Date.now()
+    };
+    App.db.pending.push(pending);
+    saveDB();
+    Sync.setMap('pending', App.db.pending);
+    bcNotify();
+    m.close();
+    toast('註冊已送出，等待老師審核','success', 3500);
+    // show pending screen
+    rerender();
+  } }, '送出申請'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   LOGIN SCREENS
+   ──────────────────────────────────────────────────────────── */
+function renderLogin(root){
+  root.innerHTML = '';
+  const wrap = el('div', { class:'center-wrap' });
+  const card = el('div', { class:'login-card' });
+  card.appendChild(el('div', { class:'brand-big' },
+    el('div', { class:'logo' }, 'V3'),
+    el('div', null,
+      el('h2', null, App.db.branding.title || '課程管理系統'),
+      el('div', { class:'muted small' }, '教室：' + (App.cfg?.roomCode || '—'))
+    )
+  ));
+
+  const tabbar = el('div', { class:'tab-bar' });
+  const btnT = el('button', { class: (App.loginRole !== 'student') ? 'active':'', onclick:()=> { App.loginRole='teacher'; renderLogin(root); } }, '🧑‍🏫 老師');
+  const btnS = el('button', { class: (App.loginRole === 'student') ? 'active':'', onclick:()=> { App.loginRole='student'; renderLogin(root); } }, '🧑‍🎓 學生');
+  tabbar.appendChild(btnT); tabbar.appendChild(btnS);
+  card.appendChild(tabbar);
+
+  if(App.loginRole === 'student'){
+    // student login
+    const f1 = el('div', { class:'field' });
+    f1.appendChild(el('label', { class:'label' }, '選擇姓名'));
+    const sel = el('select', { class:'select' });
+    sel.appendChild(el('option', { value:'' }, '— 請選擇 —'));
+    App.db.students.forEach(s => sel.appendChild(el('option', { value:s.id }, (s.cls?s.cls+' · ':'') + s.name)));
+    f1.appendChild(sel);
+    card.appendChild(f1);
+
+    const f2 = el('div', { class:'field' });
+    f2.appendChild(el('label', { class:'label' }, '密碼'));
+    const i2 = el('input', { class:'input', type:'password', placeholder:'你的密碼' });
+    f2.appendChild(i2);
+    card.appendChild(f2);
+
+    const submit = ()=>{
+      const id = sel.value; const pw = i2.value;
+      if(!id) return toast('請選擇姓名','danger');
+      const s = App.db.students.find(x => x.id === id);
+      if(!s) return toast('找不到學生','danger');
+      if(s.password && s.password !== pw) return toast('密碼錯誤','danger');
+      App.session = { role:'student', id:s.id, name:s.name, cls:s.cls };
+      saveSession();
+      toast('歡迎回來，' + s.name + '！','success');
+      go('checkin');
+    };
+    const btn = el('button', { class:'btn btn-primary btn-block', onclick: submit }, '登入');
+    i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+    card.appendChild(btn);
+
+    card.appendChild(el('hr', { class:'sep' }));
+    card.appendChild(el('button', { class:'btn btn-block', onclick: studentRegisterFlow }, '＋ 沒有帳號？申請註冊'));
+  } else {
+    // teacher login
+    const f1 = el('div', { class:'field' });
+    f1.appendChild(el('label', { class:'label' }, '帳號'));
+    const i1 = el('input', { class:'input', placeholder:'admin' });
+    f1.appendChild(i1);
+    card.appendChild(f1);
+
+    const f2 = el('div', { class:'field' });
+    f2.appendChild(el('label', { class:'label' }, '密碼'));
+    const i2 = el('input', { class:'input', type:'password', placeholder:'密碼' });
+    f2.appendChild(i2);
+    card.appendChild(f2);
+
+    const submit = ()=>{
+      const u = i1.value.trim(); const pw = i2.value;
+      const a = App.db.accounts.find(x => x.username === u && x.password === pw);
+      if(!a) return toast('帳號或密碼錯誤','danger');
+      App.session = { role:'teacher', id:a.id, name:a.name, username:a.username };
+      saveSession();
+      toast('歡迎，' + a.name + '！','success');
+      go('overview');
+    };
+    const btn = el('button', { class:'btn btn-primary btn-block', onclick: submit }, '登入');
+    i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+    card.appendChild(btn);
+  }
+
+  card.appendChild(el('hr', { class:'sep' }));
+  const back = el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)'}, onclick: async ()=> {
+    const ok = await confirmDlg('要切換到別的教室嗎？目前的設定會被清除（資料保留）');
+    if(ok){
+      App.cfg = null; App.session = null;
+      try { localStorage.removeItem(LS_CFG); localStorage.removeItem(LS_SESSION); } catch(e){}
+      rerender();
+    }
+  }}, '← 切換教室');
+  card.appendChild(back);
+
+  wrap.appendChild(card);
+  root.appendChild(wrap);
+}
+
+/* ════════════════════════════════════════════════════════════
+   APP CHROME (sidebar / topbar / nav)
+   ──────────────────────────────────────────────────────────── */
+function renderChrome(root, role){
+  root.innerHTML = '';
+  const app = el('div', { class:'app' });
+
+  // sidebar (desktop)
+  if(role === 'teacher'){
+    app.appendChild(renderSidebarTeacher());
+  } else {
+    app.appendChild(renderSidebarStudent());
+  }
+
+  // main area
+  const main = el('div', { class:'main-area' });
+  main.appendChild(renderTopbar(role));
+  const content = el('div', { class:'content', id:'main-content' });
+  main.appendChild(content);
+  if(role === 'teacher') main.appendChild(renderBottomNavTeacher());
+  else main.appendChild(renderBottomNavStudent());
+
+  app.appendChild(main);
+  root.appendChild(app);
+
+  return content;
+}
+
+function sideItem(view, icon, label, badge){
+  const active = App.view === view;
+  const b = el('button', { class:'side-item ' + (active?'active':''), onclick:()=> go(view) },
+    el('span', { class:'ico' }, icon),
+    el('span', null, label)
+  );
+  if(badge) b.appendChild(el('span', { class:'badge' }, String(badge)));
+  return b;
+}
+
+function renderSidebarTeacher(){
+  const side = el('aside', { class:'sidebar' });
+  side.appendChild(el('div', { class:'brand' },
+    el('div', { class:'brand-logo' }, 'V3'),
+    el('div', { class:'brand-title' }, App.db.branding.title || '課程管理')
+  ));
+  side.appendChild(el('div', { class:'side-section-title' }, '日常'));
+  side.appendChild(sideItem('overview','📊','總覽'));
+  side.appendChild(sideItem('students','👥','學生名單'));
+  side.appendChild(sideItem('attendance','✅','出席管理'));
+  side.appendChild(sideItem('leave','📆','請假管理'));
+  side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
+  side.appendChild(el('div', { class:'side-section-title' }, '系統'));
+  side.appendChild(sideItem('settings','⚙️','設定'));
+  side.appendChild(sideItem('firebase','☁️','跨裝置同步'));
+
+  // bottom: user info + logout
+  const spacer = el('div', { style:{flex:'1'} });
+  side.appendChild(spacer);
+
+  const userBox = el('div', { class:'card', style:{padding:'10px',marginTop:'8px'} },
+    el('div', { class:'small', style:{fontWeight:'600'} }, App.session?.name || '老師'),
+    el('div', { class:'tiny muted' }, '@' + (App.session?.username||'')),
+    el('div', { style:{marginTop:'6px',display:'flex',gap:'4px'} },
+      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: toggleTheme, title:'切換暗色' }, App.theme==='dark'?'☀️':'🌙'),
+      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: doLogout, title:'登出' }, '⎋ 登出')
+    )
+  );
+  side.appendChild(userBox);
+
+  return side;
+}
+
+function renderSidebarStudent(){
+  const side = el('aside', { class:'sidebar' });
+  const me = currentStudent();
+  side.appendChild(el('div', { class:'brand' },
+    el('div', { class:'brand-logo' }, 'V3'),
+    el('div', { class:'brand-title' }, '我的課程')
+  ));
+  side.appendChild(el('div', { class:'side-section-title' }, '功能'));
+  side.appendChild(sideItem('checkin','✋','簽到'));
+  side.appendChild(sideItem('myatt','📅','出席紀錄'));
+  side.appendChild(sideItem('myleave','📆','請假'));
+  side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
+  side.appendChild(sideItem('me','👤','個人'));
+
+  side.appendChild(el('div', { style:{flex:'1'} }));
+  side.appendChild(el('div', { class:'card', style:{padding:'10px'} },
+    el('div', { class:'small', style:{fontWeight:'600'} }, me?.name || '學生'),
+    el('div', { class:'tiny muted' }, (me?.cls || '') + (me?.seat ? ' · '+me.seat+'號':'')),
+    el('div', { style:{marginTop:'6px',display:'flex',gap:'4px'} },
+      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: toggleTheme }, App.theme==='dark'?'☀️':'🌙'),
+      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: doLogout }, '⎋')
+    )
+  ));
+  return side;
+}
+
+function renderTopbar(role){
+  const bar = el('header', { class:'topbar' });
+  const titles = role === 'teacher' ? {
+    overview:'📊 今日總覽', students:'👥 學生名單', attendance:'✅ 出席管理',
+    leave:'📆 請假管理', messages:'💬 訊息', settings:'⚙️ 設定', firebase:'☁️ 同步設定',
+    pending:'📥 待審核註冊'
+  } : {
+    checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人'
+  };
+  const t = titles[App.view] || (role === 'teacher' ? '課程管理' : '學生');
+  bar.appendChild(el('h1', null, t));
+
+  const actions = el('div', { class:'topbar-actions' });
+  // connection status
+  let connClass = 'offline', connText = '離線';
+  if(App.fbStatus === 'online'){ connClass='online'; connText='已同步'; }
+  else if(App.fbStatus === 'connecting'){ connClass='connecting'; connText='連線中'; }
+  else if(App.fbStatus === 'error'){ connClass='error'; connText='錯誤'; }
+  else if(App.fbStatus === 'idle'){ connClass='offline'; connText='本機'; }
+  actions.appendChild(el('span', { class:'conn ' + connClass, title:'Firebase 狀態', onclick:()=> go('firebase') },
+    el('span', { class:'dot' }), connText
+  ));
+
+  // pending badge (teacher only)
+  if(role === 'teacher' && App.db.pending && App.db.pending.length){
+    actions.appendChild(el('button', { class:'btn btn-sm', onclick:()=> go('pending') },
+      '📥 ' + App.db.pending.length
+    ));
+  }
+
+  bar.appendChild(actions);
+  return bar;
+}
+
+function renderBottomNavTeacher(){
+  const nav = el('nav', { class:'bottom-nav' });
+  const items = [
+    { v:'overview', i:'📊', t:'總覽' },
+    { v:'students', i:'👥', t:'學生' },
+    { v:'attendance', i:'✅', t:'出席' },
+    { v:'leave', i:'📆', t:'請假' },
+    { v:'messages', i:'💬', t:'訊息', badge: unreadMessages() }
+  ];
+  items.forEach(it => {
+    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''), onclick:()=> go(it.v) },
+      el('span', { class:'ico' }, it.i),
+      el('span', null, it.t)
+    );
+    if(it.badge) b.appendChild(el('span', { class:'badge' }, String(it.badge)));
+    nav.appendChild(b);
+  });
+  return nav;
+}
+function renderBottomNavStudent(){
+  const nav = el('nav', { class:'bottom-nav' });
+  const items = [
+    { v:'checkin', i:'✋', t:'簽到' },
+    { v:'myatt', i:'📅', t:'紀錄' },
+    { v:'myleave', i:'📆', t:'請假' },
+    { v:'messages', i:'💬', t:'訊息', badge: unreadMessages() },
+    { v:'me', i:'👤', t:'我' }
+  ];
+  items.forEach(it => {
+    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''), onclick:()=> go(it.v) },
+      el('span', { class:'ico' }, it.i),
+      el('span', null, it.t)
+    );
+    if(it.badge) b.appendChild(el('span', { class:'badge' }, String(it.badge)));
+    nav.appendChild(b);
+  });
+  return nav;
+}
+
+function toggleTheme(){
+  App.theme = App.theme === 'dark' ? 'light' : 'dark';
+  saveTheme();
+  rerender();
+}
+function doLogout(){
+  confirmDlg('要登出嗎？資料會保留', { title:'登出' }).then(ok => {
+    if(!ok) return;
+    App.session = null;
+    saveSession();
+    rerender();
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: OVERVIEW (rOv)
+   ──────────────────────────────────────────────────────────── */
+function rOv(content){
+  const stats = computeTodayStats();
+  const today = td();
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
+    el('div', null,
+      el('h1', null, '今日總覽'),
+      el('div', { class:'muted small' }, today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' }))
+    ),
+    el('div', { class:'flex' },
+      el('button', { class:'btn btn-sm', onclick:()=> rerender() }, '🔄 重整'),
+      el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('attendance') }, '✅ 點名 →')
+    )
+  ));
+
+  // stat tiles
+  const grid = el('div', { class:'grid grid-4', style:{marginBottom:'16px'} });
+  grid.appendChild(el('div', { class:'stat s-success', onclick:()=> go('attendance','signed') },
+    el('div', { class:'num' }, String(stats.signed)),
+    el('div', { class:'lbl' }, '已簽到 / ' + stats.total)
+  ));
+  grid.appendChild(el('div', { class:'stat s-danger', onclick:()=> go('attendance','absent') },
+    el('div', { class:'num' }, String(stats.absent)),
+    el('div', { class:'lbl' }, '未簽到')
+  ));
+  grid.appendChild(el('div', { class:'stat s-accent', onclick:()=> go('leave') },
+    el('div', { class:'num' }, String(stats.leave)),
+    el('div', { class:'lbl' }, '請假中')
+  ));
+  grid.appendChild(el('div', { class:'stat s-warn', onclick:()=> go('attendance','late') },
+    el('div', { class:'num' }, String(stats.late)),
+    el('div', { class:'lbl' }, '今日遲到')
+  ));
+  content.appendChild(grid);
+
+  // pending registrations
+  if(App.db.pending && App.db.pending.length){
+    const alert = el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'12px'} },
+      el('div', { class:'flex-between' },
+        el('div', null,
+          el('h3', null, '📥 有 ' + App.db.pending.length + ' 則新註冊申請'),
+          el('div', { class:'small muted' }, '請審核以加入學生名單')
+        ),
+        el('button', { class:'btn btn-primary btn-sm', onclick:()=> go('pending') }, '前往審核 →')
+      )
+    );
+    content.appendChild(alert);
+  }
+
+  // today's roster
+  const card = el('div', { class:'card' });
+  card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+    el('h3', null, '今日班況'),
+    el('div', { class:'tag' }, stats.signed + ' / ' + stats.total)
+  ));
+  if(App.db.students.length === 0){
+    card.appendChild(el('div', { class:'empty' },
+      el('div', { class:'ico' }, '👥'),
+      el('div', null, '還沒有學生'),
+      el('button', { class:'btn btn-primary', style:{marginTop:'12px'}, onclick:()=> go('students') }, '＋ 新增學生')
+    ));
+  } else {
+    const sgrid = el('div', { class:'stu-grid' });
+    const sortedStu = App.db.students.slice().sort((a,b)=> (a.seat||0)-(b.seat||0));
+    sortedStu.forEach(s => {
+      const att = studentSignedToday(s.id);
+      const leave = studentOnLeaveToday(s.id);
+      let cls = 'stu-card';
+      if(leave) cls += ' leave';
+      else if(att) cls += ' signed';
+      else cls += ' absent';
+      const card = el('div', { class: cls });
+      card.appendChild(el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')));
+      card.appendChild(el('div', { class:'meta' }, s.cls || '—'));
+      if(leave){
+        card.appendChild(el('div', { class:'small' }, '📆 ' + (leave.reason || '請假中')));
+      } else if(att){
+        card.appendChild(el('div', { class:'small mono' }, '✅ ' + att.time));
+      } else {
+        const acts = el('div', { class:'actions' });
+        acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> markPresent(s.id) }, '✓ 補簽'));
+        acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假'));
+        card.appendChild(acts);
+      }
+      sgrid.appendChild(card);
+    });
+    card.appendChild(sgrid);
+  }
+  content.appendChild(card);
+}
+
+function markPresent(studentId, options={}){
+  const s = findStudent(studentId);
+  if(!s) return toast('找不到學生','danger');
+  const existing = studentSignedToday(studentId);
+  if(existing){
+    toast(s.name + ' 已簽到於 ' + existing.time, 'warn');
+    return;
+  }
+  const rec = {
+    id: nid(), studentId, studentName: s.name, cls: s.cls || '',
+    date: td(), time: nt(), ts: Date.now(),
+    status: 'present', method: options.method || 'teacher-mark'
+  };
+  App.db.attendance.push(rec);
+  saveDB();
+  Sync.push('attendance', rec);
+  bcNotify();
+  toast('已標記 ' + s.name + ' 出席','success');
+  rerender();
+}
+
+function openLeaveDialog(studentId){
+  const s = findStudent(studentId);
+  if(!s) return;
+  promptDlg('請假原因（會自動批准）', '', { title:'為 ' + s.name + ' 請假' }).then(reason => {
+    if(reason === null) return;
+    const lv = {
+      id: nid(), studentId, name: s.name, cls: s.cls||'',
+      date: td(), reason: reason || '事假',
+      status: 'approved', ts: Date.now(), reviewer: App.session?.name || '老師'
+    };
+    App.db.leaves.push(lv);
+    saveDB();
+    Sync.push('leaves', lv);
+    bcNotify();
+    toast('已為 ' + s.name + ' 請假','success');
+    rerender();
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: STUDENTS (rStu)
+   ──────────────────────────────────────────────────────────── */
+function rStu(content){
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '學生名單'),
+      el('div', { class:'muted small' }, '共 ' + App.db.students.length + ' 位')
+    ),
+    el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px'} },
+      el('button', { class:'btn btn-sm', onclick: openCSVImport }, '📥 CSV 匯入'),
+      el('button', { class:'btn btn-sm', onclick: openCSVExport }, '📤 匯出'),
+      el('button', { class:'btn btn-sm', onclick: bulkAddStudents }, '＋ 批次'),
+      el('button', { class:'btn btn-primary', onclick:()=> openStudentEdit() }, '＋ 新增')
+    )
+  ));
+
+  // search
+  const searchBar = el('div', { style:{marginBottom:'12px'} });
+  const inp = el('input', { class:'input', placeholder:'🔍 搜尋姓名 / 班級 / 座號', oninput: e => {
+    App._stuSearch = e.target.value.toLowerCase();
+    renderList();
+  }});
+  if(App._stuSearch) inp.value = App._stuSearch;
+  searchBar.appendChild(inp);
+  content.appendChild(searchBar);
+
+  const listWrap = el('div', { class:'card' });
+  content.appendChild(listWrap);
+
+  function renderList(){
+    listWrap.innerHTML = '';
+    let students = App.db.students.slice();
+    const q = App._stuSearch || '';
+    if(q){
+      students = students.filter(s =>
+        (s.name||'').toLowerCase().includes(q) ||
+        (s.cls||'').toLowerCase().includes(q) ||
+        String(s.seat||'').includes(q)
+      );
+    }
+    students.sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0));
+
+    if(students.length === 0){
+      listWrap.appendChild(el('div', { class:'empty' },
+        el('div', { class:'ico' }, '👥'),
+        el('div', null, q ? '沒有符合的學生' : '尚無學生，點右上「＋ 新增」開始')
+      ));
+      return;
+    }
+
+    students.forEach(s => {
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'avatar' }, initials(s.name)));
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')),
+        el('div', { class:'sub' }, (s.cls || '無班級') + (s.email?' · '+s.email:''))
+      ));
+      const acts = el('div', { class:'actions' });
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openStudentEdit(s) }, '✏️'));
+      acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        const ok = await confirmDlg('確定刪除 ' + s.name + '？相關出席紀錄會保留', { danger:true });
+        if(!ok) return;
+        App.db.students = App.db.students.filter(x => x.id !== s.id);
+        saveDB();
+        Sync.setMap('students', App.db.students);
+        bcNotify();
+        toast('已刪除','success');
+        rerender();
+      } }, '🗑'));
+      row.appendChild(acts);
+      listWrap.appendChild(row);
+    });
+  }
+  renderList();
+}
+
+function openStudentEdit(s=null){
+  const isNew = !s;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew?'新增學生':'編輯學生'));
+
+  const fields = [
+    { key:'name', label:'姓名', placeholder:'王小明', required:true },
+    { key:'cls', label:'班級', placeholder:'A班' },
+    { key:'seat', label:'座號', type:'number', placeholder:'1' },
+    { key:'email', label:'信箱', placeholder:'optional' },
+    { key:'phone', label:'電話', placeholder:'optional' },
+    { key:'password', label:'密碼', type:'password', placeholder:'學生登入用' },
+    { key:'note', label:'備註', placeholder:'optional' }
+  ];
+  const inps = {};
+  fields.forEach(f => {
+    const fb = el('div', { class:'field' });
+    fb.appendChild(el('label', { class:'label' }, f.label + (f.required?' *':'')));
+    const i = el('input', { class:'input', type:f.type||'text', placeholder:f.placeholder||'' });
+    if(s && s[f.key] != null) i.value = s[f.key];
+    inps[f.key] = i;
+    fb.appendChild(i);
+    m.root.appendChild(fb);
+  });
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const name = inps.name.value.trim();
+    if(!name) return toast('姓名必填','danger');
+    if(isNew){
+      const rec = { id: nid() };
+      Object.keys(inps).forEach(k => {
+        const v = inps[k].value;
+        if(k==='seat') rec[k] = parseInt(v,10) || 0;
+        else rec[k] = v;
+      });
+      App.db.students.push(rec);
+    } else {
+      Object.keys(inps).forEach(k => {
+        const v = inps[k].value;
+        if(k==='seat') s[k] = parseInt(v,10) || 0;
+        else s[k] = v;
+      });
+    }
+    saveDB();
+    Sync.setMap('students', App.db.students);
+    bcNotify();
+    toast(isNew?'已新增':'已更新','success');
+    m.close();
+    rerender();
+  } }, isNew?'新增':'儲存'));
+  m.root.appendChild(actions);
+}
+
+function bulkAddStudents(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '批次新增學生'));
+  m.root.appendChild(el('p', { class:'small muted' }, '每行一位，格式：姓名,班級,座號（可省略後兩項）'));
+  const ta = el('textarea', { class:'textarea', placeholder:'王小明,A班,1\n李大華,A班,2\n張三' });
+  ta.style.minHeight = '200px';
+  m.root.appendChild(ta);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const lines = ta.value.split(/\n+/).map(l=>l.trim()).filter(Boolean);
+    let added = 0;
+    lines.forEach(line => {
+      const parts = line.split(/[,\t]/).map(p=>p.trim());
+      if(!parts[0]) return;
+      App.db.students.push({
+        id: nid(), name: parts[0], cls: parts[1]||'', seat: parseInt(parts[2],10)||0
+      });
+      added++;
+    });
+    saveDB();
+    Sync.setMap('students', App.db.students);
+    bcNotify();
+    toast('已新增 ' + added + ' 位','success');
+    m.close();
+    rerender();
+  } }, '匯入'));
+  m.root.appendChild(actions);
+}
+
+function openCSVImport(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, 'CSV 匯入'));
+  m.root.appendChild(el('p', { class:'small muted' }, '欄位：姓名,班級,座號,信箱,電話,密碼,備註'));
+  const inp = el('input', { type:'file', accept:'.csv,.txt' });
+  inp.addEventListener('change', e => {
+    const file = e.target.files[0]; if(!file) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      const text = fr.result.replace(/^﻿/, '');
+      const lines = text.split(/\r?\n/).filter(l=>l.trim());
+      // skip header if first row looks like one
+      let start = 0;
+      if(/姓名|name/i.test(lines[0])) start = 1;
+      let added = 0;
+      for(let i=start;i<lines.length;i++){
+        const cols = lines[i].split(/,/).map(c=>c.trim().replace(/^"|"$/g,''));
+        if(!cols[0]) continue;
+        App.db.students.push({
+          id: nid(),
+          name: cols[0], cls: cols[1]||'', seat: parseInt(cols[2],10)||0,
+          email: cols[3]||'', phone: cols[4]||'', password: cols[5]||'',
+          note: cols[6]||''
+        });
+        added++;
+      }
+      saveDB();
+      Sync.setMap('students', App.db.students);
+      bcNotify();
+      toast('已匯入 ' + added + ' 位','success');
+      m.close();
+      rerender();
+    };
+    fr.readAsText(file, 'UTF-8');
+  });
+  m.root.appendChild(inp);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(actions);
+}
+
+function openCSVExport(){
+  const header = '姓名,班級,座號,信箱,電話,備註';
+  const rows = App.db.students.map(s =>
+    [s.name, s.cls, s.seat, s.email||'', s.phone||'', s.note||''].map(v => '"' + String(v||'').replace(/"/g,'""') + '"').join(',')
+  );
+  const csv = '﻿' + header + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'students_' + td() + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('已下載','success');
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: ATTENDANCE (rAtt)
+   ──────────────────────────────────────────────────────────── */
+function rAtt(content){
+  const date = App._attDate || td();
+  const filter = App.subview; // 'signed'|'absent'|'late'|null
+  const att = App.db.attendance.filter(a => a.date === date);
+  const signedIds = new Set(att.map(a => a.studentId));
+  const leaveIds = new Set(App.db.leaves.filter(l => l.date === date && l.status === 'approved').map(l => l.studentId));
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '出席管理'),
+      el('div', { class:'muted small' }, date)
+    ),
+    el('div', { class:'flex' },
+      el('input', { class:'input', type:'date', value:date, style:{width:'150px'}, onchange: e => { App._attDate = e.target.value; rerender(); } }),
+      el('button', { class:'btn btn-sm', onclick: ()=> { App._attDate = td(); rerender(); } }, '今天'),
+      el('button', { class:'btn btn-sm btn-danger', onclick: clearTodayAttendance, title:'清空' }, '🗑 清空')
+    )
+  ));
+
+  // filter tabs
+  const tabs = el('div', { class:'tab-bar', style:{maxWidth:'500px',marginBottom:'12px'} });
+  const tabItems = [
+    { v:null, t:'全部' }, { v:'signed', t:'已簽' },
+    { v:'absent', t:'未簽' }, { v:'late', t:'遲到' }
+  ];
+  tabItems.forEach(t => {
+    tabs.appendChild(el('button', { class: filter === t.v ? 'active':'', onclick:()=> go('attendance', t.v) }, t.t));
+  });
+  content.appendChild(tabs);
+
+  // bulk actions
+  const bulkBar = el('div', { class:'flex', style:{marginBottom:'12px',flexWrap:'wrap',gap:'6px'} },
+    el('button', { class:'btn btn-success btn-sm', onclick:()=> bulkMark('present') }, '✓ 全班簽到'),
+    el('button', { class:'btn btn-sm', onclick:()=> bulkMark('absent') }, '✗ 全班未簽'),
+    el('button', { class:'btn btn-sm', onclick:()=> openMassLeave() }, '📆 批次請假')
+  );
+  content.appendChild(bulkBar);
+
+  // student grid
+  let students = App.db.students.slice().sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0));
+
+  if(filter === 'signed') students = students.filter(s => signedIds.has(s.id));
+  else if(filter === 'absent') students = students.filter(s => !signedIds.has(s.id) && !leaveIds.has(s.id));
+  else if(filter === 'late') {
+    const lateMin = App.db.settings.lateMinutes || 10;
+    const start = App.db.settings.startTime || '08:00';
+    const [sh, sm] = start.split(':').map(Number);
+    const thr = sh*60 + sm + lateMin;
+    students = students.filter(s => {
+      const a = att.find(x => x.studentId === s.id);
+      if(!a || !a.time) return false;
+      const [h,m] = a.time.split(':').map(Number);
+      return h*60+m > thr;
+    });
+  }
+
+  if(students.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📭'),
+      el('div', null, '沒有符合的學生')
+    ));
+    return;
+  }
+
+  const sgrid = el('div', { class:'stu-grid' });
+  students.forEach(s => {
+    const a = att.find(x => x.studentId === s.id);
+    const lv = leaveIds.has(s.id) ? App.db.leaves.find(l => l.studentId === s.id && l.date === date) : null;
+    let cls = 'stu-card';
+    if(lv) cls += ' leave';
+    else if(a) cls += ' signed';
+    else cls += ' absent';
+    const card = el('div', { class: cls });
+    card.appendChild(el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')));
+    card.appendChild(el('div', { class:'meta' }, s.cls || '—'));
+    if(lv){
+      card.appendChild(el('div', { class:'small' }, '📆 ' + (lv.reason||'請假')));
+      const acts = el('div', { class:'actions' });
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> {
+        App.db.leaves = App.db.leaves.filter(x => x.id !== lv.id);
+        saveDB(); Sync.setMap('leaves', App.db.leaves); bcNotify(); rerender();
+      }}, '撤銷'));
+      card.appendChild(acts);
+    } else if(a){
+      card.appendChild(el('div', { class:'small mono' }, '✅ ' + a.time));
+      const acts = el('div', { class:'actions' });
+      acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick:()=> {
+        App.db.attendance = App.db.attendance.filter(x => x.id !== a.id);
+        saveDB(); Sync.remove('attendance', a.id); bcNotify(); rerender();
+      }}, '取消'));
+      card.appendChild(acts);
+    } else {
+      const acts = el('div', { class:'actions' });
+      acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> markPresent(s.id) }, '✓ 簽到'));
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假'));
+      card.appendChild(acts);
+    }
+    sgrid.appendChild(card);
+  });
+  content.appendChild(sgrid);
+}
+
+function bulkMark(status){
+  confirmDlg(status==='present' ? '要把全班標記為已簽到嗎？' : '要清掉本日所有簽到嗎？', { danger: status!=='present' }).then(ok => {
+    if(!ok) return;
+    const date = App._attDate || td();
+    if(status === 'present'){
+      const existing = new Set(App.db.attendance.filter(a => a.date === date).map(a => a.studentId));
+      const newRecs = [];
+      App.db.students.forEach(s => {
+        if(existing.has(s.id)) return;
+        newRecs.push({
+          id: nid(), studentId: s.id, studentName: s.name, cls: s.cls||'',
+          date, time: nt(), ts: Date.now(),
+          status:'present', method:'teacher-bulk'
+        });
+      });
+      App.db.attendance = App.db.attendance.concat(newRecs);
+      saveDB();
+      Sync.setMap('attendance', App.db.attendance);
+      bcNotify();
+      toast('已標記 ' + newRecs.length + ' 位出席','success');
+    } else {
+      // absent = remove today's records
+      App.db.attendance = App.db.attendance.filter(a => a.date !== date);
+      saveDB();
+      Sync.setMap('attendance', App.db.attendance);
+      bcNotify();
+      toast('已清空 ' + date + ' 全部簽到','success');
+    }
+    rerender();
+  });
+}
+
+function clearTodayAttendance(){
+  confirmDlg('要清空 ' + (App._attDate||td()) + ' 的所有簽到嗎？此操作無法復原', { danger:true }).then(ok => {
+    if(!ok) return;
+    const date = App._attDate || td();
+    App.db.attendance = App.db.attendance.filter(a => a.date !== date);
+    saveDB();
+    Sync.setMap('attendance', App.db.attendance);
+    bcNotify();
+    toast('已清空','success');
+    rerender();
+  });
+}
+
+function openMassLeave(){
+  const date = App._attDate || td();
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '批次請假'));
+  m.root.appendChild(el('p', { class:'small muted' }, '日期：' + date));
+  const lf = el('div', { class:'field' });
+  lf.appendChild(el('label', { class:'label' }, '原因'));
+  const reasonI = el('input', { class:'input', value:'事假', placeholder:'事假/病假...' });
+  lf.appendChild(reasonI);
+  m.root.appendChild(lf);
+
+  m.root.appendChild(el('label', { class:'label' }, '選擇學生'));
+  const checkWrap = el('div', { style:{maxHeight:'260px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
+  const checks = {};
+  App.db.students.forEach(s => {
+    const row = el('label', { class:'flex', style:{padding:'6px'} });
+    const cb = el('input', { type:'checkbox' });
+    checks[s.id] = cb;
+    row.appendChild(cb);
+    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + s.name + (s.seat?` (${s.seat})`:'')));
+    checkWrap.appendChild(row);
+  });
+  m.root.appendChild(checkWrap);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const reason = reasonI.value.trim() || '事假';
+    let added = 0;
+    Object.keys(checks).forEach(sid => {
+      if(!checks[sid].checked) return;
+      const s = findStudent(sid); if(!s) return;
+      const exists = App.db.leaves.find(l => l.studentId === sid && l.date === date);
+      if(exists) return;
+      App.db.leaves.push({
+        id:nid(), studentId:sid, name:s.name, cls:s.cls||'',
+        date, reason, status:'approved', ts:Date.now(),
+        reviewer: App.session?.name || '老師'
+      });
+      added++;
+    });
+    saveDB();
+    Sync.setMap('leaves', App.db.leaves);
+    bcNotify();
+    toast('已建立 ' + added + ' 筆請假','success');
+    m.close();
+    rerender();
+  }}, '建立請假'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: LEAVE (rLeave)
+   ──────────────────────────────────────────────────────────── */
+function rLeave(content){
+  content.appendChild(el('h1', null, '請假管理'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '審核學生請假申請、查詢請假紀錄'));
+
+  const tabs = el('div', { class:'tab-bar', style:{maxWidth:'420px',marginBottom:'12px'} });
+  const sub = App.subview || 'pending';
+  ['pending','approved','rejected','all'].forEach(t => {
+    const label = { pending:'待審核', approved:'已批准', rejected:'已拒絕', all:'全部' }[t];
+    tabs.appendChild(el('button', { class: sub === t ? 'active':'', onclick:()=> go('leave', t) }, label));
+  });
+  content.appendChild(tabs);
+
+  let leaves = App.db.leaves.slice().sort((a,b)=> (b.ts||0) - (a.ts||0));
+  if(sub !== 'all') leaves = leaves.filter(l => (l.status || 'pending') === sub);
+
+  if(leaves.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📆'),
+      el('div', null, '沒有請假紀錄')
+    ));
+    return;
+  }
+
+  const listWrap = el('div', { class:'card' });
+  leaves.forEach(l => {
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'avatar' }, initials(l.name)));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, l.name + ' · ' + l.date),
+      el('div', { class:'sub' }, l.reason + ' · ' + relTime(l.ts||0))
+    ));
+    const statusTag = el('span', { class:'tag t-' + (l.status==='approved'?'success':l.status==='rejected'?'danger':'warn') },
+      l.status==='approved'?'已批准':l.status==='rejected'?'已拒絕':'待審核'
+    );
+    const acts = el('div', { class:'actions', style:{alignItems:'center'} });
+    acts.appendChild(statusTag);
+    if((l.status||'pending') === 'pending'){
+      acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> updateLeaveStatus(l.id, 'approved') }, '✓'));
+      acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick:()=> updateLeaveStatus(l.id, 'rejected') }, '✗'));
+    } else {
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+        const ok = await confirmDlg('刪除這筆請假？', { danger:true });
+        if(!ok) return;
+        App.db.leaves = App.db.leaves.filter(x => x.id !== l.id);
+        saveDB(); Sync.setMap('leaves', App.db.leaves); bcNotify();
+        rerender();
+      } }, '🗑'));
+    }
+    row.appendChild(acts);
+    listWrap.appendChild(row);
+  });
+  content.appendChild(listWrap);
+}
+
+function updateLeaveStatus(id, status){
+  const l = App.db.leaves.find(x => x.id === id);
+  if(!l) return;
+  l.status = status;
+  l.reviewer = App.session?.name || '老師';
+  l.reviewedAt = Date.now();
+  saveDB();
+  Sync.push('leaves', l);
+  bcNotify();
+  toast(status==='approved' ? '已批准' : '已拒絕', 'success');
+  rerender();
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: MESSAGES (rMsg basic)
+   ──────────────────────────────────────────────────────────── */
+function rMsg(content){
+  content.appendChild(el('h1', null, '訊息'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '與學生溝通的留言區'));
+
+  // mark all read on entry
+  markMessagesRead();
+
+  const card = el('div', { class:'card', style:{display:'flex',flexDirection:'column',minHeight:'400px'} });
+  const list = el('div', { style:{flex:'1',overflow:'auto',padding:'4px',maxHeight:'60vh'} });
+  card.appendChild(list);
+  const msgs = App.db.messages.slice().sort((a,b)=> (a.ts||0)-(b.ts||0));
+  if(msgs.length === 0){
+    list.appendChild(el('div', { class:'empty' },
+      el('div', { class:'ico' }, '💬'),
+      el('div', null, '還沒有訊息')
+    ));
+  } else {
+    msgs.forEach(m => {
+      const me = (App.session.role === 'teacher' && m.fromRole === 'teacher')
+              || (App.session.role === 'student' && m.fromId === App.session.id);
+      const bubble = el('div', { style:{
+        background: me ? 'var(--primary)' : 'var(--surface-2)',
+        color: me ? '#fff' : 'var(--text)',
+        padding:'8px 12px', borderRadius:'12px',
+        maxWidth:'80%', alignSelf: me?'flex-end':'flex-start',
+        marginBottom:'8px',
+        fontSize:'14px'
+      }});
+      bubble.appendChild(el('div', null, m.text));
+      bubble.appendChild(el('div', { style:{fontSize:'10px',opacity:.7,marginTop:'4px'} }, (m.fromName||'') + ' · ' + relTime(m.ts||0)));
+      const wrap = el('div', { style:{display:'flex',flexDirection:'column'} }, bubble);
+      list.appendChild(wrap);
+    });
+  }
+  // input
+  const inputBar = el('div', { style:{display:'flex',gap:'8px',marginTop:'12px',paddingTop:'12px',borderTop:'1px solid var(--border)'} });
+  const inp = el('input', { class:'input', placeholder:'輸入訊息...', style:{flex:'1'} });
+  const send = ()=>{
+    const t = inp.value.trim(); if(!t) return;
+    const rec = {
+      id: nid(),
+      fromId: App.session.role === 'teacher' ? 'teacher' : App.session.id,
+      fromName: App.session.name,
+      fromRole: App.session.role,
+      text: t,
+      ts: Date.now()
+    };
+    App.db.messages.push(rec);
+    saveDB();
+    Sync.push('messages', rec);
+    bcNotify();
+    inp.value = '';
+    rerender();
+  };
+  inp.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+  inputBar.appendChild(inp);
+  inputBar.appendChild(el('button', { class:'btn btn-primary', onclick: send }, '送出'));
+  card.appendChild(inputBar);
+  content.appendChild(card);
+
+  setTimeout(()=> { list.scrollTop = list.scrollHeight; }, 50);
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: PENDING REGISTRATIONS
+   ──────────────────────────────────────────────────────────── */
+function rPending(content){
+  content.appendChild(el('h1', null, '待審核註冊'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '學生提交的註冊申請'));
+
+  if(!App.db.pending.length){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📭'),
+      el('div', null, '沒有待審核項目')
+    ));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  App.db.pending.slice().reverse().forEach(p => {
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'avatar' }, initials(p.name)));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, p.name + (p.seat?` (${p.seat})`:'')),
+      el('div', { class:'sub' }, (p.cls||'無班級') + ' · ' + relTime(p.ts||0))
+    ));
+    const acts = el('div', { class:'actions' },
+      el('button', { class:'btn btn-sm btn-success', onclick:()=> approveStudent(p.id) }, '✓ 接受'),
+      el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectStudent(p.id) }, '✗ 拒絕')
+    );
+    row.appendChild(acts);
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+}
+function approveStudent(pid){
+  const p = App.db.pending.find(x => x.id === pid);
+  if(!p) return;
+  App.db.students.push({
+    id: nid(), name:p.name, cls:p.cls, seat:p.seat,
+    password:p.password, note:'學生自註冊'
+  });
+  App.db.pending = App.db.pending.filter(x => x.id !== pid);
+  saveDB();
+  Sync.setMap('students', App.db.students);
+  Sync.setMap('pending', App.db.pending);
+  bcNotify();
+  toast('已加入 ' + p.name,'success');
+  rerender();
+}
+function rejectStudent(pid){
+  confirmDlg('拒絕並刪除此申請？', { danger:true }).then(ok => {
+    if(!ok) return;
+    App.db.pending = App.db.pending.filter(x => x.id !== pid);
+    saveDB();
+    Sync.setMap('pending', App.db.pending);
+    bcNotify();
+    toast('已拒絕','warn');
+    rerender();
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: SETTINGS
+   ──────────────────────────────────────────────────────────── */
+function rSettings(content){
+  content.appendChild(el('h1', null, '設定'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '系統參數、外觀、帳號'));
+
+  // settings card
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '🏫 課程資訊'));
+  const fSchool = el('div', { class:'field' });
+  fSchool.appendChild(el('label', { class:'label' }, '學校 / 課程名稱'));
+  const iSchool = el('input', { class:'input', value: App.db.settings.schoolName||'' });
+  fSchool.appendChild(iSchool);
+  card.appendChild(fSchool);
+
+  const fTeacher = el('div', { class:'field' });
+  fTeacher.appendChild(el('label', { class:'label' }, '老師姓名'));
+  const iTeacher = el('input', { class:'input', value: App.db.settings.teacherName||'' });
+  fTeacher.appendChild(iTeacher);
+  card.appendChild(fTeacher);
+
+  const fStart = el('div', { class:'field' });
+  fStart.appendChild(el('label', { class:'label' }, '上課時間'));
+  const iStart = el('input', { class:'input', type:'time', value: App.db.settings.startTime||'08:00' });
+  fStart.appendChild(iStart);
+  card.appendChild(fStart);
+
+  const fLate = el('div', { class:'field' });
+  fLate.appendChild(el('label', { class:'label' }, '遲到判定（分鐘）'));
+  const iLate = el('input', { class:'input', type:'number', min:'0', value: App.db.settings.lateMinutes||10 });
+  fLate.appendChild(iLate);
+  card.appendChild(fLate);
+
+  card.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    App.db.settings.schoolName = iSchool.value.trim() || '我的課程';
+    App.db.settings.teacherName = iTeacher.value.trim() || '老師';
+    App.db.settings.startTime = iStart.value || '08:00';
+    App.db.settings.lateMinutes = parseInt(iLate.value,10) || 10;
+    App.db.branding.title = App.db.settings.schoolName;
+    saveDB();
+    Sync.setNode('settings', App.db.settings);
+    bcNotify();
+    toast('已儲存','success');
+    rerender();
+  } }, '💾 儲存課程資訊'));
+  content.appendChild(card);
+
+  // appearance
+  const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card2.appendChild(el('h3', null, '🎨 外觀'));
+  const row1 = el('div', { class:'flex', style:{marginTop:'8px',flexWrap:'wrap'} });
+  row1.appendChild(el('button', { class:'btn ' + (App.theme==='light'?'btn-primary':''), onclick:()=> { App.theme='light'; saveTheme(); rerender(); } }, '☀️ 亮色'));
+  row1.appendChild(el('button', { class:'btn ' + (App.theme==='dark'?'btn-primary':''), onclick:()=> { App.theme='dark'; saveTheme(); rerender(); } }, '🌙 暗色'));
+  card2.appendChild(row1);
+  const row2 = el('div', { class:'flex', style:{marginTop:'8px',flexWrap:'wrap'} });
+  ['blue','green','violet'].forEach(c => {
+    const map = { blue:'藍色', green:'綠色', violet:'紫色' };
+    row2.appendChild(el('button', { class:'btn ' + (App.accent===c?'btn-primary':''), onclick:()=> { App.accent=c; saveTheme(); rerender(); } }, map[c]));
+  });
+  card2.appendChild(row2);
+  content.appendChild(card2);
+
+  // account
+  const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card3.appendChild(el('h3', null, '🔐 老師帳號'));
+  App.db.accounts.forEach(a => {
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'avatar' }, initials(a.name)));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, a.name + '  @' + a.username),
+      el('div', { class:'sub' }, '密碼長度：' + (a.password||'').length)
+    ));
+    const acts = el('div', { class:'actions' });
+    acts.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+      const newpw = await promptDlg('新密碼', '', { type:'password' });
+      if(newpw === null) return;
+      if(!newpw) return toast('不可空','danger');
+      a.password = newpw;
+      saveDB(); toast('已更新','success');
+    } }, '🔑 改密碼'));
+    if(App.db.accounts.length > 1){
+      acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        const ok = await confirmDlg('刪除帳號 ' + a.username + '？', { danger:true });
+        if(!ok) return;
+        App.db.accounts = App.db.accounts.filter(x => x.id !== a.id);
+        saveDB(); toast('已刪除','warn'); rerender();
+      } }, '🗑'));
+    }
+    row.appendChild(acts);
+    card3.appendChild(row);
+  });
+  card3.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'10px'}, onclick: async ()=> {
+    const u = await promptDlg('新帳號名稱'); if(!u) return;
+    if(App.db.accounts.find(a => a.username === u)) return toast('已存在','danger');
+    const p = await promptDlg('密碼', '', { type:'password' }); if(!p) return;
+    const n = await promptDlg('顯示名稱', u); if(n === null) return;
+    App.db.accounts.push({ id:nid(), username:u, password:p, name:n||u, role:'teacher', ts:Date.now() });
+    saveDB(); toast('已新增','success'); rerender();
+  } }, '＋ 新增老師帳號'));
+  content.appendChild(card3);
+
+  // danger zone
+  const card4 = el('div', { class:'card', style:{marginTop:'12px',borderColor:'var(--danger)'} });
+  card4.appendChild(el('h3', { style:{color:'var(--danger)'} }, '⚠️ 危險區'));
+  card4.appendChild(el('div', { class:'flex', style:{marginTop:'8px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-danger', onclick: async ()=> {
+      const ok = await confirmDlg('要清空所有出席紀錄嗎？此操作無法復原', { danger:true });
+      if(!ok) return;
+      App.db.attendance = [];
+      saveDB(); Sync.setNode('attendance', null); bcNotify();
+      toast('已清空','warn'); rerender();
+    } }, '清空所有出席紀錄'),
+    el('button', { class:'btn btn-danger', onclick: async ()=> {
+      const ok = await confirmDlg('要重設整個系統嗎？所有資料會消失！', { danger:true });
+      if(!ok) return;
+      const ok2 = await confirmDlg('再次確認：真的要重設？', { danger:true });
+      if(!ok2) return;
+      try {
+        Object.keys(localStorage).filter(k => k.startsWith(LS_KEY)).forEach(k => localStorage.removeItem(k));
+      } catch(e){}
+      location.reload();
+    } }, '🔄 重設系統')
+  ));
+  content.appendChild(card4);
+}
+
+/* ════════════════════════════════════════════════════════════
+   TEACHER: FIREBASE SETUP
+   ──────────────────────────────────────────────────────────── */
+function rFirebase(content){
+  content.appendChild(el('h1', null, '跨裝置同步'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '使用 Firebase Realtime Database，讓老師手機/平板/電腦即時同步'));
+
+  const stateMap = {
+    idle: { tag:'未啟用', cls:'' },
+    connecting: { tag:'連線中', cls:'t-warn' },
+    online: { tag:'已連線', cls:'t-success' },
+    error: { tag:'錯誤', cls:'t-danger' }
+  };
+  const st = stateMap[App.fbStatus] || stateMap.idle;
+  content.appendChild(el('div', { class:'card', style:{marginBottom:'12px'} },
+    el('div', { class:'flex-between' },
+      el('div', null,
+        el('h3', null, '目前狀態'),
+        el('div', { class:'small muted' }, '教室代碼：' + (App.cfg?.roomCode || '—'))
+      ),
+      el('span', { class:'tag ' + st.cls }, st.tag)
+    )
+  ));
+
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, 'Firebase 設定'));
+  card.appendChild(el('p', { class:'small muted' }, '到 Firebase 主控台 → 建立專案 → 啟用 Realtime Database → 設定為「測試模式」→ 複製 SDK 設定貼到下面'));
+
+  const ta = el('textarea', { class:'textarea', style:{minHeight:'180px',fontFamily:'monospace',fontSize:'12px'},
+    placeholder:'{\n  "apiKey": "...",\n  "authDomain": "...",\n  "databaseURL": "https://....firebaseio.com",\n  "projectId": "..."\n}'
+  });
+  const cur = localStorage.getItem(LS_FB);
+  if(cur) ta.value = cur;
+  card.appendChild(ta);
+
+  card.appendChild(el('div', { class:'flex', style:{marginTop:'10px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-primary', onclick:()=> {
+      const text = ta.value.trim();
+      if(!text){
+        localStorage.removeItem(LS_FB);
+        Sync.detachAll();
+        toast('已清除 Firebase 設定','warn');
+        rerender();
+        return;
+      }
+      let cfg;
+      try { cfg = JSON.parse(text); }
+      catch(e){ return toast('JSON 格式錯誤','danger'); }
+      if(!cfg.databaseURL) return toast('需要 databaseURL','danger');
+      try { localStorage.setItem(LS_FB, JSON.stringify(cfg)); } catch(e){ return toast('儲存失敗','danger'); }
+      Sync.init();
+      toast('已套用，連線中...','success');
+      setTimeout(rerender, 500);
+    } }, '💾 套用'),
+    el('button', { class:'btn', onclick:()=> {
+      Sync.detachAll();
+      try { localStorage.removeItem(LS_FB); } catch(e){}
+      ta.value = '';
+      toast('已停用同步','warn');
+      rerender();
+    } }, '⏏ 停用'),
+    el('button', { class:'btn', onclick:()=> Sync.init() }, '🔄 重連')
+  ));
+  content.appendChild(card);
+
+  // teacher's instructions to share with students
+  const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card2.appendChild(el('h3', null, '📲 分享給學生'));
+  card2.appendChild(el('p', { class:'small muted' }, '學生請開啟同樣的網址，選「我是學生」，輸入下方教室代碼：'));
+  card2.appendChild(el('div', { class:'mono', style:{padding:'12px',background:'var(--surface-2)',borderRadius:'8px',fontSize:'18px',textAlign:'center'} }, App.cfg?.roomCode || '—'));
+  card2.appendChild(el('div', { class:'small muted', style:{marginTop:'8px'} }, '提示：學生也要設定相同的 Firebase（或老師可分享連結）'));
+  content.appendChild(card2);
+}
+
+/* ════════════════════════════════════════════════════════════
+   STUDENT: CHECK-IN
+   ──────────────────────────────────────────────────────────── */
+function rCheckIn(content){
+  const me = currentStudent();
+  if(!me){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '⚠️'),
+      el('div', null, '找不到學生資料，請重新登入')
+    ));
+    return;
+  }
+  const already = studentSignedToday(me.id);
+  const onLeave = studentOnLeaveToday(me.id);
+
+  content.appendChild(el('div', { style:{textAlign:'center',marginBottom:'12px'} },
+    el('h1', null, '哈囉，' + me.name),
+    el('div', { class:'muted' }, td() + ' · ' + nt())
+  ));
+
+  const wrap = el('div', { class:'checkin-wrap' });
+
+  if(onLeave){
+    wrap.appendChild(el('div', { class:'card', style:{background:'var(--accent-soft)',borderColor:'var(--accent)',padding:'24px',textAlign:'center',maxWidth:'320px'} },
+      el('div', { class:'huge' }, '📆'),
+      el('h2', { style:{color:'var(--accent)'} }, '今日請假中'),
+      el('div', { class:'muted' }, onLeave.reason || '')
+    ));
+  } else if(already){
+    wrap.appendChild(el('div', { class:'card', style:{background:'var(--success-soft)',borderColor:'var(--success)',padding:'24px',textAlign:'center',maxWidth:'320px'} },
+      el('div', { class:'huge' }, '✅'),
+      el('h2', { style:{color:'var(--success)'} }, '已簽到'),
+      el('div', { class:'mono big' }, already.time),
+      el('div', { class:'muted small' }, '今天 ' + already.date)
+    ));
+  } else {
+    const btn = el('button', { class:'checkin-btn pulse', onclick: doStudentCheckIn }, '簽到');
+    wrap.appendChild(btn);
+    wrap.appendChild(el('div', { class:'muted small', style:{marginTop:'16px'} }, '點按大按鈕完成今日簽到'));
+  }
+
+  content.appendChild(wrap);
+
+  // request leave action
+  const lc = el('div', { class:'card', style:{marginTop:'12px',textAlign:'center'} });
+  lc.appendChild(el('h3', null, '無法到課？'));
+  lc.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'8px'}, onclick:()=> studentRequestLeave() }, '📆 申請請假'));
+  content.appendChild(lc);
+}
+
+function doStudentCheckIn(){
+  const me = currentStudent();
+  if(!me) return;
+  if(studentSignedToday(me.id)){
+    toast('你今天已經簽到過了','warn');
+    return;
+  }
+  if(studentOnLeaveToday(me.id)){
+    toast('你今天有請假，不需簽到','warn');
+    return;
+  }
+  const btn = document.querySelector('.checkin-btn');
+  if(btn){ btn.classList.remove('pulse'); btn.classList.add('done'); btn.disabled = true; }
+
+  const rec = {
+    id: nid(), studentId: me.id, studentName: me.name, cls: me.cls||'',
+    date: td(), time: nt(), ts: Date.now(),
+    status:'present', method:'student-self'
+  };
+  App.db.attendance.push(rec);
+  saveDB();
+  Sync.push('attendance', rec);
+  bcNotify();
+
+  // success animation
+  const check = el('div', { class:'success-check' }, '✓');
+  document.body.appendChild(check);
+  setTimeout(()=> check.remove(), 900);
+
+  // confetti
+  const colors = ['#16a34a','#2563eb','#8b5cf6','#ea580c','#dc2626','#facc15'];
+  for(let i=0;i<14;i++){
+    const c = el('div', { class:'confetti', style:{
+      left: (50 + (Math.random()*40 - 20)) + '%',
+      top: '40%',
+      background: colors[Math.floor(Math.random()*colors.length)],
+      transform: 'rotate(' + (Math.random()*360) + 'deg)',
+      animationDelay: (Math.random()*0.2) + 's'
+    }});
+    document.body.appendChild(c);
+    setTimeout(()=> c.remove(), 1600);
+  }
+
+  toast('簽到成功！' + rec.time, 'success', 3000);
+  setTimeout(()=> rerender(), 1400);
+}
+
+function studentRequestLeave(){
+  const me = currentStudent();
+  if(!me) return;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '申請請假'));
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '日期'));
+  const i1 = el('input', { class:'input', type:'date', value: td() });
+  f1.appendChild(i1);
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '原因'));
+  const i2 = el('textarea', { class:'textarea', placeholder:'例：身體不適' });
+  f2.appendChild(i2);
+  m.root.appendChild(f1); m.root.appendChild(f2);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const d = i1.value || td();
+    const r = i2.value.trim() || '事假';
+    const rec = {
+      id: nid(), studentId: me.id, name: me.name, cls: me.cls||'',
+      date: d, reason: r, status:'pending', ts: Date.now()
+    };
+    App.db.leaves.push(rec);
+    saveDB(); Sync.push('leaves', rec); bcNotify();
+    toast('已送出請假申請，等待老師審核','success', 3000);
+    m.close();
+    rerender();
+  } }, '送出'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   STUDENT: MY ATTENDANCE
+   ──────────────────────────────────────────────────────────── */
+function rMyAtt(content){
+  const me = currentStudent(); if(!me) return;
+  content.appendChild(el('h1', null, '我的出席紀錄'));
+  const records = App.db.attendance.filter(a => a.studentId === me.id).sort((a,b)=> (b.ts||0)-(a.ts||0));
+  const leaves = App.db.leaves.filter(l => l.studentId === me.id).sort((a,b)=> (b.ts||0)-(a.ts||0));
+
+  const tot = records.length;
+  const lateMin = App.db.settings.lateMinutes || 10;
+  const start = App.db.settings.startTime || '08:00';
+  const [sh,sm] = start.split(':').map(Number);
+  const thr = sh*60+sm+lateMin;
+  const lateCount = records.filter(r => {
+    if(!r.time) return false;
+    const [h,m] = r.time.split(':').map(Number);
+    return h*60+m > thr;
+  }).length;
+  const approvedLeave = leaves.filter(l => l.status === 'approved').length;
+
+  const grid = el('div', { class:'grid grid-3', style:{marginBottom:'14px'} });
+  grid.appendChild(el('div', { class:'stat s-success' }, el('div',{class:'num'}, String(tot)), el('div',{class:'lbl'}, '出席次數')));
+  grid.appendChild(el('div', { class:'stat s-warn' }, el('div',{class:'num'}, String(lateCount)), el('div',{class:'lbl'}, '遲到')));
+  grid.appendChild(el('div', { class:'stat s-accent' }, el('div',{class:'num'}, String(approvedLeave)), el('div',{class:'lbl'}, '請假')));
+  content.appendChild(grid);
+
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '紀錄'));
+  if(records.length === 0){
+    card.appendChild(el('div', { class:'empty' },
+      el('div', { class:'ico' }, '📅'),
+      el('div', null, '尚無紀錄')
+    ));
+  } else {
+    records.forEach(r => {
+      const isLate = r.time && (() => {
+        const [h,m] = r.time.split(':').map(Number);
+        return h*60+m > thr;
+      })();
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'avatar', style: isLate?{background:'var(--warn-soft)',color:'var(--warn)'}:null }, isLate?'⚠':'✓'));
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, r.date),
+        el('div', { class:'sub' }, r.time + ' · ' + (r.method==='student-self'?'自助簽到':'老師標記'))
+      ));
+      row.appendChild(el('span', { class:'tag t-' + (isLate?'warn':'success') }, isLate?'遲到':'準時'));
+      card.appendChild(row);
+    });
+  }
+  content.appendChild(card);
+}
+
+/* ════════════════════════════════════════════════════════════
+   STUDENT: MY LEAVE
+   ──────────────────────────────────────────────────────────── */
+function rMyLeave(content){
+  const me = currentStudent(); if(!me) return;
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
+    el('h1', null, '我的請假'),
+    el('button', { class:'btn btn-primary', onclick: studentRequestLeave }, '＋ 申請')
+  ));
+  const leaves = App.db.leaves.filter(l => l.studentId === me.id).sort((a,b)=> (b.ts||0)-(a.ts||0));
+  if(leaves.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📆'),
+      el('div', null, '尚無請假紀錄')
+    ));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  leaves.forEach(l => {
+    const row = el('div', { class:'list-row' });
+    const stat = l.status||'pending';
+    row.appendChild(el('div', { class:'avatar', style: stat==='approved'?{background:'var(--success-soft)',color:'var(--success)'}:stat==='rejected'?{background:'var(--danger-soft)',color:'var(--danger)'}:{background:'var(--warn-soft)',color:'var(--warn)'} }, stat==='approved'?'✓':stat==='rejected'?'✗':'⌛'));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, l.date),
+      el('div', { class:'sub' }, l.reason + ' · ' + relTime(l.ts||0))
+    ));
+    row.appendChild(el('span', { class:'tag t-' + (stat==='approved'?'success':stat==='rejected'?'danger':'warn') }, stat==='approved'?'已批准':stat==='rejected'?'已拒絕':'待審核'));
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+}
+
+/* ════════════════════════════════════════════════════════════
+   STUDENT: PROFILE (me)
+   ──────────────────────────────────────────────────────────── */
+function rMe(content){
+  const me = currentStudent(); if(!me) return;
+  content.appendChild(el('h1', null, '個人資料'));
+  const card = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
+  card.appendChild(el('div', { class:'avatar', style:{width:'80px',height:'80px',fontSize:'28px',margin:'0 auto 12px'} }, initials(me.name)));
+  card.appendChild(el('h2', null, me.name));
+  card.appendChild(el('div', { class:'muted' }, (me.cls||'') + (me.seat?' · '+me.seat+'號':'')));
+  if(me.email) card.appendChild(el('div', { class:'small muted' }, me.email));
+  content.appendChild(card);
+
+  // settings
+  const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card2.appendChild(el('h3', null, '🎨 外觀'));
+  const row = el('div', { class:'flex', style:{marginTop:'8px',flexWrap:'wrap'} },
+    el('button', { class:'btn ' + (App.theme==='light'?'btn-primary':''), onclick:()=> { App.theme='light'; saveTheme(); rerender(); } }, '☀️ 亮色'),
+    el('button', { class:'btn ' + (App.theme==='dark'?'btn-primary':''), onclick:()=> { App.theme='dark'; saveTheme(); rerender(); } }, '🌙 暗色')
+  );
+  card2.appendChild(row);
+  content.appendChild(card2);
+
+  const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card3.appendChild(el('h3', null, '🔐 修改密碼'));
+  card3.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'8px'}, onclick: async ()=> {
+    const oldpw = await promptDlg('目前密碼', '', { type:'password' });
+    if(oldpw === null) return;
+    if((me.password||'') !== oldpw) return toast('密碼錯誤','danger');
+    const newpw = await promptDlg('新密碼', '', { type:'password' });
+    if(newpw === null) return;
+    if(!newpw) return toast('不可空','danger');
+    me.password = newpw;
+    saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+    toast('已更新','success');
+  } }, '🔑 修改密碼'));
+  content.appendChild(card3);
+
+  // logout
+  const card4 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card4.appendChild(el('button', { class:'btn btn-danger btn-block', onclick: doLogout }, '⎋ 登出'));
+  content.appendChild(card4);
+}
+
+/* ════════════════════════════════════════════════════════════
+   ROUTING / RENDER
+   ──────────────────────────────────────────────────────────── */
+function rerender(){
+  const root = $('#root');
+
+  // no config → wizard
+  if(!App.cfg){
+    renderWizard(root);
+    return;
+  }
+  // no session → login
+  if(!App.session){
+    renderLogin(root);
+    return;
+  }
+  // session: must match a real student (if student)
+  if(App.session.role === 'student'){
+    const exists = currentStudent();
+    if(!exists){
+      // maybe still pending or got deleted
+      const pending = App.db.pending.find(p => p.name === App.session.name);
+      if(pending){
+        root.innerHTML = '';
+        const wrap = el('div', { class:'center-wrap' });
+        const card = el('div', { class:'login-card', style:{textAlign:'center'} });
+        card.appendChild(el('div', { class:'huge' }, '⌛'));
+        card.appendChild(el('h2', null, '註冊申請審核中'));
+        card.appendChild(el('div', { class:'muted' }, '請等待老師批准，老師批准後重新登入即可'));
+        card.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'16px'}, onclick:()=> { App.session=null; saveSession(); rerender(); } }, '返回登入'));
+        wrap.appendChild(card);
+        root.appendChild(wrap);
+        return;
+      }
+      App.session = null;
+      saveSession();
+      rerender();
+      return;
+    }
+  }
+
+  const content = renderChrome(root, App.session.role);
+
+  // route
+  try {
+    if(App.session.role === 'teacher'){
+      const v = App.view;
+      if(v === 'overview' || !v) rOv(content);
+      else if(v === 'students') rStu(content);
+      else if(v === 'attendance') rAtt(content);
+      else if(v === 'leave') rLeave(content);
+      else if(v === 'messages') rMsg(content);
+      else if(v === 'settings') rSettings(content);
+      else if(v === 'firebase') rFirebase(content);
+      else if(v === 'pending') rPending(content);
+      else { App.view = 'overview'; rOv(content); }
+    } else {
+      const v = App.view;
+      if(v === 'checkin' || !v) rCheckIn(content);
+      else if(v === 'myatt') rMyAtt(content);
+      else if(v === 'myleave') rMyLeave(content);
+      else if(v === 'messages') rMsg(content);
+      else if(v === 'me') rMe(content);
+      else { App.view = 'checkin'; rCheckIn(content); }
+    }
+  } catch(e){
+    console.error('Render error', e);
+    content.innerHTML = '';
+    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--danger)'} },
+      el('h3', { style:{color:'var(--danger)'} }, '⚠️ 渲染錯誤'),
+      el('div', { class:'small mono' }, e.message || String(e)),
+      el('button', { class:'btn', style:{marginTop:'8px'}, onclick:()=> { App.view = App.session.role==='teacher'?'overview':'checkin'; rerender(); } }, '回首頁')
+    ));
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   BOOT
+   ──────────────────────────────────────────────────────────── */
+function boot(){
+  // theme
+  App.theme = localStorage.getItem(LS_THEME) || 'light';
+  App.accent = localStorage.getItem(LS_ACCENT) || 'blue';
+  applyTheme();
+
+  // cfg & session
+  App.cfg = loadCfg();
+  App.session = loadSession();
+
+  if(App.cfg){
+    loadDB();
+    initBC();
+    Sync.init();
+  }
+
+  // route from hash if present
+  const h = location.hash.slice(1);
+  if(h){
+    const [v, sv] = h.split('/');
+    App.view = v; App.subview = sv || null;
+  }
+
+  rerender();
+}
+
+document.addEventListener('DOMContentLoaded', boot);
+if(document.readyState !== 'loading') boot();
+
+// expose for debugging
+window.__App = App;
+window.__Sync = Sync;
+</script>
+</body>
+</html>
