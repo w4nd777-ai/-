@@ -1521,6 +1521,80 @@ function loadSession(){
   try { return JSON.parse(localStorage.getItem(LS_SESSION) || 'null'); } catch(e){ return null; }
 }
 
+// ═══════════ 確保預設資料就緒 ═══════════
+// 1) V1 偵測到先匯入
+// 2) 沒有老師帳號 → 建立 admin/admin123
+// 3) 沒有任何學生 → 自動建立 20 位示範學生
+// 4) 沒有課程 → 預設一個
+function ensureDefaultsAndDemo(){
+  // V1 自動匯入 (一次性)
+  try { autoImportV1(); } catch(e){ console.warn('[ensureDefaults v1]', e); }
+
+  let changed = false;
+
+  // 預設管理員帳號
+  if(!App.db.accounts || App.db.accounts.length === 0){
+    App.db.accounts = [{
+      id: nid(),
+      username: 'admin',
+      password: 'admin123',
+      name: '管理員',
+      role: 'teacher',
+      createdAt: Date.now()
+    }];
+    changed = true;
+    console.log('[v3] 建立預設管理員帳號 admin / admin123');
+  }
+
+  // 預設課程
+  if(!App.db.courses || App.db.courses.length === 0){
+    App.db.courses = [{
+      id: nid(),
+      name: '我的課程',
+      code: 'CS101',
+      teacher: '管理員'
+    }];
+    changed = true;
+  }
+
+  // 預設設定
+  App.db.settings = App.db.settings || {};
+  if(!App.db.settings.teacherName) App.db.settings.teacherName = '管理員';
+  if(!App.db.settings.schoolName) App.db.settings.schoolName = '我的課程';
+
+  // 沒學生 → 自動建立 20 位示範學生
+  if(!App.db.students || App.db.students.length === 0){
+    const demoNames = [
+      '王小明','李美華','陳大同','張小芳','林志強',
+      '黃淑芬','吳家豪','劉雅婷','蔡明翰','鄭雅雯',
+      '謝佳玲','許文傑','曾子涵','楊承恩','周宜君',
+      '潘冠廷','洪詩涵','蕭俊偉','賴怡均','江柏翰'
+    ];
+    const classes = ['202','202','202','202','202','203','203','203','203','203','204','204','204','204','204','205','205','205','205','205'];
+    App.db.students = demoNames.map((name, i) => {
+      const sid = '109' + String(5001 + i).padStart(4,'0');  // 1095001 ~ 1095020
+      return {
+        id: nid(),
+        name: name,
+        sid: sid,
+        cls: classes[i],
+        seat: ((i % 5) + 1),
+        email: '',
+        phone: '',
+        parentName: '',
+        parentPhone: '',
+        parentEmail: '',
+        password: sid.slice(-4),  // 預設密碼 = 學號末 4 碼
+        mustChangePw: false
+      };
+    });
+    changed = true;
+    console.log('[v3] 建立 20 位示範學生');
+  }
+
+  if(changed) saveDB();
+}
+
 function saveTheme(){
   try {
     localStorage.setItem(LS_THEME, App.theme);
@@ -2273,25 +2347,26 @@ function renderLogin(root){
     }
   } else {
     // teacher login
+    const hasDefault = App.db.accounts.some(a => a.username === 'admin' && a.password === 'admin123');
+
     const f1 = el('div', { class:'field' });
     f1.appendChild(el('label', { class:'label' }, '帳號'));
-    const i1 = el('input', { class:'input', placeholder:'admin', autocomplete:'username' });
+    const i1 = el('input', { class:'input', placeholder:'admin', autocomplete:'username', value: hasDefault ? 'admin' : '' });
     f1.appendChild(i1);
     card.appendChild(f1);
 
     const f2 = el('div', { class:'field' });
     f2.appendChild(el('label', { class:'label' }, '密碼'));
-    const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
+    const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password', value: hasDefault ? 'admin123' : '' });
     f2.appendChild(i2);
     card.appendChild(f2);
 
     // helper hint for first-time use
-    const hasDefault = App.db.accounts.some(a => a.username === 'admin' && a.password === 'admin123');
     if(hasDefault){
       card.appendChild(el('div', { class:'small muted', style:{
         textAlign:'center',padding:'8px 12px',marginBottom:'10px',
         background:'var(--surface-2)',borderRadius:'8px'
-      }}, '💡 首次使用？預設帳號 admin / admin123（請儘速於設定中修改密碼）'));
+      }}, '💡 已預填預設帳密，直接按「登入」即可（建議改密碼）'));
     }
 
     const submit = ()=>{
@@ -8267,10 +8342,17 @@ function showPwaInstallChip(){
 function rerender(){
   const root = $('#root');
 
-  // no config → wizard
+  // 自動初始化：不再跳設定精靈，直接進登入頁
   if(!App.cfg){
-    renderWizard(root);
-    return;
+    // 固定教室代碼 DEMO01，不會每次變
+    App.cfg = { roomCode: 'DEMO01', role: 'teacher', createdAt: Date.now() };
+    saveCfg();
+    if(typeof loadDB === 'function') loadDB();
+    if(typeof initBC === 'function') initBC();
+    if(typeof Sync !== 'undefined' && Sync.init) Sync.init();
+    if(typeof wsRegisterCurrent === 'function') wsRegisterCurrent();
+    // 確保有預設管理員 + 示範學生
+    ensureDefaultsAndDemo();
   }
   // no session → login
   if(!App.session){
@@ -8371,61 +8453,18 @@ function boot(){
   // QR join URL handling — runs before db so we can switch room first
   const handled = handleQrJoinHash();
 
-  if(App.cfg){
-    loadDB();
-    initBC();
-    Sync.init();
-    wsRegisterCurrent();
+  if(!App.cfg){
+    // 沒設定過 → 使用固定預設教室 DEMO01（不每次變）
+    App.cfg = { roomCode: 'DEMO01', role: 'teacher', createdAt: Date.now() };
+    saveCfg(App.cfg);
   }
+  loadDB();
+  initBC();
+  Sync.init();
+  wsRegisterCurrent();
 
-  // ═══ 預設管理員帳號（首次開啟自動建立）═══
-  // 為了讓用戶能立即登入而不必走設定精靈
-  try {
-    if(!App.cfg){
-      // 沒設定過 → 建立預設教室
-      App.cfg = {
-        role: 'teacher',
-        roomCode: 'DEMO01',
-        createdAt: Date.now()
-      };
-      saveCfg(App.cfg);
-      loadDB();
-      initBC();
-      Sync.init();
-      wsRegisterCurrent();
-    }
-
-    // ═══ V1 → V3 自動匯入（在建立預設帳號之前）═══
-    // 若偵測到 V1 (cmsDB) 學生資料，自動匯入學生 / 課程 / 帳號（一次性）
-    try { autoImportV1(); } catch(e){ console.warn('[v3 v1-import]', e); }
-
-    if(App.db && (!App.db.accounts || App.db.accounts.length === 0)){
-      // 沒帳號 → 自動建立預設管理員
-      App.db.accounts = App.db.accounts || [];
-      App.db.accounts.push({
-        id: (typeof nid === 'function' ? nid() : Date.now()),
-        username: 'admin',
-        password: 'admin123',
-        name: '管理員',
-        role: 'teacher',
-        createdAt: Date.now()
-      });
-      // 預設課程資訊
-      if(!App.db.courses || !App.db.courses.length){
-        App.db.courses = [{
-          id: (typeof nid === 'function' ? nid() : Date.now()+1),
-          name: '我的課程',
-          code: 'CS101',
-          teacher: '管理員'
-        }];
-      }
-      App.db.settings = App.db.settings || {};
-      App.db.settings.teacherName = App.db.settings.teacherName || '管理員';
-      App.db.settings.schoolName = App.db.settings.schoolName || '我的課程';
-      saveDB();
-      console.log('[v3] 已自動建立預設管理員帳號 admin / admin123');
-    }
-  } catch(e){ console.warn('[v3 default admin]', e); }
+  // 確保有管理員帳號 + 學生資料
+  try { ensureDefaultsAndDemo(); } catch(e){ console.warn('[v3 defaults]', e); }
 
   // route from hash if present (and not a join hash we already consumed)
   if(!handled){
