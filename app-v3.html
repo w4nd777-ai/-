@@ -286,6 +286,18 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   display:flex; flex-direction:column; align-items:center; gap:8px;
   padding:12px; pointer-events:none;
 }
+/* Desktop: toasts in bottom-right so they don't obscure the title/nav */
+@media (min-width:900px){
+  .toast-host{
+    top:auto; left:auto; right:16px; bottom:16px;
+    align-items:flex-end;
+  }
+  @keyframes toastInDesktop{
+    from{ opacity:0; transform:translateX(20px); }
+    to{ opacity:1; transform:translateX(0); }
+  }
+  .toast{ animation:toastInDesktop .25s ease-out; }
+}
 .toast{
   background:var(--surface); color:var(--text);
   border:1px solid var(--border); border-radius:var(--r-sm);
@@ -873,6 +885,129 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 .journey-step .ttl{ flex:1; font-weight:600; }
 .journey-step .arr{ color:var(--text-muted); }
 
+/* ───── v3.1 UX additions: hello bar / student picker / quick CTAs ───── */
+.hello-bar{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; padding:10px 14px;
+  background:linear-gradient(135deg, var(--primary-soft) 0%, var(--accent-soft) 100%);
+  border:1px solid var(--border);
+  border-radius:var(--r-md);
+  margin-bottom:14px;
+  font-size:14px;
+}
+.hello-bar .greet{ font-weight:700; }
+.hello-bar .date{ font-size:12px; color:var(--text-muted); }
+
+/* student picker grid (login) */
+.stu-picker{
+  display:grid; gap:10px;
+  grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+  max-height:min(60vh,520px);
+  overflow-y:auto;
+  padding:4px;
+}
+.stu-picker .pcard{
+  background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:var(--r-md); padding:14px 10px;
+  cursor:pointer; text-align:center;
+  transition:all var(--tx);
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+}
+.stu-picker .pcard:hover{
+  border-color:var(--primary); transform:translateY(-2px);
+  box-shadow:var(--shadow);
+}
+.stu-picker .pcard:active{ transform:scale(.97); }
+.stu-picker .pcard .av{
+  width:48px; height:48px; border-radius:50%;
+  background:var(--primary); color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:18px;
+}
+.stu-picker .pcard .nm{ font-weight:700; font-size:14px; }
+.stu-picker .pcard .mt{ font-size:11px; color:var(--text-muted); }
+.stu-picker-search{
+  width:100%; margin-bottom:10px;
+}
+
+/* hueing avatars (deterministic) */
+.av-color-0{ background:#2563eb; } .av-color-1{ background:#16a34a; }
+.av-color-2{ background:#8b5cf6; } .av-color-3{ background:#ea580c; }
+.av-color-4{ background:#dc2626; } .av-color-5{ background:#0891b2; }
+.av-color-6{ background:#db2777; } .av-color-7{ background:#65a30d; }
+
+/* quick-start onboarding (first run) */
+.quick-start{
+  display:grid; gap:12px;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  margin-bottom:16px;
+}
+.qs-card{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-lg); padding:18px;
+  cursor:pointer; transition:all var(--tx);
+  display:flex; flex-direction:column; gap:6px;
+  position:relative;
+}
+.qs-card:hover{
+  border-color:var(--primary); transform:translateY(-2px);
+  box-shadow:var(--shadow);
+}
+.qs-card.primary{
+  background:linear-gradient(135deg, var(--primary), var(--primary-hover));
+  color:#fff; border-color:transparent;
+}
+.qs-card.primary .ttl,.qs-card.primary .desc{ color:#fff; }
+.qs-card .ico{ font-size:28px; line-height:1; margin-bottom:4px; }
+.qs-card .ttl{ font-size:15px; font-weight:700; }
+.qs-card .desc{ font-size:12px; color:var(--text-muted); line-height:1.4; }
+.qs-card .tag{
+  position:absolute; top:10px; right:10px;
+  background:var(--warn); color:#fff;
+  font-size:10px; padding:2px 8px; border-radius:6px; font-weight:700;
+}
+
+/* student progress bars */
+.progress-bars{
+  display:grid; gap:12px;
+  grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+}
+.pbar{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md); padding:12px;
+}
+.pbar .ttl{ font-size:12px; color:var(--text-muted); margin-bottom:6px; }
+.pbar .val{ font-size:24px; font-weight:800; letter-spacing:-.02em; line-height:1; }
+.pbar .track{
+  height:8px; background:var(--surface-3); border-radius:4px;
+  overflow:hidden; margin-top:8px;
+}
+.pbar .fill{
+  height:100%; border-radius:4px;
+  transition:width .4s ease-out;
+}
+.pbar.success .fill{ background:var(--success); }
+.pbar.primary .fill{ background:var(--primary); }
+.pbar.warn .fill{ background:var(--warn); }
+.pbar.accent .fill{ background:var(--accent); }
+
+/* enhanced student check-in: bigger button */
+.checkin-hero{
+  display:flex; flex-direction:column; align-items:center;
+  padding:24px 8px;
+}
+.checkin-hero .checkin-btn{
+  width:min(340px,80vw); height:min(340px,80vw); max-height:34vh;
+  font-size:32px;
+}
+
+@media (min-width:600px){
+  .checkin-hero .checkin-btn{
+    width:280px; height:280px; max-height:none;
+    font-size:36px;
+  }
+}
+
 /* heatmap grid */
 .heatmap{
   display:grid; gap:2px;
@@ -1251,6 +1386,129 @@ function loadDB(){
     console.warn('loadDB failed', e);
     App.db = defaultDB();
   }
+}
+
+/* ════════════════════════════════════════════════════════════
+   V1 → V3 AUTO-IMPORT (one-shot on first boot)
+   ──────────────────────────────────────────────────────────── */
+const LS_V1_IMPORTED = LS_KEY + '_v1_imported';
+
+function detectV1Students(){
+  // V1 stores its DB at localStorage 'cmsDB'; if absent, no data to import.
+  try {
+    const raw = localStorage.getItem('cmsDB');
+    if(!raw) return null;
+    const v1 = JSON.parse(raw);
+    if(!v1 || typeof v1 !== 'object') return null;
+    const students = Array.isArray(v1.students) ? v1.students : [];
+    if(!students.length) return null;
+    return {
+      students,
+      courses: Array.isArray(v1.courses) ? v1.courses : [],
+      accounts: Array.isArray(v1.accounts) ? v1.accounts : [],
+      settings: v1.settings || null
+    };
+  } catch(e){
+    console.warn('[v1-detect] failed', e);
+    return null;
+  }
+}
+
+function autoImportV1(){
+  // Guard: only run once.
+  try {
+    if(localStorage.getItem(LS_V1_IMPORTED) === '1') return false;
+  } catch(e){}
+  const v1 = detectV1Students();
+  if(!v1) return false;
+  if(!App.db) return false;
+
+  // Only import if V3 has no students yet — avoid clobbering anything
+  // the teacher already entered manually.
+  const existingStu = (App.db.students && App.db.students.length) ? App.db.students.length : 0;
+  if(existingStu > 0){
+    try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){}
+    return false;
+  }
+
+  // -- Map V1 students → V3 schema. V1 uses `pass` & `sid`; V3 uses `password`.
+  const seenSids = new Set();
+  const cleanStudents = (v1.students || []).map(s => {
+    if(!s || !s.name) return null;
+    const sid = s.sid != null ? String(s.sid).trim() : '';
+    // dedupe by sid+name to be safe (V1 sometimes has _timeUnreliable etc.)
+    const dupKey = (sid || '') + '|' + s.name;
+    if(seenSids.has(dupKey)) return null;
+    seenSids.add(dupKey);
+    const passFromV1 = s.pass || s.password || '';
+    const fallbackPass = sid ? sid.slice(-4).padStart(4,'0') : '0000';
+    return {
+      id: s.id || nid(),
+      name: String(s.name).trim(),
+      sid,
+      cls: s.cls || s.class || '',
+      seat: typeof s.seat === 'number' ? s.seat : (parseInt(s.seat,10) || 0),
+      email: s.email || '',
+      phone: s.phone || '',
+      parentName: s.parentName || s.guardianName || '',
+      parentPhone: s.parentPhone || s.guardianPhone || '',
+      parentEmail: s.parentEmail || s.guardianEmail || '',
+      // V3 reads `password` field — keep V1 password if present, else last 4 of sid
+      password: passFromV1 || fallbackPass,
+      mustChangePw: !!s.mustChangePw,
+      note: s.note || 'V1 匯入'
+    };
+  }).filter(Boolean);
+
+  if(!cleanStudents.length){
+    try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){}
+    return false;
+  }
+
+  App.db.students = cleanStudents;
+
+  // -- Courses
+  if(v1.courses && v1.courses.length && (!App.db.courses || !App.db.courses.length)){
+    App.db.courses = v1.courses.map(c => ({
+      id: c.id || nid(),
+      name: c.name || '課程',
+      code: c.code || '',
+      teacher: c.teacher || ''
+    }));
+  }
+
+  // -- Accounts: V1 may use {user,pass} or {username,password}. Convert all
+  //    to V3 schema. Only adopt if V3 has no teacher accounts yet.
+  if(v1.accounts && v1.accounts.length && (!App.db.accounts || !App.db.accounts.length)){
+    App.db.accounts = v1.accounts.map(a => ({
+      id: a.id || nid(),
+      username: a.user || a.username || 'admin',
+      password: a.pass || a.password || 'admin123',
+      name: a.name || a.fullName || '老師',
+      role: 'teacher',
+      ts: a.ts || Date.now()
+    }));
+  }
+
+  // -- Settings: pick up school/teacher names if useful
+  if(v1.settings && App.db.settings){
+    if(v1.settings.schoolName) App.db.settings.schoolName = v1.settings.schoolName;
+    if(v1.settings.teacherName) App.db.settings.teacherName = v1.settings.teacherName;
+    if(v1.settings.startTime) App.db.settings.startTime = v1.settings.startTime;
+    if(typeof v1.settings.lateMinutes === 'number') App.db.settings.lateMinutes = v1.settings.lateMinutes;
+    if(App.db.branding && v1.settings.schoolName) App.db.branding.title = v1.settings.schoolName;
+  }
+
+  // NOTE: we deliberately do NOT import V1 attendance/leaves/messages — those
+  //       are often timestamped with the wrong day ("_timeUnreliable"), so
+  //       importing them would pollute today's stats.
+
+  saveDB();
+  try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){}
+  console.log('[v3] auto-imported ' + cleanStudents.length + ' students from V1');
+  // toast comes later (after rerender) so it actually shows
+  App._v1ImportedCount = cleanStudents.length;
+  return true;
 }
 
 function saveSession(){
@@ -1949,51 +2207,92 @@ function renderLogin(root){
   card.appendChild(tabbar);
 
   if(App.loginRole === 'student'){
-    // student login
-    const f1 = el('div', { class:'field' });
-    f1.appendChild(el('label', { class:'label' }, '選擇姓名'));
-    const sel = el('select', { class:'select' });
-    sel.appendChild(el('option', { value:'' }, '— 請選擇 —'));
-    App.db.students.forEach(s => sel.appendChild(el('option', { value:s.id }, (s.cls?s.cls+' · ':'') + s.name)));
-    f1.appendChild(sel);
-    card.appendChild(f1);
+    // ── student login: tap-your-name grid (Linear-style) ──
+    const intro = el('div', { class:'small muted', style:{marginBottom:'8px',textAlign:'center'} },
+      '點一下你的名字就能登入'
+    );
+    card.appendChild(intro);
 
-    const f2 = el('div', { class:'field' });
-    f2.appendChild(el('label', { class:'label' }, '密碼'));
-    const i2 = el('input', { class:'input', type:'password', placeholder:'你的密碼' });
-    f2.appendChild(i2);
-    card.appendChild(f2);
+    if(!App.db.students.length){
+      // empty roster — bypass to registration flow
+      card.appendChild(el('div', { class:'empty', style:{padding:'24px 8px'} },
+        el('div', { class:'ico', style:{fontSize:'40px'} }, '🧑‍🎓'),
+        el('div', null, '老師還沒建立學生名單'),
+        el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '你可以申請註冊，等待老師審核')
+      ));
+      card.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
+    } else {
+      // search box (auto-show when > 12 students)
+      const showSearch = App.db.students.length > 12;
+      let q = (App._stuLoginSearch || '').toLowerCase();
+      const grid = el('div', { class:'stu-picker' });
 
-    const submit = ()=>{
-      const id = sel.value; const pw = i2.value;
-      if(!id) return toast('請選擇姓名','danger');
-      const s = App.db.students.find(x => x.id === id);
-      if(!s) return toast('找不到學生','danger');
-      if(s.password && s.password !== pw) return toast('密碼錯誤','danger');
-      App.session = { role:'student', id:s.id, name:s.name, cls:s.cls };
-      saveSession();
-      toast('歡迎回來，' + s.name + '！','success');
-      go('checkin');
-    };
-    const btn = el('button', { class:'btn btn-primary btn-block', onclick: submit }, '登入');
-    i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
-    card.appendChild(btn);
+      function renderGrid(){
+        grid.innerHTML = '';
+        let list = App.db.students.slice();
+        if(q){
+          list = list.filter(s =>
+            (s.name||'').toLowerCase().includes(q) ||
+            (s.cls||'').toLowerCase().includes(q) ||
+            String(s.sid||'').toLowerCase().includes(q) ||
+            String(s.seat||'').includes(q)
+          );
+        }
+        list.sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0) || (a.name||'').localeCompare(b.name||''));
+        if(!list.length){
+          grid.appendChild(el('div', { class:'muted small', style:{gridColumn:'1/-1',textAlign:'center',padding:'20px'} },
+            '找不到「' + (q||'…') + '」'
+          ));
+          return;
+        }
+        list.forEach((s, idx) => {
+          const pcard = el('button', { class:'pcard', onclick:()=> studentTapToLogin(s.id), title:'點此登入 ' + s.name });
+          const colorIdx = (s.id ? String(s.id).charCodeAt(0) : idx) % 8;
+          pcard.appendChild(el('div', { class:'av av-color-' + colorIdx }, initials(s.name)));
+          pcard.appendChild(el('div', { class:'nm' }, s.name));
+          const meta = (s.cls ? s.cls + ' · ' : '') + (s.sid ? '學號 ' + s.sid : (s.seat ? '座號 ' + s.seat : ''));
+          if(meta) pcard.appendChild(el('div', { class:'mt' }, meta));
+          grid.appendChild(pcard);
+        });
+      }
 
-    card.appendChild(el('hr', { class:'sep' }));
-    card.appendChild(el('button', { class:'btn btn-block', onclick: studentRegisterFlow }, '＋ 沒有帳號？申請註冊'));
+      if(showSearch){
+        const search = el('input', { class:'input stu-picker-search', placeholder:'🔍 搜尋姓名 / 班級 / 學號', value: App._stuLoginSearch||'',
+          oninput: e => { q = e.target.value.toLowerCase(); App._stuLoginSearch = e.target.value; renderGrid(); } });
+        card.appendChild(search);
+      }
+      card.appendChild(grid);
+      renderGrid();
+
+      card.appendChild(el('hr', { class:'sep' }));
+      const help = el('div', { class:'small muted', style:{textAlign:'center',marginBottom:'8px'} },
+        '找不到你的名字？'
+      );
+      card.appendChild(help);
+      card.appendChild(el('button', { class:'btn btn-block', onclick: studentRegisterFlow }, '＋ 申請註冊'));
+    }
   } else {
     // teacher login
     const f1 = el('div', { class:'field' });
     f1.appendChild(el('label', { class:'label' }, '帳號'));
-    const i1 = el('input', { class:'input', placeholder:'admin' });
+    const i1 = el('input', { class:'input', placeholder:'admin', autocomplete:'username' });
     f1.appendChild(i1);
     card.appendChild(f1);
 
     const f2 = el('div', { class:'field' });
     f2.appendChild(el('label', { class:'label' }, '密碼'));
-    const i2 = el('input', { class:'input', type:'password', placeholder:'密碼' });
+    const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
     f2.appendChild(i2);
     card.appendChild(f2);
+
+    // helper hint for first-time use
+    const hasDefault = App.db.accounts.some(a => a.username === 'admin' && a.password === 'admin123');
+    if(hasDefault){
+      card.appendChild(el('div', { class:'small muted', style:{
+        textAlign:'center',padding:'8px 12px',marginBottom:'10px',
+        background:'var(--surface-2)',borderRadius:'8px'
+      }}, '💡 首次使用？預設帳號 admin / admin123（請儘速於設定中修改密碼）'));
+    }
 
     const submit = ()=>{
       const u = i1.value.trim(); const pw = i2.value;
@@ -2005,6 +2304,7 @@ function renderLogin(root){
       go('overview');
     };
     const btn = el('button', { class:'btn btn-primary btn-block', onclick: submit }, '登入');
+    i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
     i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
     card.appendChild(btn);
   }
@@ -2022,6 +2322,74 @@ function renderLogin(root){
 
   wrap.appendChild(card);
   root.appendChild(wrap);
+}
+
+/* ════════════════════════════════════════════════════════════
+   STUDENT TAP-TO-LOGIN — pick name → enter password modal
+   ──────────────────────────────────────────────────────────── */
+function studentTapToLogin(studentId){
+  const s = App.db.students.find(x => x.id === studentId);
+  if(!s) return toast('找不到學生','danger');
+
+  // If no password set on this student, log them in directly.
+  // (Common case for V1-imported students whose sid was used as fallback.)
+  if(!s.password){
+    finishStudentLogin(s);
+    return;
+  }
+
+  // Ask for password in a focused modal.
+  const m = modal('', { dismissable:true });
+  const colorIdx = (s.id ? String(s.id).charCodeAt(0) : 0) % 8;
+  m.root.appendChild(el('div', { style:{textAlign:'center',marginBottom:'12px'} },
+    el('div', { class:'av av-color-' + colorIdx, style:{
+      width:'72px',height:'72px',borderRadius:'50%',margin:'0 auto 10px',
+      color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',
+      fontSize:'28px',fontWeight:'700'
+    }}, initials(s.name)),
+    el('h2', null, s.name),
+    el('div', { class:'small muted' },
+      (s.cls ? s.cls + ' · ' : '') + (s.sid ? '學號 ' + s.sid : (s.seat ? '座號 ' + s.seat : ''))
+    )
+  ));
+
+  const f = el('div', { class:'field' });
+  f.appendChild(el('label', { class:'label' }, '請輸入密碼'));
+  const inp = el('input', { class:'input', type:'password', placeholder:'你的密碼', autocomplete:'current-password' });
+  f.appendChild(inp);
+  const hint = el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    s.sid
+      ? '提示：預設密碼為學號末 4 碼 (' + String(s.sid).slice(-4).padStart(4,'0') + ')'
+      : '若沒改過，請聯絡老師索取預設密碼'
+  );
+  f.appendChild(hint);
+  m.root.appendChild(f);
+
+  const tryLogin = () => {
+    const pw = inp.value;
+    if(s.password !== pw){
+      toast('密碼錯誤','danger');
+      inp.focus(); inp.select();
+      return;
+    }
+    m.close();
+    finishStudentLogin(s);
+  };
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: tryLogin }, '登入 →'));
+  m.root.appendChild(actions);
+
+  inp.addEventListener('keydown', e => { if(e.key === 'Enter') tryLogin(); });
+  setTimeout(()=> inp.focus(), 80);
+}
+
+function finishStudentLogin(s){
+  App.session = { role:'student', id:s.id, name:s.name, cls:s.cls };
+  saveSession();
+  toast('歡迎回來，' + s.name + '！','success');
+  go('checkin');
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2332,6 +2700,14 @@ function rOv(content){
   const stats = computeTodayStats();
   const today = td();
 
+  // hello bar (time-aware greeting)
+  const hb = renderHelloBar();
+  if(hb) content.appendChild(hb);
+
+  // quick-start CTA (only when no students)
+  const qs = renderQuickStart();
+  if(qs) content.appendChild(qs);
+
   // welcome journey card (auto-hides after completion)
   const j = renderWelcomeJourney();
   if(j) content.appendChild(j);
@@ -2339,30 +2715,30 @@ function rOv(content){
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
     el('div', null,
       el('h1', null, '今日總覽'),
-      el('div', { class:'muted small' }, today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' }))
+      el('div', { class:'muted small' }, '掌握今天整班的出席狀況 · ' + today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' }))
     ),
     el('div', { class:'flex no-print' },
-      el('button', { class:'btn btn-sm', onclick:()=> rerender() }, '🔄 重整'),
+      el('button', { class:'btn btn-sm', onclick:()=> rerender(), title:'重新載入資料' }, '🔄 重整'),
       el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
-      el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('attendance') }, '✅ 點名 →')
+      el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('attendance'), title:'進入點名頁面' }, '✅ 點名 →')
     )
   ));
 
-  // stat tiles
+  // stat tiles (with subtitles explaining each)
   const grid = el('div', { class:'grid grid-4', style:{marginBottom:'16px'} });
-  grid.appendChild(el('div', { class:'stat s-success', onclick:()=> go('attendance','signed') },
+  grid.appendChild(el('div', { class:'stat s-success card-hover', onclick:()=> go('attendance','signed'), title:'點此查看已簽到名單' },
     el('div', { class:'num' }, String(stats.signed)),
-    el('div', { class:'lbl' }, '已簽到 / ' + stats.total)
+    el('div', { class:'lbl' }, '已簽到 / ' + stats.total + ' 人')
   ));
-  grid.appendChild(el('div', { class:'stat s-danger', onclick:()=> go('attendance','absent') },
+  grid.appendChild(el('div', { class:'stat s-danger card-hover', onclick:()=> go('attendance','absent'), title:'點此查看尚未到課學生' },
     el('div', { class:'num' }, String(stats.absent)),
-    el('div', { class:'lbl' }, '未簽到')
+    el('div', { class:'lbl' }, '未簽到 · 待處理')
   ));
-  grid.appendChild(el('div', { class:'stat s-accent', onclick:()=> go('leave') },
+  grid.appendChild(el('div', { class:'stat s-accent card-hover', onclick:()=> go('leave'), title:'點此管理請假' },
     el('div', { class:'num' }, String(stats.leave)),
-    el('div', { class:'lbl' }, '請假中')
+    el('div', { class:'lbl' }, '請假中 · 已批准')
   ));
-  grid.appendChild(el('div', { class:'stat s-warn', onclick:()=> go('attendance','late') },
+  grid.appendChild(el('div', { class:'stat s-warn card-hover', onclick:()=> go('attendance','late'), title:'點此查看遲到名單' },
     el('div', { class:'num' }, String(stats.late)),
     el('div', { class:'lbl' }, '今日遲到')
   ));
@@ -2471,14 +2847,15 @@ function rStu(content){
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '學生名單'),
-      el('div', { class:'muted small' }, '共 ' + App.db.students.length + ' 位')
+      el('div', { class:'muted small' }, '共 ' + App.db.students.length + ' 位 · 學生用「點我選擇」即可登入')
     ),
     el('div', { class:'flex no-print', style:{flexWrap:'wrap',gap:'6px'} },
-      el('button', { class:'btn btn-sm', onclick: openCSVImport }, '📥 CSV 匯入'),
-      el('button', { class:'btn btn-sm', onclick: openCSVExport }, '📤 匯出'),
-      el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印' }, '🖨'),
-      el('button', { class:'btn btn-sm', onclick: bulkAddStudents }, '＋ 批次'),
-      el('button', { class:'btn btn-primary', onclick:()=> openStudentEdit() }, '＋ 新增')
+      el('button', { class:'btn btn-sm', onclick: openCSVImport, title:'從 CSV 檔匯入學生名單' }, '📥 CSV 匯入'),
+      el('button', { class:'btn btn-sm', onclick: openCSVExport, title:'匯出為 CSV 檔' }, '📤 匯出'),
+      el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
+      el('button', { class:'btn btn-sm', onclick: bulkAddStudents, title:'一次貼上多位學生姓名' }, '＋ 批次'),
+      el('button', { class:'btn btn-sm btn-success', onclick: quickCreateStudent, title:'最快速：只要姓名 + 學號就建立帳號' }, '⚡ 快速建立'),
+      el('button', { class:'btn btn-primary', onclick:()=> openStudentEdit(), title:'新增單一學生（含完整欄位）' }, '＋ 新增')
     )
   ));
 
@@ -2509,10 +2886,24 @@ function rStu(content){
     students.sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0));
 
     if(students.length === 0){
-      listWrap.appendChild(el('div', { class:'empty' },
-        el('div', { class:'ico' }, '👥'),
-        el('div', null, q ? '沒有符合的學生' : '尚無學生，點右上「＋ 新增」開始')
-      ));
+      if(q){
+        listWrap.appendChild(el('div', { class:'empty' },
+          el('div', { class:'ico' }, '🔍'),
+          el('div', null, '沒有符合「' + q + '」的學生')
+        ));
+      } else {
+        // strong empty state with multiple paths to action
+        listWrap.appendChild(emptyState({
+          icon: '👥',
+          title: '還沒有學生',
+          msg: '建立學生後，學生開 V3 → 點「我是學生」就能直接看到自己名字',
+          actions: [
+            ['⚡ 快速建立（最簡單）', quickCreateStudent, 'btn btn-primary'],
+            ['📥 從 CSV 匯入', openCSVImport, 'btn'],
+            ['＋ 批次新增', bulkAddStudents, 'btn']
+          ]
+        }));
+      }
       return;
     }
 
@@ -2542,6 +2933,129 @@ function rStu(content){
   renderList();
 }
 
+/* ─────────────────────────────────────────────────────────────
+   QUICK CREATE STUDENT — one-step "name + sid → done" flow
+   The whole point: teacher can hand a child a working account in
+   under 5 seconds. Password defaults to last 4 of student id.
+   ───────────────────────────────────────────────────────────── */
+function quickCreateStudent(){
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, '⚡ 快速建立學生'));
+  m.root.appendChild(el('p', { class:'small muted' },
+    '只要填姓名 + 學號，立刻建立完整帳號。密碼預設為學號末 4 碼。'
+  ));
+
+  const fName = el('div', { class:'field' });
+  fName.appendChild(el('label', { class:'label' }, '姓名 *'));
+  const iName = el('input', { class:'input', placeholder:'例：王小明' });
+  fName.appendChild(iName);
+  m.root.appendChild(fName);
+
+  const fSid = el('div', { class:'field' });
+  fSid.appendChild(el('label', { class:'label' }, '學號（4 位數以上建議）'));
+  const iSid = el('input', { class:'input', placeholder:'例：12345 → 密碼變 2345' });
+  fSid.appendChild(iSid);
+  m.root.appendChild(fSid);
+
+  const fCls = el('div', { class:'field' });
+  fCls.appendChild(el('label', { class:'label' }, '班級（可空）'));
+  const iCls = el('input', { class:'input', placeholder:'例：301', value: App._quickLastCls || '' });
+  fCls.appendChild(iCls);
+  m.root.appendChild(fCls);
+
+  const fSeat = el('div', { class:'field' });
+  fSeat.appendChild(el('label', { class:'label' }, '座號（可空）'));
+  const iSeat = el('input', { class:'input', type:'number', placeholder:'例：1' });
+  fSeat.appendChild(iSeat);
+  m.root.appendChild(fSeat);
+
+  // Live preview of generated password
+  const preview = el('div', { class:'small muted', style:{
+    marginTop:'4px',padding:'8px 12px',background:'var(--surface-2)',
+    borderRadius:'8px',fontFamily:'ui-monospace,monospace'
+  } }, '密碼將為：(請先填學號)');
+  function updatePreview(){
+    const sid = iSid.value.trim();
+    if(sid && sid.length >= 1){
+      const pw = sid.slice(-4).padStart(4,'0');
+      preview.textContent = '🔑 預設密碼：' + pw + '（學號末 4 碼）';
+    } else {
+      preview.textContent = '🔑 預設密碼：0000（無學號時的 fallback）';
+    }
+  }
+  iSid.addEventListener('input', updatePreview);
+  updatePreview();
+  m.root.appendChild(preview);
+
+  // helper: "keep adding" mode (don't close modal, allow rapid entry)
+  const keepGoing = el('label', { class:'small', style:{
+    display:'flex',alignItems:'center',gap:'6px',marginTop:'10px',cursor:'pointer'
+  }});
+  const chk = el('input', { type:'checkbox' });
+  if(App._quickKeepGoing) chk.checked = true;
+  keepGoing.appendChild(chk);
+  keepGoing.appendChild(el('span', null, '建立後繼續新增下一位（不關閉視窗）'));
+  m.root.appendChild(keepGoing);
+
+  function doCreate(){
+    const name = iName.value.trim();
+    if(!name){ toast('姓名必填','danger'); iName.focus(); return; }
+    const sid = iSid.value.trim();
+    const cls = iCls.value.trim();
+    const seat = parseInt(iSeat.value,10) || 0;
+    const password = sid ? sid.slice(-4).padStart(4,'0') : '0000';
+
+    // de-dupe (warn but allow)
+    const dup = App.db.students.find(s =>
+      (sid && s.sid && String(s.sid) === sid) ||
+      (s.name === name && s.cls === cls)
+    );
+    if(dup){
+      toast('提醒：可能已存在「' + dup.name + '」','warn', 2200);
+    }
+
+    const rec = {
+      id: nid(),
+      name, sid, cls, seat,
+      email: '', phone: '',
+      password,
+      note: '快速建立'
+    };
+    App.db.students.push(rec);
+    saveDB();
+    try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){}
+    toast('✓ 已建立 ' + name + '（密碼：' + password + '）','success', 2400);
+
+    App._quickLastCls = cls;
+    App._quickKeepGoing = chk.checked;
+
+    if(chk.checked){
+      // reset for next entry but keep class
+      iName.value = '';
+      iSid.value = '';
+      iSeat.value = seat ? String(seat + 1) : '';
+      updatePreview();
+      iName.focus();
+      // partial rerender of list behind modal
+      try { rerender(); } catch(e){}
+    } else {
+      m.close();
+      rerender();
+    }
+  }
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: doCreate }, '✓ 建立帳號'));
+  m.root.appendChild(actions);
+
+  // Enter from any field submits
+  [iName, iSid, iCls, iSeat].forEach(inp => {
+    inp.addEventListener('keydown', e => { if(e.key === 'Enter') doCreate(); });
+  });
+  setTimeout(()=> iName.focus(), 80);
+}
+
 function openStudentEdit(s=null){
   const isNew = !s;
   const m = modal('');
@@ -2549,6 +3063,7 @@ function openStudentEdit(s=null){
 
   const fields = [
     { key:'name', label:'姓名', placeholder:'王小明', required:true },
+    { key:'sid', label:'學號', placeholder:'例：12345（密碼預設為末 4 碼）' },
     { key:'cls', label:'班級', placeholder:'A班' },
     { key:'seat', label:'座號', type:'number', placeholder:'1' },
     { key:'email', label:'信箱', placeholder:'optional' },
@@ -2697,12 +3212,12 @@ function rAtt(content){
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '出席管理'),
-      el('div', { class:'muted small' }, date)
+      el('div', { class:'muted small' }, '逐一替學生補簽、處理請假或標記遲到 · ' + date)
     ),
     el('div', { class:'flex' },
-      el('input', { class:'input', type:'date', value:date, style:{width:'150px'}, onchange: e => { App._attDate = e.target.value; rerender(); } }),
-      el('button', { class:'btn btn-sm', onclick: ()=> { App._attDate = td(); rerender(); } }, '今天'),
-      el('button', { class:'btn btn-sm btn-danger', onclick: clearTodayAttendance, title:'清空' }, '🗑 清空')
+      el('input', { class:'input', type:'date', value:date, style:{width:'150px'}, title:'選擇日期', onchange: e => { App._attDate = e.target.value; rerender(); } }),
+      el('button', { class:'btn btn-sm', onclick: ()=> { App._attDate = td(); rerender(); }, title:'跳到今天' }, '今天'),
+      el('button', { class:'btn btn-sm btn-danger', onclick: clearTodayAttendance, title:'清空今天所有簽到紀錄' }, '🗑 清空')
     )
   ));
 
@@ -3345,38 +3860,91 @@ function rCheckIn(content){
   const already = studentSignedToday(me.id);
   const onLeave = studentOnLeaveToday(me.id);
 
-  content.appendChild(el('div', { style:{textAlign:'center',marginBottom:'12px'} },
-    el('h1', null, '哈囉，' + me.name),
-    el('div', { class:'muted' }, td() + ' · ' + nt())
+  // hello bar (time-aware)
+  const hb = renderHelloBar();
+  if(hb) content.appendChild(hb);
+
+  // header
+  content.appendChild(el('div', { style:{textAlign:'center',marginBottom:'8px'} },
+    el('h1', null, '✋ 我要簽到'),
+    el('div', { class:'muted small' }, td() + ' · ' + nt())
   ));
 
-  const wrap = el('div', { class:'checkin-wrap' });
+  // ── HUGE check-in button (takes ~1/3 screen) ──
+  const wrap = el('div', { class:'checkin-wrap checkin-hero' });
 
   if(onLeave){
-    wrap.appendChild(el('div', { class:'card', style:{background:'var(--accent-soft)',borderColor:'var(--accent)',padding:'24px',textAlign:'center',maxWidth:'320px'} },
+    wrap.appendChild(el('div', { class:'card', style:{background:'var(--accent-soft)',borderColor:'var(--accent)',padding:'32px 24px',textAlign:'center',maxWidth:'340px'} },
       el('div', { class:'huge' }, '📆'),
       el('h2', { style:{color:'var(--accent)'} }, '今日請假中'),
-      el('div', { class:'muted' }, onLeave.reason || '')
+      el('div', { class:'muted' }, onLeave.reason || ''),
+      el('div', { class:'tiny muted', style:{marginTop:'8px'} }, '已通過老師批准，不需簽到')
     ));
   } else if(already){
-    wrap.appendChild(el('div', { class:'card', style:{background:'var(--success-soft)',borderColor:'var(--success)',padding:'24px',textAlign:'center',maxWidth:'320px'} },
+    wrap.appendChild(el('div', { class:'card', style:{background:'var(--success-soft)',borderColor:'var(--success)',padding:'32px 24px',textAlign:'center',maxWidth:'340px'} },
       el('div', { class:'huge' }, '✅'),
-      el('h2', { style:{color:'var(--success)'} }, '已簽到'),
+      el('h2', { style:{color:'var(--success)'} }, '已完成簽到'),
       el('div', { class:'mono big' }, already.time),
-      el('div', { class:'muted small' }, '今天 ' + already.date)
+      el('div', { class:'muted small' }, '今天 ' + already.date + ' · 看你真積極！')
     ));
   } else {
-    const btn = el('button', { class:'checkin-btn pulse', onclick: doStudentCheckIn }, '簽到');
+    const btn = el('button', { class:'checkin-btn pulse', onclick: doStudentCheckIn, title:'點我完成今日簽到' }, '👆 點我簽到');
     wrap.appendChild(btn);
-    wrap.appendChild(el('div', { class:'muted small', style:{marginTop:'16px'} }, '點按大按鈕完成今日簽到'));
+    wrap.appendChild(el('div', { class:'muted small', style:{marginTop:'14px',textAlign:'center'} },
+      '按下大按鈕，立刻完成今日簽到'
+    ));
   }
 
   content.appendChild(wrap);
 
+  // ── my progress (compact stats) ──
+  try {
+    const attRate = attendanceRate(me.id);
+    const subRate = submissionRate(me.id);
+    const subAvg = submissionAvg(me.id);
+    const unreadAnn = (typeof studentUnreadAnnouncements === 'function' ? studentUnreadAnnouncements() : 0) || 0;
+    const newAsgn = (typeof studentNewAssignmentCount === 'function' ? studentNewAssignmentCount() : 0) || 0;
+
+    const progress = el('div', { class:'progress-bars', style:{marginTop:'16px'} });
+    progress.appendChild(el('div', { class:'pbar success' },
+      el('div', { class:'ttl' }, '出席率'),
+      el('div', { class:'val' }, attRate + '%'),
+      el('div', { class:'track' }, el('div', { class:'fill', style:{width: attRate + '%'} }))
+    ));
+    progress.appendChild(el('div', { class:'pbar primary' },
+      el('div', { class:'ttl' }, '作業繳交率'),
+      el('div', { class:'val' }, subRate + '%'),
+      el('div', { class:'track' }, el('div', { class:'fill', style:{width: subRate + '%'} }))
+    ));
+    progress.appendChild(el('div', { class:'pbar accent' },
+      el('div', { class:'ttl' }, '作業平均分'),
+      el('div', { class:'val' }, subAvg ? String(subAvg) : '—'),
+      el('div', { class:'track' }, el('div', { class:'fill', style:{width: (subAvg||0) + '%'} }))
+    ));
+    content.appendChild(progress);
+
+    // quick-jumps to assignments + announcements (with unread red dot)
+    if(newAsgn || unreadAnn){
+      const jumps = el('div', { class:'row', style:{marginTop:'12px'} });
+      if(newAsgn){
+        jumps.appendChild(el('button', { class:'btn btn-block', onclick:()=> go('sasgn'), title:'查看新作業' },
+          '📤 ' + newAsgn + ' 件新作業 →'
+        ));
+      }
+      if(unreadAnn){
+        jumps.appendChild(el('button', { class:'btn btn-block', onclick:()=> go('sann'), title:'查看新公告' },
+          '🔔 ' + unreadAnn + ' 則新公告 →'
+        ));
+      }
+      content.appendChild(jumps);
+    }
+  } catch(e){ /* progress is best-effort */ }
+
   // request leave action
   const lc = el('div', { class:'card', style:{marginTop:'12px',textAlign:'center'} });
   lc.appendChild(el('h3', null, '無法到課？'));
-  lc.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'8px'}, onclick:()=> studentRequestLeave() }, '📆 申請請假'));
+  lc.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '送出申請後等待老師批准'));
+  lc.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'10px'}, onclick:()=> studentRequestLeave() }, '📆 申請請假'));
   content.appendChild(lc);
 }
 
@@ -6473,6 +7041,116 @@ function journeyDone(key){
     localStorage.setItem(LS_JOURNEY_DONE, JSON.stringify(st));
   } catch(e){}
 }
+/* ─── v3.1: hello-bar greeting (time-aware) ──────────────────── */
+function timeGreeting(){
+  const h = new Date().getHours();
+  if(h >= 5 && h < 11) return '早安';
+  if(h >= 11 && h < 14) return '中午好';
+  if(h >= 14 && h < 18) return '午安';
+  if(h >= 18 && h < 23) return '晚安';
+  return '夜深了';
+}
+function renderHelloBar(){
+  if(!App.session) return null;
+  const name = App.session.name || '';
+  const greet = timeGreeting();
+  const d = new Date();
+  const weekday = ['日','一','二','三','四','五','六'][d.getDay()];
+  const dateStr = (d.getMonth()+1) + ' 月 ' + d.getDate() + ' 日 · 週' + weekday;
+  return el('div', { class:'hello-bar no-print' },
+    el('div', null,
+      el('div', { class:'greet' }, greet + '，' + name + ' 👋'),
+      el('div', { class:'date' }, dateStr)
+    ),
+    App.session.role === 'student' && currentStudent()
+      ? el('div', { class:'tiny muted', style:{textAlign:'right'} },
+          (currentStudent().cls || '') +
+          (currentStudent().seat ? ' · ' + currentStudent().seat + '號' : '')
+        )
+      : null
+  );
+}
+
+/* ─── v3.1: quick-start CTA grid (first run for teacher) ──── */
+function renderQuickStart(){
+  if(!App.session || App.session.role !== 'teacher') return null;
+  // Show only if teacher has no students yet AND hasn't dismissed
+  if(App.db.students.length > 0) return null;
+  const st = journeyState();
+  if(st.qsDismissed) return null;
+
+  const grid = el('div', { class:'quick-start no-print' });
+
+  const card1 = el('div', { class:'qs-card primary', onclick:()=> { go('students'); setTimeout(openCSVImport, 200); } },
+    el('div', { class:'ico' }, '📥'),
+    el('div', { class:'ttl' }, '匯入學生名單'),
+    el('div', { class:'desc' }, '從 CSV 一鍵匯入整班學生（最常用）'),
+    el('div', { class:'tag' }, '推薦')
+  );
+  grid.appendChild(card1);
+
+  const card2 = el('div', { class:'qs-card', onclick:()=> { go('students'); setTimeout(quickCreateStudent, 200); } },
+    el('div', { class:'ico' }, '⚡'),
+    el('div', { class:'ttl' }, '快速建立學生'),
+    el('div', { class:'desc' }, '只要姓名 + 學號就生成完整帳號')
+  );
+  grid.appendChild(card2);
+
+  const card3 = el('div', { class:'qs-card', onclick:()=> go('qr') },
+    el('div', { class:'ico' }, '📱'),
+    el('div', { class:'ttl' }, 'QR Code 點名'),
+    el('div', { class:'desc' }, '投影一張 QR 碼，學生掃描即簽到')
+  );
+  grid.appendChild(card3);
+
+  const card4 = el('div', { class:'qs-card', onclick:()=> renderDemoData() },
+    el('div', { class:'ico' }, '📺'),
+    el('div', { class:'ttl' }, '查看示範資料'),
+    el('div', { class:'desc' }, '建立 5 位假學生，先試用所有功能')
+  );
+  grid.appendChild(card4);
+
+  // dismiss link
+  const wrap = el('div', null);
+  wrap.appendChild(el('div', { class:'flex-between', style:{marginBottom:'8px'} },
+    el('h3', { style:{margin:0} }, '🚀 快速開始'),
+    el('button', { class:'btn-ghost tiny', style:{
+      background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)'
+    }, onclick:()=> { journeyDone('qsDismissed'); rerender(); }}, '稍後再說 ✕')
+  ));
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+/* Generate a few demo students so the teacher can try features
+   immediately without any setup. */
+function renderDemoData(){
+  if(App.db.students.length > 0){
+    toast('已有學生，不重複建立示範資料','warn');
+    return;
+  }
+  const demos = [
+    { name:'王小明', sid:'A001', cls:'示範班', seat:1 },
+    { name:'李大華', sid:'A002', cls:'示範班', seat:2 },
+    { name:'張美麗', sid:'A003', cls:'示範班', seat:3 },
+    { name:'陳志強', sid:'A004', cls:'示範班', seat:4 },
+    { name:'林雅婷', sid:'A005', cls:'示範班', seat:5 }
+  ];
+  demos.forEach(d => {
+    App.db.students.push({
+      id: nid(),
+      name: d.name, sid: d.sid, cls: d.cls, seat: d.seat,
+      email:'', phone:'',
+      password: d.sid.slice(-4),
+      note:'示範資料'
+    });
+  });
+  saveDB();
+  try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){}
+  toast('✅ 已建立 5 位示範學生（密碼皆為學號末 4 碼）','success', 3500);
+  go('students');
+}
+
 function renderWelcomeJourney(){
   if(!App.session || App.session.role !== 'teacher') return null;
   const st = journeyState();
@@ -7716,6 +8394,11 @@ function boot(){
       Sync.init();
       wsRegisterCurrent();
     }
+
+    // ═══ V1 → V3 自動匯入（在建立預設帳號之前）═══
+    // 若偵測到 V1 (cmsDB) 學生資料，自動匯入學生 / 課程 / 帳號（一次性）
+    try { autoImportV1(); } catch(e){ console.warn('[v3 v1-import]', e); }
+
     if(App.db && (!App.db.accounts || App.db.accounts.length === 0)){
       // 沒帳號 → 自動建立預設管理員
       App.db.accounts = App.db.accounts || [];
@@ -7763,6 +8446,15 @@ function boot(){
   try { backupAutoIfNeeded(); } catch(e){}
 
   rerender();
+
+  // V1 import toast (after first render so the user actually sees it)
+  if(App._v1ImportedCount){
+    const n = App._v1ImportedCount;
+    App._v1ImportedCount = 0;
+    setTimeout(()=> {
+      try { toast('✅ 已從舊版自動匯入 ' + n + ' 位學生','success', 5000); } catch(e){}
+    }, 1500);
+  }
 
   // try auto-checkin if there was a pending code
   if(App.pendingAttCode){
