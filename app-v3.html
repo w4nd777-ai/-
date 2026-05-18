@@ -791,6 +791,208 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
 .recip-chip .x{ cursor:pointer; opacity:.7; }
 .recip-chip .x:hover{ opacity:1; }
 
+/* ──────────── PHASE 4 — Polish & Accessibility ──────────── */
+/* focus rings */
+:focus{ outline:none; }
+:focus-visible{
+  outline:2px solid var(--primary);
+  outline-offset:2px;
+  border-radius:var(--r-sm);
+}
+button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
+  box-shadow:0 0 0 3px var(--primary-soft);
+}
+
+/* loading spinner */
+.spinner{
+  display:inline-block; width:18px; height:18px;
+  border:2px solid var(--border-strong);
+  border-top-color:var(--primary);
+  border-radius:50%;
+  animation:spin .8s linear infinite;
+  vertical-align:middle;
+}
+.spinner.big{ width:48px; height:48px; border-width:4px; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.loading-overlay{
+  position:fixed; inset:0; z-index:99;
+  background:rgba(0,0,0,.4); display:flex;
+  align-items:center; justify-content:center;
+  flex-direction:column; gap:12px; color:#fff;
+}
+
+/* fade-in for view */
+.content > * { animation: fadeUp .25s ease-out both; }
+@keyframes fadeUp{
+  from{ opacity:0; transform:translateY(6px); }
+  to{ opacity:1; transform:translateY(0); }
+}
+
+/* empty state */
+.empty-state{
+  text-align:center; padding:48px 16px;
+  background:var(--surface); border-radius:var(--r-lg);
+  border:1px dashed var(--border);
+}
+.empty-state .ico{ font-size:48px; margin-bottom:8px; }
+.empty-state h3{ margin:8px 0 4px; }
+.empty-state p{ color:var(--text-muted); margin:4px 0 16px; font-size:14px; }
+.empty-state .cta{ display:inline-flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+
+/* welcome journey */
+.journey-card{
+  background:linear-gradient(135deg, var(--primary-soft), var(--accent-soft));
+  border:1px solid var(--primary);
+  border-radius:var(--r-lg); padding:16px;
+  margin-bottom:16px; position:relative;
+}
+.journey-card .close{
+  position:absolute; right:10px; top:10px;
+  background:transparent; border:none; cursor:pointer;
+  font-size:18px; color:var(--text-muted);
+  width:28px; height:28px; border-radius:50%;
+}
+.journey-card .close:hover{ background:rgba(0,0,0,.06); }
+.journey-card h3{ margin-bottom:10px; }
+.journey-steps{ display:flex; flex-direction:column; gap:8px; }
+.journey-step{
+  display:flex; align-items:center; gap:10px;
+  padding:10px 12px; background:var(--surface);
+  border-radius:var(--r-md); cursor:pointer;
+  transition:transform var(--tx);
+}
+.journey-step:hover{ transform:translateX(3px); }
+.journey-step.done{ opacity:.6; }
+.journey-step .ix{
+  width:28px; height:28px; border-radius:50%;
+  background:var(--primary); color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:13px; flex-shrink:0;
+}
+.journey-step.done .ix{ background:var(--success); }
+.journey-step .ttl{ flex:1; font-weight:600; }
+.journey-step .arr{ color:var(--text-muted); }
+
+/* heatmap grid */
+.heatmap{
+  display:grid; gap:2px;
+  overflow-x:auto; padding:8px 0;
+}
+.heatmap .hcell{
+  width:18px; height:18px; border-radius:3px;
+  background:var(--surface-3);
+  position:relative; cursor:default;
+}
+.heatmap .hcell.l1{ background:#ddebf3; }
+.heatmap .hcell.l2{ background:#90b8de; }
+.heatmap .hcell.l3{ background:#3478c8; }
+.heatmap .hcell.l4{ background:#1a4d8a; }
+.heatmap .hcell.abs{ background:#fee2e2; }
+.heatmap .hcell.leave{ background:#ede9fe; }
+[data-theme="dark"] .heatmap .hcell.l1{ background:#1e3a5f; }
+[data-theme="dark"] .heatmap .hcell.l2{ background:#2a5a8c; }
+[data-theme="dark"] .heatmap .hcell.l3{ background:#3478c8; }
+[data-theme="dark"] .heatmap .hcell.l4{ background:#5a9adf; }
+.heatmap-row{ display:flex; align-items:center; gap:6px; }
+.heatmap-row .lbl{
+  font-size:11px; width:90px; flex-shrink:0;
+  white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; color:var(--text-muted);
+}
+.heatmap-row .cells{ display:flex; gap:2px; flex:1; }
+
+/* drag drop overlay */
+.drop-zone{
+  position:fixed; inset:0; z-index:9999;
+  background:rgba(37,99,235,.92); color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  flex-direction:column; gap:12px;
+  pointer-events:none;
+  font-size:18px; font-weight:600;
+  backdrop-filter:blur(6px);
+}
+.drop-zone .icn{ font-size:64px; }
+
+/* storage usage bar */
+.usage-bar{
+  height:12px; background:var(--surface-3); border-radius:6px;
+  overflow:hidden; position:relative;
+}
+.usage-bar .fill{
+  height:100%; background:var(--success); transition:width .3s;
+}
+.usage-bar.warn .fill{ background:var(--warn); }
+.usage-bar.danger .fill{ background:var(--danger); }
+
+/* log table */
+.log-row{
+  display:grid;
+  grid-template-columns:120px 80px 1fr;
+  gap:10px; padding:8px 10px; align-items:center;
+  border-bottom:1px solid var(--border);
+  font-size:13px;
+}
+.log-row:hover{ background:var(--surface-2); }
+.log-row .tm{ color:var(--text-muted); font-size:11px; }
+.log-row .typ{
+  display:inline-block; padding:1px 8px; border-radius:999px;
+  font-size:10px; font-weight:700;
+  background:var(--surface-2);
+}
+
+/* multi-file chip */
+.mfile-chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px; border-radius:8px;
+  background:var(--surface-2); margin:2px;
+  font-size:12px; max-width:100%;
+}
+.mfile-chip .nm{ max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mfile-chip .x{ cursor:pointer; color:var(--danger); }
+
+/* teacher info badge in student topbar */
+.teacher-badge{
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--surface-2); padding:4px 10px;
+  border-radius:999px; cursor:pointer; font-size:12px;
+  font-weight:600;
+}
+.teacher-badge .av{
+  width:22px; height:22px; border-radius:50%;
+  background:var(--primary); color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px;
+}
+
+/* print styles */
+@media print{
+  body{ background:#fff; color:#000; }
+  .sidebar, .topbar, .bottom-nav, .toast-host,
+  .modal-host, .pwa-prompt, .drop-zone,
+  .topbar-actions, .nav-item, .actions, button,
+  .btn, .side-item{ display:none !important; }
+  .app{ display:block; }
+  .main-area{ padding:0; }
+  .content{ padding:0; max-width:100%; }
+  .card, .stat, .chart-card{
+    border:1px solid #ccc !important; box-shadow:none !important;
+    page-break-inside:avoid;
+    background:#fff !important;
+  }
+  table{
+    width:100%; border-collapse:collapse; font-size:11px;
+    page-break-inside:auto;
+  }
+  table th, table td{ border:1px solid #999 !important; padding:4px 6px; }
+  tr{ page-break-inside:avoid; }
+  thead{ display:table-header-group; }
+  h1{ font-size:20px; } h2{ font-size:16px; } h3{ font-size:14px; }
+  .no-print{ display:none !important; }
+  .print-only{ display:block !important; }
+  @page{ margin:1.2cm; size:A4; }
+}
+.print-only{ display:none; }
+
 </style>
 </head>
 <body>
@@ -1890,6 +2092,9 @@ function renderSidebarTeacher(){
   ));
   side.appendChild(sideItem('workspace','🏢','多教室管理'));
   side.appendChild(sideItem('notify','📲','通知設定'));
+  side.appendChild(sideItem('backup','💼','備份與還原'));
+  side.appendChild(sideItem('logs','📜','操作紀錄'));
+  side.appendChild(sideItem('storage','💾','儲存空間'));
   side.appendChild(sideItem('settings','⚙️','設定'));
   side.appendChild(sideItem('firebase','☁️','跨裝置同步'));
 
@@ -1954,7 +2159,8 @@ function renderTopbar(role){
     assignments:'📋 作業管理', submissions:'📥 繳交記錄', grades:'🎯 學期成績',
     evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具',
     qr:'📱 QR Code 簽到', calendar:'📅 行事曆', gantt:'📊 作業甘特圖',
-    workspace:'🏢 多教室管理', notify:'📲 通知設定'
+    workspace:'🏢 多教室管理', notify:'📲 通知設定',
+    backup:'💼 備份與還原', logs:'📜 操作紀錄', storage:'💾 儲存空間'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告'
@@ -1977,6 +2183,15 @@ function renderTopbar(role){
   if(role === 'teacher' && App.db.pending && App.db.pending.length){
     actions.appendChild(el('button', { class:'btn btn-sm', onclick:()=> go('pending') },
       '📥 ' + App.db.pending.length
+    ));
+  }
+
+  // teacher info badge (student only)
+  if(role === 'student'){
+    const t = App.db.settings.teacherName || '老師';
+    actions.appendChild(el('span', { class:'teacher-badge', onclick: openTeacherInfo, title:'點看老師資訊' },
+      el('span', { class:'av' }, initials(t)),
+      el('span', null, t)
     ));
   }
 
@@ -2035,6 +2250,7 @@ function openMoreMenuTeacher(){
     ['announcements','📢 公告管理'],['analytics','📈 分析工具'],
     ['calendar','📅 行事曆'],['gantt','📊 甘特圖'],
     ['workspace','🏢 多教室'],['notify','📲 通知設定'],
+    ['backup','💼 備份'],['logs','📜 操作紀錄'],['storage','💾 儲存空間'],
     ['settings','⚙️ 設定'],['firebase','☁️ 跨裝置同步']
   ];
   const grid = el('div', { class:'grid grid-2' });
@@ -2116,13 +2332,18 @@ function rOv(content){
   const stats = computeTodayStats();
   const today = td();
 
+  // welcome journey card (auto-hides after completion)
+  const j = renderWelcomeJourney();
+  if(j) content.appendChild(j);
+
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
     el('div', null,
       el('h1', null, '今日總覽'),
       el('div', { class:'muted small' }, today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' }))
     ),
-    el('div', { class:'flex' },
+    el('div', { class:'flex no-print' },
       el('button', { class:'btn btn-sm', onclick:()=> rerender() }, '🔄 重整'),
+      el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
       el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('attendance') }, '✅ 點名 →')
     )
   ));
@@ -2252,9 +2473,10 @@ function rStu(content){
       el('h1', null, '學生名單'),
       el('div', { class:'muted small' }, '共 ' + App.db.students.length + ' 位')
     ),
-    el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px'} },
+    el('div', { class:'flex no-print', style:{flexWrap:'wrap',gap:'6px'} },
       el('button', { class:'btn btn-sm', onclick: openCSVImport }, '📥 CSV 匯入'),
       el('button', { class:'btn btn-sm', onclick: openCSVExport }, '📤 匯出'),
+      el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印' }, '🖨'),
       el('button', { class:'btn btn-sm', onclick: bulkAddStudents }, '＋ 批次'),
       el('button', { class:'btn btn-primary', onclick:()=> openStudentEdit() }, '＋ 新增')
     )
@@ -4265,9 +4487,12 @@ function rAnalytics(content){
   // sub navigation
   const subnav = el('div', { class:'tabs-line' });
   [
-    ['main','🏠 主頁'],['health','💚 整體健康度'],['low-att','📉 低出席'],
-    ['overdue','⌛ 逾期未繳'],['dist','📊 成績分布'],['trend','📈 出席趨勢'],
-    ['compare','🔬 班級比較']
+    ['main','🏠 主頁'],['health','💚 健康度'],['low-att','📉 低出席'],
+    ['overdue','⌛ 逾期未繳'],['dist','📊 成績分布'],['att-trend','📈 出席趨勢'],
+    ['compare','🔬 班級比較'],
+    ['heatmap','🔥 熱圖'],['timeline','⏰ 時間線'],['trend','📈 成績趨勢'],
+    ['rank','🏆 排行榜'],['risk','⚠ 風險預警'],['reliab','📊 互評可靠度'],
+    ['pattern','📅 出席模式']
   ].forEach(([v,t]) => {
     subnav.appendChild(el('button', { class: sub===v?'active':'', onclick:()=> go('analytics', v==='main'?null:v) }, t));
   });
@@ -4278,8 +4503,16 @@ function rAnalytics(content){
   if(sub === 'low-att') return rAnalyticsLowAtt(content);
   if(sub === 'overdue') return rAnalyticsOverdue(content);
   if(sub === 'dist') return rAnalyticsDist(content);
-  if(sub === 'trend') return rAnalyticsTrend(content);
+  if(sub === 'att-trend') return rAnalyticsTrend(content);
   if(sub === 'compare') return rAnalyticsCompare(content);
+  // Phase 4 new
+  if(sub === 'heatmap') return rAnHeatmap(content);
+  if(sub === 'timeline') return rAnTimeline(content);
+  if(sub === 'trend') return rAnTrend(content);
+  if(sub === 'rank') return rAnRank(content);
+  if(sub === 'risk') return rAnRisk(content);
+  if(sub === 'reliab') return rAnReliab(content);
+  if(sub === 'pattern') return rAnPattern(content);
 }
 
 function rAnalyticsMain(content){
@@ -4302,8 +4535,15 @@ function rAnalyticsMain(content){
     ['low-att','📉','低出席學生','找出需要關心的同學'],
     ['overdue','⌛','逾期未繳排行','缺繳作業最多的學生'],
     ['dist','📊','成績分布','成績段直方圖'],
-    ['trend','📈','出席趨勢','每日出席率折線'],
-    ['compare','🔬','班級比較','跨班級表現對比']
+    ['att-trend','📈','出席趨勢','每日出席率折線'],
+    ['compare','🔬','班級比較','跨班級表現對比'],
+    ['heatmap','🔥','出席熱圖','30 日學生 × 日期熱圖'],
+    ['timeline','⏰','學生時間線','單一學生活動軸'],
+    ['trend','📈','成績趨勢','每日 / 每作業均分'],
+    ['rank','🏆','排行榜','總分 / 出席 / 作業'],
+    ['risk','⚠','風險預警','可能掉隊的學生'],
+    ['reliab','📊','互評可靠度','互評偏離度'],
+    ['pattern','📅','出席模式','找翹課日'],
   ].forEach(([v,i,t,d]) => {
     cards.appendChild(el('div', { class:'card card-hover', onclick:()=> go('analytics', v) },
       el('div', { class:'huge' }, i),
@@ -4485,7 +4725,7 @@ function rSAsgn(content){
   // detail?
   if(App.subview && !['all','pending','done','overdue'].includes(App.subview)){
     const asg = App.db.assignments.find(a => a.id === App.subview);
-    if(asg) return rSAsgnDetail(content, asg, me);
+    if(asg) return rSAsgnDetailV2(content, asg, me);
   }
 
   const tab = App.subview || 'pending';
@@ -5839,6 +6079,1335 @@ function rGantt(content){
 }
 
 /* ════════════════════════════════════════════════════════════
+   ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  PHASE 4  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+   收尾完善：進階分析、備份、匯入匯出、列印、無障礙、UX
+   ──────────────────────────────────────────────────────────── */
+
+/* ---- LS keys for Phase 4 ---- */
+const LS_BACKUP_PREFIX = LS_KEY + '_backup_';
+const LS_BACKUP_LAST   = LS_KEY + '_backup_last';
+const LS_LOGS          = LS_KEY + '_logs';
+const LS_JOURNEY_DONE  = LS_KEY + '_journey_done';
+
+/* ---- Operation log ---- */
+function logOp(type, msg, meta){
+  try {
+    if(!App.db) return;
+    if(!Array.isArray(App.db._logs)) App.db._logs = [];
+    App.db._logs.push({
+      id: nid(), ts: Date.now(),
+      type: type || 'info',
+      msg: String(msg || ''),
+      who: (App.session && App.session.name) || 'system',
+      meta: meta || null
+    });
+    if(App.db._logs.length > 1000) App.db._logs = App.db._logs.slice(-1000);
+    // do not call saveDB here to avoid recursion; assume caller will save
+  } catch(e){}
+}
+
+/* ---- Backup system (auto-once-per-day + manual) ---- */
+function backupList(){
+  const list = [];
+  try {
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith(LS_BACKUP_PREFIX)){
+        const date = k.slice(LS_BACKUP_PREFIX.length);
+        let size = 0;
+        try { size = localStorage.getItem(k).length; } catch(e){}
+        list.push({ key:k, date, size });
+      }
+    }
+  } catch(e){}
+  return list.sort((a,b) => b.date.localeCompare(a.date));
+}
+function backupCreate(label){
+  if(!App.db) return null;
+  const today = td();
+  const tag = label || today;
+  const key = LS_BACKUP_PREFIX + tag;
+  try {
+    const data = {
+      ts: Date.now(),
+      version: 'v3',
+      room: (App.cfg && App.cfg.roomCode) || 'local',
+      db: App.db
+    };
+    localStorage.setItem(key, JSON.stringify(data));
+    // keep last 7
+    const all = backupList();
+    if(all.length > 7){
+      all.slice(7).forEach(b => {
+        try { localStorage.removeItem(b.key); } catch(e){}
+      });
+    }
+    try { localStorage.setItem(LS_BACKUP_LAST, today); } catch(e){}
+    return key;
+  } catch(e){
+    console.warn('backup failed', e);
+    return null;
+  }
+}
+function backupAutoIfNeeded(){
+  try {
+    if(!App.db) return;
+    const last = localStorage.getItem(LS_BACKUP_LAST) || '';
+    if(last === td()) return;
+    backupCreate(td());
+  } catch(e){}
+}
+async function backupRestore(key){
+  try {
+    const raw = localStorage.getItem(key);
+    if(!raw) { toast('找不到備份','danger'); return false; }
+    const obj = JSON.parse(raw);
+    if(!obj || !obj.db) { toast('備份格式錯誤','danger'); return false; }
+    const ok = await confirmDlg('還原這份備份？目前的資料會被覆蓋（建議先匯出）',
+      { danger:true, title:'⚠ 確認還原 ' + (key.slice(LS_BACKUP_PREFIX.length)) });
+    if(!ok) return false;
+    App.db = Object.assign(defaultDB(), obj.db);
+    logOp('restore','還原備份 ' + key);
+    saveDB(); Sync.setNode('', App.db); bcNotify();
+    toast('已還原','success');
+    rerender();
+    return true;
+  } catch(e){
+    toast('還原失敗：' + e.message,'danger');
+    return false;
+  }
+}
+
+/* ---- Full JSON export / import ---- */
+function exportFullJSON(){
+  if(!App.db) return;
+  const data = {
+    version:'v3', ts: Date.now(),
+    room: (App.cfg && App.cfg.roomCode) || 'local',
+    schoolName: App.db.settings?.schoolName,
+    db: App.db
+  };
+  const blob = new Blob([JSON.stringify(data,null,2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  downloadDataUrl(url, 'cms-v3-backup-' + td() + '.json');
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+  logOp('export','匯出完整 JSON');
+  saveDB();
+  toast('已下載完整 JSON','success');
+}
+async function importFullJSON(file){
+  try {
+    const text = await file.text();
+    const obj = JSON.parse(text);
+    if(!obj || !obj.db) { toast('JSON 格式錯誤（缺 db）','danger'); return; }
+    // show preview
+    const m = modal('');
+    m.root.appendChild(el('h2', null, '📥 匯入預覽'));
+    const db = obj.db;
+    const summary = el('div', { class:'card' });
+    summary.appendChild(el('div', { class:'small' },
+      `學生：${(db.students||[]).length} 人 ／ `+
+      `出席：${(db.attendance||[]).length} 筆 ／ `+
+      `作業：${(db.assignments||[]).length} 份 ／ `+
+      `繳交：${(db.submissions||[]).length} 筆`
+    ));
+    if(obj.schoolName) summary.appendChild(el('div',{class:'small muted',style:{marginTop:'6px'}}, '原課程：' + esc(obj.schoolName)));
+    if(obj.ts) summary.appendChild(el('div',{class:'small muted'}, '備份時間：' + new Date(obj.ts).toLocaleString('zh-TW')));
+    m.root.appendChild(summary);
+
+    const note = el('div', { class:'card', style:{marginTop:'10px',borderColor:'var(--warn)',background:'var(--warn-soft)'} },
+      el('div',{class:'small'},'⚠ 確認後目前所有資料將被「整個覆蓋」'));
+    m.root.appendChild(note);
+
+    const acts = el('div', { class:'modal-actions' });
+    acts.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+    acts.appendChild(el('button', { class:'btn btn-danger', onclick:()=> {
+      App.db = Object.assign(defaultDB(), db);
+      logOp('import','匯入完整 JSON');
+      saveDB(); Sync.setNode('', App.db); bcNotify();
+      m.close();
+      toast('已匯入並覆蓋','success');
+      rerender();
+    }}, '確定覆蓋'));
+    m.root.appendChild(acts);
+  } catch(e){
+    toast('解析失敗：' + e.message, 'danger');
+  }
+}
+
+/* ---- v1 detection ---- */
+function detectV1(){
+  try {
+    const raw = localStorage.getItem('cmsDB');
+    if(!raw) return null;
+    const v1 = JSON.parse(raw);
+    if(!v1 || typeof v1 !== 'object') return null;
+    return v1;
+  } catch(e){ return null; }
+}
+async function importFromV1(){
+  const v1 = detectV1();
+  if(!v1){ toast('找不到 v1 資料','danger'); return; }
+  const cnt = (v1.students||[]).length + ' 學生／' + (v1.attendance||[]).length + ' 出席';
+  const ok = await confirmDlg('偵測到 v1 資料（' + cnt + '），匯入會「合併」到目前資料庫\n（學生 ID 衝突會以 v1 為準）', { title:'匯入 v1' });
+  if(!ok) return;
+  if(!App.db) App.db = defaultDB();
+  // shallow merge
+  ['students','attendance','assignments','submissions','leaves','announcements','evals','feeds','messages','groups'].forEach(k => {
+    if(Array.isArray(v1[k])) {
+      const existing = new Set((App.db[k]||[]).map(x => x.id).filter(Boolean));
+      (v1[k]||[]).forEach(item => {
+        if(item && item.id && !existing.has(item.id)) App.db[k].push(item);
+      });
+    }
+  });
+  logOp('import','從 v1 匯入');
+  saveDB(); Sync.setNode('', App.db); bcNotify();
+  toast('已從 v1 匯入','success');
+  rerender();
+}
+
+/* ---- per-table CSV ---- */
+function exportStudentsCSV(){
+  const rows = [['姓名','學號/座號','班級','Email','電話','備註','加入時間']];
+  App.db.students.forEach(s => {
+    rows.push([s.name, s.seat||'', s.cls||'', s.email||'', s.phone||'', s.note||'', s.ts?new Date(s.ts).toLocaleString('zh-TW'):'']);
+  });
+  downloadCSV(rows, 'students_' + td() + '.csv');
+  logOp('export','匯出學生 CSV');
+  saveDB();
+}
+function exportAttendanceCSV(){
+  const rows = [['日期','時間','姓名','班級','狀態','方式']];
+  App.db.attendance.forEach(a => {
+    rows.push([a.date||'', a.time||'', a.studentName||'', a.cls||'', a.status||'', a.method||'']);
+  });
+  downloadCSV(rows, 'attendance_' + td() + '.csv');
+  logOp('export','匯出出席 CSV');
+  saveDB();
+}
+function exportSubmissionsCSV(){
+  const rows = [['作業','學生','繳交時間','分數','滿分','評語']];
+  App.db.submissions.forEach(s => {
+    const a = App.db.assignments.find(x => x.id === s.assignmentId);
+    rows.push([
+      a?a.title:'(已刪除)',
+      s.studentName||'',
+      s.ts?new Date(s.ts).toLocaleString('zh-TW'):'',
+      typeof s.score==='number'?s.score:'',
+      a?(a.points||100):'',
+      s.comment||''
+    ]);
+  });
+  downloadCSV(rows, 'submissions_' + td() + '.csv');
+  logOp('export','匯出繳交 CSV');
+  saveDB();
+}
+
+/* ---- semester PDF (全班 / 個別) ---- */
+function exportSemesterPDFAll(){
+  const w = (App.db.settings.gradeWeights) || defaultWeights();
+  let html = '<h1>' + esc(App.db.settings.schoolName||'班級') + ' — 學期成績報告</h1>';
+  html += '<div style="font-size:12px;color:#666">產生時間：' + new Date().toLocaleString('zh-TW') + '</div>';
+  html += '<table><thead><tr><th>排名</th><th>姓名</th><th>班級</th><th>出席</th><th>作業</th><th>期中</th><th>期末</th><th>總分</th></tr></thead><tbody>';
+  const rows = App.db.students.map(s => ({ s, g: calcGrade(s.id) })).sort((a,b)=> b.g.total - a.g.total);
+  rows.forEach((r,i) => {
+    html += '<tr><td>' + (i+1) + '</td><td>' + esc(r.s.name) + '</td><td>' + esc(r.s.cls||'') + '</td>'+
+      '<td>' + r.g.att + '</td><td>' + r.g.asgn + '</td><td>' + r.g.mid + '</td><td>' + r.g.final + '</td>'+
+      '<td><b>' + r.g.total + '</b></td></tr>';
+  });
+  html += '</tbody></table>';
+  html += '<div style="font-size:11px;color:#888;margin-top:12px">權重：出席 '+w.att+'% / 作業 '+w.asgn+'% / 期中 '+w.mid+'% / 期末 '+w.final+'%</div>';
+  downloadPDF('學期成績報告', html);
+  logOp('export','匯出學期 PDF（全班）');
+  saveDB();
+}
+function exportSemesterPDFStudent(s){
+  const g = calcGrade(s.id);
+  let html = '<h1>' + esc(s.name) + ' — 個人成績單</h1>';
+  html += '<div style="font-size:12px;color:#666">' + esc(App.db.settings.schoolName||'') + ' · ' + esc(s.cls||'') + '</div>';
+  html += '<h2>📊 學期表現</h2>';
+  html += '<table>';
+  html += '<tr><th>項目</th><th>分數</th></tr>';
+  html += '<tr><td>出席率</td><td>' + attendanceRate(s.id) + '%</td></tr>';
+  html += '<tr><td>作業繳交率</td><td>' + submissionRate(s.id) + '%</td></tr>';
+  html += '<tr><td>作業平均</td><td>' + submissionAvg(s.id) + '</td></tr>';
+  html += '<tr><td>出席分</td><td>' + g.att + '</td></tr>';
+  html += '<tr><td>作業分</td><td>' + g.asgn + '</td></tr>';
+  html += '<tr><td>期中</td><td>' + g.mid + '</td></tr>';
+  html += '<tr><td>期末</td><td>' + g.final + '</td></tr>';
+  html += '<tr style="background:#fef3c7"><th>總分</th><th>' + g.total + '</th></tr>';
+  html += '</table>';
+  // submissions list
+  const subs = App.db.submissions.filter(x => x.studentId === s.id);
+  if(subs.length){
+    html += '<h2>📋 作業繳交</h2><table><thead><tr><th>作業</th><th>繳交</th><th>分數</th></tr></thead><tbody>';
+    subs.forEach(sub => {
+      const a = App.db.assignments.find(x => x.id === sub.assignmentId);
+      html += '<tr><td>' + esc(a?a.title:'-') + '</td>'+
+        '<td>' + (sub.ts? new Date(sub.ts).toLocaleString('zh-TW'):'') + '</td>'+
+        '<td>' + (typeof sub.score==='number'?sub.score:'未批改') + '</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+  downloadPDF(s.name + ' 個人成績單', html);
+  logOp('export','匯出個人 PDF：' + s.name);
+  saveDB();
+}
+
+/* ---- Storage usage ---- */
+function storageUsage(){
+  let total = 0;
+  let cms = 0;
+  try {
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      const v = localStorage.getItem(k) || '';
+      const size = k.length + v.length;
+      total += size;
+      if(k.startsWith(LS_KEY)) cms += size;
+    }
+  } catch(e){}
+  // browsers usually allow 5MB
+  const LIMIT = 5 * 1024 * 1024;
+  return {
+    total, cms, limit:LIMIT,
+    pct: Math.min(100, Math.round(100 * total / LIMIT))
+  };
+}
+function fmtBytes(n){
+  if(n < 1024) return n + ' B';
+  if(n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(2) + ' MB';
+}
+
+/* ---- Drag & drop global ---- */
+function initDragDrop(){
+  if(App._dragInit) return; App._dragInit = true;
+  let counter = 0;
+  let overlay = null;
+  function showOverlay(){
+    if(overlay) return;
+    overlay = el('div', { class:'drop-zone' },
+      el('div', { class:'icn' }, '📁'),
+      el('div', null, '放開以匯入 JSON / CSV')
+    );
+    document.body.appendChild(overlay);
+  }
+  function hideOverlay(){
+    if(overlay){ overlay.remove(); overlay = null; }
+  }
+  window.addEventListener('dragenter', e => {
+    if(!App.cfg || !App.session) return;
+    if(!e.dataTransfer || !Array.from(e.dataTransfer.types||[]).includes('Files')) return;
+    counter++;
+    showOverlay();
+  });
+  window.addEventListener('dragover', e => {
+    if(!App.cfg || !App.session) return;
+    e.preventDefault();
+  });
+  window.addEventListener('dragleave', e => {
+    counter--;
+    if(counter <= 0){ counter = 0; hideOverlay(); }
+  });
+  window.addEventListener('drop', async e => {
+    if(!App.cfg || !App.session) return;
+    e.preventDefault();
+    counter = 0; hideOverlay();
+    if(App.session.role !== 'teacher') { toast('僅老師可匯入','warn'); return; }
+    const files = Array.from(e.dataTransfer.files || []);
+    if(!files.length) return;
+    const f = files[0];
+    if(f.name.toLowerCase().endsWith('.json')) await importFullJSON(f);
+    else if(f.name.toLowerCase().endsWith('.csv')) await importStudentsCSVFile(f);
+    else toast('僅支援 JSON / CSV','warn');
+  });
+}
+
+async function importStudentsCSVFile(file){
+  try {
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if(!lines.length) { toast('CSV 為空','warn'); return; }
+    // skip BOM and header heuristically
+    const startIdx = (lines[0].includes('姓名') || lines[0].toLowerCase().includes('name')) ? 1 : 0;
+    const added = [];
+    for(let i = startIdx; i < lines.length; i++){
+      const cols = lines[i].split(',').map(c => c.replace(/^"|"$/g,'').replace(/""/g,'"').trim());
+      const name = cols[0]; if(!name) continue;
+      added.push({
+        id:nid(), name,
+        seat:cols[1]||'', cls:cols[2]||'',
+        email:cols[3]||'', phone:cols[4]||'', note:cols[5]||'',
+        ts:Date.now()
+      });
+    }
+    if(!added.length){ toast('沒有有效資料','warn'); return; }
+    const ok = await confirmDlg('從 CSV 匯入 ' + added.length + ' 位學生？');
+    if(!ok) return;
+    App.db.students.push(...added);
+    logOp('import','CSV 匯入 ' + added.length + ' 學生');
+    saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+    toast('已匯入 ' + added.length + ' 學生','success');
+    rerender();
+  } catch(e){
+    toast('CSV 解析失敗：' + e.message, 'danger');
+  }
+}
+
+/* ---- Print helper ---- */
+function printCurrent(){
+  toast('準備列印…','', 800);
+  setTimeout(()=> window.print(), 200);
+}
+
+/* ---- Welcome journey ---- */
+function journeyState(){
+  try { return JSON.parse(localStorage.getItem(LS_JOURNEY_DONE) || '{}'); }
+  catch(e){ return {}; }
+}
+function journeyDone(key){
+  try {
+    const st = journeyState(); st[key] = Date.now();
+    localStorage.setItem(LS_JOURNEY_DONE, JSON.stringify(st));
+  } catch(e){}
+}
+function renderWelcomeJourney(){
+  if(!App.session || App.session.role !== 'teacher') return null;
+  const st = journeyState();
+  if(st.dismissed) return null;
+  const stuCount = App.db.students.length;
+  const hasAtt = App.db.attendance.length > 0;
+  const visitedOv = !!st.visitedOv;
+  if(stuCount > 0 && hasAtt && visitedOv) {
+    // mark dismissed automatically
+    journeyDone('dismissed');
+    return null;
+  }
+  const card = el('div', { class:'journey-card no-print' });
+  card.appendChild(el('button', { class:'close', title:'關閉', onclick: ()=> {
+    journeyDone('dismissed'); rerender();
+  }}, '✕'));
+  card.appendChild(el('h3', null, '🎉 歡迎使用！跟著以下步驟開始'));
+  const steps = el('div', { class:'journey-steps' });
+
+  const step1 = el('div', { class:'journey-step ' + (stuCount>0?'done':''), onclick: ()=> go('students') });
+  step1.appendChild(el('div', { class:'ix' }, stuCount>0?'✓':'1'));
+  step1.appendChild(el('div', { class:'ttl' }, '加入學生（也可批次匯入 CSV）'));
+  step1.appendChild(el('div', { class:'arr' }, '→'));
+  steps.appendChild(step1);
+
+  const step2 = el('div', { class:'journey-step ' + (hasAtt?'done':''), onclick: ()=> go('qr') });
+  step2.appendChild(el('div', { class:'ix' }, hasAtt?'✓':'2'));
+  step2.appendChild(el('div', { class:'ttl' }, '用 QR Code 投影點名'));
+  step2.appendChild(el('div', { class:'arr' }, '→'));
+  steps.appendChild(step2);
+
+  const step3 = el('div', { class:'journey-step ' + (visitedOv?'done':''), onclick: ()=> { journeyDone('visitedOv'); go('overview'); } });
+  step3.appendChild(el('div', { class:'ix' }, visitedOv?'✓':'3'));
+  step3.appendChild(el('div', { class:'ttl' }, '回到「總覽」看今日班況'));
+  step3.appendChild(el('div', { class:'arr' }, '→'));
+  steps.appendChild(step3);
+
+  card.appendChild(steps);
+  return card;
+}
+
+/* ---- Empty state helper ---- */
+function emptyState(opts){
+  const wrap = el('div', { class:'empty-state' });
+  wrap.appendChild(el('div', { class:'ico' }, opts.icon || '📭'));
+  wrap.appendChild(el('h3', null, opts.title || '尚無資料'));
+  if(opts.msg) wrap.appendChild(el('p', null, opts.msg));
+  if(opts.actions){
+    const cta = el('div', { class:'cta' });
+    opts.actions.forEach(([t, fn, cls]) => {
+      cta.appendChild(el('button', { class: cls||'btn btn-primary', onclick: fn }, t));
+    });
+    wrap.appendChild(cta);
+  }
+  return wrap;
+}
+
+/* ---- Keyboard shortcut sequence (g+s, g+a, g+o, c, l) ---- */
+function initKeyShortcuts(){
+  if(App._keyInit) return; App._keyInit = true;
+  let buf = ''; let bufT = 0;
+  document.addEventListener('keydown', e => {
+    if(!App.session || !App.cfg) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if(/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+    if(e.ctrlKey || e.metaKey || e.altKey) return;
+
+    // Esc closes modal
+    if(e.key === 'Escape'){
+      const host = $('#modal-host');
+      if(host && host.firstChild){ host.innerHTML = ''; return; }
+    }
+
+    const now = Date.now();
+    if(now - bufT > 1000) buf = '';
+    bufT = now;
+    const k = (e.key || '').toLowerCase();
+
+    if(App.session.role === 'teacher'){
+      if(buf === 'g'){
+        buf = '';
+        if(k === 's'){ e.preventDefault(); go('students'); return; }
+        if(k === 'a'){ e.preventDefault(); go('assignments'); return; }
+        if(k === 'o'){ e.preventDefault(); go('overview'); return; }
+        if(k === 'q'){ e.preventDefault(); go('qr'); return; }
+        if(k === 'g'){ e.preventDefault(); go('grades'); return; }
+        return;
+      }
+      if(k === 'g'){ buf = 'g'; return; }
+      if(k === '?'){ e.preventDefault(); openShortcutHelp(); return; }
+      if(k === '/'){ e.preventDefault(); openCmdPalette(); return; }
+    } else {
+      if(k === 'c'){ e.preventDefault(); go('checkin'); return; }
+      if(k === 'l'){ e.preventDefault(); go('myleave'); return; }
+      if(k === '?'){ e.preventDefault(); openShortcutHelp(); return; }
+    }
+  });
+}
+
+function openShortcutHelp(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '⌨ 鍵盤快捷鍵'));
+  const isT = App.session && App.session.role === 'teacher';
+  const items = isT ? [
+    ['G S','學生名單'], ['G A','作業管理'], ['G O','總覽'],
+    ['G Q','QR 簽到'], ['G G','學期成績'],
+    ['Ctrl/⌘ K','命令面板'], ['/','命令面板'],
+    ['Esc','關閉對話框']
+  ] : [
+    ['C','簽到'], ['L','請假'],
+    ['Ctrl/⌘ K','命令面板'], ['Esc','關閉對話框']
+  ];
+  const tbl = el('table', { style:{width:'100%',fontSize:'13px'} });
+  items.forEach(([k,t]) => {
+    tbl.appendChild(el('tr', null,
+      el('td', { style:{padding:'4px 8px'} }, el('span', { class:'tag', style:{fontFamily:'monospace'} }, k)),
+      el('td', { style:{padding:'4px 8px'} }, t)
+    ));
+  });
+  m.root.appendChild(tbl);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m.close() }, '了解'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 4 ▒▒  NEW ANALYTICS SUBPAGES
+   ──────────────────────────────────────────────────────────── */
+function rAnHeatmap(content){
+  // student × last-30-days
+  const dates = [];
+  for(let i = 29; i >= 0; i--){
+    const d = new Date(); d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().slice(0,10));
+  }
+  content.appendChild(el('h2', null, '🔥 30 日出席熱圖'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
+    '🟦 深=多次簽到 · 🟥 淡紅=缺席 · 🟪 紫=請假'));
+  if(App.db.students.length === 0){
+    content.appendChild(emptyState({ icon:'👥', title:'尚無學生', msg:'加入學生後即可看到熱圖',
+      actions:[['＋ 加入學生', ()=> go('students')]] }));
+    return;
+  }
+  // map student -> date -> attendance count + leave?
+  const attMap = {};
+  App.db.attendance.forEach(a => {
+    const k = a.studentId + '|' + a.date;
+    attMap[k] = (attMap[k] || 0) + 1;
+  });
+  const leaveSet = new Set(App.db.leaves
+    .filter(l => l.status === 'approved' || l.status === 'pending')
+    .map(l => l.studentId + '|' + l.date));
+
+  const wrap = el('div', { class:'card heatmap', style:{padding:'8px 12px'} });
+  // header row with month markers
+  const hdr = el('div', { class:'heatmap-row' });
+  hdr.appendChild(el('div', { class:'lbl' }, ''));
+  const cellsHdr = el('div', { class:'cells' });
+  dates.forEach((ds,i) => {
+    const lbl = (i === 0 || ds.slice(8) === '01') ? ds.slice(5,7) + '月' : '';
+    const c = el('div', { style:{width:'18px',fontSize:'9px',color:'var(--text-faint)',textAlign:'center'} }, lbl);
+    cellsHdr.appendChild(c);
+  });
+  hdr.appendChild(cellsHdr);
+  wrap.appendChild(hdr);
+
+  App.db.students.slice(0, 60).forEach(s => {
+    const row = el('div', { class:'heatmap-row' });
+    row.appendChild(el('div', { class:'lbl', title:s.name }, s.name));
+    const cells = el('div', { class:'cells' });
+    dates.forEach(ds => {
+      const k = s.id + '|' + ds;
+      const ct = attMap[k] || 0;
+      let cls = '';
+      if(leaveSet.has(k)) cls = 'leave';
+      else if(ct === 0) cls = 'abs';
+      else if(ct === 1) cls = 'l2';
+      else if(ct === 2) cls = 'l3';
+      else if(ct >= 3) cls = 'l4';
+      const c = el('div', { class:'hcell ' + cls, title: s.name + ' · ' + ds + ' · ' + (ct?(ct+'次'):(leaveSet.has(k)?'請假':'未簽')) });
+      cells.appendChild(c);
+    });
+    row.appendChild(cells);
+    wrap.appendChild(row);
+  });
+  content.appendChild(wrap);
+
+  // legend
+  const legend = el('div', { class:'flex small muted', style:{marginTop:'10px',gap:'12px',flexWrap:'wrap'} });
+  [
+    ['未簽','abs'],['請假','leave'],['1次','l2'],['2次','l3'],['3+','l4']
+  ].forEach(([t,cls]) => {
+    legend.appendChild(el('span', { class:'flex', style:{alignItems:'center',gap:'4px'} },
+      el('span', { class:'hcell '+cls, style:{display:'inline-block'} }),
+      el('span', null, t)
+    ));
+  });
+  content.appendChild(legend);
+}
+
+function rAnTimeline(content){
+  const filterId = App.subFilter || (App.db.students[0] && App.db.students[0].id);
+  content.appendChild(el('h2', null, '⏰ 學生活動時間軸'));
+  if(!App.db.students.length){
+    content.appendChild(emptyState({icon:'👥',title:'尚無學生'}));
+    return;
+  }
+  const sel = el('select', { class:'select', onchange: e => {
+    App.subFilter = e.target.value; rerender();
+  }});
+  App.db.students.forEach(s => {
+    const opt = el('option', { value:s.id }, s.name + (s.cls?'  '+s.cls:''));
+    if(s.id === filterId) opt.setAttribute('selected','');
+    sel.appendChild(opt);
+  });
+  content.appendChild(sel);
+
+  const s = findStudent(filterId);
+  if(!s){ content.appendChild(el('div', null, '請選擇學生')); return; }
+
+  // collect events
+  const events = [];
+  App.db.attendance.filter(a => a.studentId === s.id).forEach(a => {
+    events.push({ ts:a.ts||0, type:'簽到', icon:'✅', desc: a.date + ' ' + (a.time||''), tag:'success' });
+  });
+  App.db.leaves.filter(l => l.studentId === s.id).forEach(l => {
+    events.push({ ts:l.ts||0, type:'請假('+l.status+')', icon:'📆', desc: l.date + ' — ' + (l.reason||''), tag:'accent' });
+  });
+  App.db.submissions.filter(x => x.studentId === s.id).forEach(sub => {
+    const a = App.db.assignments.find(x => x.id === sub.assignmentId);
+    events.push({ ts:sub.ts||0, type:'繳交', icon:'📤', desc: (a?a.title:'-') + (typeof sub.score==='number'?(' · '+sub.score+'分'):''), tag:'primary' });
+  });
+  events.sort((a,b) => b.ts - a.ts);
+
+  if(!events.length){
+    content.appendChild(emptyState({icon:'⏰',title:'尚無活動紀錄'}));
+    return;
+  }
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  events.slice(0, 200).forEach(ev => {
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'avatar', style:{background:'var(--surface-2)'} }, ev.icon));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, ev.type + ' — ' + ev.desc),
+      el('div', { class:'sub' }, relTime(ev.ts) + ' · ' + fmtDateTime(ev.ts))
+    ));
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+}
+
+function rAnTrend(content){
+  // grade trend by latest 20 submissions (avg per day)
+  content.appendChild(el('h2', null, '📈 成績趨勢（最近 30 天）'));
+  const days = [];
+  for(let i = 29; i >= 0; i--){
+    const d = new Date(); d.setDate(d.getDate() - i);
+    days.push(d.toISOString().slice(0,10));
+  }
+  const data = days.map(ds => {
+    const subs = App.db.submissions.filter(s => typeof s.score === 'number' &&
+      s.ts && new Date(s.ts).toISOString().slice(0,10) === ds);
+    const avg = subs.length ? Math.round(subs.reduce((t,s)=> t+s.score, 0)/subs.length) : null;
+    return { label: ds.slice(5), value: avg||0, n: subs.length };
+  });
+  const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
+  card.appendChild(el('h3', null, '每日平均分數'));
+  card.innerHTML += lineChart(data, { max:100, min:0 });
+  content.appendChild(card);
+
+  // per-assignment avg
+  const card2 = el('div', { class:'chart-card', style:{marginTop:'12px'} });
+  card2.appendChild(el('h3', null, '各作業平均分'));
+  const asgData = App.db.assignments.slice(-10).map(a => {
+    const subs = App.db.submissions.filter(s => s.assignmentId === a.id && typeof s.score === 'number');
+    const avg = subs.length ? Math.round(subs.reduce((t,s)=> t+s.score,0)/subs.length) : 0;
+    return { label: (a.title||'').slice(0,8), value: avg };
+  });
+  if(asgData.length){
+    card2.innerHTML += barChart(asgData, { max:100 });
+  } else {
+    card2.appendChild(emptyState({icon:'📋',title:'尚無已批改作業'}));
+  }
+  content.appendChild(card2);
+}
+
+function rAnRank(content){
+  content.appendChild(el('h2', null, '🎯 排行榜'));
+  const subTabs = el('div', { class:'tabs-line' });
+  ['total','att','asgn'].forEach(k => {
+    const labels = { total:'總分', att:'出席率', asgn:'作業均分' };
+    subTabs.appendChild(el('button', { class: (App.rankBy||'total')===k?'active':'',
+      onclick:()=> { App.rankBy = k; rerender(); }}, labels[k]));
+  });
+  content.appendChild(subTabs);
+
+  const mode = App.rankBy || 'total';
+  let rows = App.db.students.map(s => {
+    if(mode === 'total') return { s, v: calcGrade(s.id).total };
+    if(mode === 'att') return { s, v: attendanceRate(s.id) };
+    if(mode === 'asgn') return { s, v: submissionAvg(s.id) };
+  }).sort((a,b) => b.v - a.v);
+  if(!rows.length){
+    content.appendChild(emptyState({icon:'🎯',title:'尚無學生'}));
+    return;
+  }
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  rows.forEach((r,i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i+1);
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'avatar', style: i<3?{background:'var(--warn-soft)',color:'var(--warn)'}:{} }, medal));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, r.s.name),
+      el('div', { class:'sub' }, r.s.cls || '—')
+    ));
+    row.appendChild(el('span', { class:'tag', style:{background:'var(--primary-soft)',color:'var(--primary)',fontWeight:'700'} },
+      String(r.v) + (mode==='total'?'':'%') ));
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+}
+
+function rAnRisk(content){
+  content.appendChild(el('h2', null, '⚠ 風險預警'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
+    '依出席率、繳交率、平均分自動計算風險指數'));
+
+  const rows = App.db.students.map(s => {
+    const att = attendanceRate(s.id);
+    const sub = submissionRate(s.id);
+    const avg = submissionAvg(s.id);
+    let risk = 0; const reasons = [];
+    if(att < 60){ risk += 40; reasons.push('出席率 '+att+'%'); }
+    else if(att < 75){ risk += 20; reasons.push('出席偏低 '+att+'%'); }
+    if(sub < 50){ risk += 30; reasons.push('繳交率 '+sub+'%'); }
+    else if(sub < 70){ risk += 15; reasons.push('繳交偏低 '+sub+'%'); }
+    if(avg && avg < 60){ risk += 30; reasons.push('作業平均 '+avg); }
+    else if(avg && avg < 70){ risk += 15; reasons.push('作業偏低 '+avg); }
+    return { s, risk, reasons };
+  }).filter(r => r.risk >= 15).sort((a,b) => b.risk - a.risk);
+
+  if(!rows.length){
+    content.appendChild(emptyState({icon:'✨',title:'目前沒有風險學生',msg:'所有學生表現都不錯！'}));
+    return;
+  }
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  rows.forEach(r => {
+    const level = r.risk >= 60 ? 'danger' : r.risk >= 35 ? 'warn' : 'primary';
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'avatar', style:{background:'var(--'+level+'-soft)',color:'var(--'+level+')'} }, '⚠'));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, r.s.name + '   '),
+      el('div', { class:'sub' }, r.reasons.join('，'))
+    ));
+    row.appendChild(el('span', { class:'tag t-'+level, style:{fontWeight:'700'} }, '風險 ' + r.risk));
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+
+  content.appendChild(el('div', { class:'muted small', style:{marginTop:'10px'} },
+    '※ 風險 ≥ 60 = 嚴重 / 35-59 = 注意 / 15-34 = 觀察'));
+}
+
+function rAnReliab(content){
+  content.appendChild(el('h2', null, '📊 互評可靠度'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
+    '比較學生互評的分數與最終批改分數的偏離（偏離越大，可靠度越低）'));
+
+  // evals: assume each is {id, raterId, targetId, score, ts, type?}
+  const evals = (App.db.evals || []).filter(e => typeof e.score === 'number' && e.raterId && e.targetId);
+  if(!evals.length){
+    content.appendChild(emptyState({icon:'⭐',title:'尚無互評資料'}));
+    return;
+  }
+  // group by rater, compute avg deviation vs final
+  const byRater = {};
+  evals.forEach(e => {
+    if(!byRater[e.raterId]) byRater[e.raterId] = [];
+    byRater[e.raterId].push(e);
+  });
+  const rows = Object.keys(byRater).map(rid => {
+    const list = byRater[rid];
+    let totalDev = 0, n = 0;
+    list.forEach(e => {
+      const final = calcGrade(e.targetId).total;
+      if(typeof e.score === 'number'){
+        totalDev += Math.abs(e.score - final);
+        n++;
+      }
+    });
+    const s = findStudent(rid);
+    const dev = n ? Math.round(totalDev / n) : 0;
+    const reliab = Math.max(0, 100 - dev * 2);
+    return { s, dev, n, reliab };
+  }).filter(r => r.s).sort((a,b) => b.reliab - a.reliab);
+
+  if(!rows.length){
+    content.appendChild(emptyState({icon:'⭐',title:'尚無有效互評'}));
+    return;
+  }
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  rows.forEach(r => {
+    const cls = r.reliab>=80?'success':r.reliab>=60?'primary':'warn';
+    const row = el('div', { class:'bar-row' },
+      el('div', { class:'lab' }, r.s.name + '  ('+r.n+'評)'),
+      el('div', { class:'bar-wrap' }, el('div', { class:'bar', style:{
+        width: r.reliab+'%',
+        background: 'var(--'+cls+')'
+      }})),
+      el('div', { class:'val' }, r.reliab + '%')
+    );
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+}
+
+function rAnPattern(content){
+  content.appendChild(el('h2', null, '📅 出席模式'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
+    '分析每週各天的出席率，找出常被「翹掉」的日子'));
+
+  // count signed students per day-of-week
+  const days = ['週日','週一','週二','週三','週四','週五','週六'];
+  const dayCount = [0,0,0,0,0,0,0];
+  const dayPresent = [0,0,0,0,0,0,0];
+  // unique date+dayOfWeek
+  const seenDates = new Set();
+  App.db.attendance.forEach(a => {
+    if(!a.date) return;
+    seenDates.add(a.date);
+  });
+  // also include any leave dates to count "had class"
+  App.db.leaves.forEach(l => { if(l.date) seenDates.add(l.date); });
+
+  const total = App.db.students.length || 1;
+  seenDates.forEach(ds => {
+    const d = new Date(ds + 'T00:00');
+    const dow = d.getDay();
+    dayCount[dow] += total; // possible slots
+    const signed = new Set(App.db.attendance.filter(a => a.date === ds).map(a => a.studentId));
+    dayPresent[dow] += signed.size;
+  });
+
+  const data = days.map((lbl,i) => ({
+    label: lbl,
+    value: dayCount[i] ? Math.round(100 * dayPresent[i] / dayCount[i]) : 0
+  }));
+  const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
+  card.appendChild(el('h3', null, '各週天出席率'));
+  card.innerHTML += barChart(data, { max:100,
+    colors: data.map(d => d.value < 60 ? 'var(--danger)' : d.value < 80 ? 'var(--warn)' : 'var(--success)') });
+  content.appendChild(card);
+
+  // most-absent date list
+  const dateAbs = {};
+  Array.from(seenDates).forEach(ds => {
+    const signed = new Set(App.db.attendance.filter(a => a.date === ds).map(a => a.studentId));
+    const onLeave = new Set(App.db.leaves.filter(l => l.date === ds && (l.status==='approved'||l.status==='pending')).map(l => l.studentId));
+    const abs = total - signed.size - onLeave.size;
+    dateAbs[ds] = abs;
+  });
+  const topAbs = Object.entries(dateAbs).filter(([d,n]) => n > 0).sort((a,b) => b[1] - a[1]).slice(0, 10);
+  if(topAbs.length){
+    const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
+    card2.appendChild(el('h3', null, '🔻 缺席最多的日期'));
+    topAbs.forEach(([ds, n]) => {
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, ds),
+        el('div', { class:'sub' }, days[new Date(ds+'T00:00').getDay()])
+      ));
+      row.appendChild(el('span', { class:'tag t-danger' }, n + ' 人缺席'));
+      card2.appendChild(row);
+    });
+    content.appendChild(card2);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 4 ▒▒  NEW VIEWS — Storage / Logs / Backup / DataIO
+   ──────────────────────────────────────────────────────────── */
+function rStorage(content){
+  content.appendChild(el('h1', null, '💾 儲存空間'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '本機 localStorage 使用狀況'));
+
+  const u = storageUsage();
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '使用率：' + u.pct + '%'));
+  const bar = el('div', { class:'usage-bar ' + (u.pct >= 80 ? 'danger' : u.pct >= 60 ? 'warn' : '') });
+  bar.appendChild(el('div', { class:'fill', style:{ width: u.pct + '%' } }));
+  card.appendChild(bar);
+  card.appendChild(el('div', { class:'small muted', style:{marginTop:'8px'} },
+    '本系統占用：' + fmtBytes(u.cms) + '  ／  瀏覽器全部：' + fmtBytes(u.total) + '  ／  上限 ~ ' + fmtBytes(u.limit)));
+  if(u.pct >= 80){
+    card.appendChild(el('div', { class:'card', style:{marginTop:'10px',borderColor:'var(--danger)',background:'var(--danger-soft)'} },
+      el('div', { style:{fontWeight:'700',color:'var(--danger)'} }, '⚠ 容量警告'),
+      el('div', { class:'small', style:{marginTop:'4px'} }, '建議匯出備份後清理舊資料')
+    ));
+  }
+  content.appendChild(card);
+
+  // breakdown by area
+  const card2 = el('div', { class:'card', style:{marginTop:'10px'} });
+  card2.appendChild(el('h3', null, '📊 各區佔用'));
+  if(App.db){
+    const sizes = {
+      students: JSON.stringify(App.db.students||[]).length,
+      attendance: JSON.stringify(App.db.attendance||[]).length,
+      assignments: JSON.stringify(App.db.assignments||[]).length,
+      submissions: JSON.stringify(App.db.submissions||[]).length,
+      messages: JSON.stringify(App.db.messages||[]).length,
+      announcements: JSON.stringify(App.db.announcements||[]).length,
+      evals: JSON.stringify(App.db.evals||[]).length,
+      logs: JSON.stringify(App.db._logs||[]).length,
+    };
+    const total = Object.values(sizes).reduce((a,b)=> a+b, 0) || 1;
+    Object.entries(sizes).sort((a,b)=> b[1]-a[1]).forEach(([k,v]) => {
+      const pct = Math.round(100 * v / total);
+      const row = el('div', { class:'bar-row' },
+        el('div', { class:'lab' }, k),
+        el('div', { class:'bar-wrap' }, el('div', { class:'bar', style:{width:pct+'%'} })),
+        el('div', { class:'val' }, fmtBytes(v))
+      );
+      card2.appendChild(row);
+    });
+  }
+  content.appendChild(card2);
+
+  // cleanup actions
+  const card3 = el('div', { class:'card', style:{marginTop:'10px'} });
+  card3.appendChild(el('h3', null, '🧹 清理工具'));
+  const actions = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  actions.appendChild(el('button', { class:'btn', onclick: async ()=> {
+    const ok = await confirmDlg('清空訊息（保留最近 50 筆）？');
+    if(!ok) return;
+    App.db.messages = (App.db.messages||[]).slice(-50);
+    logOp('cleanup','清理舊訊息'); saveDB(); rerender(); toast('已清理','success');
+  }}, '🗑 清舊訊息'));
+  actions.appendChild(el('button', { class:'btn', onclick: async ()=> {
+    const ok = await confirmDlg('清除操作紀錄？');
+    if(!ok) return;
+    App.db._logs = []; saveDB(); rerender(); toast('已清除','success');
+  }}, '🗑 清操作紀錄'));
+  actions.appendChild(el('button', { class:'btn', onclick: async ()=> {
+    const ok = await confirmDlg('刪除所有自動備份？');
+    if(!ok) return;
+    backupList().forEach(b => { try{ localStorage.removeItem(b.key); }catch(e){} });
+    rerender(); toast('已刪除','success');
+  }}, '🗑 清備份'));
+  card3.appendChild(actions);
+  content.appendChild(card3);
+}
+
+function rLogs(content){
+  content.appendChild(el('h1', null, '📜 操作紀錄'));
+
+  const logs = (App.db._logs || []).slice().reverse();
+  const types = Array.from(new Set(logs.map(l => l.type))).sort();
+
+  // filter
+  if(!App._logFilter) App._logFilter = { type:'', q:'' };
+  const ctrl = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginBottom:'10px'} });
+  const sel = el('select', { class:'select', style:{flex:'0 0 140px'}, onchange: e => { App._logFilter.type = e.target.value; rerender(); }});
+  sel.appendChild(el('option', { value:'' }, '所有類型'));
+  types.forEach(t => {
+    const o = el('option', { value:t }, t);
+    if(App._logFilter.type === t) o.setAttribute('selected','');
+    sel.appendChild(o);
+  });
+  ctrl.appendChild(sel);
+  const iQ = el('input', { class:'input', style:{flex:'1',minWidth:'120px'}, placeholder:'搜尋…', value: App._logFilter.q });
+  iQ.addEventListener('input', e => { App._logFilter.q = e.target.value; setTimeout(()=> { rerender(); setTimeout(()=> { const ii = $('input[placeholder="搜尋…"]'); if(ii){ ii.focus(); ii.setSelectionRange(ii.value.length, ii.value.length); } }, 30); }, 80); });
+  ctrl.appendChild(iQ);
+  ctrl.appendChild(el('button', { class:'btn no-print', onclick: ()=> {
+    const rows = [['時間','類型','人','內容']];
+    logs.forEach(l => rows.push([fmtDateTime(l.ts), l.type, l.who, l.msg]));
+    downloadCSV(rows, 'logs_' + td() + '.csv');
+  }}, '⬇ CSV'));
+  ctrl.appendChild(el('button', { class:'btn no-print', onclick: ()=> printCurrent() }, '🖨 列印'));
+  ctrl.appendChild(el('button', { class:'btn btn-danger no-print', onclick: async ()=> {
+    const ok = await confirmDlg('清空所有操作紀錄？', { danger:true });
+    if(!ok) return;
+    App.db._logs = []; saveDB(); rerender(); toast('已清空','success');
+  }}, '🗑 清空'));
+  content.appendChild(ctrl);
+
+  const filtered = logs.filter(l => {
+    if(App._logFilter.type && l.type !== App._logFilter.type) return false;
+    if(App._logFilter.q){
+      const q = App._logFilter.q.toLowerCase();
+      const hay = (l.type+' '+l.msg+' '+(l.who||'')).toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  if(!filtered.length){
+    content.appendChild(emptyState({icon:'📜',title:'尚無紀錄'}));
+    return;
+  }
+  const card = el('div', { class:'card', style:{padding:'4px'} });
+  filtered.slice(0, 500).forEach(l => {
+    const row = el('div', { class:'log-row' });
+    row.appendChild(el('div', { class:'tm' }, fmtDateTime(l.ts)));
+    row.appendChild(el('div', null, el('span', { class:'typ' }, l.type)));
+    row.appendChild(el('div', null,
+      el('div', null, esc(l.msg)),
+      el('div', { class:'tiny muted' }, l.who || '')
+    ));
+    card.appendChild(row);
+  });
+  content.appendChild(card);
+  if(filtered.length > 500){
+    content.appendChild(el('div', { class:'muted small', style:{marginTop:'8px'} }, '只顯示前 500 筆，共 ' + filtered.length + ' 筆'));
+  }
+}
+
+function rBackup(content){
+  content.appendChild(el('h1', null, '💼 備份與還原'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '系統每天首次開啟自動備份（最多保留 7 天）'));
+
+  // manual actions
+  const cardM = el('div', { class:'card' });
+  cardM.appendChild(el('h3', null, '🛡 手動操作'));
+  const a = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  a.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+    const k = backupCreate(td() + '_manual_' + Date.now().toString(36));
+    if(k){ logOp('backup','手動備份'); saveDB(); toast('已備份','success'); rerender(); }
+    else toast('備份失敗（空間可能不足）','danger');
+  }}, '💾 立即備份'));
+  a.appendChild(el('button', { class:'btn', onclick: exportFullJSON }, '⬇ 匯出完整 JSON'));
+  const fInp = el('input', { type:'file', accept:'.json', style:{display:'none'} });
+  fInp.addEventListener('change', async e => { const f = e.target.files[0]; if(f) await importFullJSON(f); });
+  cardM.appendChild(fInp);
+  a.appendChild(el('button', { class:'btn', onclick:()=> fInp.click() }, '⬆ 匯入 JSON'));
+  // v1 detect
+  if(detectV1()){
+    a.appendChild(el('button', { class:'btn', style:{background:'var(--accent-soft)',color:'var(--accent)'},
+      onclick: importFromV1 }, '🔄 從 v1 匯入'));
+  }
+  cardM.appendChild(a);
+  content.appendChild(cardM);
+
+  // per-table CSV
+  const cardC = el('div', { class:'card', style:{marginTop:'10px'} });
+  cardC.appendChild(el('h3', null, '📄 個別 CSV 匯出'));
+  const cc = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  cc.appendChild(el('button', { class:'btn btn-sm', onclick: exportStudentsCSV }, '學生'));
+  cc.appendChild(el('button', { class:'btn btn-sm', onclick: exportAttendanceCSV }, '出席'));
+  cc.appendChild(el('button', { class:'btn btn-sm', onclick: exportSubmissionsCSV }, '繳交'));
+  cc.appendChild(el('button', { class:'btn btn-sm', onclick: exportGradesCSV }, '成績'));
+  cardC.appendChild(cc);
+  cardC.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} },
+    el('button', { class:'btn btn-sm', onclick: exportSemesterPDFAll }, '📄 學期 PDF（全班）'),
+    el('button', { class:'btn btn-sm', onclick: ()=> {
+      if(!App.db.students.length) return toast('沒有學生','warn');
+      const m = modal('');
+      m.root.appendChild(el('h2', null, '選擇學生'));
+      const list = el('div', { class:'card', style:{maxHeight:'320px',overflow:'auto'} });
+      App.db.students.forEach(s => {
+        list.appendChild(el('div', { class:'list-row', onclick:()=> { m.close(); exportSemesterPDFStudent(s); } },
+          el('div', { class:'avatar' }, initials(s.name)),
+          el('div', { class:'info' }, el('div',{class:'name'},s.name), el('div',{class:'sub'},s.cls||''))
+        ));
+      });
+      m.root.appendChild(list);
+      const ax = el('div', { class:'modal-actions' });
+      ax.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+      m.root.appendChild(ax);
+    }}, '📄 個人 PDF…')
+  ));
+  content.appendChild(cardC);
+
+  // backup history
+  const bk = backupList();
+  const cardH = el('div', { class:'card', style:{marginTop:'10px'} });
+  cardH.appendChild(el('h3', null, '📚 自動備份歷史'));
+  if(!bk.length){
+    cardH.appendChild(el('div', { class:'small muted', style:{marginTop:'8px'} }, '尚無備份'));
+  } else {
+    bk.forEach(b => {
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'avatar', style:{background:'var(--primary-soft)',color:'var(--primary)'} }, '📦'));
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, b.date),
+        el('div', { class:'sub' }, fmtBytes(b.size))
+      ));
+      const acts = el('div', { class:'actions' });
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> {
+        // download
+        try {
+          const raw = localStorage.getItem(b.key);
+          const blob = new Blob([raw], { type:'application/json' });
+          const url = URL.createObjectURL(blob);
+          downloadDataUrl(url, 'backup_' + b.date + '.json');
+          setTimeout(()=> URL.revokeObjectURL(url), 1000);
+        } catch(e){ toast('下載失敗','danger'); }
+      }}, '⬇'));
+      acts.appendChild(el('button', { class:'btn btn-sm btn-primary', onclick:()=> backupRestore(b.key) }, '↺ 還原'));
+      acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        const ok = await confirmDlg('刪除這份備份？', { danger:true });
+        if(!ok) return;
+        try { localStorage.removeItem(b.key); } catch(e){}
+        rerender(); toast('已刪除','success');
+      }}, '🗑'));
+      row.appendChild(acts);
+      cardH.appendChild(row);
+    });
+  }
+  content.appendChild(cardH);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 4 ▒▒  ENHANCE STUDENT SUBMISSION (multi-file + edit)
+   ──────────────────────────────────────────────────────────── */
+function rSAsgnDetailV2(content, asg, me){
+  content.appendChild(el('button', { class:'btn-ghost small no-print', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',marginBottom:'8px'}, onclick:()=> go('sasgn') }, '← 返回'));
+  content.appendChild(el('h1', null, asg.title || ''));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '截止：' + (asg.dueAt ? new Date(asg.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無') + ' · 滿分 ' + (asg.points||100)
+  ));
+
+  const soon = isAssignmentDueSoon(asg);
+  const overdue = isAssignmentOverdue(asg);
+  if(soon){
+    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--danger)',background:'var(--danger-soft)',marginBottom:'10px'} },
+      el('div', { style:{color:'var(--danger)',fontWeight:'700'} }, '⚠ 24 小時內到期！請盡快繳交')
+    ));
+  }
+
+  if(asg.desc){
+    content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
+      el('h3', null, '📝 作業說明'),
+      el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'4px'} }, asg.desc)
+    ));
+  }
+  if(asg.attach){
+    content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
+      el('h3', null, '📎 老師附件'),
+      el('button', { class:'btn btn-sm', style:{marginTop:'4px'}, onclick:()=> downloadDataUrl(asg.attach.data, asg.attach.name) }, '⬇ ' + asg.attach.name)
+    ));
+  }
+
+  const existing = App.db.submissions.find(s => s.studentId === me.id && s.assignmentId === asg.id);
+
+  // already graded
+  if(existing && typeof existing.score === 'number'){
+    const card = el('div', { class:'card', style:{borderColor:'var(--success)',background:'var(--success-soft)'} });
+    card.appendChild(el('h3', null, '✅ 已批改'));
+    card.appendChild(el('div', { class:'huge', style:{color:'var(--success)',textAlign:'center',marginTop:'4px'} }, existing.score + ' / ' + (asg.points||100)));
+    if(existing.comment){
+      card.appendChild(el('div', { style:{marginTop:'8px',padding:'8px',background:'var(--surface)',borderRadius:'8px'} },
+        el('div', { class:'small', style:{fontWeight:'600',marginBottom:'4px'} }, '💬 老師評語'),
+        el('div', { class:'small', style:{whiteSpace:'pre-wrap'} }, existing.comment)
+      ));
+    }
+    // preview submitted
+    card.appendChild(submissionPreview(existing));
+    card.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'8px'}, onclick: ()=> markSubmissionRead(existing) }, '✓ 標記已讀'));
+    content.appendChild(card);
+    return;
+  }
+
+  // submitted, awaiting grade
+  if(existing){
+    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'10px'} },
+      el('h3', null, '⌛ 已繳交，等待批改'),
+      el('div', { class:'small muted', style:{marginTop:'4px'} }, '繳交於 ' + relTime(existing.ts||0))
+    ));
+    // preview + edit/withdraw before due
+    content.appendChild(submissionPreview(existing));
+    if(!overdue){
+      content.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'10px'} },
+        el('button', { class:'btn btn-sm', onclick:()=> { App._editSub = existing.id; rerender(); } }, '✏️ 修改繳交'),
+        el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+          const ok = await confirmDlg('要刪除這次繳交以重新提交嗎？', { danger:true });
+          if(!ok) return;
+          App.db.submissions = App.db.submissions.filter(x => x.id !== existing.id);
+          logOp('submit','刪除繳交：' + asg.title);
+          saveDB(); Sync.setMap('submissions', App.db.submissions); bcNotify();
+          toast('已刪除','warn'); rerender();
+        }}, '🗑 刪除繳交')
+      ));
+      if(App._editSub === existing.id){
+        content.appendChild(buildSubmissionForm(asg, me, existing));
+      }
+    }
+    return;
+  }
+
+  // new submission
+  content.appendChild(buildSubmissionForm(asg, me, null));
+}
+
+function submissionPreview(sub){
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  card.appendChild(el('h3', null, '📋 你的繳交內容'));
+  if(sub.text){
+    card.appendChild(el('div', { class:'small', style:{whiteSpace:'pre-wrap',padding:'8px',background:'var(--surface-2)',borderRadius:'8px',marginTop:'6px'} }, sub.text));
+  }
+  if(sub.link){
+    card.appendChild(el('div', { style:{marginTop:'6px'} },
+      el('a', { href:sub.link, target:'_blank', rel:'noopener' }, '🔗 ' + sub.link)));
+  }
+  const files = sub.attaches || (sub.attach ? [sub.attach] : []);
+  if(files.length){
+    const fwrap = el('div', { style:{marginTop:'6px',display:'flex',flexWrap:'wrap',gap:'4px'} });
+    files.forEach(f => {
+      const chip = el('span', { class:'mfile-chip', onclick:()=> downloadDataUrl(f.data, f.name) },
+        el('span', null, '📎'), el('span', { class:'nm' }, f.name));
+      fwrap.appendChild(chip);
+    });
+    card.appendChild(fwrap);
+  }
+  return card;
+}
+
+function buildSubmissionForm(asg, me, existing){
+  const overdue = isAssignmentOverdue(asg);
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  card.appendChild(el('h3', null, '📤 ' + (overdue?'(已逾期) ':'') + (existing?'修改繳交':'繳交作業')));
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '文字內容（可選）'));
+  const iT = el('textarea', { class:'textarea', placeholder:'寫下你的回答...' });
+  if(existing && existing.text) iT.value = existing.text;
+  fT.appendChild(iT); card.appendChild(fT);
+
+  const fL = el('div', { class:'field' });
+  fL.appendChild(el('label', { class:'label' }, '連結（可選）'));
+  const iL = el('input', { class:'input', placeholder:'https://...', value: (existing && existing.link) || '' });
+  fL.appendChild(iL); card.appendChild(fL);
+
+  // multi-file
+  const fF = el('div', { class:'field' });
+  fF.appendChild(el('label', { class:'label' }, '檔案（最多 5 個，每個 ≤ 1MB）'));
+  let attaches = existing ? (existing.attaches || (existing.attach?[existing.attach]:[])).slice() : [];
+  const upBox = el('div', { class:'upload-area' });
+  const fInp = el('input', { type:'file', multiple:'multiple', style:{display:'none'} });
+  function refresh(){
+    upBox.innerHTML = '';
+    if(attaches.length){
+      attaches.forEach((a,idx) => {
+        const chip = el('div', { class:'mfile-chip' },
+          el('span', null, '📎'),
+          el('span', { class:'nm', title:a.name }, a.name),
+          el('span', { class:'x', onclick: e => {
+            e.stopPropagation(); attaches.splice(idx,1); refresh();
+          }}, '✗')
+        );
+        upBox.appendChild(chip);
+      });
+      if(attaches.length < 5){
+        upBox.appendChild(el('div', { class:'small muted', style:{marginTop:'6px',cursor:'pointer'} }, '＋ 再加一個'));
+      }
+    } else {
+      upBox.appendChild(el('div', null, '點此選擇檔案'));
+      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 1MB · 最多 5 個'));
+    }
+  }
+  fInp.addEventListener('change', async e => {
+    const files = Array.from(e.target.files || []);
+    for(const file of files){
+      if(attaches.length >= 5){ toast('最多 5 個檔案','warn'); break; }
+      try {
+        const data = await readFileAsBase64(file);
+        if(data) attaches.push(data);
+      } catch(err){ toast(err.message,'danger'); }
+    }
+    fInp.value = '';
+    refresh();
+  });
+  upBox.addEventListener('click', ()=> fInp.click());
+  fF.appendChild(upBox); fF.appendChild(fInp); card.appendChild(fF);
+  refresh();
+
+  card.appendChild(el('div', { class:'flex', style:{marginTop:'10px',gap:'8px'} },
+    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick:()=> {
+      const txt = iT.value.trim();
+      const lnk = iL.value.trim();
+      if(!txt && !lnk && !attaches.length) return toast('至少填一項內容','danger');
+      if(existing){
+        // update
+        existing.text = txt; existing.link = lnk;
+        existing.attaches = attaches.slice();
+        existing.attach = attaches[0] || null;
+        existing.ts = Date.now();
+        logOp('submit','修改繳交：' + asg.title);
+        saveDB(); Sync.push('submissions', existing); bcNotify();
+        toast('已更新','success');
+        App._editSub = null;
+        rerender();
+        return;
+      }
+      const rec = {
+        id: nid(), assignmentId: asg.id,
+        studentId: me.id, studentName: me.name,
+        text: txt, link: lnk,
+        attaches: attaches.slice(),
+        attach: attaches[0] || null,
+        ts: Date.now()
+      };
+      App.db.submissions.push(rec);
+      logOp('submit','繳交：' + asg.title);
+      saveDB(); Sync.push('submissions', rec); bcNotify();
+      toast('已繳交！','success'); rerender();
+    }}, existing?'💾 儲存修改':'✅ 送出繳交'),
+    existing ? el('button', { class:'btn', onclick:()=> { App._editSub = null; rerender(); } }, '取消') : null
+  ));
+  return card;
+}
+
+/* ---- Student: teacher info badge ---- */
+function openTeacherInfo(){
+  const m = modal('');
+  const t = App.db.settings.teacherName || '老師';
+  const school = App.db.settings.schoolName || '課程';
+  m.root.appendChild(el('div', { style:{textAlign:'center'} },
+    el('div', { class:'avatar', style:{width:'72px',height:'72px',fontSize:'28px',margin:'8px auto',background:'var(--primary)',color:'#fff'} }, initials(t)),
+    el('h2', null, t),
+    el('div', { class:'muted' }, school)
+  ));
+  if(App.db.accounts && App.db.accounts.length){
+    const a = App.db.accounts[0];
+    m.root.appendChild(el('div', { class:'card', style:{marginTop:'10px'} },
+      el('div', { class:'small' }, '👤 @' + (a.username||'')),
+      el('div', { class:'small muted', style:{marginTop:'4px'} }, '上課時間 ' + (App.db.settings.startTime||'08:00'))
+    ));
+  }
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m.close() }, '了解'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
    PHASE 3 ▒▒  COMMAND PALETTE (Ctrl+K / Cmd+K)
    ──────────────────────────────────────────────────────────── */
 function cmdItems(){
@@ -5863,6 +7432,11 @@ function cmdItems(){
       { i:'📲', t:'通知設定', h:'notify', go: ()=> go('notify') },
       { i:'🤖', t:'AI 助教', h:'AI', go: ()=> openAIAssistant() },
       { i:'📧', t:'寄送 Email', h:'email', go: ()=> openEmailComposer() },
+      { i:'💼', t:'備份與還原', h:'backup', go: ()=> go('backup') },
+      { i:'📜', t:'操作紀錄', h:'logs', go: ()=> go('logs') },
+      { i:'💾', t:'儲存空間', h:'storage', go: ()=> go('storage') },
+      { i:'⌨', t:'鍵盤快捷鍵', h:'shortcuts', go: openShortcutHelp },
+      { i:'🖨', t:'列印目前頁', h:'print', go: printCurrent },
       { i:'⚙️', t:'設定', h:'settings', go: ()=> go('settings') },
       { i:'☁️', t:'Firebase 同步', h:'firebase', go: ()=> go('firebase') },
       { i:'🌓', t:'切換亮/暗主題', h:'theme', go: toggleTheme },
@@ -6075,6 +7649,9 @@ function rerender(){
       else if(v === 'gantt') rGantt(content);
       else if(v === 'workspace') rWorkspace(content);
       else if(v === 'notify') rNotify(content);
+      else if(v === 'backup') rBackup(content);
+      else if(v === 'logs') rLogs(content);
+      else if(v === 'storage') rStorage(content);
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -6135,6 +7712,11 @@ function boot(){
   // PWA + shortcuts
   initPWA();
   initCmdPaletteShortcut();
+  initKeyShortcuts();
+  initDragDrop();
+
+  // Phase 4: auto-backup once per day
+  try { backupAutoIfNeeded(); } catch(e){}
 
   rerender();
 
