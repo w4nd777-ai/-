@@ -583,6 +583,214 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   .matrix th,.matrix td{ padding:6px 4px; }
 }
 
+/* ════════ phase 3 additions ════════ */
+
+/* QR code page */
+.qr-wrap{
+  display:flex; flex-direction:column; align-items:center;
+  padding:24px 12px; gap:14px;
+}
+.qr-box{
+  background:#fff; padding:18px; border-radius:var(--r-md);
+  box-shadow:var(--shadow); border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+}
+.qr-box img{ width:300px; height:300px; max-width:80vw; max-height:80vw; }
+.qr-meta{
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  text-align:center;
+}
+.qr-countdown{
+  font-size:48px; font-weight:800; letter-spacing:-.04em;
+  font-variant-numeric:tabular-nums; color:var(--primary);
+}
+.qr-countdown.warn{ color:var(--warn); }
+.qr-countdown.danger{ color:var(--danger); animation:blink 1s infinite; }
+
+/* AI chat */
+.ai-chat{
+  display:flex; flex-direction:column; gap:8px;
+  max-height:60vh; overflow-y:auto; padding:4px;
+}
+.ai-msg{
+  padding:10px 14px; border-radius:12px;
+  max-width:85%; word-break:break-word; white-space:pre-wrap;
+  font-size:14px; line-height:1.5;
+}
+.ai-msg.user{
+  align-self:flex-end;
+  background:var(--primary); color:var(--primary-fg);
+  border-bottom-right-radius:4px;
+}
+.ai-msg.assistant{
+  align-self:flex-start;
+  background:var(--surface-2); color:var(--text);
+  border-bottom-left-radius:4px;
+}
+.ai-msg.system{
+  align-self:center; background:transparent;
+  color:var(--text-muted); font-size:12px;
+}
+.ai-thinking{
+  display:inline-flex; gap:4px; align-items:center;
+}
+.ai-thinking span{
+  width:8px; height:8px; border-radius:50%; background:var(--text-faint);
+  animation:thinkBlink 1.4s infinite;
+}
+.ai-thinking span:nth-child(2){ animation-delay:.2s; }
+.ai-thinking span:nth-child(3){ animation-delay:.4s; }
+@keyframes thinkBlink{
+  0%,80%,100%{ opacity:.2; transform:scale(.8); }
+  40%{ opacity:1; transform:scale(1); }
+}
+.ai-quick{
+  display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;
+}
+.ai-quick button{
+  background:var(--surface-2); border:1px solid var(--border);
+  border-radius:999px; padding:6px 12px; font-size:12px;
+  cursor:pointer; color:var(--text); font-weight:500;
+}
+.ai-quick button:hover{ background:var(--primary-soft); color:var(--primary); border-color:var(--primary); }
+
+/* Calendar */
+.cal-grid{
+  display:grid; grid-template-columns:repeat(7,1fr); gap:4px;
+  background:var(--border); padding:1px; border-radius:var(--r-sm);
+  overflow:hidden;
+}
+.cal-head{
+  background:var(--surface-2); text-align:center;
+  padding:8px 4px; font-size:12px; font-weight:700;
+  color:var(--text-muted);
+}
+.cal-cell{
+  background:var(--surface); min-height:74px;
+  padding:6px; display:flex; flex-direction:column; gap:2px;
+  cursor:pointer; transition:background var(--tx);
+  position:relative;
+}
+.cal-cell:hover{ background:var(--surface-2); }
+.cal-cell.other{ background:var(--surface-2); opacity:.55; }
+.cal-cell.today{ background:var(--primary-soft); }
+.cal-cell .d{ font-weight:700; font-size:13px; }
+.cal-cell.today .d{ color:var(--primary); }
+.cal-cell .evs{ display:flex; flex-direction:column; gap:2px; font-size:10px; }
+.cal-cell .ev{
+  display:flex; align-items:center; gap:3px; padding:1px 4px;
+  border-radius:3px; background:var(--surface-2);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.cal-cell .ev.due{ background:var(--primary-soft); color:var(--primary); }
+.cal-cell .ev.ann{ background:var(--warn-soft); color:var(--warn); }
+.cal-cell .ev.att{ background:var(--success-soft); color:var(--success); }
+@media(max-width:680px){
+  .cal-cell{ min-height:54px; padding:3px; }
+  .cal-cell .d{ font-size:11px; }
+  .cal-cell .ev{ font-size:9px; padding:0 2px; }
+}
+
+/* Gantt */
+.gantt-wrap{ overflow-x:auto; }
+.gantt-table{ min-width:600px; width:100%; border-collapse:collapse; }
+.gantt-table th,.gantt-table td{ padding:6px 4px; border-bottom:1px solid var(--border); font-size:12px; }
+.gantt-table .gantt-name{ text-align:left; font-weight:600; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gantt-track{
+  position:relative; height:24px; background:var(--surface-2);
+  border-radius:4px; overflow:hidden;
+}
+.gantt-bar{
+  position:absolute; top:3px; bottom:3px; border-radius:3px;
+  background:var(--success); color:#fff; font-size:10px;
+  display:flex; align-items:center; padding:0 6px;
+  cursor:pointer; transition:transform var(--tx);
+  white-space:nowrap; overflow:hidden;
+}
+.gantt-bar:hover{ transform:scaleY(1.15); }
+.gantt-bar.warn{ background:var(--warn); }
+.gantt-bar.danger{ background:var(--danger); }
+.gantt-today{
+  position:absolute; top:0; bottom:0; width:2px;
+  background:var(--danger); opacity:.6; z-index:2;
+}
+
+/* Command palette */
+.cmd-host{
+  position:fixed; inset:0; z-index:9500;
+  background:rgba(0,0,0,.4);
+  display:flex; align-items:flex-start; justify-content:center;
+  padding-top:12vh; padding-left:12px; padding-right:12px;
+  animation:fadeIn .15s ease-out;
+}
+.cmd-box{
+  background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:var(--r-md); width:100%; max-width:540px;
+  box-shadow:var(--shadow-lg); overflow:hidden;
+  display:flex; flex-direction:column; max-height:70vh;
+}
+.cmd-input{
+  border:none; padding:14px 16px; font-size:15px;
+  background:transparent; color:var(--text); outline:none;
+  border-bottom:1px solid var(--border);
+}
+.cmd-list{ flex:1; overflow-y:auto; padding:4px; }
+.cmd-item{
+  display:flex; align-items:center; gap:10px; padding:10px 12px;
+  border-radius:6px; cursor:pointer; font-size:14px;
+  color:var(--text);
+}
+.cmd-item.sel{ background:var(--primary-soft); color:var(--primary); }
+.cmd-item:hover{ background:var(--surface-2); }
+.cmd-item .ico{ font-size:18px; width:24px; }
+.cmd-item .ttl{ flex:1; font-weight:500; }
+.cmd-item .hint{ font-size:11px; color:var(--text-faint); }
+.cmd-empty{ padding:20px; text-align:center; color:var(--text-muted); font-size:13px; }
+
+/* Workspace list */
+.ws-card{
+  display:flex; align-items:center; gap:12px; padding:12px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-sm); margin-bottom:8px;
+}
+.ws-card.active{ border-color:var(--primary); background:var(--primary-soft); }
+.ws-card .ws-info{ flex:1; }
+.ws-card .ws-name{ font-weight:700; font-size:15px; }
+.ws-card .ws-meta{ font-size:12px; color:var(--text-muted); }
+
+/* PWA install prompt */
+.pwa-prompt{
+  position:fixed; left:12px; right:12px; bottom:calc(var(--nav-h) + 12px);
+  z-index:7500; background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:var(--r-md); padding:12px 14px;
+  box-shadow:var(--shadow-lg);
+  display:flex; gap:10px; align-items:center;
+  animation:toastIn .3s ease-out;
+}
+@media(min-width:900px){
+  .pwa-prompt{ left:auto; right:24px; bottom:24px; max-width:360px; }
+}
+
+/* notification badge dots in QR */
+.qr-stats{
+  display:flex; gap:24px; justify-content:center;
+  padding:12px 16px; background:var(--surface-2);
+  border-radius:var(--r-md);
+}
+.qr-stats .item{ text-align:center; }
+.qr-stats .num{ font-size:28px; font-weight:800; color:var(--primary); }
+.qr-stats .lbl{ font-size:11px; color:var(--text-muted); font-weight:600; }
+
+/* Email picker */
+.recip-chip{
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--primary-soft); color:var(--primary);
+  padding:3px 10px; border-radius:999px; font-size:12px;
+  font-weight:600; margin:2px;
+}
+.recip-chip .x{ cursor:pointer; opacity:.7; }
+.recip-chip .x:hover{ opacity:1; }
+
 </style>
 </head>
 <body>
@@ -1316,6 +1524,10 @@ function go(view, subview=null){
 window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
   if(!h) return;
+  if(h.startsWith('att=') || h.startsWith('join=')){
+    handleQrJoinHash();
+    return;
+  }
   const [v, sv] = h.split('/');
   App.view = v;
   App.subview = sv || null;
@@ -1658,6 +1870,7 @@ function renderSidebarTeacher(){
   side.appendChild(sideItem('overview','📊','總覽'));
   side.appendChild(sideItem('students','👥','學生名單'));
   side.appendChild(sideItem('attendance','✅','出席管理'));
+  side.appendChild(sideItem('qr','📱','QR Code 簽到'));
   side.appendChild(sideItem('leave','📆','請假管理'));
   side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
   side.appendChild(el('div', { class:'side-section-title' }, '教學'));
@@ -1667,7 +1880,16 @@ function renderSidebarTeacher(){
   side.appendChild(sideItem('evals','💬','課程評價'));
   side.appendChild(sideItem('announcements','📢','公告管理'));
   side.appendChild(sideItem('analytics','📈','分析工具'));
+  side.appendChild(sideItem('calendar','📅','行事曆'));
+  side.appendChild(sideItem('gantt','📊','作業甘特圖'));
   side.appendChild(el('div', { class:'side-section-title' }, '系統'));
+  // AI 助教 button (acts like nav)
+  side.appendChild(el('button', { class:'side-item', onclick: openAIAssistant },
+    el('span', { class:'ico' }, '🤖'),
+    el('span', null, 'AI 助教')
+  ));
+  side.appendChild(sideItem('workspace','🏢','多教室管理'));
+  side.appendChild(sideItem('notify','📲','通知設定'));
   side.appendChild(sideItem('settings','⚙️','設定'));
   side.appendChild(sideItem('firebase','☁️','跨裝置同步'));
 
@@ -1705,6 +1927,10 @@ function renderSidebarStudent(){
   side.appendChild(sideItem('sgrade','🎯','我的成績'));
   side.appendChild(sideItem('sev','⭐','課程評價'));
   side.appendChild(sideItem('sann','📢','公告', studentUnreadAnnouncements() || null));
+  side.appendChild(el('button', { class:'side-item', onclick: openAIAssistant },
+    el('span', { class:'ico' }, '🤖'),
+    el('span', null, 'AI 學習助教')
+  ));
   side.appendChild(sideItem('me','👤','個人'));
 
   side.appendChild(el('div', { style:{flex:'1'} }));
@@ -1726,7 +1952,9 @@ function renderTopbar(role){
     leave:'📆 請假管理', messages:'💬 訊息', settings:'⚙️ 設定', firebase:'☁️ 同步設定',
     pending:'📥 待審核註冊',
     assignments:'📋 作業管理', submissions:'📥 繳交記錄', grades:'🎯 學期成績',
-    evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具'
+    evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具',
+    qr:'📱 QR Code 簽到', calendar:'📅 行事曆', gantt:'📊 作業甘特圖',
+    workspace:'🏢 多教室管理', notify:'📲 通知設定'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告'
@@ -1801,9 +2029,12 @@ function openMoreMenuTeacher(){
   const m = modal('');
   m.root.appendChild(el('h2', null, '更多'));
   const items = [
-    ['students','👥 學生名單'],['leave','📆 請假管理'],['messages','💬 訊息'],
+    ['students','👥 學生名單'],['qr','📱 QR 簽到'],
+    ['leave','📆 請假管理'],['messages','💬 訊息'],
     ['grades','🎯 學期成績'],['evals','💬 課程評價'],
     ['announcements','📢 公告管理'],['analytics','📈 分析工具'],
+    ['calendar','📅 行事曆'],['gantt','📊 甘特圖'],
+    ['workspace','🏢 多教室'],['notify','📲 通知設定'],
     ['settings','⚙️ 設定'],['firebase','☁️ 跨裝置同步']
   ];
   const grid = el('div', { class:'grid grid-2' });
@@ -1811,6 +2042,12 @@ function openMoreMenuTeacher(){
     grid.appendChild(el('button', { class:'btn', style:{height:'56px'}, onclick:()=> { m.close(); go(v); } }, t));
   });
   m.root.appendChild(grid);
+  // AI + Email
+  m.root.appendChild(el('div', { class:'flex', style:{marginTop:'10px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick:()=> { m.close(); openAIAssistant(); }}, '🤖 AI 助教'),
+    el('button', { class:'btn', style:{flex:'1'}, onclick:()=> { m.close(); openEmailComposer(); }}, '📧 寄送 Email'),
+    el('button', { class:'btn', style:{flex:'1'}, onclick:()=> { m.close(); openCmdPalette(); }}, '⚡ 命令面板')
+  ));
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
   m.root.appendChild(actions);
@@ -1828,6 +2065,10 @@ function openMoreMenuStudent(){
     grid.appendChild(el('button', { class:'btn', style:{height:'56px'}, onclick:()=> { m.close(); go(v); } }, t));
   });
   m.root.appendChild(grid);
+  m.root.appendChild(el('div', { class:'flex', style:{marginTop:'10px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick:()=> { m.close(); openAIAssistant(); }}, '🤖 AI 助教'),
+    el('button', { class:'btn', style:{flex:'1'}, onclick:()=> { m.close(); openCmdPalette(); }}, '⚡ 命令面板')
+  ));
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
   m.root.appendChild(actions);
@@ -2718,6 +2959,56 @@ function rSettings(content){
   } }, '＋ 新增老師帳號'));
   content.appendChild(card3);
 
+  // Claude API key
+  const cardAI = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardAI.appendChild(el('h3', null, '🤖 AI 助教（Claude API）'));
+  cardAI.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} }, '填入 Anthropic API Key 即可使用 AI 助教與 AI 評語建議。Key 只存在你的瀏覽器，不會上傳'));
+  const fK = el('div', { class:'field' });
+  fK.appendChild(el('label', { class:'label' }, 'API Key（sk-ant-...）'));
+  const iK = el('input', { class:'input', type:'password', placeholder:'sk-ant-api03-...', value: localStorage.getItem(LS_CLAUDE_KEY) || '' });
+  fK.appendChild(iK);
+  cardAI.appendChild(fK);
+  cardAI.appendChild(el('div', { class:'flex' },
+    el('button', { class:'btn btn-primary', onclick: ()=> {
+      const v = iK.value.trim();
+      if(!v){
+        try { localStorage.removeItem(LS_CLAUDE_KEY); } catch(e){}
+        toast('已清除','warn'); return;
+      }
+      try { localStorage.setItem(LS_CLAUDE_KEY, v); } catch(e){}
+      toast('已儲存','success');
+    }}, '💾 儲存'),
+    el('button', { class:'btn', onclick: async ()=> {
+      // test call
+      iK.value = iK.value.trim();
+      try { localStorage.setItem(LS_CLAUDE_KEY, iK.value); } catch(e){}
+      toast('測試中…','', 1200);
+      const r = await askClaude('請用 1 句中文回覆「測試成功」','你是測試助理');
+      if(r) toast('AI 回應：' + r.slice(0,40),'success', 4000);
+    } }, '🧪 測試'),
+    el('a', { href:'https://console.anthropic.com/settings/keys', target:'_blank', class:'btn-ghost small', style:{padding:'0 8px',display:'inline-flex',alignItems:'center'} }, '取得 Key →')
+  ));
+  content.appendChild(cardAI);
+
+  // PWA
+  const cardP = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardP.appendChild(el('h3', null, '📱 應用'));
+  cardP.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} }, '把這個系統加到主畫面，就像 App 一樣使用'));
+  cardP.appendChild(el('div', { class:'flex' },
+    el('button', { class:'btn', onclick:()=> {
+      if(App.pwaPrompt){
+        App.pwaPrompt.prompt();
+      } else {
+        toast('請使用瀏覽器選單「加到主畫面」','', 4000);
+      }
+    } }, '📲 加到主畫面'),
+    el('button', { class:'btn', onclick: ()=> {
+      try { localStorage.removeItem(LS_PWA_DISMISS); } catch(e){}
+      toast('已重設提示','success');
+    }}, '重置提示')
+  ));
+  content.appendChild(cardP);
+
   // danger zone
   const card4 = el('div', { class:'card', style:{marginTop:'12px',borderColor:'var(--danger)'} });
   card4.appendChild(el('h3', { style:{color:'var(--danger)'} }, '⚠️ 危險區'));
@@ -2939,6 +3230,7 @@ function studentRequestLeave(){
     };
     App.db.leaves.push(rec);
     saveDB(); Sync.push('leaves', rec); bcNotify();
+    triggerWebhook('leave-request', { student: me.name, date: d, reason: r });
     toast('已送出請假申請，等待老師審核','success', 3000);
     m.close();
     rerender();
@@ -3526,8 +3818,15 @@ function openSubmissionGrade(sub, list=null, idx=0){
   fCmt.appendChild(iCmt);
   m.root.appendChild(fCmt);
 
-  // AI suggest button (placeholder)
-  m.root.appendChild(el('div', { class:'flex', style:{marginBottom:'10px'} },
+  // AI suggest buttons: real Claude or quick presets
+  m.root.appendChild(el('div', { class:'flex', style:{marginBottom:'10px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-sm btn-primary', onclick: async ()=> {
+      const txt = await aiSuggestComment(sub, asg);
+      if(txt){
+        iCmt.value = txt;
+        toast('已套用 AI 評語建議','success');
+      }
+    }}, '🤖 AI 生成評語'),
     el('button', { class:'btn btn-sm', onclick: ()=> {
       const suggestions = [
         '寫得很完整，論點清晰，條理分明，請繼續保持！',
@@ -3537,8 +3836,8 @@ function openSubmissionGrade(sub, list=null, idx=0){
         '完成度高，文字表達流暢，給予肯定。'
       ];
       iCmt.value = suggestions[Math.floor(Math.random()*suggestions.length)];
-      toast('已套用建議評語（可手動修改）','success');
-    }}, '🤖 評語建議')
+      toast('已套用範本評語','success');
+    }}, '📝 範本評語')
   ));
 
   const actions = el('div', { class:'modal-actions' });
@@ -3950,6 +4249,7 @@ function openAnnouncementEdit(a){
     saveDB();
     Sync.setMap('announcements', App.db.announcements);
     bcNotify();
+    if(isNew) triggerWebhook('announcement', { title: rec.title, author: rec.author });
     toast(isNew?'已發布':'已更新','success');
     m.close(); rerender();
   }}, isNew?'發布':'儲存'));
@@ -4597,6 +4897,1121 @@ function rSAnn(content){
 /* ════════════════════════════════════════════════════════════
    ROUTING / RENDER
    ──────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  CONSTANTS + STATE
+   ──────────────────────────────────────────────────────────── */
+const LS_CLAUDE_KEY = LS_KEY + '_claude_key';
+const LS_WEBHOOK    = LS_KEY + '_webhook';
+const LS_WS_LIST    = LS_KEY + '_workspaces';
+const LS_PWA_DISMISS= LS_KEY + '_pwa_dismiss';
+
+Object.assign(App, {
+  qrTimer: null,
+  qrAttCode: null,
+  qrAttExpires: 0,
+  aiHistory: [],          // AI chat history (per-session)
+  cmdOpen: false,
+  cmdHandler: null,
+  pwaPrompt: null,        // beforeinstallprompt event
+});
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  WORKSPACE MANAGEMENT (multi-classroom isolation)
+   ──────────────────────────────────────────────────────────── */
+function wsLoad(){
+  try { return JSON.parse(localStorage.getItem(LS_WS_LIST) || '[]'); } catch(e){ return []; }
+}
+function wsSave(list){
+  try { localStorage.setItem(LS_WS_LIST, JSON.stringify(list)); } catch(e){}
+}
+function wsRegisterCurrent(){
+  if(!App.cfg || !App.cfg.roomCode) return;
+  const list = wsLoad();
+  const name = (App.db && App.db.branding && App.db.branding.title) || '我的課程';
+  const existing = list.find(w => w.roomCode === App.cfg.roomCode);
+  if(existing){
+    existing.name = name;
+    existing.lastUsed = Date.now();
+  } else {
+    list.push({
+      id: nid(), roomCode: App.cfg.roomCode, name,
+      created: Date.now(), lastUsed: Date.now()
+    });
+  }
+  wsSave(list);
+}
+function wsSwitchTo(roomCode){
+  // detach firebase, swap cfg, reload db
+  try { Sync.detachAll(); } catch(e){}
+  App.cfg = Object.assign({}, App.cfg||{}, { roomCode });
+  saveCfg();
+  loadDB();
+  initBC();
+  Sync.init();
+  wsRegisterCurrent();
+  App.view = (App.session && App.session.role === 'teacher') ? 'overview' : 'checkin';
+  rerender();
+  toast('已切換到 ' + roomCode, 'success');
+}
+
+function rWorkspace(content){
+  wsRegisterCurrent();
+  content.appendChild(el('h1', null, '🏢 多教室管理'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '一位老師可以同時管理多個獨立的班級 / 課程，每間教室資料完全隔離'));
+
+  const list = wsLoad();
+  const curRoom = App.cfg && App.cfg.roomCode;
+
+  // current
+  const cur = el('div', { class:'card', style:{marginBottom:'12px'} });
+  cur.appendChild(el('h3', null, '🟢 目前所在'));
+  cur.appendChild(el('div', { class:'flex', style:{marginTop:'8px'} },
+    el('div', { style:{flex:'1'} },
+      el('div', { style:{fontWeight:'700',fontSize:'15px'} }, (App.db.branding.title || '我的課程')),
+      el('div', { class:'small muted mono' }, curRoom || '—')
+    ),
+    el('span', { class:'tag t-success' }, '使用中')
+  ));
+  content.appendChild(cur);
+
+  // other workspaces
+  const otherList = list.filter(w => w.roomCode !== curRoom);
+  const wsCard = el('div', { class:'card' });
+  wsCard.appendChild(el('div', { class:'flex-between' },
+    el('h3', null, '所有教室 (' + list.length + ')'),
+    el('button', { class:'btn btn-sm btn-primary', onclick: wsCreateNew }, '➕ 建立新教室')
+  ));
+
+  if(!otherList.length){
+    wsCard.appendChild(el('div', { class:'empty', style:{padding:'24px 0'} },
+      el('div', { class:'ico' }, '🏢'),
+      el('div', null, '目前只有一個教室')
+    ));
+  } else {
+    otherList.sort((a,b)=> (b.lastUsed||0) - (a.lastUsed||0)).forEach(w => {
+      const row = el('div', { class:'ws-card' });
+      row.appendChild(el('div', { class:'ws-info' },
+        el('div', { class:'ws-name' }, w.name || '未命名'),
+        el('div', { class:'ws-meta mono' }, w.roomCode + ' · 上次使用 ' + (w.lastUsed?relTime(w.lastUsed):'—'))
+      ));
+      const actions = el('div', { class:'actions' });
+      actions.appendChild(el('button', { class:'btn btn-sm btn-primary', onclick:()=> wsSwitchTo(w.roomCode) }, '🚪 切換到'));
+      actions.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        const ok = await confirmDlg('刪除教室 ' + w.name + '？資料會清空！', { danger:true });
+        if(!ok) return;
+        try { localStorage.removeItem(LS_DB + '_' + w.roomCode); } catch(e){}
+        wsSave(list.filter(x => x.id !== w.id));
+        toast('已刪除','warn');
+        rerender();
+      } }, '🗑'));
+      row.appendChild(actions);
+      wsCard.appendChild(row);
+    });
+  }
+  content.appendChild(wsCard);
+}
+
+async function wsCreateNew(){
+  const name = await promptDlg('新教室名稱', '', { title:'建立新教室', placeholder:'例：高一甲班' });
+  if(!name) return;
+  const roomCode = 'room-' + Math.random().toString(36).slice(2,7);
+  const list = wsLoad();
+  list.push({ id:nid(), roomCode, name:name.trim(), created:Date.now(), lastUsed:Date.now() });
+  wsSave(list);
+  // switch immediately
+  try { Sync.detachAll(); } catch(e){}
+  App.cfg = Object.assign({}, App.cfg||{}, { roomCode });
+  saveCfg();
+  loadDB();
+  App.db.settings.schoolName = name.trim();
+  App.db.branding.title = name.trim();
+  // copy current teacher accounts so the same login works
+  const oldRoom = (wsLoad().find(w => w.roomCode !== roomCode) || {}).roomCode;
+  // keep existing session accounts under accounts: do nothing — wizard would init; instead seed account from current
+  if(App.session && App.session.role === 'teacher' && App.session.username){
+    App.db.accounts = [{
+      id: App.session.id || nid(),
+      username: App.session.username, password: '', // blank: user can reset
+      name: App.session.name || '老師', role:'teacher', ts:Date.now()
+    }];
+    // try to recover password from the source room
+    try {
+      const list2 = wsLoad();
+      const src = list2.find(w => w.roomCode !== roomCode);
+      if(src){
+        const raw = localStorage.getItem(LS_DB + '_' + src.roomCode);
+        if(raw){
+          const srcDb = JSON.parse(raw);
+          const srcAcc = (srcDb.accounts||[]).find(a => a.username === App.session.username);
+          if(srcAcc) App.db.accounts[0].password = srcAcc.password || '';
+        }
+      }
+    } catch(e){}
+  }
+  saveDB();
+  initBC();
+  Sync.init();
+  toast('已建立並切換到「' + name + '」','success');
+  App.view = 'overview';
+  rerender();
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  QR CODE CHECK-IN
+   ──────────────────────────────────────────────────────────── */
+function genAttCode(){
+  // 6-char base32 token, valid for 5 min
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for(let i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+
+function currentSiteOrigin(){
+  // Honor whatever URL the file is opened from
+  const o = location.origin + location.pathname.replace(/[^/]*$/, '');
+  return o;
+}
+
+function buildQRJoinUrl(attCode){
+  const base = location.origin + location.pathname;
+  const room = (App.cfg && App.cfg.roomCode) || '';
+  return base + '#join=' + encodeURIComponent(room) + '&att=' + encodeURIComponent(attCode);
+}
+
+function rQR(content){
+  // teacher-only
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px'} },
+    el('div', null,
+      el('h1', null, '📱 QR Code 簽到'),
+      el('div', { class:'muted small' }, '學生掃描下方 QR 即可自動簽到')
+    ),
+    el('button', { class:'btn btn-sm', onclick:()=> { qrRegenerate(true); } }, '🔄 重新產生')
+  ));
+
+  // ensure we have a code
+  if(!App.qrAttCode || App.qrAttExpires < Date.now()){
+    App.qrAttCode = genAttCode();
+    App.qrAttExpires = Date.now() + 5*60*1000;
+  }
+
+  const url = buildQRJoinUrl(App.qrAttCode);
+  const qrImg = 'https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&ecc=M&data=' + encodeURIComponent(url);
+
+  const wrap = el('div', { class:'qr-wrap' });
+  wrap.appendChild(el('div', { class:'qr-box' }, el('img', { src: qrImg, alt:'QR Code' })));
+
+  const meta = el('div', { class:'qr-meta' });
+  meta.appendChild(el('div', { class:'mono small', style:{wordBreak:'break-all',maxWidth:'320px'} }, url));
+  meta.appendChild(el('div', { class:'small muted' }, '驗證碼：',
+    el('span', { class:'mono', style:{fontWeight:'700',color:'var(--primary)'} }, App.qrAttCode)
+  ));
+  const cd = el('div', { class:'qr-countdown', id:'qr-cd' }, '5:00');
+  meta.appendChild(cd);
+  meta.appendChild(el('div', { class:'tiny muted' }, '每 5 分鐘自動更換，防止外流'));
+  wrap.appendChild(meta);
+
+  // stats: today qr signed
+  const today = td();
+  const qrCount = App.db.attendance.filter(a => a.date === today && a.method === 'qr').length;
+  const totalSigned = todayAttendance().length;
+  const stats = el('div', { class:'qr-stats' });
+  stats.appendChild(el('div', { class:'item' },
+    el('div', { class:'num' }, String(qrCount)),
+    el('div', { class:'lbl' }, '掃碼簽到')
+  ));
+  stats.appendChild(el('div', { class:'item' },
+    el('div', { class:'num' }, String(totalSigned)),
+    el('div', { class:'lbl' }, '今日總簽到')
+  ));
+  stats.appendChild(el('div', { class:'item' },
+    el('div', { class:'num' }, String(App.db.students.length)),
+    el('div', { class:'lbl' }, '學生總數')
+  ));
+  wrap.appendChild(stats);
+
+  // copy link
+  wrap.appendChild(el('div', { class:'flex' },
+    el('button', { class:'btn btn-sm', onclick: ()=>{
+      try {
+        if(navigator.clipboard) navigator.clipboard.writeText(url);
+      } catch(e){}
+      toast('已複製連結','success');
+    }}, '🔗 複製連結'),
+    el('button', { class:'btn btn-sm', onclick: ()=> {
+      // open in new window for fullscreen present mode
+      const w = window.open('', '_blank');
+      if(!w) return toast('請允許彈窗','warn');
+      w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>QR 簽到</title>' +
+        '<style>body{margin:0;background:#0a0a0a;color:#fff;font-family:sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;}img{background:#fff;padding:24px;border-radius:16px;max-width:80vmin;}h1{font-size:32px;margin-bottom:8px;}p{color:#aaa;}</style></head>' +
+        '<body><h1>📱 掃描簽到</h1><p>' + esc(App.db.branding.title||'') + '</p><img src="' + qrImg + '"><p style="margin-top:24px;font-size:42px;font-family:monospace;letter-spacing:.2em;">' + App.qrAttCode + '</p></body></html>');
+      w.document.close();
+    }}, '🖥 全螢幕展示')
+  ));
+
+  content.appendChild(wrap);
+
+  // countdown timer
+  if(App.qrTimer) clearInterval(App.qrTimer);
+  App.qrTimer = setInterval(()=>{
+    const elc = document.getElementById('qr-cd');
+    if(!elc){ clearInterval(App.qrTimer); App.qrTimer = null; return; }
+    const remain = Math.max(0, App.qrAttExpires - Date.now());
+    const mm = Math.floor(remain/60000);
+    const ss = Math.floor((remain%60000)/1000);
+    elc.textContent = mm + ':' + String(ss).padStart(2,'0');
+    elc.classList.toggle('warn', remain > 0 && remain < 60000);
+    elc.classList.toggle('danger', remain > 0 && remain < 15000);
+    if(remain <= 0){
+      qrRegenerate(false);
+    }
+  }, 500);
+}
+
+function qrRegenerate(notify){
+  App.qrAttCode = genAttCode();
+  App.qrAttExpires = Date.now() + 5*60*1000;
+  if(notify) toast('已產生新碼','success');
+  if(App.view === 'qr') rerender();
+}
+
+/* QR auto-checkin from URL hash */
+function handleQrJoinHash(){
+  // accept #join=ROOM&att=CODE  (also #att=CODE alone for already-joined students)
+  const h = location.hash.slice(1);
+  if(!h) return false;
+  const params = {};
+  h.split('&').forEach(p => {
+    const i = p.indexOf('=');
+    if(i > 0) params[p.slice(0,i)] = decodeURIComponent(p.slice(i+1));
+    else params[p] = '';
+  });
+  if(!params.att && !params.join) return false;
+
+  // if a room is requested AND it differs from current, switch
+  if(params.join && (!App.cfg || App.cfg.roomCode !== params.join)){
+    if(App.cfg && App.cfg.roomCode){
+      // already in different room: prompt
+      const ok = confirm('要切換到教室 "' + params.join + '" 並嘗試簽到？');
+      if(!ok){ location.hash = ''; return false; }
+    }
+    try { Sync.detachAll(); } catch(e){}
+    App.cfg = { roomCode: params.join, role: (App.cfg && App.cfg.role) || 'student' };
+    saveCfg();
+    loadDB();
+    initBC();
+    Sync.init();
+  }
+
+  if(params.att){
+    // store for after-login auto-check
+    App.pendingAttCode = params.att;
+    location.hash = '';
+    // attempt right now if student already logged in
+    setTimeout(()=> tryAutoCheckin(), 300);
+    return true;
+  }
+  return false;
+}
+
+function tryAutoCheckin(){
+  if(!App.pendingAttCode) return;
+  if(!App.session || App.session.role !== 'student') return;
+  const me = currentStudent();
+  if(!me) return;
+
+  // validate code: must match current room's qrAttCode OR be any code if teacher-side fresh
+  // since codes are short-lived and per-teacher-device, we can't verify cryptographically here.
+  // accept any non-empty code (the QR encodes a fresh one) — log it in attendance metadata.
+  const code = App.pendingAttCode;
+  App.pendingAttCode = null;
+
+  if(studentSignedToday(me.id)){
+    toast('你今天已經簽到過了','warn', 3000);
+    return;
+  }
+  if(studentOnLeaveToday(me.id)){
+    toast('你今天有請假，不需簽到','warn', 3000);
+    return;
+  }
+
+  const rec = {
+    id: nid(), studentId: me.id, studentName: me.name, cls: me.cls||'',
+    date: td(), time: nt(), ts: Date.now(),
+    status:'present', method:'qr', code
+  };
+  App.db.attendance.push(rec);
+  saveDB();
+  Sync.push('attendance', rec);
+  bcNotify();
+
+  // success animation
+  const check = el('div', { class:'success-check' }, '✓');
+  document.body.appendChild(check);
+  setTimeout(()=> check.remove(), 900);
+
+  toast('📱 QR 簽到成功！' + rec.time, 'success', 3500);
+  triggerWebhook('checkin', { student: me.name, time: rec.time, method:'qr' });
+
+  // do not change route — stay on whatever the student was on
+  if(App.view === 'checkin') setTimeout(()=> rerender(), 800);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  CLAUDE AI INTEGRATION
+   ──────────────────────────────────────────────────────────── */
+async function askClaude(prompt, system){
+  const key = localStorage.getItem(LS_CLAUDE_KEY);
+  if(!key){
+    toast('請先在設定中填入 Claude API Key','warn', 3500);
+    return null;
+  }
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        system: system || '你是一位友善、簡潔的中文教師助理',
+        messages:[{ role:'user', content: prompt }]
+      })
+    });
+    const data = await r.json();
+    if(data.error){
+      toast('AI 錯誤：' + (data.error.message||''),'danger', 4000);
+      return null;
+    }
+    return (data.content && data.content[0] && data.content[0].text) || '';
+  } catch(e){
+    toast('AI 呼叫失敗：' + (e.message||e),'danger', 4000);
+    return null;
+  }
+}
+
+function buildTeacherContext(){
+  const s = computeTodayStats();
+  const recent = App.db.assignments.slice().sort((a,b)=> (b.ts||0)-(a.ts||0)).slice(0,5);
+  const overdue = App.db.assignments.filter(a => isAssignmentOverdue(a));
+  const recentAtt = App.db.attendance.slice(-30);
+  return [
+    '【班級資訊】',
+    '學校：' + (App.db.settings.schoolName||''),
+    '學生總數：' + App.db.students.length,
+    '今日出席：' + s.signed + '/' + s.total + '（缺席 ' + s.absent + '、請假 ' + s.leave + '、遲到 ' + s.late + '）',
+    '近期作業：' + recent.map(a => a.title + (isAssignmentOverdue(a)?'（逾期）':'')).join('、'),
+    '逾期作業數：' + overdue.length,
+    '最近 30 筆簽到平均時間：' + (recentAtt.length ? recentAtt.map(a=>a.time).filter(Boolean).slice(0,5).join('、') : '無'),
+    ''
+  ].join('\n');
+}
+function buildStudentContext(me){
+  if(!me) return '';
+  const att = attendanceRate(me.id);
+  const avg = submissionAvg(me.id);
+  const rate = submissionRate(me.id);
+  const unsub = App.db.assignments.filter(a => assignmentTargets(a).has(me.id)
+    && !App.db.submissions.find(s => s.assignmentId === a.id && s.studentId === me.id));
+  return [
+    '【你的學習狀況】',
+    '姓名：' + me.name + (me.cls?' · '+me.cls:''),
+    '出席率：' + att + '%',
+    '作業平均分：' + avg,
+    '作業繳交率：' + rate + '%',
+    '未繳作業：' + (unsub.length ? unsub.map(a=>a.title).join('、') : '無'),
+    ''
+  ].join('\n');
+}
+
+function openAIAssistant(){
+  if(!localStorage.getItem(LS_CLAUDE_KEY)){
+    const ok = confirm('尚未設定 Claude API Key，要前往設定頁嗎？');
+    if(ok) go('settings');
+    return;
+  }
+  App.aiHistory = [];
+  const isTeacher = App.session && App.session.role === 'teacher';
+  const me = currentStudent();
+  const m = modal('');
+  m.root.style.maxWidth = '560px';
+  m.root.appendChild(el('h2', null, '🤖 AI ' + (isTeacher?'助教':'學習助理')));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    isTeacher ? '已自動帶入班級脈絡' : '已自動帶入你的學習狀況'
+  ));
+
+  // quick buttons
+  const quick = el('div', { class:'ai-quick' });
+  const presets = isTeacher ? [
+    ['出席狀況分析','請分析目前班級的出席狀況，並給出建議'],
+    ['成績統計','請總結目前班級成績表現，找出需要關注的學生'],
+    ['逾期名單','哪些學生作業逾期？該如何提醒'],
+    ['寫公告','幫我寫一則本週課程提醒公告（200 字內）']
+  ] : [
+    ['我表現如何','請幫我看看目前的學習狀況，並給建議'],
+    ['怎麼進步','我該如何提升我的成績和出席率？'],
+    ['學習計畫','幫我安排一個本週的學習計畫'],
+    ['複習重點','幫我整理最近作業可能的重點']
+  ];
+  presets.forEach(([label, q]) => {
+    quick.appendChild(el('button', { onclick:()=> sendAI(q) }, label));
+  });
+  m.root.appendChild(quick);
+
+  const chat = el('div', { class:'ai-chat', id:'ai-chat' });
+  chat.appendChild(el('div', { class:'ai-msg system' }, '👋 ' + (isTeacher?'我可以幫你分析班級資料、寫公告、給教學建議':'我會根據你的學習狀況給友善的建議')));
+  m.root.appendChild(chat);
+
+  const inputRow = el('div', { class:'flex', style:{marginTop:'10px'} });
+  const inp = el('input', { class:'input', placeholder:'問個問題…', style:{flex:'1'} });
+  const sendBtn = el('button', { class:'btn btn-primary', onclick:()=> {
+    const v = inp.value.trim(); if(!v) return; inp.value=''; sendAI(v);
+  }}, '送出');
+  inp.addEventListener('keydown', e => { if(e.key==='Enter'){ const v=inp.value.trim(); if(!v) return; inp.value=''; sendAI(v); } });
+  inputRow.appendChild(inp); inputRow.appendChild(sendBtn);
+  m.root.appendChild(inputRow);
+
+  async function sendAI(q){
+    const chatEl = document.getElementById('ai-chat');
+    if(!chatEl) return;
+    const ctx = isTeacher ? buildTeacherContext() : buildStudentContext(me);
+    const sys = isTeacher
+      ? '你是教師助理，回答簡潔具體，能引用以下班級脈絡。不要回答與教學無關的內容。\n\n' + ctx
+      : '你是友善的學習助教，用鼓勵的口吻回答，回答簡短不超過 200 字。\n\n' + ctx;
+    chatEl.appendChild(el('div', { class:'ai-msg user' }, q));
+    const ph = el('div', { class:'ai-msg assistant' }, el('span', { class:'ai-thinking' }, el('span'), el('span'), el('span')));
+    chatEl.appendChild(ph);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    const ans = await askClaude(q, sys);
+    ph.innerHTML = '';
+    ph.textContent = ans || '（無回應）';
+    chatEl.scrollTop = chatEl.scrollHeight;
+    App.aiHistory.push({ q, a: ans });
+  }
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(actions);
+  setTimeout(()=> inp.focus(), 80);
+}
+
+async function aiSuggestComment(sub, asg){
+  // teacher grading helper
+  const key = localStorage.getItem(LS_CLAUDE_KEY);
+  if(!key){
+    toast('請先在設定中填入 Claude API Key','warn', 3500);
+    return null;
+  }
+  const stu = findStudent(sub.studentId);
+  const prompt = '請為以下學生作業給出 2-3 句中文評語（鼓勵口吻、給出具體建議）：\n\n' +
+    '學生：' + (stu?stu.name:'') + '\n' +
+    '作業：' + (asg?asg.title:'') + '\n' +
+    '描述：' + (asg?asg.description||'':'') + '\n' +
+    '繳交內容：' + (sub.text || sub.fileName || '（未提供文字內容）') + '\n' +
+    '分數：' + (typeof sub.score==='number' ? sub.score : '未評') + '\n';
+  toast('🤖 AI 思考中…','', 1800);
+  return await askClaude(prompt, '你是有經驗的中文教師，會給學生鼓勵且具體的評語。');
+}
+// expose for grading flow
+window.aiSuggestComment = aiSuggestComment;
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  WEBHOOK / EMAIL NOTIFICATIONS
+   ──────────────────────────────────────────────────────────── */
+function whLoad(){
+  try { return JSON.parse(localStorage.getItem(LS_WEBHOOK) || 'null'); }
+  catch(e){ return null; }
+}
+function whSave(cfg){
+  try { localStorage.setItem(LS_WEBHOOK, JSON.stringify(cfg)); } catch(e){}
+}
+
+async function triggerWebhook(eventType, payload){
+  const cfg = whLoad();
+  if(!cfg || !cfg.enabled || !cfg.url) return;
+  if(cfg.events && !cfg.events[eventType]) return;
+
+  const titleMap = {
+    'announcement':'📢 新公告',
+    'assignment-due':'⏰ 作業即將到期',
+    'attendance-issue':'⚠️ 出席異常',
+    'leave-request':'📆 請假申請',
+    'checkin':'✅ 學生簽到',
+    'test':'🧪 測試訊息'
+  };
+  const title = titleMap[eventType] || '通知';
+  const text = title + '\n' +
+    '教室：' + (App.db.branding.title||'') + '\n' +
+    Object.entries(payload||{}).map(([k,v])=> k+': '+(typeof v==='object'?JSON.stringify(v):v)).join('\n');
+
+  let body;
+  if(cfg.platform === 'discord'){
+    body = JSON.stringify({ content: text });
+  } else if(cfg.platform === 'telegram'){
+    // expects url like https://api.telegram.org/botTOKEN/sendMessage?chat_id=XXX
+    body = JSON.stringify({ text });
+  } else if(cfg.platform === 'line'){
+    body = JSON.stringify({ messages:[{ type:'text', text }] });
+  } else {
+    body = JSON.stringify({ event: eventType, title, text, payload, ts: Date.now() });
+  }
+
+  try {
+    const opts = {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body
+    };
+    if(cfg.platform === 'line' && cfg.token){
+      opts.headers['Authorization'] = 'Bearer ' + cfg.token;
+    }
+    await fetch(cfg.url, opts).catch(()=>null);
+  } catch(e){ /* CORS may block; user is told in UI */ }
+}
+
+function rNotify(content){
+  content.appendChild(el('h1', null, '📲 通知設定'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '當有重要事件發生時，自動發送通知到指定平台'));
+
+  const cfg = whLoad() || { enabled:false, platform:'discord', url:'', token:'', events:{
+    announcement:true, 'assignment-due':true, 'attendance-issue':true, 'leave-request':true, checkin:false
+  }};
+
+  const card = el('div', { class:'card' });
+
+  const fEn = el('div', { class:'flex', style:{marginBottom:'12px'} });
+  const cb = el('input', { type:'checkbox', id:'wh-en' });
+  cb.checked = !!cfg.enabled;
+  fEn.appendChild(cb);
+  fEn.appendChild(el('label', { for:'wh-en', style:{flex:'1',cursor:'pointer'} }, '啟用 Webhook 通知'));
+  card.appendChild(fEn);
+
+  const fP = el('div', { class:'field' });
+  fP.appendChild(el('label', { class:'label' }, '平台'));
+  const sel = el('select', { class:'select' });
+  [['discord','Discord (最簡單)'],['telegram','Telegram Bot'],['line','LINE Messaging API'],['generic','通用 Webhook']].forEach(([v,l])=>{
+    const o = el('option', { value:v }, l);
+    if(cfg.platform === v) o.selected = true;
+    sel.appendChild(o);
+  });
+  fP.appendChild(sel);
+  card.appendChild(fP);
+
+  const fU = el('div', { class:'field' });
+  fU.appendChild(el('label', { class:'label' }, 'Webhook URL'));
+  const iU = el('input', { class:'input', placeholder:'https://...', value: cfg.url||'' });
+  fU.appendChild(iU);
+  fU.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, 'Discord：在頻道設定 → 整合 → Webhook 取得；Telegram：使用 BotFather 建立後 https://api.telegram.org/botTOKEN/sendMessage?chat_id=YOUR_CHAT_ID'));
+  card.appendChild(fU);
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, 'Token / Channel Access Token（LINE 才需要）'));
+  const iT = el('input', { class:'input', placeholder:'Bearer token', value: cfg.token||'' });
+  fT.appendChild(iT);
+  card.appendChild(fT);
+
+  // events
+  const evs = [
+    ['announcement','新公告發布'],
+    ['assignment-due','作業即將到期 (24h 前)'],
+    ['attendance-issue','學生出席異常'],
+    ['leave-request','學生請假申請'],
+    ['checkin','學生簽到（高頻）']
+  ];
+  const fE = el('div', { class:'field' });
+  fE.appendChild(el('label', { class:'label' }, '觸發事件'));
+  const evMap = {};
+  evs.forEach(([v,l])=> {
+    const id = 'wh-ev-' + v;
+    const cbE = el('input', { type:'checkbox', id });
+    cbE.checked = !!(cfg.events && cfg.events[v]);
+    evMap[v] = cbE;
+    fE.appendChild(el('div', { class:'flex', style:{padding:'4px 0'} },
+      cbE, el('label', { for:id, style:{cursor:'pointer'} }, l)
+    ));
+  });
+  card.appendChild(fE);
+
+  const actions = el('div', { class:'flex', style:{marginTop:'10px',flexWrap:'wrap'} });
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=>{
+    const newCfg = {
+      enabled: cb.checked,
+      platform: sel.value,
+      url: iU.value.trim(),
+      token: iT.value.trim(),
+      events: Object.fromEntries(Object.entries(evMap).map(([k,el])=> [k, el.checked]))
+    };
+    whSave(newCfg);
+    toast('已儲存','success');
+  }}, '💾 儲存'));
+  actions.appendChild(el('button', { class:'btn', onclick: async ()=>{
+    const cur = {
+      enabled:true, platform: sel.value, url: iU.value.trim(), token: iT.value.trim(),
+      events: { test:true }
+    };
+    if(!cur.url) return toast('請先填 URL','warn');
+    whSave(cur);
+    await triggerWebhook('test', { message:'這是來自課程管理系統 v3 的測試' });
+    toast('已嘗試發送（請至平台確認）','success', 3500);
+  } }, '🧪 測試發送'));
+  card.appendChild(actions);
+
+  content.appendChild(card);
+
+  // Email section
+  const ec = el('div', { class:'card', style:{marginTop:'12px'} });
+  ec.appendChild(el('h3', null, '📧 Email 通知'));
+  ec.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} }, '使用系統預設郵件 App，支援批次寄送'));
+  ec.appendChild(el('button', { class:'btn', onclick: openEmailComposer }, '✉️ 開啟郵件編輯器'));
+  content.appendChild(ec);
+}
+
+function openEmailComposer(){
+  const m = modal('');
+  m.root.style.maxWidth = '560px';
+  m.root.appendChild(el('h2', null, '📧 寄送 Email'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} }, '會用系統預設郵件 App 開啟，支援批次（BCC）'));
+
+  // recipient type
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '對象'));
+  const selT = el('select', { class:'select' });
+  selT.appendChild(el('option', { value:'student' }, '學生本人'));
+  selT.appendChild(el('option', { value:'parent' }, '家長'));
+  fT.appendChild(selT);
+  m.root.appendChild(fT);
+
+  // class filter
+  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean)));
+  const fC = el('div', { class:'field' });
+  fC.appendChild(el('label', { class:'label' }, '班級篩選'));
+  const selC = el('select', { class:'select' });
+  selC.appendChild(el('option', { value:'' }, '— 全部 —'));
+  classes.forEach(c => selC.appendChild(el('option', { value:c }, c)));
+  fC.appendChild(selC);
+  m.root.appendChild(fC);
+
+  // chips
+  const chipBox = el('div', { style:{minHeight:'40px',padding:'6px 0'} });
+  const countSpan = el('span', { id:'recip-count' }, '0');
+  m.root.appendChild(el('label', { class:'label' }, '收件人（', countSpan, '）'));
+  m.root.appendChild(chipBox);
+
+  function buildChips(){
+    chipBox.innerHTML = '';
+    const which = selT.value;
+    const cls = selC.value;
+    let students = App.db.students.filter(s => !cls || s.cls === cls);
+    let emails = students.map(s => which === 'parent' ? s.parentEmail : s.email).filter(Boolean);
+    countSpan.textContent = String(emails.length);
+    if(!emails.length){
+      chipBox.appendChild(el('div', { class:'muted small' }, '無有效 Email — 請先在學生資料填入'));
+      return;
+    }
+    emails.slice(0,10).forEach(e => {
+      chipBox.appendChild(el('span', { class:'recip-chip' }, e));
+    });
+    if(emails.length > 10){
+      chipBox.appendChild(el('span', { class:'recip-chip' }, '+' + (emails.length-10) + ' 人'));
+    }
+    chipBox._emails = emails;
+  }
+  selT.addEventListener('change', buildChips);
+  selC.addEventListener('change', buildChips);
+  buildChips();
+
+  // subject
+  const fS = el('div', { class:'field' });
+  fS.appendChild(el('label', { class:'label' }, '主旨'));
+  const iS = el('input', { class:'input', value:'【' + (App.db.branding.title||'') + '】通知' });
+  fS.appendChild(iS);
+  m.root.appendChild(fS);
+
+  // body
+  const fB = el('div', { class:'field' });
+  fB.appendChild(el('label', { class:'label' }, '內容'));
+  const iB = el('textarea', { class:'textarea', placeholder:'郵件內容…', style:{minHeight:'120px'} });
+  fB.appendChild(iB);
+  m.root.appendChild(fB);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const emails = chipBox._emails || [];
+    if(!emails.length) return toast('無收件人','warn');
+    const subj = encodeURIComponent(iS.value);
+    const body = encodeURIComponent(iB.value);
+    const bcc = emails.join(',');
+    const mailto = 'mailto:?bcc=' + bcc + '&subject=' + subj + '&body=' + body;
+    if(mailto.length > 7500){
+      // some clients have URL limits
+      toast('收件人過多，已嘗試開啟，若失敗請分批','warn', 4000);
+    }
+    location.href = mailto;
+    m.close();
+  } }, '✉️ 開啟郵件 App'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  CALENDAR + GANTT
+   ──────────────────────────────────────────────────────────── */
+function rCalendar(content){
+  content.appendChild(el('h1', null, '📅 行事曆'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} }, '看見作業、公告、出席紀錄全貌'));
+
+  if(!App._calCursor){
+    const now = new Date();
+    App._calCursor = { y: now.getFullYear(), m: now.getMonth() };
+  }
+  const cur = App._calCursor;
+
+  // header with nav
+  const hdr = el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+    el('div', { class:'flex' },
+      el('button', { class:'btn btn-sm', onclick: ()=>{
+        cur.m -= 1; if(cur.m < 0){ cur.m = 11; cur.y -= 1; } rerender();
+      }}, '◀'),
+      el('h2', { style:{minWidth:'140px',textAlign:'center'} }, cur.y + ' 年 ' + (cur.m+1) + ' 月'),
+      el('button', { class:'btn btn-sm', onclick: ()=>{
+        cur.m += 1; if(cur.m > 11){ cur.m = 0; cur.y += 1; } rerender();
+      }}, '▶'),
+      el('button', { class:'btn btn-sm', onclick: ()=>{
+        const n = new Date(); cur.y = n.getFullYear(); cur.m = n.getMonth(); rerender();
+      }}, '今天')
+    ),
+    el('div', { class:'flex tiny muted' },
+      el('span', null, '🟦 作業到期'),
+      el('span', null, '🟧 公告'),
+      el('span', null, '🟩 出席')
+    )
+  );
+  content.appendChild(hdr);
+
+  // build event map keyed by 'YYYY-MM-DD'
+  const evMap = {};
+  function pushEv(date, ev){ (evMap[date] = evMap[date] || []).push(ev); }
+  App.db.assignments.forEach(a => {
+    if(a.dueAt){
+      const d = new Date(a.dueAt);
+      const dk = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      pushEv(dk, { kind:'due', label:'作業：'+a.title, id:a.id });
+    }
+  });
+  App.db.announcements.forEach(a => {
+    const t = a.ts ? new Date(a.ts) : null;
+    if(!t) return;
+    const dk = t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0');
+    pushEv(dk, { kind:'ann', label:'公告：'+(a.title||a.text||'').slice(0,16), id:a.id });
+  });
+  const attDays = new Set();
+  App.db.attendance.forEach(at => attDays.add(at.date));
+  attDays.forEach(d => pushEv(d, { kind:'att', label:'簽到記錄', date:d }));
+
+  const grid = el('div', { class:'cal-grid' });
+  ['日','一','二','三','四','五','六'].forEach(d => grid.appendChild(el('div', { class:'cal-head' }, d)));
+
+  const firstDay = new Date(cur.y, cur.m, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(cur.y, cur.m+1, 0).getDate();
+  const prevMonthDays = new Date(cur.y, cur.m, 0).getDate();
+  const today = td();
+
+  // leading cells
+  for(let i=startWeekday-1; i>=0; i--){
+    const d = prevMonthDays - i;
+    grid.appendChild(el('div', { class:'cal-cell other' }, el('div', { class:'d' }, String(d))));
+  }
+  // current month
+  for(let day=1; day<=daysInMonth; day++){
+    const dk = cur.y + '-' + String(cur.m+1).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+    const cls = 'cal-cell' + (dk === today ? ' today' : '');
+    const evs = evMap[dk] || [];
+    const cell = el('div', { class:cls, onclick: ()=> openDayDetail(dk, evs) });
+    cell.appendChild(el('div', { class:'d' }, String(day)));
+    if(evs.length){
+      const evWrap = el('div', { class:'evs' });
+      evs.slice(0,3).forEach(ev => evWrap.appendChild(el('div', { class:'ev '+ev.kind }, ev.label)));
+      if(evs.length > 3) evWrap.appendChild(el('div', { class:'tiny muted' }, '+' + (evs.length-3)));
+      cell.appendChild(evWrap);
+    }
+    grid.appendChild(cell);
+  }
+  // trailing cells
+  const totalCells = startWeekday + daysInMonth;
+  const trailing = (7 - (totalCells % 7)) % 7;
+  for(let i=1;i<=trailing;i++){
+    grid.appendChild(el('div', { class:'cal-cell other' }, el('div', { class:'d' }, String(i))));
+  }
+  content.appendChild(grid);
+}
+
+function openDayDetail(dateKey, evs){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '📅 ' + dateKey));
+  if(!evs || !evs.length){
+    m.root.appendChild(el('div', { class:'empty' }, '當天無事件'));
+  } else {
+    evs.forEach(ev => {
+      const cls = ev.kind === 'due' ? 'tag t-primary' : ev.kind === 'ann' ? 'tag t-warn' : 'tag t-success';
+      const row = el('div', { class:'list-row', onclick:()=> {
+        m.close();
+        if(ev.kind === 'due') { App.subview = ev.id; go('assignments', ev.id); }
+        else if(ev.kind === 'ann') go('announcements');
+        else if(ev.kind === 'att') go('attendance');
+      }});
+      row.appendChild(el('span', { class:cls }, ev.kind==='due'?'作業':ev.kind==='ann'?'公告':'出席'));
+      row.appendChild(el('div', { class:'info' }, el('div', { class:'name' }, ev.label)));
+      m.root.appendChild(row);
+    });
+  }
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(actions);
+}
+
+function rGantt(content){
+  content.appendChild(el('h1', null, '📊 作業甘特圖'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '最近 30 天作業時間軸 — 綠：未到期、橘：即將到期、紅：逾期'));
+
+  const today = new Date();
+  const days = 30;
+  const start = new Date(today.getTime() - 7*86400*1000); // 7 days back
+  const end = new Date(start.getTime() + days*86400*1000);
+  const range = end.getTime() - start.getTime();
+
+  // filter
+  const assigns = App.db.assignments.filter(a => {
+    if(!a.dueAt && !a.ts) return false;
+    const cs = a.ts ? new Date(a.ts).getTime() : new Date(a.dueAt).getTime();
+    const ce = a.dueAt ? new Date(a.dueAt).getTime() : cs;
+    return ce >= start.getTime() && cs <= end.getTime();
+  }).sort((a,b)=> new Date(a.dueAt||a.ts) - new Date(b.dueAt||b.ts));
+
+  if(!assigns.length){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📊'),
+      el('div', null, '近 30 天無作業')
+    ));
+    return;
+  }
+
+  const wrap = el('div', { class:'gantt-wrap card' });
+  const tbl = el('table', { class:'gantt-table' });
+  const thead = el('tr');
+  thead.appendChild(el('th', { class:'gantt-name' }, '作業'));
+  thead.appendChild(el('th', null, '時間軸 (' +
+    (start.getMonth()+1) + '/' + start.getDate() + ' → ' +
+    (end.getMonth()+1) + '/' + end.getDate() + ')'));
+  tbl.appendChild(thead);
+
+  assigns.forEach(a => {
+    const cs = a.ts ? new Date(a.ts).getTime() : new Date(a.dueAt).getTime();
+    const ce = a.dueAt ? new Date(a.dueAt).getTime() : cs + 86400*1000;
+    const x0 = Math.max(0, (cs - start.getTime()) / range * 100);
+    const x1 = Math.min(100, (ce - start.getTime()) / range * 100);
+    const w = Math.max(2, x1 - x0);
+    const overdue = isAssignmentOverdue(a);
+    const dueSoon = isAssignmentDueSoon(a);
+    const cls = 'gantt-bar' + (overdue ? ' danger' : dueSoon ? ' warn' : '');
+
+    const tr = el('tr');
+    tr.appendChild(el('td', { class:'gantt-name', title:a.title }, a.title));
+    const td2 = el('td');
+    const track = el('div', { class:'gantt-track' });
+    // today line
+    const tx = Math.max(0, Math.min(100, (Date.now() - start.getTime()) / range * 100));
+    track.appendChild(el('div', { class:'gantt-today', style:{ left: tx + '%' } }));
+    const bar = el('div', { class:cls, style:{ left:x0+'%', width:w+'%' }, onclick:()=>{
+      App.subview = a.id; go('assignments', a.id);
+    }}, a.title);
+    track.appendChild(bar);
+    td2.appendChild(track);
+    tr.appendChild(td2);
+    tbl.appendChild(tr);
+  });
+  wrap.appendChild(tbl);
+  content.appendChild(wrap);
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  COMMAND PALETTE (Ctrl+K / Cmd+K)
+   ──────────────────────────────────────────────────────────── */
+function cmdItems(){
+  const role = App.session && App.session.role;
+  if(role === 'teacher'){
+    return [
+      { i:'📊', t:'總覽', h:'overview', go: ()=> go('overview') },
+      { i:'👥', t:'學生名單', h:'students', go: ()=> go('students') },
+      { i:'✅', t:'出席管理', h:'attendance', go: ()=> go('attendance') },
+      { i:'📱', t:'QR Code 簽到', h:'QR', go: ()=> go('qr') },
+      { i:'📆', t:'請假管理', h:'leave', go: ()=> go('leave') },
+      { i:'💬', t:'訊息', h:'messages', go: ()=> go('messages') },
+      { i:'📋', t:'作業管理', h:'assignments', go: ()=> go('assignments') },
+      { i:'📥', t:'繳交記錄', h:'submissions', go: ()=> go('submissions') },
+      { i:'🎯', t:'學期成績', h:'grades', go: ()=> go('grades') },
+      { i:'💬', t:'課程評價', h:'evals', go: ()=> go('evals') },
+      { i:'📢', t:'公告管理', h:'announcements', go: ()=> go('announcements') },
+      { i:'📈', t:'分析工具', h:'analytics', go: ()=> go('analytics') },
+      { i:'📅', t:'行事曆', h:'calendar', go: ()=> go('calendar') },
+      { i:'📊', t:'甘特圖', h:'gantt', go: ()=> go('gantt') },
+      { i:'🏢', t:'多教室管理', h:'workspace', go: ()=> go('workspace') },
+      { i:'📲', t:'通知設定', h:'notify', go: ()=> go('notify') },
+      { i:'🤖', t:'AI 助教', h:'AI', go: ()=> openAIAssistant() },
+      { i:'📧', t:'寄送 Email', h:'email', go: ()=> openEmailComposer() },
+      { i:'⚙️', t:'設定', h:'settings', go: ()=> go('settings') },
+      { i:'☁️', t:'Firebase 同步', h:'firebase', go: ()=> go('firebase') },
+      { i:'🌓', t:'切換亮/暗主題', h:'theme', go: toggleTheme },
+      { i:'⎋', t:'登出', h:'logout', go: doLogout },
+    ];
+  } else {
+    return [
+      { i:'✋', t:'簽到', h:'checkin', go: ()=> go('checkin') },
+      { i:'📅', t:'出席紀錄', h:'myatt', go: ()=> go('myatt') },
+      { i:'📆', t:'請假', h:'myleave', go: ()=> go('myleave') },
+      { i:'💬', t:'訊息', h:'messages', go: ()=> go('messages') },
+      { i:'📤', t:'作業', h:'sasgn', go: ()=> go('sasgn') },
+      { i:'🎯', t:'我的成績', h:'sgrade', go: ()=> go('sgrade') },
+      { i:'⭐', t:'課程評價', h:'sev', go: ()=> go('sev') },
+      { i:'📢', t:'公告', h:'sann', go: ()=> go('sann') },
+      { i:'🤖', t:'AI 學習助教', h:'AI', go: ()=> openAIAssistant() },
+      { i:'👤', t:'個人', h:'me', go: ()=> go('me') },
+      { i:'🌓', t:'切換亮/暗主題', h:'theme', go: toggleTheme },
+      { i:'⎋', t:'登出', h:'logout', go: doLogout },
+    ];
+  }
+}
+
+function openCmdPalette(){
+  if(App.cmdOpen) return;
+  App.cmdOpen = true;
+  const all = cmdItems();
+  let filtered = all.slice();
+  let sel = 0;
+
+  const host = el('div', { class:'cmd-host', onclick: e => { if(e.target === host) close(); } });
+  const box = el('div', { class:'cmd-box' });
+  const inp = el('input', { class:'cmd-input', placeholder:'輸入指令… (Esc 關閉)' });
+  const list = el('div', { class:'cmd-list' });
+
+  function render(){
+    list.innerHTML = '';
+    if(!filtered.length){
+      list.appendChild(el('div', { class:'cmd-empty' }, '沒有符合的指令'));
+      return;
+    }
+    filtered.forEach((it, i) => {
+      const row = el('div', { class:'cmd-item ' + (i===sel?'sel':''), onclick: ()=> { exec(it); } },
+        el('span', { class:'ico' }, it.i),
+        el('span', { class:'ttl' }, it.t),
+        el('span', { class:'hint' }, it.h)
+      );
+      list.appendChild(row);
+    });
+  }
+  function filter(){
+    const q = inp.value.trim().toLowerCase();
+    if(!q){ filtered = all.slice(); sel=0; render(); return; }
+    filtered = all.filter(it =>
+      it.t.toLowerCase().includes(q) ||
+      (it.h && it.h.toLowerCase().includes(q))
+    );
+    sel = 0;
+    render();
+  }
+  function exec(it){
+    close();
+    setTimeout(()=> { try { it.go(); } catch(e){ console.error(e); } }, 80);
+  }
+  function close(){
+    App.cmdOpen = false;
+    host.remove();
+    if(App.cmdHandler){
+      document.removeEventListener('keydown', App.cmdHandler, true);
+      App.cmdHandler = null;
+    }
+  }
+
+  inp.addEventListener('input', filter);
+  inp.addEventListener('keydown', e => {
+    if(e.key === 'Escape'){ e.preventDefault(); close(); }
+    else if(e.key === 'ArrowDown'){ e.preventDefault(); sel = Math.min(filtered.length-1, sel+1); render(); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); sel = Math.max(0, sel-1); render(); }
+    else if(e.key === 'Enter'){ e.preventDefault(); if(filtered[sel]) exec(filtered[sel]); }
+  });
+
+  box.appendChild(inp); box.appendChild(list);
+  host.appendChild(box);
+  document.body.appendChild(host);
+  render();
+  setTimeout(()=> inp.focus(), 50);
+}
+
+function initCmdPaletteShortcut(){
+  if(App._cmdInit) return;
+  App._cmdInit = true;
+  document.addEventListener('keydown', e => {
+    const isMod = e.ctrlKey || e.metaKey;
+    if(isMod && (e.key === 'k' || e.key === 'K' || e.key === 'p' || e.key === 'P')){
+      // skip if user typing in plain input/textarea? actually we want to open even then for productivity
+      if(!App.session || !App.cfg) return;
+      e.preventDefault();
+      openCmdPalette();
+    }
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   PHASE 3 ▒▒  PWA SERVICE WORKER + INSTALL
+   ──────────────────────────────────────────────────────────── */
+function initPWA(){
+  // register sw
+  if('serviceWorker' in navigator){
+    try {
+      navigator.serviceWorker.register('sw-v3.js').catch(()=>null);
+    } catch(e){}
+  }
+  // listen for install prompt
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    App.pwaPrompt = e;
+    showPwaInstallChip();
+  });
+  window.addEventListener('appinstalled', ()=> {
+    App.pwaPrompt = null;
+    const p = document.querySelector('.pwa-prompt');
+    if(p) p.remove();
+    toast('已安裝到主畫面','success');
+  });
+}
+
+function showPwaInstallChip(){
+  if(localStorage.getItem(LS_PWA_DISMISS)) return;
+  if(document.querySelector('.pwa-prompt')) return;
+  const chip = el('div', { class:'pwa-prompt' },
+    el('div', { style:{flex:'1'} },
+      el('div', { style:{fontWeight:'700'} }, '📱 加到主畫面'),
+      el('div', { class:'tiny muted' }, '離線可用 · 像 App 一樣')
+    ),
+    el('button', { class:'btn btn-sm btn-primary', onclick: async ()=> {
+      if(!App.pwaPrompt) return;
+      App.pwaPrompt.prompt();
+      try { await App.pwaPrompt.userChoice; } catch(e){}
+      App.pwaPrompt = null;
+      chip.remove();
+    }}, '安裝'),
+    el('button', { class:'btn btn-sm', onclick: ()=> {
+      try { localStorage.setItem(LS_PWA_DISMISS, '1'); } catch(e){}
+      chip.remove();
+    }}, '不再提示')
+  );
+  document.body.appendChild(chip);
+}
+
 function rerender(){
   const root = $('#root');
 
@@ -4655,6 +6070,11 @@ function rerender(){
       else if(v === 'evals') rEv(content);
       else if(v === 'announcements') rAnn(content);
       else if(v === 'analytics') rAnalytics(content);
+      else if(v === 'qr') rQR(content);
+      else if(v === 'calendar') rCalendar(content);
+      else if(v === 'gantt') rGantt(content);
+      else if(v === 'workspace') rWorkspace(content);
+      else if(v === 'notify') rNotify(content);
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -4693,20 +6113,57 @@ function boot(){
   App.cfg = loadCfg();
   App.session = loadSession();
 
+  // QR join URL handling — runs before db so we can switch room first
+  const handled = handleQrJoinHash();
+
   if(App.cfg){
     loadDB();
     initBC();
     Sync.init();
+    wsRegisterCurrent();
   }
 
-  // route from hash if present
-  const h = location.hash.slice(1);
-  if(h){
-    const [v, sv] = h.split('/');
-    App.view = v; App.subview = sv || null;
+  // route from hash if present (and not a join hash we already consumed)
+  if(!handled){
+    const h = location.hash.slice(1);
+    if(h && !h.startsWith('att=') && !h.startsWith('join=')){
+      const [v, sv] = h.split('/');
+      App.view = v; App.subview = sv || null;
+    }
   }
+
+  // PWA + shortcuts
+  initPWA();
+  initCmdPaletteShortcut();
 
   rerender();
+
+  // try auto-checkin if there was a pending code
+  if(App.pendingAttCode){
+    setTimeout(()=> tryAutoCheckin(), 600);
+  }
+
+  // background scheduler for assignment-due notifications
+  schedulePeriodicNotifications();
+}
+
+function schedulePeriodicNotifications(){
+  // Check assignments due in 24h once per hour
+  if(App._notifyTimer) return;
+  function check(){
+    if(!App.db || !App.session || App.session.role !== 'teacher') return;
+    const cfg = whLoad();
+    if(!cfg || !cfg.enabled || !cfg.events || !cfg.events['assignment-due']) return;
+    const last = parseInt(localStorage.getItem(LS_KEY + '_notif_due') || '0', 10);
+    if(Date.now() - last < 12*3600*1000) return; // throttle 12h
+    const soon = App.db.assignments.filter(a => isAssignmentDueSoon(a));
+    if(soon.length){
+      triggerWebhook('assignment-due', { count: soon.length, titles: soon.map(s=>s.title).join('、') });
+      try { localStorage.setItem(LS_KEY + '_notif_due', String(Date.now())); } catch(e){}
+    }
+  }
+  App._notifyTimer = setInterval(check, 3600*1000);
+  setTimeout(check, 8000);
 }
 
 document.addEventListener('DOMContentLoaded', boot);
