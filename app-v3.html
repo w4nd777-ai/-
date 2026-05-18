@@ -8441,6 +8441,38 @@ function rerender(){
    BOOT
    ──────────────────────────────────────────────────────────── */
 function boot(){
+  // ═══ 緊急重設機制 ═══
+  // 訪問 ?reset=1 → 清除所有 v3 localStorage + 解除 Service Worker
+  try {
+    if(location.search.indexOf('reset=1') >= 0){
+      // 清除所有 v3 相關的 localStorage
+      const keysToDelete = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && (k.indexOf('cms_v3') === 0 || k.indexOf('cms-v3') === 0)){
+          keysToDelete.push(k);
+        }
+      }
+      keysToDelete.forEach(k => localStorage.removeItem(k));
+      // 解除 Service Worker
+      if('serviceWorker' in navigator){
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          regs.forEach(r => r.unregister());
+        });
+      }
+      // 清除 CacheStorage
+      if('caches' in window){
+        caches.keys().then(names => names.forEach(n => caches.delete(n)));
+      }
+      // 重新導向到乾淨網址
+      setTimeout(() => {
+        location.replace(location.pathname);
+      }, 500);
+      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;font-size:18px;color:#666">🔄 重設中，請稍候...</div>';
+      return;
+    }
+  } catch(e){ console.warn('[reset]', e); }
+
   // theme
   App.theme = localStorage.getItem(LS_THEME) || 'light';
   App.accent = localStorage.getItem(LS_ACCENT) || 'blue';
