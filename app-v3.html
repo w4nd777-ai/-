@@ -3054,10 +3054,12 @@ function renderLoginTeacherStage(){
 }
 
 function renderLoginStudentStage(){
+  // 🔒 隱私友善版：班級下拉 → 姓名下拉 → 密碼
+  // 不顯示其他同學的卡片清單
   const stage = el('div', { class:'login-stage' });
-  stage.appendChild(el('h3', null, '🧑‍🎓 請選擇你的名字'));
-  stage.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
-    '點一下你的卡片就能登入'));
+  stage.appendChild(el('h3', null, '🧑‍🎓 學生登入'));
+  stage.appendChild(el('div', { class:'small muted', style:{marginBottom:'14px'} },
+    '依序選擇班級、姓名，輸入密碼即可登入'));
 
   if(!App.db.students.length){
     stage.appendChild(el('div', { class:'empty', style:{padding:'24px 8px'} },
@@ -3070,78 +3072,134 @@ function renderLoginStudentStage(){
     return stage;
   }
 
-  // Search bar
-  let q = (App._stuLoginSearch || '').toLowerCase();
-  App._collapsedClasses = App._collapsedClasses || {};
+  // 取得所有班級（去重 + 排序）
+  const classes = [...new Set(App.db.students.map(s => s.cls || '未分班'))].sort((a,b)=> a.localeCompare(b));
 
-  const search = el('input', { class:'input stu-picker-search', placeholder:'🔍 搜尋你的名字或學號…',
-    value: App._stuLoginSearch||'',
-    oninput: e => { q = e.target.value.toLowerCase(); App._stuLoginSearch = e.target.value; renderGroups(); }
+  // 班級下拉
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '① 選擇班級'));
+  const selCls = el('select', { class:'input select' });
+  selCls.appendChild(el('option', { value:'' }, '── 請選擇班級 ──'));
+  classes.forEach(c => {
+    const o = el('option', { value:c }, c);
+    if(App._loginCls === c) o.setAttribute('selected','');
+    selCls.appendChild(o);
   });
-  stage.appendChild(search);
+  f1.appendChild(selCls);
+  stage.appendChild(f1);
 
-  const host = el('div');
-  stage.appendChild(host);
+  // 姓名下拉（依班級篩選）
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '② 選擇姓名'));
+  const selName = el('select', { class:'input select' });
+  f2.appendChild(selName);
+  stage.appendChild(f2);
 
-  function renderGroups(){
-    host.innerHTML = '';
-    let list = App.db.students.slice();
-    if(q){
-      list = list.filter(s =>
-        (s.name||'').toLowerCase().includes(q) ||
-        (s.cls||'').toLowerCase().includes(q) ||
-        String(s.sid||'').toLowerCase().includes(q) ||
-        String(s.seat||'').includes(q)
-      );
-    }
-    if(!list.length){
-      host.appendChild(el('div', { class:'muted small', style:{textAlign:'center',padding:'30px 8px'} },
-        '找不到「' + (q || '…') + '」'));
+  // 密碼欄
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '③ 輸入密碼'));
+  const pwWrap = el('div', { class:'pw-input-wrap' });
+  const iPw = el('input', { class:'input', type:'password', placeholder:'輸入密碼', autocomplete:'current-password' });
+  const togBtn = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', onclick: ()=> {
+    iPw.type = iPw.type === 'password' ? 'text' : 'password';
+    togBtn.textContent = iPw.type === 'password' ? '👁' : '🙈';
+  }}, '👁');
+  pwWrap.appendChild(iPw);
+  pwWrap.appendChild(togBtn);
+  f3.appendChild(pwWrap);
+  stage.appendChild(f3);
+
+  function refreshNameList(){
+    const cls = selCls.value;
+    selName.innerHTML = '';
+    if(!cls){
+      const o = el('option', { value:'' }, '── 請先選班級 ──');
+      o.setAttribute('disabled','');
+      selName.appendChild(o);
+      selName.disabled = true;
       return;
     }
-    // group by cls
-    const groups = {};
+    selName.disabled = false;
+    selName.appendChild(el('option', { value:'' }, '── 請選擇姓名 ──'));
+    const list = App.db.students
+      .filter(s => (s.cls || '未分班') === cls)
+      .sort((a,b) => (a.seat||0) - (b.seat||0) || (a.name||'').localeCompare(b.name||''));
     list.forEach(s => {
-      const k = s.cls || '未分班';
-      if(!groups[k]) groups[k] = [];
-      groups[k].push(s);
-    });
-    const keys = Object.keys(groups).sort((a,b)=> a.localeCompare(b));
-    keys.forEach(k => {
-      const arr = groups[k].sort((a,b)=> (a.seat||0)-(b.seat||0) || (a.name||'').localeCompare(b.name||''));
-      const collapsed = !!App._collapsedClasses[k];
-      const grp = el('div', { class:'cls-group' + (collapsed ? ' collapsed' : '') });
-      const header = el('div', { class:'cls-group-header', onclick: ()=> {
-        App._collapsedClasses[k] = !collapsed;
-        renderGroups();
-      }},
-        el('span', { class:'chev' }, '▼'),
-        el('span', { class:'gtt' }, '── ' + k + ' ──'),
-        el('span', { class:'gct' }, '(' + arr.length + ' 人)')
-      );
-      const body = el('div', { class:'cls-group-body' });
-      arr.forEach((s, idx) => {
-        const colorIdx = (s.id ? String(s.id).charCodeAt(0) : idx) % 8;
-        const pcard = el('button', { class:'pcard', onclick:()=> studentTapToLogin(s.id), title:'點此登入 ' + s.name });
-        pcard.appendChild(el('div', { class:'av av-color-' + colorIdx }, initials(s.name)));
-        pcard.appendChild(el('div', { class:'nm' }, s.name));
-        const meta = (s.sid ? '學號 ' + s.sid : (s.seat ? '座號 ' + s.seat : ''));
-        if(meta) pcard.appendChild(el('div', { class:'mt' }, meta));
-        body.appendChild(pcard);
-      });
-      grp.appendChild(header);
-      grp.appendChild(body);
-      host.appendChild(grp);
+      // 隱私：顯示「座號 + 姓名首字 + ○ + 姓名末字」(可選)
+      // 這裡用完整姓名（學生選自己的本來就知道）
+      const o = el('option', { value:String(s.id) }, (s.seat ? '['+s.seat+'] ' : '') + s.name);
+      if(App._loginStuId == s.id) o.setAttribute('selected','');
+      selName.appendChild(o);
     });
   }
-  renderGroups();
+  selCls.addEventListener('change', () => {
+    App._loginCls = selCls.value;
+    App._loginStuId = '';
+    refreshNameList();
+    iPw.value = '';
+  });
+  selName.addEventListener('change', () => {
+    App._loginStuId = selName.value;
+    iPw.focus();
+  });
+  refreshNameList();
+
+  // 登入函式
+  function attemptLogin(){
+    const sid = parseInt(selName.value);
+    if(!selCls.value) return toast('請先選擇班級', 'warning');
+    if(!sid) return toast('請選擇你的姓名', 'warning');
+    const pw = iPw.value;
+    if(!pw) return toast('請輸入密碼', 'warning');
+    const s = App.db.students.find(x => x.id === sid);
+    if(!s) return toast('學生不存在','danger');
+    const stored = s.password || s.pass || (String(s.sid||'0000').slice(-4));
+    if(String(pw) !== String(stored)){
+      toast('密碼錯誤','danger');
+      iPw.value = '';
+      iPw.focus();
+      return;
+    }
+    // 登入成功
+    finishStudentLogin(s);
+  }
+  iPw.addEventListener('keydown', e => { if(e.key === 'Enter') attemptLogin(); });
+
+  // 登入按鈕
+  stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'8px'}, onclick: attemptLogin }, '登入'));
+
+  // 忘記密碼
+  stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'10px'} },
+    el('a', { href:'javascript:void(0)', onclick: showForgotPassword,
+      style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
+      '🔑 忘記密碼？')
+  ));
 
   stage.appendChild(el('hr', { class:'sep' }));
   stage.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px'} },
-    el('button', { class:'btn', style:{flex:'1'}, onclick: ()=> { App._loginStage = 'choose'; App._stuLoginSearch=''; rerender(); } }, '← 返回'),
-    el('button', { class:'btn', style:{flex:'1'}, onclick: studentRegisterFlow }, '找不到我 → 申請註冊')
+    el('button', { class:'btn', style:{flex:'1'}, onclick: ()=> { App._loginStage = 'choose'; App._loginCls=''; App._loginStuId=''; rerender(); } }, '← 返回'),
+    el('button', { class:'btn', style:{flex:'1'}, onclick: studentRegisterFlow }, '＋ 申請註冊')
   ));
   return stage;
+}
+
+// 忘記密碼說明
+function showForgotPassword(){
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, '🔑 忘記密碼'));
+  m.root.appendChild(el('p', { style:{lineHeight:'1.8',fontSize:'14px',color:'var(--text)'} },
+    '請使用以下方式之一找回密碼：'));
+  m.root.appendChild(el('div', { style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginTop:'10px'} },
+    el('div', { style:{fontWeight:'600',marginBottom:'6px'} }, '💡 預設密碼是「學號最後 4 碼」'),
+    el('div', { class:'small muted' }, '例如：學號 1095001 → 密碼 5001')
+  ));
+  m.root.appendChild(el('div', { style:{background:'var(--warn-soft)',padding:'12px',borderRadius:'8px',marginTop:'10px'} },
+    el('div', { style:{fontWeight:'600',marginBottom:'6px'} }, '🧑‍🏫 請聯絡老師重設'),
+    el('div', { class:'small muted' }, '老師可以在「學生名單」幫你重設為預設密碼')
+  ));
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m.close() }, '了解'));
+  m.root.appendChild(actions);
 }
 
 /* ════════════════════════════════════════════════════════════
