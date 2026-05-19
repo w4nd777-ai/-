@@ -1878,6 +1878,7 @@ function defaultDB(){
     announcements: [],
     leaves: [],            // {id, studentId, name, date, reason, status, ts}
     pending: [],           // pending student registrations
+    passwordResets: [],    // 學生密碼重設請求 {id,studentId,studentName,cls,sid,email,status,ts}
     peerEvals: [],         // batch 1: 學生互評任務
     selfEvals: [],         // batch 2: 學生自評
     attendanceNotes: [],   // batch 2: 老師對學生的出席評語 {id, studentId, text, ts, by}
@@ -2760,54 +2761,94 @@ async function joinExisting(){
 }
 
 function studentRegisterFlow(){
-  // simple: ask name + password, if approved/no-pending → student record
+  // 完整註冊：姓名 + 學號 + email + 班級 + 座號 + 密碼
   const m = modal('', { dismissable:false });
-  m.root.appendChild(el('h2', null, '學生註冊'));
+  m.root.appendChild(el('h2', null, '🧑‍🎓 學生註冊'));
+  m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'13px',marginBottom:'10px'} },
+    '請完整填寫資料，等待老師審核'));
 
-  const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, '姓名'));
-  const i1 = el('input', { class:'input', placeholder:'王小明' });
-  f1.appendChild(i1);
+  function field(label, input, hint){
+    const f = el('div', { class:'field' });
+    const lbl = el('label', { class:'label' }, label);
+    f.appendChild(lbl);
+    f.appendChild(input);
+    if(hint) f.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} }, hint));
+    return f;
+  }
 
-  const f2 = el('div', { class:'field' });
-  f2.appendChild(el('label', { class:'label' }, '班級（可空）'));
-  const i2 = el('input', { class:'input', placeholder:'例：A班' });
-  f2.appendChild(i2);
+  const iName = el('input', { class:'input', placeholder:'王小明' });
+  const iSid = el('input', { class:'input', placeholder:'例：1095001', inputmode:'numeric' });
+  const iCls = el('input', { class:'input', placeholder:'例：202' });
+  const iSeat = el('input', { class:'input', type:'number', placeholder:'例：5', min:'0' });
+  const iEmail = el('input', { class:'input', type:'email', placeholder:'your@example.com', autocomplete:'email' });
+  const iPw = el('input', { class:'input', type:'password', placeholder:'至少 4 字元' });
+  const iPw2 = el('input', { class:'input', type:'password', placeholder:'再輸入一次' });
 
-  const f3 = el('div', { class:'field' });
-  f3.appendChild(el('label', { class:'label' }, '座號（可空）'));
-  const i3 = el('input', { class:'input', type:'number', placeholder:'1' });
-  f3.appendChild(i3);
+  m.root.appendChild(field('姓名 *', iName));
+  m.root.appendChild(field('學號 *', iSid, '預設密碼為學號末 4 碼'));
 
-  const f4 = el('div', { class:'field' });
-  f4.appendChild(el('label', { class:'label' }, '密碼'));
-  const i4 = el('input', { class:'input', type:'password', placeholder:'至少 4 字' });
-  f4.appendChild(i4);
+  // 兩欄並排（班級+座號）
+  const row2 = el('div', { class:'grid-2', style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'} },
+    field('班級', iCls),
+    field('座號', iSeat)
+  );
+  m.root.appendChild(row2);
 
-  [f1,f2,f3,f4].forEach(f => m.root.appendChild(f));
+  m.root.appendChild(field('📧 Email *', iEmail, '忘記密碼時可使用此 email 重設'));
+  m.root.appendChild(field('密碼 *', iPw, '至少 4 字元'));
+  m.root.appendChild(field('確認密碼 *', iPw2));
 
-  const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn', onclick: ()=> { m.close(); }}, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
-    const name = i1.value.trim();
-    const cls = i2.value.trim();
-    const seat = parseInt(i3.value,10) || 0;
-    const pw = i4.value.trim();
-    if(!name || !pw){ toast('姓名與密碼不可空','danger'); return; }
-    // create pending entry
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',padding:'8px 12px',background:'var(--danger-soft)',borderRadius:'8px',marginTop:'8px'} });
+  m.root.appendChild(err);
+
+  function showErr(msg){ err.textContent = msg; err.style.display = 'block'; }
+
+  const submit = ()=> {
+    const name = iName.value.trim();
+    const sid = iSid.value.trim();
+    const cls = iCls.value.trim();
+    const seat = parseInt(iSeat.value, 10) || 0;
+    const email = iEmail.value.trim();
+    const pw = iPw.value;
+    const pw2 = iPw2.value;
+
+    err.style.display = 'none';
+    if(!name) return showErr('請輸入姓名');
+    if(!sid) return showErr('請輸入學號');
+    if(!email) return showErr('請輸入 Email（忘記密碼時需要）');
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showErr('Email 格式錯誤');
+    if(!pw || pw.length < 4) return showErr('密碼至少 4 字元');
+    if(pw !== pw2) return showErr('兩次密碼不一致');
+
+    // 檢查學號重複
+    const dupStu = App.db.students.find(s => String(s.sid||'') === sid);
+    const dupPending = App.db.pending.find(p => String(p.sid||'') === sid);
+    if(dupStu || dupPending) return showErr('此學號已被使用');
+
     const pending = {
-      id: nid(), name, cls, seat, password: pw, ts: Date.now()
+      id: nid(),
+      name, sid, cls, seat, email,
+      password: pw,
+      mustChangePw: false,  // 自己註冊的不用再改
+      ts: Date.now()
     };
     App.db.pending.push(pending);
     saveDB();
-    Sync.setMap('pending', App.db.pending);
-    bcNotify();
+    try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(e){}
+    if(typeof logOp === 'function') logOp('register', name + ' 註冊申請');
     m.close();
-    toast('註冊已送出，等待老師審核','success', 3500);
-    // show pending screen
+    toast('✅ 註冊已送出！等待老師審核','success', 3500);
     rerender();
-  } }, '送出申請'));
+  };
+
+  iPw2.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick: ()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: submit }, '✓ 送出申請'));
   m.root.appendChild(actions);
+
+  setTimeout(()=> iName.focus(), 80);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -3287,18 +3328,83 @@ function renderLoginStudentStage(){
 function showForgotPassword(){
   const m = modal('', { dismissable:true });
   m.root.appendChild(el('h2', null, '🔑 忘記密碼'));
-  m.root.appendChild(el('p', { style:{lineHeight:'1.8',fontSize:'14px',color:'var(--text)'} },
-    '請使用以下方式之一找回密碼：'));
-  m.root.appendChild(el('div', { style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginTop:'10px'} },
-    el('div', { style:{fontWeight:'600',marginBottom:'6px'} }, '💡 預設密碼是「學號最後 4 碼」'),
-    el('div', { class:'small muted' }, '例如：學號 1095001 → 密碼 5001')
+  m.root.appendChild(el('p', { style:{lineHeight:'1.6',fontSize:'14px',color:'var(--text)',marginBottom:'12px'} },
+    '輸入註冊時填的 Email，即可發送重設密碼請求給老師：'));
+
+  // 學號
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '學號'));
+  const iSid = el('input', { class:'input', placeholder:'例：1095001', inputmode:'numeric' });
+  f1.appendChild(iSid);
+  m.root.appendChild(f1);
+
+  // Email
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '📧 註冊 Email'));
+  const iEmail = el('input', { class:'input', type:'email', placeholder:'your@example.com' });
+  f2.appendChild(iEmail);
+  m.root.appendChild(f2);
+
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',padding:'8px 12px',background:'var(--danger-soft)',borderRadius:'8px',marginBottom:'8px'} });
+  m.root.appendChild(err);
+
+  // 說明
+  m.root.appendChild(el('div', { style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginTop:'10px',fontSize:'13px',lineHeight:'1.7'} },
+    el('div', { style:{fontWeight:'600',marginBottom:'4px'} }, '💡 找回方式：'),
+    el('div', null, '1. 老師會在後台收到通知 → 一鍵重設'),
+    el('div', null, '2. 也可請老師直接幫你重設'),
+    el('div', { class:'small muted', style:{marginTop:'4px'} }, '預設密碼為學號末 4 碼')
   ));
-  m.root.appendChild(el('div', { style:{background:'var(--warn-soft)',padding:'12px',borderRadius:'8px',marginTop:'10px'} },
-    el('div', { style:{fontWeight:'600',marginBottom:'6px'} }, '🧑‍🏫 請聯絡老師重設'),
-    el('div', { class:'small muted' }, '老師可以在「學生名單」幫你重設為預設密碼')
-  ));
+
+  const submit = ()=> {
+    const sid = iSid.value.trim();
+    const email = iEmail.value.trim();
+    err.style.display = 'none';
+    if(!sid) { err.textContent='請輸入學號'; err.style.display='block'; return; }
+    if(!email) { err.textContent='請輸入 Email'; err.style.display='block'; return; }
+
+    // 找對應學生
+    const s = App.db.students.find(x => String(x.sid||'') === sid && (x.email||'').toLowerCase() === email.toLowerCase());
+    if(!s){
+      err.textContent='學號與 Email 不符，請確認後重試（或聯絡老師）';
+      err.style.display='block';
+      return;
+    }
+
+    // 建立重設請求
+    App.db.passwordResets = App.db.passwordResets || [];
+    // 移除舊的請求
+    App.db.passwordResets = App.db.passwordResets.filter(r => r.studentId !== s.id);
+    App.db.passwordResets.push({
+      id: nid(),
+      studentId: s.id,
+      studentName: s.name,
+      cls: s.cls,
+      sid: s.sid,
+      email: s.email,
+      status: 'pending',
+      ts: Date.now()
+    });
+    saveDB();
+    try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
+    if(typeof logOp === 'function') logOp('pwResetRequest', s.name + ' 申請重設密碼');
+
+    m.close();
+    // 成功 modal
+    const m2 = modal('', { dismissable:true });
+    m2.root.appendChild(el('h2', { style:{color:'var(--success)'} }, '✅ 申請已送出'));
+    m2.root.appendChild(el('p', { style:{lineHeight:'1.8'} },
+      '已通知老師重設你的密碼。老師核准後，請用「學號末 4 碼」（' + String(s.sid||'').slice(-4) + '）登入，並立即修改密碼。'));
+    const a2 = el('div', { class:'modal-actions' });
+    a2.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m2.close() }, '我知道了'));
+    m2.root.appendChild(a2);
+  };
+
+  iEmail.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
+
   const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m.close() }, '了解'));
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: submit }, '📨 送出申請'));
   m.root.appendChild(actions);
 }
 
@@ -3580,7 +3686,7 @@ function renderTopbar(role){
   const titles = role === 'teacher' ? {
     overview:'📊 今日總覽', students:'👥 學生名單', attendance:'✅ 出席管理',
     leave:'📆 請假管理', messages:'💬 訊息', settings:'⚙️ 設定', firebase:'☁️ 同步設定',
-    pending:'📥 待審核註冊',
+    pending:'📥 待處理事項',
     assignments:'📋 作業管理', submissions:'📥 繳交記錄', grades:'🎯 學期成績',
     evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具',
     qr:'📱 QR Code 簽到', calendar:'📅 行事曆', gantt:'📊 作業甘特圖',
@@ -4680,47 +4786,121 @@ function rMsg(content){
    TEACHER: PENDING REGISTRATIONS
    ──────────────────────────────────────────────────────────── */
 function rPending(content){
-  content.appendChild(el('h1', null, '待審核註冊'));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '學生提交的註冊申請'));
+  content.appendChild(el('h1', null, '待處理事項'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '學生註冊申請與密碼重設請求'));
+
+  // ─── 區塊 1：密碼重設請求 ───
+  const resets = (App.db.passwordResets || []).filter(r => r.status === 'pending');
+  if(resets.length){
+    content.appendChild(el('div', { style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px',marginTop:'10px'} },
+      el('h3', { style:{margin:'0'} }, '🔑 密碼重設請求'),
+      el('span', { class:'pill pill-att warn' }, resets.length + ' 件')
+    ));
+    const cardR = el('div', { class:'card', style:{marginBottom:'16px'} });
+    resets.slice().reverse().forEach(r => {
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'avatar', style:{background:'var(--warn)'} }, initials(r.studentName)));
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, r.studentName + (r.sid ? '（學號 ' + r.sid + '）' : '')),
+        el('div', { class:'sub' },
+          (r.cls || '無班級') + ' · 📧 ' + (r.email || '無 Email') + ' · ' + relTime(r.ts || 0))
+      ));
+      const acts = el('div', { class:'actions' },
+        el('button', { class:'btn btn-sm btn-success', onclick:()=> approvePwReset(r.id), title:'重設為學號末 4 碼' }, '✓ 核准重設'),
+        el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectPwReset(r.id) }, '✗ 拒絕')
+      );
+      row.appendChild(acts);
+      cardR.appendChild(row);
+    });
+    content.appendChild(cardR);
+  }
+
+  // ─── 區塊 2：註冊申請 ───
+  content.appendChild(el('div', { style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px'} },
+    el('h3', { style:{margin:'0'} }, '👤 註冊申請'),
+    el('span', { class:'pill', style:{background:'var(--surface-2)',color:'var(--text-muted)'} }, App.db.pending.length + ' 件')
+  ));
 
   if(!App.db.pending.length){
     content.appendChild(el('div', { class:'empty card' },
       el('div', { class:'ico' }, '📭'),
-      el('div', null, '沒有待審核項目')
+      el('div', null, '沒有待審核註冊')
     ));
-    return;
+  } else {
+    const card = el('div', { class:'card' });
+    App.db.pending.slice().reverse().forEach(p => {
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'avatar' }, initials(p.name)));
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, p.name + (p.seat?` (${p.seat})`:'')),
+        el('div', { class:'sub' },
+          (p.cls||'無班級')
+          + (p.sid ? ' · 學號 ' + p.sid : '')
+          + (p.email ? ' · 📧 ' + p.email : '')
+          + ' · ' + relTime(p.ts||0)
+        )
+      ));
+      const acts = el('div', { class:'actions' },
+        el('button', { class:'btn btn-sm btn-success', onclick:()=> approveStudent(p.id) }, '✓ 接受'),
+        el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectStudent(p.id) }, '✗ 拒絕')
+      );
+      row.appendChild(acts);
+      card.appendChild(row);
+    });
+    content.appendChild(card);
   }
-  const card = el('div', { class:'card' });
-  App.db.pending.slice().reverse().forEach(p => {
-    const row = el('div', { class:'list-row' });
-    row.appendChild(el('div', { class:'avatar' }, initials(p.name)));
-    row.appendChild(el('div', { class:'info' },
-      el('div', { class:'name' }, p.name + (p.seat?` (${p.seat})`:'')),
-      el('div', { class:'sub' }, (p.cls||'無班級') + ' · ' + relTime(p.ts||0))
-    ));
-    const acts = el('div', { class:'actions' },
-      el('button', { class:'btn btn-sm btn-success', onclick:()=> approveStudent(p.id) }, '✓ 接受'),
-      el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectStudent(p.id) }, '✗ 拒絕')
-    );
-    row.appendChild(acts);
-    card.appendChild(row);
-  });
-  content.appendChild(card);
 }
 function approveStudent(pid){
   const p = App.db.pending.find(x => x.id === pid);
   if(!p) return;
   App.db.students.push({
-    id: nid(), name:p.name, cls:p.cls, seat:p.seat,
-    password:p.password, note:'學生自註冊'
+    id: nid(), name:p.name, sid:p.sid||'', cls:p.cls, seat:p.seat,
+    email:p.email||'',
+    password:p.password,
+    mustChangePw: !!p.mustChangePw,
+    note:'學生自註冊'
   });
   App.db.pending = App.db.pending.filter(x => x.id !== pid);
   saveDB();
   Sync.setMap('students', App.db.students);
   Sync.setMap('pending', App.db.pending);
   bcNotify();
+  if(typeof logOp === 'function') logOp('approveRegister', '核准 ' + p.name + ' 註冊');
   toast('已加入 ' + p.name,'success');
   rerender();
+}
+
+// 核准密碼重設請求
+function approvePwReset(rid){
+  const r = (App.db.passwordResets || []).find(x => x.id === rid);
+  if(!r) return;
+  const s = App.db.students.find(x => x.id === r.studentId);
+  if(!s){ toast('學生已不存在','danger'); return; }
+  const defPw = String(s.sid||'0000').slice(-4);
+  s.password = defPw;
+  s.mustChangePw = true;
+  s.passwordChangedAt = null;
+  s.passwordResetAt = Date.now();
+  r.status = 'approved';
+  r.processedAt = Date.now();
+  saveDB();
+  try { Sync.setMap('students', App.db.students); Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
+  if(typeof logOp === 'function') logOp('pwResetApprove', '核准重設 ' + s.name + ' 密碼為 ' + defPw);
+  toast('✅ 已重設 ' + s.name + ' 密碼為 ' + defPw + '，請告知學生','success', 5000);
+  rerender();
+}
+function rejectPwReset(rid){
+  confirmDlg('拒絕此密碼重設請求？', { danger:true }).then(ok => {
+    if(!ok) return;
+    const r = (App.db.passwordResets || []).find(x => x.id === rid);
+    if(!r) return;
+    r.status = 'rejected';
+    r.processedAt = Date.now();
+    saveDB();
+    try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
+    toast('已拒絕請求','warning');
+    rerender();
+  });
 }
 function rejectStudent(pid){
   confirmDlg('拒絕並刪除此申請？', { danger:true }).then(ok => {
