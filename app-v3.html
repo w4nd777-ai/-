@@ -1128,6 +1128,311 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 }
 .print-only{ display:none; }
 
+/* ════════════════════════════════════════════════════════════
+   BATCH 1 EXTENSIONS — login redesign / peer eval / seat matrix
+   ──────────────────────────────────────────────────────────── */
+
+/* ---------- Login redesign ---------- */
+.login-card.login-v2{ max-width:540px; padding:28px 22px; }
+.login-hero{
+  text-align:center; margin-bottom:18px;
+}
+.login-hero .logo-xl{
+  width:72px; height:72px; border-radius:18px; margin:0 auto 10px;
+  background:linear-gradient(135deg,var(--primary),var(--accent));
+  color:#fff; font-size:36px; display:flex; align-items:center; justify-content:center;
+  box-shadow:var(--shadow-lg);
+}
+.login-hero h1.brand-h1{ font-size:22px; font-weight:800; letter-spacing:-.03em; }
+.login-hero .brand-sub{ font-size:13px; color:var(--text-muted); margin-top:4px; }
+
+.last-user-box{
+  border:2px solid var(--primary-soft);
+  background:linear-gradient(135deg,var(--primary-soft),var(--surface));
+  border-radius:var(--r-md); padding:16px; margin-bottom:18px;
+  display:flex; flex-direction:column; gap:10px;
+}
+.last-user-row{ display:flex; align-items:center; gap:12px; }
+.last-user-av{
+  width:48px; height:48px; border-radius:50%;
+  color:#fff; font-weight:700; font-size:18px;
+  display:flex; align-items:center; justify-content:center;
+  flex-shrink:0; box-shadow:var(--shadow);
+}
+.last-user-info{ flex:1; min-width:0; }
+.last-user-greet{ font-weight:700; font-size:15px; }
+.last-user-meta{ font-size:12px; color:var(--text-muted); margin-top:2px; }
+.last-user-quick{
+  width:100%; padding:12px 16px;
+  background:var(--primary); color:#fff; border:none;
+  border-radius:var(--r-sm); cursor:pointer;
+  font-weight:700; font-size:15px;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  box-shadow:var(--shadow); transition:all var(--tx);
+}
+.last-user-quick:hover{ background:var(--primary-hover); transform:translateY(-1px); box-shadow:var(--shadow-lg); }
+.last-user-quick:active{ transform:scale(.98); }
+.last-user-clear{
+  background:none; border:none; color:var(--text-muted);
+  font-size:11px; cursor:pointer; padding:4px;
+  text-align:center;
+}
+.last-user-clear:hover{ color:var(--danger); }
+
+.sep-text{
+  display:flex; align-items:center; gap:10px;
+  color:var(--text-faint); font-size:12px; margin:16px 0;
+}
+.sep-text:before, .sep-text:after{
+  content:''; flex:1; height:1px; background:var(--border);
+}
+
+.role-choice{
+  display:grid; grid-template-columns:1fr 1fr; gap:12px;
+}
+.role-choice-card{
+  padding:24px 12px; border:2px solid var(--border);
+  border-radius:var(--r-md); cursor:pointer; background:var(--surface);
+  transition:all .25s cubic-bezier(.34,1.56,.64,1);
+  text-align:center; user-select:none;
+}
+.role-choice-card:hover{
+  border-color:var(--primary); transform:translateY(-4px) scale(1.02);
+  box-shadow:var(--shadow-lg);
+}
+.role-choice-card:active{ transform:scale(.96); }
+.role-choice-card .rc-ico{
+  font-size:48px; line-height:1; margin-bottom:10px;
+  display:block;
+}
+.role-choice-card .rc-title{ font-weight:700; font-size:16px; margin-bottom:4px; }
+.role-choice-card .rc-sub{ font-size:11px; color:var(--text-muted); }
+@keyframes rc-pop{
+  0%{ transform:scale(1); } 50%{ transform:scale(1.06); } 100%{ transform:scale(1); }
+}
+.role-choice-card.tapped{ animation:rc-pop .35s ease; }
+
+.login-stage{ animation:fadeStage .25s ease-out; }
+@keyframes fadeStage{
+  from{ opacity:0; transform:translateY(6px); }
+  to{ opacity:1; transform:translateY(0); }
+}
+
+.pw-input-wrap{ position:relative; }
+.pw-input-wrap input{ padding-right:40px; }
+.pw-toggle{
+  position:absolute; right:8px; top:50%; transform:translateY(-50%);
+  background:none; border:none; cursor:pointer; padding:6px;
+  font-size:18px; color:var(--text-muted); border-radius:6px;
+}
+.pw-toggle:hover{ background:var(--surface-2); color:var(--text); }
+
+.remember-row{
+  display:flex; align-items:center; gap:8px;
+  font-size:13px; cursor:pointer; user-select:none;
+  padding:6px 0;
+}
+.remember-row input{ width:16px; height:16px; cursor:pointer; }
+
+.default-hint{
+  background:var(--surface-2); border-radius:var(--r-sm);
+  padding:10px 12px; font-size:12px; color:var(--text-muted);
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin:8px 0 12px;
+}
+.default-hint .dh-actions{ display:flex; gap:6px; margin-left:auto; }
+.default-hint .dh-actions button{
+  background:var(--surface); border:1px solid var(--border);
+  padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;
+  color:var(--text);
+}
+.default-hint .dh-actions button:hover{ background:var(--surface-3); }
+
+.cls-group{ margin:14px 0 8px; }
+.cls-group-header{
+  display:flex; align-items:center; gap:8px; cursor:pointer;
+  padding:6px 4px; user-select:none;
+  border-radius:6px;
+}
+.cls-group-header:hover{ background:var(--surface-2); }
+.cls-group-header .chev{
+  width:14px; height:14px; transition:transform .2s; font-size:10px;
+  color:var(--text-faint);
+}
+.cls-group.collapsed .chev{ transform:rotate(-90deg); }
+.cls-group-header .gtt{ font-weight:700; font-size:13px; }
+.cls-group-header .gct{ font-size:11px; color:var(--text-muted); }
+.cls-group-body{ display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); gap:8px; padding:6px 0; }
+.cls-group.collapsed .cls-group-body{ display:none; }
+.cls-group-body .pcard{
+  background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:var(--r-md); padding:12px 8px;
+  cursor:pointer; text-align:center;
+  transition:all var(--tx);
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+}
+.cls-group-body .pcard:hover{
+  border-color:var(--primary); transform:translateY(-2px);
+  box-shadow:var(--shadow);
+}
+.cls-group-body .pcard:active{ transform:scale(.97); }
+.cls-group-body .pcard .av{
+  width:42px; height:42px; border-radius:50%;
+  color:#fff; display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:15px;
+}
+.cls-group-body .pcard .nm{ font-weight:700; font-size:13px; }
+.cls-group-body .pcard .mt{ font-size:10px; color:var(--text-muted); }
+
+/* ---------- Peer evaluation ---------- */
+.pe-task-card{
+  padding:14px 16px; border:1px solid var(--border);
+  border-radius:var(--r-md); background:var(--surface);
+  display:flex; flex-direction:column; gap:8px;
+  transition:all var(--tx);
+}
+.pe-task-card:hover{ border-color:var(--primary); box-shadow:var(--shadow); }
+.pe-task-card.open{ border-left:3px solid var(--success); }
+.pe-task-card.closed{ border-left:3px solid var(--text-faint); opacity:.85; }
+.pe-task-head{ display:flex; align-items:flex-start; gap:10px; }
+.pe-task-head h3{ flex:1; min-width:0; }
+.pe-pill{
+  font-size:11px; padding:2px 8px; border-radius:999px;
+  background:var(--surface-2); color:var(--text-muted); font-weight:600;
+}
+.pe-pill.open{ background:var(--success-soft); color:var(--success); }
+.pe-pill.closed{ background:var(--surface-3); color:var(--text-muted); }
+.pe-pill.due{ background:var(--warn-soft); color:var(--warn); }
+
+.pe-dim-row{
+  display:flex; align-items:center; gap:8px;
+  padding:8px 10px; background:var(--surface-2); border-radius:8px;
+  margin-bottom:6px;
+}
+.pe-dim-row .label{ flex:1; font-size:13px; font-weight:600; }
+.pe-star-bar{ display:flex; gap:4px; }
+.pe-star{
+  width:30px; height:30px; border-radius:6px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; font-size:18px; user-select:none;
+  background:var(--surface); border:1px solid var(--border);
+  transition:all var(--tx);
+}
+.pe-star:hover{ background:var(--warn-soft); border-color:var(--warn); }
+.pe-star.active{ background:var(--warn); color:#fff; border-color:var(--warn); }
+.pe-star.active.read{ background:var(--warn-soft); color:var(--warn); cursor:default; }
+
+.pe-ratee-card{
+  padding:12px 14px; border:1px solid var(--border);
+  border-radius:var(--r-md); background:var(--surface);
+  margin-bottom:10px;
+}
+.pe-ratee-head{
+  display:flex; align-items:center; gap:10px; margin-bottom:10px;
+}
+.pe-ratee-av{
+  width:36px; height:36px; border-radius:50%;
+  color:#fff; font-weight:700; font-size:14px;
+  display:flex; align-items:center; justify-content:center;
+}
+.pe-ratee-name{ flex:1; font-weight:700; }
+.pe-done-tag{
+  font-size:11px; padding:2px 8px; border-radius:999px;
+  background:var(--success-soft); color:var(--success); font-weight:600;
+}
+
+.pe-result-row{
+  display:flex; align-items:center; gap:10px;
+  padding:8px 12px; border-bottom:1px solid var(--border);
+}
+.pe-result-row:last-child{ border-bottom:none; }
+.pe-result-name{ flex:1; font-weight:600; }
+.pe-result-score{
+  font-size:20px; font-weight:700; color:var(--primary);
+  letter-spacing:-.02em;
+}
+.pe-result-count{ font-size:11px; color:var(--text-muted); }
+.pe-anomaly{
+  display:inline-block; font-size:10px; padding:1px 6px;
+  background:var(--danger-soft); color:var(--danger);
+  border-radius:999px; font-weight:600; margin-left:4px;
+}
+
+/* ---------- Seat matrix ---------- */
+.matrix-toolbar{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  margin-bottom:14px; padding:10px 12px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md);
+}
+.matrix-toolbar .legend{
+  display:flex; gap:6px; flex-wrap:wrap;
+}
+.matrix-toolbar .legend .lg{
+  display:inline-flex; align-items:center; gap:4px;
+  font-size:11px; color:var(--text-muted);
+}
+.matrix-toolbar .legend .dot{
+  width:10px; height:10px; border-radius:3px; display:inline-block;
+}
+.matrix-grid{
+  display:grid; gap:8px; padding:14px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-md); overflow-x:auto;
+}
+.matrix-podium{
+  text-align:center; font-size:11px; color:var(--text-faint);
+  padding:6px 0 10px; letter-spacing:.2em; font-weight:600;
+  border-bottom:2px dashed var(--border); margin-bottom:10px;
+}
+.matrix-seat{
+  min-height:64px; border:2px solid var(--border);
+  border-radius:10px; background:var(--surface-2);
+  padding:6px; display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  cursor:pointer; user-select:none; position:relative;
+  transition:all var(--tx);
+}
+.matrix-seat:hover{ transform:translateY(-2px); box-shadow:var(--shadow); }
+.matrix-seat .seat-no{
+  position:absolute; top:2px; left:4px;
+  font-size:9px; color:var(--text-faint); font-weight:600;
+}
+.matrix-seat .seat-nm{
+  font-weight:700; font-size:12px; text-align:center;
+  word-break:break-all; line-height:1.2;
+}
+.matrix-seat .seat-st{
+  font-size:14px; margin-top:2px;
+}
+.matrix-seat.s-present{ background:var(--success-soft); border-color:var(--success); }
+.matrix-seat.s-late{ background:var(--warn-soft); border-color:var(--warn); }
+.matrix-seat.s-leave{ background:var(--accent-soft); border-color:var(--accent); }
+.matrix-seat.s-absent{ background:var(--danger-soft); border-color:var(--danger); }
+.matrix-seat.s-empty{ background:var(--surface-3); border-style:dashed; opacity:.45; cursor:default; }
+.matrix-seat.s-empty:hover{ transform:none; box-shadow:none; }
+.matrix-seat.dragging{ opacity:.5; transform:scale(.95); }
+.matrix-seat.drag-over{ border-color:var(--primary); border-style:dashed; background:var(--primary-soft); }
+
+.matrix-cls-tabs{
+  display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;
+}
+.matrix-cls-tabs button{
+  padding:6px 14px; border:1px solid var(--border);
+  background:var(--surface); border-radius:999px;
+  cursor:pointer; font-size:13px; font-weight:600;
+}
+.matrix-cls-tabs button.active{
+  background:var(--primary); color:#fff; border-color:var(--primary);
+}
+
+@media (max-width:520px){
+  .role-choice{ grid-template-columns:1fr; }
+  .role-choice-card{ padding:18px 12px; }
+  .role-choice-card .rc-ico{ font-size:40px; }
+  .cls-group-body{ grid-template-columns:repeat(auto-fill,minmax(80px,1fr)); }
+}
+
 </style>
 </head>
 <body>
@@ -1148,6 +1453,9 @@ const LS_FB  = LS_KEY + '_fb_cfg';
 const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_SESSION = LS_KEY + '_session';
+const LS_LAST_USER  = LS_KEY + '_last_user';
+const LS_REMEMBER   = LS_KEY + '_remember';
+const LS_LOGIN_STEP = LS_KEY + '_login_step';
 
 const App = {
   cfg: null,           // workspace config: {roomCode, role, ...}
@@ -1330,6 +1638,7 @@ function defaultDB(){
     announcements: [],
     leaves: [],            // {id, studentId, name, date, reason, status, ts}
     pending: [],           // pending student registrations
+    peerEvals: [],         // batch 1: 學生互評任務
     settings: {
       schoolName: '我的課程',
       teacherName: '老師',
@@ -1377,7 +1686,7 @@ function loadDB(){
     const parsed = JSON.parse(raw);
     App.db = Object.assign(defaultDB(), parsed);
     // ensure all arrays exist
-    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending'];
+    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals'];
     arrFields.forEach(f => { if(!Array.isArray(App.db[f])) App.db[f] = []; });
     if(!App.db.settings || typeof App.db.settings !== 'object') App.db.settings = defaultDB().settings;
     if(!App.db.branding || typeof App.db.branding !== 'object') App.db.branding = defaultDB().branding;
@@ -2260,136 +2569,160 @@ function studentRegisterFlow(){
 }
 
 /* ════════════════════════════════════════════════════════════
-   LOGIN SCREENS
+   LOGIN SCREENS  (batch 1 redesign)
    ──────────────────────────────────────────────────────────── */
+function loadLastUser(){
+  try { return JSON.parse(localStorage.getItem(LS_LAST_USER) || 'null'); } catch(e){ return null; }
+}
+function saveLastUser(u){
+  try {
+    if(u) localStorage.setItem(LS_LAST_USER, JSON.stringify(u));
+    else localStorage.removeItem(LS_LAST_USER);
+  } catch(e){}
+}
+function loadRemember(){
+  try { return JSON.parse(localStorage.getItem(LS_REMEMBER) || 'null'); } catch(e){ return null; }
+}
+function saveRemember(r){
+  try {
+    if(r) localStorage.setItem(LS_REMEMBER, JSON.stringify(r));
+    else localStorage.removeItem(LS_REMEMBER);
+  } catch(e){}
+}
+function loadLoginStep(){
+  try { return localStorage.getItem(LS_LOGIN_STEP) || 'choose'; } catch(e){ return 'choose'; }
+}
+function saveLoginStep(step){
+  try {
+    if(step) localStorage.setItem(LS_LOGIN_STEP, step);
+    else localStorage.removeItem(LS_LOGIN_STEP);
+  } catch(e){}
+}
+
+// Try one-click continue from saved last user.
+function quickContinueAsLast(){
+  const lu = loadLastUser();
+  if(!lu) return toast('沒有上次登入紀錄','danger');
+  if(lu.role === 'teacher'){
+    const a = App.db.accounts.find(x => x.id === lu.id || x.username === lu.username);
+    if(!a) return toast('帳號已被刪除，請重新登入','danger');
+    // remember-me: skip password if within 7 days
+    const rem = loadRemember();
+    const remOk = rem && rem.username === a.username && (Date.now() - rem.ts) < 7*24*3600*1000;
+    if(remOk){
+      App.session = { role:'teacher', id:a.id, name:a.name, username:a.username };
+      saveSession();
+      saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
+      toast('歡迎回來，' + a.name + '！','success');
+      go('overview');
+      return;
+    }
+    // otherwise prompt for password
+    App._loginStage = 'teacher';
+    App._loginPrefill = { username: a.username };
+    rerender();
+    return;
+  }
+  if(lu.role === 'student'){
+    const s = App.db.students.find(x => x.id === lu.id);
+    if(!s) return toast('學生已不存在','danger');
+    studentTapToLogin(s.id);
+  }
+}
+
 function renderLogin(root){
   root.innerHTML = '';
   const wrap = el('div', { class:'center-wrap' });
-  const card = el('div', { class:'login-card' });
-  card.appendChild(el('div', { class:'brand-big' },
-    el('div', { class:'logo' }, '🎓'),
-    el('div', null,
-      el('h2', null, App.db.branding.title || '課程管理系統'),
-      el('div', { class:'muted small' }, '請選擇身分登入')
-    )
-  ));
+  const card = el('div', { class:'login-card login-v2' });
 
-  const tabbar = el('div', { class:'tab-bar' });
-  const btnT = el('button', { class: (App.loginRole !== 'student') ? 'active':'', onclick:()=> { App.loginRole='teacher'; renderLogin(root); } }, '🧑‍🏫 老師');
-  const btnS = el('button', { class: (App.loginRole === 'student') ? 'active':'', onclick:()=> { App.loginRole='student'; renderLogin(root); } }, '🧑‍🎓 學生');
-  tabbar.appendChild(btnT); tabbar.appendChild(btnS);
-  card.appendChild(tabbar);
+  // Hero
+  const hero = el('div', { class:'login-hero' },
+    el('div', { class:'logo-xl' }, '🎓'),
+    el('h1', { class:'brand-h1' }, App.db.branding.title || '課程管理系統'),
+    el('div', { class:'brand-sub' }, '極簡校園管理工具')
+  );
+  card.appendChild(hero);
 
-  if(App.loginRole === 'student'){
-    // ── student login: tap-your-name grid (Linear-style) ──
-    const intro = el('div', { class:'small muted', style:{marginBottom:'8px',textAlign:'center'} },
-      '點一下你的名字就能登入'
-    );
-    card.appendChild(intro);
+  // Stage default — back-compat with old App.loginRole flag
+  if(!App._loginStage){
+    App._loginStage = (App.loginRole === 'teacher' || App.loginRole === 'student')
+      ? App.loginRole : 'choose';
+  }
 
-    if(!App.db.students.length){
-      // empty roster — bypass to registration flow
-      card.appendChild(el('div', { class:'empty', style:{padding:'24px 8px'} },
-        el('div', { class:'ico', style:{fontSize:'40px'} }, '🧑‍🎓'),
-        el('div', null, '老師還沒建立學生名單'),
-        el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '你可以申請註冊，等待老師審核')
-      ));
-      card.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
-    } else {
-      // search box (auto-show when > 12 students)
-      const showSearch = App.db.students.length > 12;
-      let q = (App._stuLoginSearch || '').toLowerCase();
-      const grid = el('div', { class:'stu-picker' });
-
-      function renderGrid(){
-        grid.innerHTML = '';
-        let list = App.db.students.slice();
-        if(q){
-          list = list.filter(s =>
-            (s.name||'').toLowerCase().includes(q) ||
-            (s.cls||'').toLowerCase().includes(q) ||
-            String(s.sid||'').toLowerCase().includes(q) ||
-            String(s.seat||'').includes(q)
-          );
-        }
-        list.sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0) || (a.name||'').localeCompare(b.name||''));
-        if(!list.length){
-          grid.appendChild(el('div', { class:'muted small', style:{gridColumn:'1/-1',textAlign:'center',padding:'20px'} },
-            '找不到「' + (q||'…') + '」'
-          ));
-          return;
-        }
-        list.forEach((s, idx) => {
-          const pcard = el('button', { class:'pcard', onclick:()=> studentTapToLogin(s.id), title:'點此登入 ' + s.name });
-          const colorIdx = (s.id ? String(s.id).charCodeAt(0) : idx) % 8;
-          pcard.appendChild(el('div', { class:'av av-color-' + colorIdx }, initials(s.name)));
-          pcard.appendChild(el('div', { class:'nm' }, s.name));
-          const meta = (s.cls ? s.cls + ' · ' : '') + (s.sid ? '學號 ' + s.sid : (s.seat ? '座號 ' + s.seat : ''));
-          if(meta) pcard.appendChild(el('div', { class:'mt' }, meta));
-          grid.appendChild(pcard);
-        });
-      }
-
-      if(showSearch){
-        const search = el('input', { class:'input stu-picker-search', placeholder:'🔍 搜尋姓名 / 班級 / 學號', value: App._stuLoginSearch||'',
-          oninput: e => { q = e.target.value.toLowerCase(); App._stuLoginSearch = e.target.value; renderGrid(); } });
-        card.appendChild(search);
-      }
-      card.appendChild(grid);
-      renderGrid();
-
-      card.appendChild(el('hr', { class:'sep' }));
-      const help = el('div', { class:'small muted', style:{textAlign:'center',marginBottom:'8px'} },
-        '找不到你的名字？'
+  // ─── Last user quick entry (only on choose stage) ───
+  const lastUser = loadLastUser();
+  if(App._loginStage === 'choose' && lastUser){
+    const stillExists = (lastUser.role === 'teacher')
+      ? !!App.db.accounts.find(a => a.id === lastUser.id || a.username === lastUser.username)
+      : !!App.db.students.find(s => s.id === lastUser.id);
+    if(stillExists){
+      const colorIdx = (lastUser.id ? String(lastUser.id).charCodeAt(0) : 0) % 8;
+      const lub = el('div', { class:'last-user-box' });
+      const row = el('div', { class:'last-user-row' },
+        el('div', { class:'last-user-av av-color-' + colorIdx }, initials(lastUser.name || '?')),
+        el('div', { class:'last-user-info' },
+          el('div', { class:'last-user-greet' }, '👋 歡迎回來，' + (lastUser.name || '使用者') + '！'),
+          el('div', { class:'last-user-meta' },
+            (lastUser.role === 'teacher' ? '老師' : '學生') +
+            ' · 上次登入：' + (lastUser.ts ? relTime(lastUser.ts) : '—')
+          )
+        )
       );
-      card.appendChild(help);
-      card.appendChild(el('button', { class:'btn btn-block', onclick: studentRegisterFlow }, '＋ 申請註冊'));
+      lub.appendChild(row);
+      lub.appendChild(el('button', { class:'last-user-quick', onclick: quickContinueAsLast },
+        '🚀 一鍵繼續使用'
+      ));
+      lub.appendChild(el('button', { class:'last-user-clear', onclick: ()=> {
+        saveLastUser(null); saveRemember(null); rerender();
+      }}, '清除登入紀錄'));
+      card.appendChild(lub);
+      card.appendChild(el('div', { class:'sep-text' }, '或選擇身分'));
     }
-  } else {
-    // teacher login
-    const hasDefault = App.db.accounts.some(a => a.username === 'admin' && a.password === 'admin123');
+  }
 
-    const f1 = el('div', { class:'field' });
-    f1.appendChild(el('label', { class:'label' }, '帳號'));
-    const i1 = el('input', { class:'input', placeholder:'admin', autocomplete:'username', value: hasDefault ? 'admin' : '' });
-    f1.appendChild(i1);
-    card.appendChild(f1);
-
-    const f2 = el('div', { class:'field' });
-    f2.appendChild(el('label', { class:'label' }, '密碼'));
-    const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password', value: hasDefault ? 'admin123' : '' });
-    f2.appendChild(i2);
-    card.appendChild(f2);
-
-    // helper hint for first-time use
-    if(hasDefault){
-      card.appendChild(el('div', { class:'small muted', style:{
-        textAlign:'center',padding:'8px 12px',marginBottom:'10px',
-        background:'var(--surface-2)',borderRadius:'8px'
-      }}, '💡 已預填預設帳密，直接按「登入」即可（建議改密碼）'));
-    }
-
-    const submit = ()=>{
-      const u = i1.value.trim(); const pw = i2.value;
-      const a = App.db.accounts.find(x => x.username === u && x.password === pw);
-      if(!a) return toast('帳號或密碼錯誤','danger');
-      App.session = { role:'teacher', id:a.id, name:a.name, username:a.username };
-      saveSession();
-      toast('歡迎，' + a.name + '！','success');
-      go('overview');
-    };
-    const btn = el('button', { class:'btn btn-primary btn-block', onclick: submit }, '登入');
-    i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
-    i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
-    card.appendChild(btn);
+  // ─── Stage: choose role ───
+  if(App._loginStage === 'choose'){
+    const stage = el('div', { class:'login-stage' });
+    const grid = el('div', { class:'role-choice' });
+    const teacherCard = el('button', { class:'role-choice-card', onclick: e => {
+      e.currentTarget.classList.add('tapped');
+      setTimeout(()=> { App._loginStage = 'teacher'; rerender(); }, 220);
+    }},
+      el('span', { class:'rc-ico' }, '🧑‍🏫'),
+      el('div', { class:'rc-title' }, '我是老師'),
+      el('div', { class:'rc-sub' }, '班級管理 / 成績 / 公告')
+    );
+    const studentCard = el('button', { class:'role-choice-card', onclick: e => {
+      e.currentTarget.classList.add('tapped');
+      setTimeout(()=> { App._loginStage = 'student'; rerender(); }, 220);
+    }},
+      el('span', { class:'rc-ico' }, '🧑‍🎓'),
+      el('div', { class:'rc-title' }, '我是學生'),
+      el('div', { class:'rc-sub' }, '簽到 / 作業 / 成績')
+    );
+    grid.appendChild(teacherCard);
+    grid.appendChild(studentCard);
+    stage.appendChild(grid);
+    card.appendChild(stage);
+  }
+  else if(App._loginStage === 'teacher'){
+    card.appendChild(renderLoginTeacherStage());
+  }
+  else if(App._loginStage === 'student'){
+    card.appendChild(renderLoginStudentStage());
   }
 
   card.appendChild(el('hr', { class:'sep' }));
-  const back = el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)'}, onclick: async ()=> {
+  const back = el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',width:'100%'}, onclick: async ()=> {
     const ok = await confirmDlg('要切換到別的教室嗎？目前的設定會被清除（資料保留）');
     if(ok){
       App.cfg = null; App.session = null;
-      try { localStorage.removeItem(LS_CFG); localStorage.removeItem(LS_SESSION); } catch(e){}
+      try {
+        localStorage.removeItem(LS_CFG);
+        localStorage.removeItem(LS_SESSION);
+        localStorage.removeItem(LS_LAST_USER);
+        localStorage.removeItem(LS_REMEMBER);
+      } catch(e){}
       rerender();
     }
   }}, '← 切換教室');
@@ -2397,6 +2730,176 @@ function renderLogin(root){
 
   wrap.appendChild(card);
   root.appendChild(wrap);
+}
+
+function renderLoginTeacherStage(){
+  const stage = el('div', { class:'login-stage' });
+  stage.appendChild(el('h3', { style:{marginBottom:'14px'} }, '🧑‍🏫 老師登入'));
+
+  const hasDefault = App.db.accounts.some(a => a.username === 'admin' && a.password === 'admin123');
+  const prefill = App._loginPrefill || {};
+  const rememberSaved = loadRemember();
+
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '帳號'));
+  const i1 = el('input', { class:'input', placeholder:'admin', autocomplete:'username',
+    value: prefill.username || (rememberSaved && rememberSaved.username) || '' });
+  f1.appendChild(i1);
+  stage.appendChild(f1);
+
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '密碼'));
+  const pwWrap = el('div', { class:'pw-input-wrap' });
+  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
+  const togglePw = el('button', { type:'button', class:'pw-toggle', onclick: e => {
+    e.preventDefault();
+    if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
+    else { i2.type = 'password'; togglePw.textContent = '👁'; }
+  }}, '👁');
+  pwWrap.appendChild(i2); pwWrap.appendChild(togglePw);
+  f2.appendChild(pwWrap);
+  stage.appendChild(f2);
+
+  // Remember me
+  const rememberLabel = el('label', { class:'remember-row' });
+  const rememberChk = el('input', { type:'checkbox' });
+  if(rememberSaved && rememberSaved.username) rememberChk.checked = true;
+  rememberLabel.appendChild(rememberChk);
+  rememberLabel.appendChild(document.createTextNode(' 記住我（7 天內免輸入密碼）'));
+  stage.appendChild(rememberLabel);
+
+  if(hasDefault){
+    const hint = el('div', { class:'default-hint' },
+      el('span', null, '💡 預設帳號：'),
+      el('code', { style:{fontSize:'12px'} }, 'admin / admin123'),
+      el('div', { class:'dh-actions' },
+        el('button', { onclick: e => { e.preventDefault(); i1.value='admin'; i2.value='admin123'; }}, '使用預設'),
+        el('button', { onclick: e => { e.preventDefault(); i1.value=''; i2.value=''; i1.focus(); }}, '清除')
+      )
+    );
+    stage.appendChild(hint);
+  }
+
+  const submit = ()=>{
+    const u = i1.value.trim(); const pw = i2.value;
+    if(!u || !pw){ toast('請輸入帳號和密碼','danger'); return; }
+    const a = App.db.accounts.find(x => x.username === u && x.password === pw);
+    if(!a){ toast('帳號或密碼錯誤','danger'); return; }
+    App.session = { role:'teacher', id:a.id, name:a.name, username:a.username };
+    saveSession();
+    saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
+    if(rememberChk.checked){
+      saveRemember({ username:a.username, ts:Date.now() });
+    } else {
+      saveRemember(null);
+    }
+    App._loginStage = null; App._loginPrefill = null;
+    toast('歡迎，' + a.name + '！','success');
+    go('overview');
+  };
+
+  const btnRow = el('div', { class:'flex', style:{marginTop:'10px'} },
+    el('button', { class:'btn', style:{flex:'0 0 auto'}, onclick: ()=> { App._loginStage = 'choose'; App._loginPrefill = null; rerender(); } }, '← 返回'),
+    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: submit }, '登入 →')
+  );
+  stage.appendChild(btnRow);
+
+  i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+  i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+  setTimeout(()=> { (i1.value ? i2 : i1).focus(); }, 80);
+
+  return stage;
+}
+
+function renderLoginStudentStage(){
+  const stage = el('div', { class:'login-stage' });
+  stage.appendChild(el('h3', null, '🧑‍🎓 請選擇你的名字'));
+  stage.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '點一下你的卡片就能登入'));
+
+  if(!App.db.students.length){
+    stage.appendChild(el('div', { class:'empty', style:{padding:'24px 8px'} },
+      el('div', { class:'ico', style:{fontSize:'40px'} }, '🧑‍🎓'),
+      el('div', null, '老師還沒建立學生名單'),
+      el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '你可以申請註冊，等待老師審核')
+    ));
+    stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
+    stage.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'6px'}, onclick: ()=> { App._loginStage = 'choose'; rerender(); } }, '← 返回'));
+    return stage;
+  }
+
+  // Search bar
+  let q = (App._stuLoginSearch || '').toLowerCase();
+  App._collapsedClasses = App._collapsedClasses || {};
+
+  const search = el('input', { class:'input stu-picker-search', placeholder:'🔍 搜尋你的名字或學號…',
+    value: App._stuLoginSearch||'',
+    oninput: e => { q = e.target.value.toLowerCase(); App._stuLoginSearch = e.target.value; renderGroups(); }
+  });
+  stage.appendChild(search);
+
+  const host = el('div');
+  stage.appendChild(host);
+
+  function renderGroups(){
+    host.innerHTML = '';
+    let list = App.db.students.slice();
+    if(q){
+      list = list.filter(s =>
+        (s.name||'').toLowerCase().includes(q) ||
+        (s.cls||'').toLowerCase().includes(q) ||
+        String(s.sid||'').toLowerCase().includes(q) ||
+        String(s.seat||'').includes(q)
+      );
+    }
+    if(!list.length){
+      host.appendChild(el('div', { class:'muted small', style:{textAlign:'center',padding:'30px 8px'} },
+        '找不到「' + (q || '…') + '」'));
+      return;
+    }
+    // group by cls
+    const groups = {};
+    list.forEach(s => {
+      const k = s.cls || '未分班';
+      if(!groups[k]) groups[k] = [];
+      groups[k].push(s);
+    });
+    const keys = Object.keys(groups).sort((a,b)=> a.localeCompare(b));
+    keys.forEach(k => {
+      const arr = groups[k].sort((a,b)=> (a.seat||0)-(b.seat||0) || (a.name||'').localeCompare(b.name||''));
+      const collapsed = !!App._collapsedClasses[k];
+      const grp = el('div', { class:'cls-group' + (collapsed ? ' collapsed' : '') });
+      const header = el('div', { class:'cls-group-header', onclick: ()=> {
+        App._collapsedClasses[k] = !collapsed;
+        renderGroups();
+      }},
+        el('span', { class:'chev' }, '▼'),
+        el('span', { class:'gtt' }, '── ' + k + ' ──'),
+        el('span', { class:'gct' }, '(' + arr.length + ' 人)')
+      );
+      const body = el('div', { class:'cls-group-body' });
+      arr.forEach((s, idx) => {
+        const colorIdx = (s.id ? String(s.id).charCodeAt(0) : idx) % 8;
+        const pcard = el('button', { class:'pcard', onclick:()=> studentTapToLogin(s.id), title:'點此登入 ' + s.name });
+        pcard.appendChild(el('div', { class:'av av-color-' + colorIdx }, initials(s.name)));
+        pcard.appendChild(el('div', { class:'nm' }, s.name));
+        const meta = (s.sid ? '學號 ' + s.sid : (s.seat ? '座號 ' + s.seat : ''));
+        if(meta) pcard.appendChild(el('div', { class:'mt' }, meta));
+        body.appendChild(pcard);
+      });
+      grp.appendChild(header);
+      grp.appendChild(body);
+      host.appendChild(grp);
+    });
+  }
+  renderGroups();
+
+  stage.appendChild(el('hr', { class:'sep' }));
+  stage.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px'} },
+    el('button', { class:'btn', style:{flex:'1'}, onclick: ()=> { App._loginStage = 'choose'; App._stuLoginSearch=''; rerender(); } }, '← 返回'),
+    el('button', { class:'btn', style:{flex:'1'}, onclick: studentRegisterFlow }, '找不到我 → 申請註冊')
+  ));
+  return stage;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2463,6 +2966,8 @@ function studentTapToLogin(studentId){
 function finishStudentLogin(s){
   App.session = { role:'student', id:s.id, name:s.name, cls:s.cls };
   saveSession();
+  saveLastUser({ role:'student', id:s.id, name:s.name, cls:s.cls||'', ts:Date.now() });
+  App._loginStage = null;
   toast('歡迎回來，' + s.name + '！','success');
   go('checkin');
 }
@@ -2515,6 +3020,7 @@ function renderSidebarTeacher(){
   side.appendChild(sideItem('overview','📊','總覽'));
   side.appendChild(sideItem('students','👥','學生名單'));
   side.appendChild(sideItem('attendance','✅','出席管理'));
+  side.appendChild(sideItem('matrix','🪑','座位矩陣'));
   side.appendChild(sideItem('qr','📱','QR Code 簽到'));
   side.appendChild(sideItem('leave','📆','請假管理'));
   side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
@@ -2523,6 +3029,7 @@ function renderSidebarTeacher(){
   side.appendChild(sideItem('submissions','📥','繳交記錄', pendingGradeCount() || null));
   side.appendChild(sideItem('grades','🎯','學期成績'));
   side.appendChild(sideItem('evals','💬','課程評價'));
+  side.appendChild(sideItem('peer','⭐','學生互評'));
   side.appendChild(sideItem('announcements','📢','公告管理'));
   side.appendChild(sideItem('analytics','📈','分析工具'));
   side.appendChild(sideItem('calendar','📅','行事曆'));
@@ -2574,6 +3081,7 @@ function renderSidebarStudent(){
   side.appendChild(sideItem('sasgn','📤','作業', studentNewAssignmentCount() || null));
   side.appendChild(sideItem('sgrade','🎯','我的成績'));
   side.appendChild(sideItem('sev','⭐','課程評價'));
+  side.appendChild(sideItem('speer','⭐','我的互評', studentPendingPeerCount() || null));
   side.appendChild(sideItem('sann','📢','公告', studentUnreadAnnouncements() || null));
   side.appendChild(el('button', { class:'side-item', onclick: openAIAssistant },
     el('span', { class:'ico' }, '🤖'),
@@ -2603,10 +3111,12 @@ function renderTopbar(role){
     evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具',
     qr:'📱 QR Code 簽到', calendar:'📅 行事曆', gantt:'📊 作業甘特圖',
     workspace:'🏢 多教室管理', notify:'📲 通知設定',
-    backup:'💼 備份與還原', logs:'📜 操作紀錄', storage:'💾 儲存空間'
+    backup:'💼 備份與還原', logs:'📜 操作紀錄', storage:'💾 儲存空間',
+    peer:'⭐ 學生互評', matrix:'🪑 座位矩陣'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
-    sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告'
+    sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
+    speer:'⭐ 我的互評'
   };
   const t = titles[App.view] || (role === 'teacher' ? '課程管理' : '學生');
   bar.appendChild(el('h1', null, t));
@@ -2687,9 +3197,9 @@ function openMoreMenuTeacher(){
   const m = modal('');
   m.root.appendChild(el('h2', null, '更多'));
   const items = [
-    ['students','👥 學生名單'],['qr','📱 QR 簽到'],
+    ['students','👥 學生名單'],['matrix','🪑 座位矩陣'],['qr','📱 QR 簽到'],
     ['leave','📆 請假管理'],['messages','💬 訊息'],
-    ['grades','🎯 學期成績'],['evals','💬 課程評價'],
+    ['grades','🎯 學期成績'],['evals','💬 課程評價'],['peer','⭐ 學生互評'],
     ['announcements','📢 公告管理'],['analytics','📈 分析工具'],
     ['calendar','📅 行事曆'],['gantt','📊 甘特圖'],
     ['workspace','🏢 多教室'],['notify','📲 通知設定'],
@@ -2717,7 +3227,8 @@ function openMoreMenuStudent(){
   m.root.appendChild(el('h2', null, '更多'));
   const items = [
     ['myatt','📅 出席紀錄'],['myleave','📆 請假'],
-    ['messages','💬 訊息'],['sev','⭐ 課程評價'],['me','👤 個人']
+    ['messages','💬 訊息'],['sev','⭐ 課程評價'],
+    ['speer','⭐ 我的互評'],['me','👤 個人']
   ];
   const grid = el('div', { class:'grid grid-2' });
   items.forEach(([v,t]) => {
@@ -2749,6 +3260,20 @@ function studentUnreadAnnouncements(){
   try { last = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e){}
   return App.db.announcements.filter(a => (a.ts||0) > last && !isAnnouncementExpired(a)).length;
 }
+function studentPendingPeerCount(){
+  if(!App.session || App.session.role !== 'student') return 0;
+  const me = currentStudent(); if(!me) return 0;
+  if(!App.db.peerEvals || !App.db.peerEvals.length) return 0;
+  let pending = 0;
+  App.db.peerEvals.forEach(pe => {
+    if(typeof peerEvalIsDueClosed === 'function' && peerEvalIsDueClosed(pe)) return;
+    const ratees = (typeof peerEvalRatees === 'function') ? peerEvalRatees(pe, me) : [];
+    if(!ratees.length) return;
+    const done = (pe.scores||[]).filter(s => s.raterId === me.id).length;
+    if(done < ratees.length) pending++;
+  });
+  return pending;
+}
 function isAnnouncementExpired(a){
   if(!a.expireAt) return false;
   return new Date(a.expireAt).getTime() < Date.now();
@@ -2764,6 +3289,8 @@ function doLogout(){
     if(!ok) return;
     App.session = null;
     saveSession();
+    App._loginStage = 'choose';
+    App._loginPrefill = null;
     rerender();
   });
 }
@@ -8161,6 +8688,759 @@ function openTeacherInfo(){
 }
 
 /* ════════════════════════════════════════════════════════════
+   BATCH 1 ▒▒  PEER EVALUATIONS  (rPeer / rSPeer)
+   ────────────────────────────────────────────────────────────
+   DB.peerEvals = [{
+     id, title, desc, dueDate, scope:'class'|'group'|'custom',
+     targetCls, targetGroupId, targetStudentIds (array),
+     dimensions:[{key, label}],
+     status:'open'|'closed',
+     scores:[{ raterId, rateeId, dims:{key:1-5}, comment, anonymous, ts }],
+     createdBy, createdAt
+   }]
+   ──────────────────────────────────────────────────────────── */
+
+function peerEvalIsDueClosed(pe){
+  if(pe.status === 'closed') return true;
+  if(pe.dueDate){
+    const due = new Date(pe.dueDate + 'T23:59:59').getTime();
+    if(Date.now() > due) return true;
+  }
+  return false;
+}
+
+function peerEvalRatees(pe, me){
+  // Returns list of student records the given rater (me) should rate.
+  if(!me) return [];
+  let pool = App.db.students.slice();
+  if(pe.scope === 'class' && pe.targetCls){
+    pool = pool.filter(s => (s.cls||'') === pe.targetCls);
+  } else if(pe.scope === 'group' && pe.targetGroupId){
+    const g = App.db.groups.find(x => x.id === pe.targetGroupId);
+    const ids = new Set((g && g.memberIds) || []);
+    pool = pool.filter(s => ids.has(s.id));
+  } else if(pe.scope === 'custom' && Array.isArray(pe.targetStudentIds)){
+    const ids = new Set(pe.targetStudentIds);
+    pool = pool.filter(s => ids.has(s.id));
+  }
+  // Exclude self by default
+  return pool.filter(s => s.id !== me.id);
+}
+
+function peerEvalAggregate(pe){
+  // Returns { rateeId: { name, count, perDim:{key:avg}, total } }
+  const out = {};
+  (pe.scores || []).forEach(sc => {
+    if(!sc.rateeId) return;
+    if(!out[sc.rateeId]){
+      const s = App.db.students.find(x => x.id === sc.rateeId);
+      out[sc.rateeId] = { name: s ? s.name : '?', cls: s ? s.cls : '', count:0, sums:{}, perDim:{}, scoresPerDim:{} };
+    }
+    out[sc.rateeId].count++;
+    (pe.dimensions || []).forEach(d => {
+      const v = sc.dims && typeof sc.dims[d.key] === 'number' ? sc.dims[d.key] : null;
+      if(v == null) return;
+      out[sc.rateeId].sums[d.key] = (out[sc.rateeId].sums[d.key] || 0) + v;
+      if(!out[sc.rateeId].scoresPerDim[d.key]) out[sc.rateeId].scoresPerDim[d.key] = [];
+      out[sc.rateeId].scoresPerDim[d.key].push(v);
+    });
+  });
+  Object.values(out).forEach(o => {
+    let total = 0, n = 0;
+    (pe.dimensions || []).forEach(d => {
+      const list = o.scoresPerDim[d.key] || [];
+      if(list.length){
+        o.perDim[d.key] = list.reduce((a,b)=>a+b,0) / list.length;
+        total += o.perDim[d.key]; n++;
+      }
+    });
+    o.total = n ? (total / n) : 0;
+  });
+  return out;
+}
+
+function peerEvalDetectOutliers(pe){
+  // For each ratee, mark scores that are more than 2 stdev from mean per dim
+  // Returns Set of "raterId:rateeId" keys with anomalies
+  const out = new Set();
+  if(!pe.scores || pe.scores.length < 3) return out;
+  (pe.dimensions || []).forEach(d => {
+    // group by ratee
+    const byRatee = {};
+    pe.scores.forEach(sc => {
+      const v = sc.dims && typeof sc.dims[d.key] === 'number' ? sc.dims[d.key] : null;
+      if(v == null) return;
+      if(!byRatee[sc.rateeId]) byRatee[sc.rateeId] = [];
+      byRatee[sc.rateeId].push({ raterId: sc.raterId, v });
+    });
+    Object.values(byRatee).forEach(arr => {
+      if(arr.length < 3) return;
+      const mean = arr.reduce((a,b)=>a+b.v,0) / arr.length;
+      const sd = Math.sqrt(arr.reduce((a,b)=>a + Math.pow(b.v-mean,2), 0) / arr.length);
+      if(sd < 0.1) return;
+      arr.forEach(x => {
+        if(Math.abs(x.v - mean) > 2*sd){
+          // store with rater id only for AI inspect
+          out.add(x.raterId);
+        }
+      });
+    });
+  });
+  return out;
+}
+
+function rPeer(content){
+  // Teacher view: list / create / detail of peer eval tasks
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '⭐ 學生互評'),
+      el('div', { class:'small muted' }, '建立互評任務、設定維度、查看結果')
+    ),
+    el('button', { class:'btn btn-primary', onclick: openPeerEvalCreator }, '＋ 新增互評')
+  ));
+
+  if(App.subview && App.subview.startsWith('p_')){
+    const pid = App.subview.slice(2);
+    const pe = App.db.peerEvals.find(x => x.id === pid);
+    if(pe) return rPeerDetail(content, pe);
+  }
+
+  const list = App.db.peerEvals.slice().sort((a,b)=> (b.createdAt||0)-(a.createdAt||0));
+  if(!list.length){
+    content.appendChild(el('div', { class:'empty', style:{padding:'40px 20px'} },
+      el('div', { class:'ico', style:{fontSize:'48px'} }, '⭐'),
+      el('div', null, '還沒有互評任務'),
+      el('div', { class:'tiny muted', style:{marginTop:'6px'} }, '點右上「新增互評」開始')
+    ));
+    return;
+  }
+
+  const grid = el('div', { class:'grid', style:{gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'12px'} });
+  list.forEach(pe => {
+    const closed = peerEvalIsDueClosed(pe);
+    const card = el('div', { class:'pe-task-card ' + (closed?'closed':'open'), onclick: ()=> go('peer', 'p_'+pe.id) });
+    const head = el('div', { class:'pe-task-head' },
+      el('h3', null, pe.title || '未命名互評'),
+      el('span', { class:'pe-pill ' + (closed?'closed':'open') }, closed ? '已結束' : '進行中')
+    );
+    card.appendChild(head);
+    if(pe.desc) card.appendChild(el('div', { class:'small muted' }, pe.desc));
+    const meta = [];
+    meta.push((pe.dimensions||[]).length + ' 個維度');
+    meta.push((pe.scores||[]).length + ' 筆回應');
+    if(pe.dueDate) meta.push('截止 ' + pe.dueDate);
+    card.appendChild(el('div', { class:'tiny muted' }, meta.join(' · ')));
+    grid.appendChild(card);
+  });
+  content.appendChild(grid);
+}
+
+function openPeerEvalCreator(){
+  const m = modal('', { dismissable:false });
+  m.root.style.maxWidth = '520px';
+  m.root.appendChild(el('h2', null, '⭐ 新增互評任務'));
+
+  const fTitle = el('div', { class:'field' },
+    el('label', { class:'label' }, '標題 *'),
+    el('input', { class:'input', placeholder:'例：期末小組報告互評', id:'pe-title' })
+  );
+  const fDesc = el('div', { class:'field' },
+    el('label', { class:'label' }, '說明'),
+    el('textarea', { class:'textarea', rows:'2', placeholder:'說明評分原則…', id:'pe-desc' })
+  );
+  const fDue = el('div', { class:'field' },
+    el('label', { class:'label' }, '截止日'),
+    el('input', { class:'input', type:'date', id:'pe-due' })
+  );
+
+  // Scope
+  const fScope = el('div', { class:'field' });
+  fScope.appendChild(el('label', { class:'label' }, '評分對象'));
+  const scopeSel = el('select', { class:'input', id:'pe-scope' });
+  scopeSel.innerHTML = '<option value="class">同班</option><option value="group">同組</option><option value="custom">自選學生</option>';
+  fScope.appendChild(scopeSel);
+
+  // class picker (visible only on scope=class)
+  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean))).sort();
+  const fCls = el('div', { class:'field', id:'pe-cls-wrap' });
+  fCls.appendChild(el('label', { class:'label' }, '哪一班'));
+  const clsSel = el('select', { class:'input', id:'pe-cls' });
+  classes.forEach(c => clsSel.appendChild(el('option', { value:c }, c)));
+  if(!classes.length) clsSel.appendChild(el('option', { value:'' }, '尚無班級'));
+  fCls.appendChild(clsSel);
+
+  scopeSel.addEventListener('change', ()=> {
+    fCls.style.display = (scopeSel.value === 'class') ? '' : 'none';
+  });
+
+  // Dimensions
+  let dims = [
+    { key:'logic', label:'邏輯' },
+    { key:'express', label:'表達' },
+    { key:'contrib', label:'貢獻' }
+  ];
+  const fDims = el('div', { class:'field' });
+  fDims.appendChild(el('label', { class:'label' }, '評分維度（1-5 分）'));
+  const dimList = el('div');
+  function renderDims(){
+    dimList.innerHTML = '';
+    dims.forEach((d,i) => {
+      const row = el('div', { class:'flex', style:{gap:'6px',marginBottom:'4px'} },
+        el('input', { class:'input', value:d.label, style:{flex:'1'},
+          oninput: e => { dims[i].label = e.target.value; dims[i].key = (e.target.value || ('d'+i)).toLowerCase().replace(/[^a-z0-9]/g,'_') || ('d'+i); }
+        }),
+        el('button', { class:'btn btn-sm btn-danger', onclick: ()=> { dims.splice(i,1); renderDims(); }}, '×')
+      );
+      dimList.appendChild(row);
+    });
+  }
+  renderDims();
+  const addDim = el('button', { class:'btn btn-sm', style:{marginTop:'4px'}, onclick: ()=> {
+    dims.push({ key:'d'+(dims.length+1), label:'維度 '+(dims.length+1) });
+    renderDims();
+  }}, '＋ 加維度');
+  fDims.appendChild(dimList);
+  fDims.appendChild(addDim);
+
+  [fTitle, fDesc, fDue, fScope, fCls, fDims].forEach(f => m.root.appendChild(f));
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+    const title = (m.root.querySelector('#pe-title').value || '').trim();
+    if(!title){ toast('請輸入標題','danger'); return; }
+    if(!dims.length){ toast('至少要有一個評分維度','danger'); return; }
+    const pe = {
+      id: nid(), title,
+      desc: m.root.querySelector('#pe-desc').value.trim(),
+      dueDate: m.root.querySelector('#pe-due').value || '',
+      scope: m.root.querySelector('#pe-scope').value,
+      targetCls: m.root.querySelector('#pe-cls').value || '',
+      targetGroupId: null,
+      targetStudentIds: [],
+      dimensions: dims.slice(),
+      status: 'open',
+      scores: [],
+      createdBy: App.session?.id || '',
+      createdAt: Date.now()
+    };
+    App.db.peerEvals.push(pe);
+    saveDB();
+    if(typeof Sync !== 'undefined' && Sync.push) Sync.push('peerEvals', pe);
+    if(typeof bcNotify === 'function') bcNotify();
+    m.close();
+    toast('已建立互評任務','success');
+    go('peer', 'p_'+pe.id);
+  }}, '建立'));
+  m.root.appendChild(actions);
+}
+
+function rPeerDetail(content, pe){
+  content.appendChild(el('button', { class:'btn btn-sm', style:{marginBottom:'10px'}, onclick:()=> go('peer') }, '← 回任務列表'));
+
+  const closed = peerEvalIsDueClosed(pe);
+  const card = el('div', { class:'card', style:{padding:'16px',marginBottom:'14px'} });
+  card.appendChild(el('div', { class:'flex-between', style:{flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h2', null, pe.title),
+      pe.desc ? el('div', { class:'small muted' }, pe.desc) : null
+    ),
+    el('span', { class:'pe-pill ' + (closed?'closed':'open') }, closed ? '已結束' : '進行中')
+  ));
+  const meta = [];
+  meta.push('範圍：' + (pe.scope==='class'?('班級 '+(pe.targetCls||'-')):pe.scope==='group'?'同組':'自選'));
+  if(pe.dueDate) meta.push('截止：' + pe.dueDate);
+  meta.push('已回應：' + (pe.scores||[]).length + ' 筆');
+  card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px'} }, meta.join(' · ')));
+
+  // Action row
+  const actions = el('div', { class:'flex', style:{marginTop:'10px',flexWrap:'wrap',gap:'6px'} },
+    el('button', { class: 'btn btn-sm', onclick: ()=> {
+      pe.status = (pe.status === 'closed') ? 'open' : 'closed';
+      saveDB();
+      if(typeof Sync !== 'undefined' && Sync.push) Sync.push('peerEvals', pe);
+      rerender();
+    }}, pe.status === 'closed' ? '↺ 重新開啟' : '⛔ 提早結束'),
+    el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+      const ok = await confirmDlg('確定刪除此互評任務？所有評分將一起刪除', { danger:true });
+      if(!ok) return;
+      App.db.peerEvals = App.db.peerEvals.filter(x => x.id !== pe.id);
+      saveDB();
+      if(typeof bcNotify === 'function') bcNotify();
+      toast('已刪除','success');
+      go('peer');
+    }}, '🗑 刪除')
+  );
+  card.appendChild(actions);
+  content.appendChild(card);
+
+  // Results
+  const agg = peerEvalAggregate(pe);
+  const list = Object.entries(agg).sort((a,b)=> b[1].total - a[1].total);
+  const outliers = peerEvalDetectOutliers(pe);
+
+  if(!list.length){
+    content.appendChild(el('div', { class:'empty', style:{padding:'30px 20px'} },
+      el('div', { class:'ico', style:{fontSize:'40px'} }, '📊'),
+      el('div', null, '尚無學生提交評分'),
+      el('div', { class:'tiny muted' }, '請學生在「我的互評任務」中提交')
+    ));
+    return;
+  }
+
+  const rcard = el('div', { class:'card', style:{padding:'12px'} });
+  rcard.appendChild(el('h3', { style:{marginBottom:'8px'} }, '📊 評分結果（平均）'));
+  list.forEach(([rateeId, info]) => {
+    const row = el('div', { class:'pe-result-row' },
+      el('div', { class:'pe-result-name' },
+        info.name + (info.cls ? ' (' + info.cls + ')' : ''),
+        outliers.size ? el('span', { class:'pe-anomaly' }, '⚠ 含異常') : null
+      ),
+      el('div', null,
+        el('span', { class:'pe-result-score' }, info.total.toFixed(2)),
+        el('span', { class:'pe-result-count', style:{marginLeft:'6px'} }, '/ ' + info.count + ' 人評')
+      )
+    );
+    // dim breakdown
+    const dimRow = el('div', { class:'tiny muted', style:{paddingLeft:'8px',marginTop:'2px'} });
+    const parts = [];
+    (pe.dimensions||[]).forEach(d => {
+      const v = info.perDim[d.key];
+      if(v != null) parts.push(d.label + ' ' + v.toFixed(1));
+    });
+    dimRow.textContent = parts.join(' · ');
+    const wrap = el('div', null, row, dimRow);
+    rcard.appendChild(wrap);
+  });
+  content.appendChild(rcard);
+
+  // Quick AI scan button — uses existing AI assistant if configured
+  if(outliers.size){
+    content.appendChild(el('div', { class:'card', style:{padding:'10px',marginTop:'10px',background:'var(--warn-soft)'} },
+      el('div', { class:'small' }, '⚠ 偵測到 ' + outliers.size + ' 位評分者的給分與群體差異 > 2 個標準差。'),
+      el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '建議：可開啟 AI 助教協助分析評分是否合理')
+    ));
+  }
+}
+
+function rSPeer(content){
+  const me = currentStudent();
+  if(!me){
+    content.appendChild(el('div', { class:'empty' }, '請先登入'));
+    return;
+  }
+  content.appendChild(el('h1', { style:{marginBottom:'10px'} }, '⭐ 我的互評任務'));
+
+  // detail view
+  if(App.subview && App.subview.startsWith('p_')){
+    const pid = App.subview.slice(2);
+    const pe = App.db.peerEvals.find(x => x.id === pid);
+    if(pe) return rSPeerDetail(content, pe, me);
+  }
+
+  // list: tasks that include me as a ratee/rater scope
+  const all = (App.db.peerEvals || []).filter(pe => {
+    // I am part of the ratees pool (= someone else can rate me OR I can rate them)
+    const ratees = peerEvalRatees(pe, me);
+    return ratees.length > 0;
+  });
+
+  if(!all.length){
+    content.appendChild(el('div', { class:'empty', style:{padding:'40px 20px'} },
+      el('div', { class:'ico', style:{fontSize:'48px'} }, '⭐'),
+      el('div', null, '目前沒有互評任務'),
+      el('div', { class:'tiny muted' }, '老師發佈後會在此顯示')
+    ));
+    return;
+  }
+
+  all.sort((a,b)=> {
+    const ac = peerEvalIsDueClosed(a) ? 1 : 0;
+    const bc = peerEvalIsDueClosed(b) ? 1 : 0;
+    if(ac !== bc) return ac - bc;
+    return (b.createdAt||0) - (a.createdAt||0);
+  });
+
+  const grid = el('div', { class:'grid', style:{gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'12px'} });
+  all.forEach(pe => {
+    const closed = peerEvalIsDueClosed(pe);
+    const myCount = (pe.scores||[]).filter(s => s.raterId === me.id).length;
+    const totalRatees = peerEvalRatees(pe, me).length;
+    const card = el('div', { class:'pe-task-card ' + (closed?'closed':'open'), onclick: ()=> go('speer', 'p_'+pe.id) });
+    card.appendChild(el('div', { class:'pe-task-head' },
+      el('h3', null, pe.title),
+      el('span', { class:'pe-pill ' + (closed?'closed':'open') }, closed ? '已結束' : '進行中')
+    ));
+    if(pe.desc) card.appendChild(el('div', { class:'small muted' }, pe.desc));
+    const status = closed ? '已結束' : (myCount >= totalRatees ? '✅ 已完成' : (myCount > 0 ? '🟡 進行中 ('+myCount+'/'+totalRatees+')' : '⬜ 未開始'));
+    card.appendChild(el('div', { class:'tiny' }, status + (pe.dueDate ? ' · 截止 '+pe.dueDate : '')));
+    grid.appendChild(card);
+  });
+  content.appendChild(grid);
+}
+
+function rSPeerDetail(content, pe, me){
+  content.appendChild(el('button', { class:'btn btn-sm', style:{marginBottom:'10px'}, onclick:()=> go('speer') }, '← 回任務列表'));
+
+  const closed = peerEvalIsDueClosed(pe);
+  content.appendChild(el('div', { class:'card', style:{padding:'14px',marginBottom:'12px'} },
+    el('h2', null, pe.title),
+    pe.desc ? el('div', { class:'small muted', style:{marginTop:'4px'} }, pe.desc) : null,
+    el('div', { class:'tiny muted', style:{marginTop:'6px'} },
+      (pe.dueDate ? '截止 ' + pe.dueDate + ' · ' : '') +
+      (pe.dimensions||[]).length + ' 個維度 · ' +
+      (closed ? '已結束' : '進行中')
+    )
+  ));
+
+  // If closed → show my received average
+  if(closed){
+    const agg = peerEvalAggregate(pe);
+    const mine = agg[me.id];
+    if(mine){
+      const rcard = el('div', { class:'card', style:{padding:'14px',marginBottom:'12px'} });
+      rcard.appendChild(el('h3', null, '⭐ 我獲得的評分'));
+      rcard.appendChild(el('div', { style:{fontSize:'40px',fontWeight:'700',color:'var(--primary)',textAlign:'center',padding:'10px 0'} },
+        mine.total.toFixed(2) + ' / 5'
+      ));
+      rcard.appendChild(el('div', { class:'small muted', style:{textAlign:'center'} },
+        '由 ' + mine.count + ' 位同學評分'
+      ));
+      (pe.dimensions||[]).forEach(d => {
+        const v = mine.perDim[d.key];
+        if(v == null) return;
+        rcard.appendChild(el('div', { class:'pe-dim-row' },
+          el('span', { class:'label' }, d.label),
+          el('span', { style:{fontWeight:'700',color:'var(--primary)'} }, v.toFixed(2))
+        ));
+      });
+      content.appendChild(rcard);
+    } else {
+      content.appendChild(el('div', { class:'empty' }, '本次互評沒有收到評分'));
+    }
+    return;
+  }
+
+  // Open: list ratees
+  const ratees = peerEvalRatees(pe, me);
+  if(!ratees.length){
+    content.appendChild(el('div', { class:'empty' }, '本次互評沒有可評對象'));
+    return;
+  }
+
+  // Per-ratee rating card
+  ratees.forEach(r => {
+    const existing = (pe.scores||[]).find(sc => sc.raterId === me.id && sc.rateeId === r.id);
+    const colorIdx = (r.id ? String(r.id).charCodeAt(0) : 0) % 8;
+    const card = el('div', { class:'pe-ratee-card' });
+    const head = el('div', { class:'pe-ratee-head' },
+      el('div', { class:'pe-ratee-av av-color-' + colorIdx }, initials(r.name)),
+      el('div', { class:'pe-ratee-name' }, r.name +
+        (r.cls ? ' · ' + r.cls : '') +
+        (r.seat ? ' · ' + r.seat + '號' : '')
+      ),
+      existing ? el('span', { class:'pe-done-tag' }, '已評') : null
+    );
+    card.appendChild(head);
+
+    // dims
+    const formDims = {};
+    (pe.dimensions||[]).forEach(d => {
+      const cur = existing ? (existing.dims[d.key] || 0) : 0;
+      formDims[d.key] = cur;
+      const row = el('div', { class:'pe-dim-row' });
+      row.appendChild(el('span', { class:'label' }, d.label));
+      const bar = el('div', { class:'pe-star-bar' });
+      [1,2,3,4,5].forEach(n => {
+        const star = el('div', { class:'pe-star' + (n <= cur ? ' active' : '') }, '★');
+        star.addEventListener('click', ()=> {
+          formDims[d.key] = n;
+          // re-render bar
+          Array.from(bar.children).forEach((c,i)=> {
+            c.classList.toggle('active', (i+1) <= n);
+          });
+        });
+        bar.appendChild(star);
+      });
+      row.appendChild(bar);
+      card.appendChild(row);
+    });
+
+    // comment + anon
+    const cmtRow = el('div', { class:'field', style:{margin:'6px 0'} });
+    const cmtIn = el('textarea', { class:'textarea', rows:'2', placeholder:'（選填）給對方的評語',
+      value: existing ? (existing.comment||'') : '' });
+    cmtRow.appendChild(cmtIn);
+    card.appendChild(cmtRow);
+
+    const anonRow = el('label', { class:'remember-row' });
+    const anonChk = el('input', { type:'checkbox' });
+    if(!existing || existing.anonymous) anonChk.checked = true;
+    anonRow.appendChild(anonChk);
+    anonRow.appendChild(document.createTextNode(' 匿名提交'));
+    card.appendChild(anonRow);
+
+    card.appendChild(el('button', { class:'btn btn-primary btn-sm', style:{marginTop:'6px'}, onclick: ()=> {
+      const someZero = (pe.dimensions||[]).some(d => !formDims[d.key]);
+      if(someZero){ toast('每個維度都要評分','danger'); return; }
+      // upsert
+      const idx = (pe.scores || []).findIndex(s => s.raterId === me.id && s.rateeId === r.id);
+      const rec = {
+        raterId: me.id, rateeId: r.id,
+        dims: Object.assign({}, formDims),
+        comment: cmtIn.value.trim(),
+        anonymous: anonChk.checked,
+        ts: Date.now()
+      };
+      if(idx >= 0) pe.scores[idx] = rec;
+      else (pe.scores = pe.scores || []).push(rec);
+      saveDB();
+      if(typeof Sync !== 'undefined' && Sync.push) Sync.push('peerEvals', pe);
+      if(typeof bcNotify === 'function') bcNotify();
+      toast('已送出對 ' + r.name + ' 的評分','success');
+      rerender();
+    }}, existing ? '💾 更新評分' : '✅ 送出評分'));
+    content.appendChild(card);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   BATCH 1 ▒▒  SEAT MATRIX  (rMatrix)
+   ────────────────────────────────────────────────────────────
+   Visual seat map per class. Each cell = student card with
+   today's attendance status. Tap to cycle status.
+   ──────────────────────────────────────────────────────────── */
+
+function matrixCurrentStatus(stuId){
+  const att = studentSignedToday(stuId);
+  if(att){
+    // try detect 'late' via lateMinutes
+    const lateMin = App.db.settings.lateMinutes || 10;
+    const start = App.db.settings.startTime || '08:00';
+    const [sh, sm] = start.split(':').map(Number);
+    const lateThreshold = sh*60 + sm + lateMin;
+    if(att.time){
+      const [h,m] = att.time.split(':').map(Number);
+      if(h*60+m > lateThreshold) return 'late';
+    }
+    if(att.status === 'late') return 'late';
+    return 'present';
+  }
+  if(studentOnLeaveToday(stuId)) return 'leave';
+  return 'absent';
+}
+
+function matrixSetStatus(stuId, status){
+  const s = findStudent(stuId);
+  if(!s) return;
+  const today = td();
+  // Remove existing attendance for today
+  App.db.attendance = App.db.attendance.filter(a => !(a.studentId === stuId && a.date === today));
+  // Remove today's leave too if not 'leave'
+  if(status !== 'leave'){
+    App.db.leaves = App.db.leaves.filter(l => !(l.studentId === stuId && l.date === today));
+  }
+  if(status === 'present'){
+    App.db.attendance.push({
+      id: nid(), studentId: stuId, studentName: s.name, cls: s.cls||'',
+      date: today, time: nt(), ts: Date.now(),
+      status: 'present', method: 'matrix'
+    });
+  } else if(status === 'late'){
+    App.db.attendance.push({
+      id: nid(), studentId: stuId, studentName: s.name, cls: s.cls||'',
+      date: today, time: nt(), ts: Date.now(),
+      status: 'late', method: 'matrix'
+    });
+  } else if(status === 'leave'){
+    // ensure a leave exists
+    const ex = App.db.leaves.find(l => l.studentId === stuId && l.date === today);
+    if(!ex){
+      App.db.leaves.push({
+        id: nid(), studentId: stuId, name: s.name, cls: s.cls||'',
+        date: today, reason: '老師標記',
+        status: 'approved', ts: Date.now(),
+        reviewer: App.session?.name || '老師'
+      });
+    }
+  } else {
+    // absent: already cleared
+  }
+  saveDB();
+  if(typeof Sync !== 'undefined' && Sync.push) Sync.push('attendance', null);
+  if(typeof bcNotify === 'function') bcNotify();
+}
+
+function rMatrix(content){
+  // determine all classes
+  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean))).sort();
+  if(!classes.length) classes.push('');
+  if(!App._matrixCls || !classes.includes(App._matrixCls)) App._matrixCls = classes[0];
+
+  // ensure settings.seatLayout exists
+  App.db.settings.seatLayout = App.db.settings.seatLayout || {};
+  const cls = App._matrixCls;
+  const layout = App.db.settings.seatLayout[cls] || { rows: 0, cols: 6 };
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '🪑 座位矩陣'),
+      el('div', { class:'small muted' }, '點座位切換出席狀態 · 拖放可換位')
+    )
+  ));
+
+  // class tabs
+  if(classes.length > 1 || classes[0]){
+    const tabs = el('div', { class:'matrix-cls-tabs' });
+    classes.forEach(c => {
+      tabs.appendChild(el('button', {
+        class: (c === cls ? 'active' : ''),
+        onclick: ()=> { App._matrixCls = c; rerender(); }
+      }, c || '未分班'));
+    });
+    content.appendChild(tabs);
+  }
+
+  // students for this class, sorted by seat
+  const students = App.db.students
+    .filter(s => (s.cls||'') === cls)
+    .sort((a,b)=> (a.seat||999)-(b.seat||999) || (a.name||'').localeCompare(b.name||''));
+
+  // Toolbar
+  const cols = layout.cols || 6;
+  let rows = layout.rows || Math.max(1, Math.ceil(students.length / cols));
+
+  const toolbar = el('div', { class:'matrix-toolbar' });
+  toolbar.appendChild(el('div', { class:'small', style:{fontWeight:'600'} }, cls || '未分班'));
+  toolbar.appendChild(el('div', { class:'small muted' }, students.length + ' 位學生'));
+  // cols input
+  const colsBox = el('div', { class:'flex', style:{gap:'4px',alignItems:'center'} },
+    el('span', { class:'tiny muted' }, '欄'),
+    (function(){
+      const inp = el('input', { type:'number', class:'input', style:{width:'60px',padding:'4px 8px'}, value: String(cols), min:'1', max:'12' });
+      inp.addEventListener('change', ()=> {
+        const v = Math.max(1, Math.min(12, parseInt(inp.value,10) || 6));
+        layout.cols = v;
+        App.db.settings.seatLayout[cls] = layout;
+        saveDB(); rerender();
+      });
+      return inp;
+    })()
+  );
+  toolbar.appendChild(colsBox);
+
+  // Legend
+  toolbar.appendChild(el('div', { class:'legend' },
+    el('span', { class:'lg' }, el('span', { class:'dot', style:{background:'var(--success)'} }), '出席'),
+    el('span', { class:'lg' }, el('span', { class:'dot', style:{background:'var(--warn)'} }), '遲到'),
+    el('span', { class:'lg' }, el('span', { class:'dot', style:{background:'var(--accent)'} }), '請假'),
+    el('span', { class:'lg' }, el('span', { class:'dot', style:{background:'var(--danger)'} }), '缺席')
+  ));
+
+  toolbar.appendChild(el('button', { class:'btn btn-sm btn-primary', onclick: ()=> {
+    layout.cols = cols;
+    layout.rows = rows;
+    App.db.settings.seatLayout[cls] = layout;
+    saveDB();
+    toast('座位配置已儲存','success');
+  }}, '💾 儲存配置'));
+
+  toolbar.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> {
+    // Re-assign seat numbers based on visual order — useful when teacher rearranges
+    students.forEach((s, i) => { s.seat = i + 1; });
+    saveDB();
+    toast('已依目前順序重新編號座號','success');
+    rerender();
+  }}, '🔢 重編座號'));
+
+  content.appendChild(toolbar);
+
+  // Compute total cells
+  const totalSlots = Math.max(students.length, cols * Math.max(rows, Math.ceil(students.length/cols)));
+  const effRows = Math.ceil(totalSlots / cols);
+
+  // Podium
+  content.appendChild(el('div', { class:'matrix-podium' }, '╴╴╴ 講  台 ╴╴╴'));
+
+  // Grid
+  const grid = el('div', { class:'matrix-grid', style:{ gridTemplateColumns:'repeat(' + cols + ', minmax(70px, 1fr))' } });
+
+  // pad students with placeholders
+  const slots = students.slice();
+  while(slots.length < effRows * cols) slots.push(null);
+
+  slots.forEach((s, idx) => {
+    if(!s){
+      const empty = el('div', { class:'matrix-seat s-empty' },
+        el('span', { class:'tiny muted' }, '空位')
+      );
+      grid.appendChild(empty);
+      return;
+    }
+    const status = matrixCurrentStatus(s.id);
+    const cell = el('div', { class:'matrix-seat s-' + status, draggable:'true' });
+    cell.appendChild(el('span', { class:'seat-no' }, '#' + (s.seat || idx+1)));
+    cell.appendChild(el('div', { class:'seat-nm' }, s.name));
+    const stMap = { present:'✅', late:'🟡', leave:'📆', absent:'❌' };
+    cell.appendChild(el('div', { class:'seat-st' }, stMap[status] || '⬜'));
+
+    cell.addEventListener('click', ()=> {
+      // cycle: absent → present → late → leave → absent
+      const cur = matrixCurrentStatus(s.id);
+      const cycle = { absent:'present', present:'late', late:'leave', leave:'absent' };
+      const next = cycle[cur] || 'present';
+      matrixSetStatus(s.id, next);
+      rerender();
+    });
+
+    // drag-and-drop seat swap
+    cell.addEventListener('dragstart', e => {
+      cell.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', s.id); } catch(err){}
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    cell.addEventListener('dragend', ()=> {
+      cell.classList.remove('dragging');
+      grid.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+    });
+    cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('drag-over'); });
+    cell.addEventListener('dragleave', ()=> cell.classList.remove('drag-over'));
+    cell.addEventListener('drop', e => {
+      e.preventDefault();
+      cell.classList.remove('drag-over');
+      let srcId = '';
+      try { srcId = e.dataTransfer.getData('text/plain'); } catch(err){}
+      if(!srcId || srcId === s.id) return;
+      const src = App.db.students.find(x => x.id === srcId);
+      if(!src) return;
+      const tmp = src.seat;
+      src.seat = s.seat;
+      s.seat = tmp;
+      saveDB();
+      if(typeof bcNotify === 'function') bcNotify();
+      toast('已交換 ' + src.name + ' ↔ ' + s.name + ' 的座位','success');
+      rerender();
+    });
+
+    grid.appendChild(cell);
+  });
+
+  content.appendChild(grid);
+
+  // Today summary
+  const counts = { present:0, late:0, leave:0, absent:0 };
+  students.forEach(s => { counts[matrixCurrentStatus(s.id)]++; });
+  content.appendChild(el('div', { class:'card', style:{padding:'12px',marginTop:'12px'} },
+    el('div', { class:'flex', style:{justifyContent:'space-around',flexWrap:'wrap',gap:'10px'} },
+      el('div', { style:{textAlign:'center'} }, el('div', { style:{fontSize:'20px',fontWeight:'700',color:'var(--success)'}}, counts.present), el('div', { class:'tiny muted' }, '出席')),
+      el('div', { style:{textAlign:'center'} }, el('div', { style:{fontSize:'20px',fontWeight:'700',color:'var(--warn)'}}, counts.late), el('div', { class:'tiny muted' }, '遲到')),
+      el('div', { style:{textAlign:'center'} }, el('div', { style:{fontSize:'20px',fontWeight:'700',color:'var(--accent)'}}, counts.leave), el('div', { class:'tiny muted' }, '請假')),
+      el('div', { style:{textAlign:'center'} }, el('div', { style:{fontSize:'20px',fontWeight:'700',color:'var(--danger)'}}, counts.absent), el('div', { class:'tiny muted' }, '缺席'))
+    )
+  ));
+}
+
+/* ════════════════════════════════════════════════════════════
    PHASE 3 ▒▒  COMMAND PALETTE (Ctrl+K / Cmd+K)
    ──────────────────────────────────────────────────────────── */
 function cmdItems(){
@@ -8170,6 +9450,7 @@ function cmdItems(){
       { i:'📊', t:'總覽', h:'overview', go: ()=> go('overview') },
       { i:'👥', t:'學生名單', h:'students', go: ()=> go('students') },
       { i:'✅', t:'出席管理', h:'attendance', go: ()=> go('attendance') },
+      { i:'🪑', t:'座位矩陣', h:'matrix seat', go: ()=> go('matrix') },
       { i:'📱', t:'QR Code 簽到', h:'QR', go: ()=> go('qr') },
       { i:'📆', t:'請假管理', h:'leave', go: ()=> go('leave') },
       { i:'💬', t:'訊息', h:'messages', go: ()=> go('messages') },
@@ -8177,6 +9458,7 @@ function cmdItems(){
       { i:'📥', t:'繳交記錄', h:'submissions', go: ()=> go('submissions') },
       { i:'🎯', t:'學期成績', h:'grades', go: ()=> go('grades') },
       { i:'💬', t:'課程評價', h:'evals', go: ()=> go('evals') },
+      { i:'⭐', t:'學生互評', h:'peer evaluation', go: ()=> go('peer') },
       { i:'📢', t:'公告管理', h:'announcements', go: ()=> go('announcements') },
       { i:'📈', t:'分析工具', h:'analytics', go: ()=> go('analytics') },
       { i:'📅', t:'行事曆', h:'calendar', go: ()=> go('calendar') },
@@ -8204,6 +9486,7 @@ function cmdItems(){
       { i:'📤', t:'作業', h:'sasgn', go: ()=> go('sasgn') },
       { i:'🎯', t:'我的成績', h:'sgrade', go: ()=> go('sgrade') },
       { i:'⭐', t:'課程評價', h:'sev', go: ()=> go('sev') },
+      { i:'⭐', t:'我的互評任務', h:'peer my', go: ()=> go('speer') },
       { i:'📢', t:'公告', h:'sann', go: ()=> go('sann') },
       { i:'🤖', t:'AI 學習助教', h:'AI', go: ()=> openAIAssistant() },
       { i:'👤', t:'個人', h:'me', go: ()=> go('me') },
@@ -8412,6 +9695,8 @@ function rerender(){
       else if(v === 'backup') rBackup(content);
       else if(v === 'logs') rLogs(content);
       else if(v === 'storage') rStorage(content);
+      else if(v === 'peer') rPeer(content);
+      else if(v === 'matrix') rMatrix(content);
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -8424,6 +9709,7 @@ function rerender(){
       else if(v === 'sgrade') rSGrade(content);
       else if(v === 'sev') rSEv(content);
       else if(v === 'sann') rSAnn(content);
+      else if(v === 'speer') rSPeer(content);
       else { App.view = 'checkin'; rCheckIn(content); }
     }
   } catch(e){
