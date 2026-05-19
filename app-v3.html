@@ -3046,11 +3046,111 @@ function renderLoginTeacherStage(){
   );
   stage.appendChild(btnRow);
 
+  // 🔑 忘記密碼連結
+  stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'14px'} },
+    el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword,
+      style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
+      '🔑 忘記密碼？')
+  ));
+
   i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
   i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
   setTimeout(()=> { (i1.value ? i2 : i1).focus(); }, 80);
 
   return stage;
+}
+
+// 老師忘記密碼 - 提供多種選項
+function showTeacherForgotPassword(){
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, '🔑 找回老師密碼'));
+  m.root.appendChild(el('p', { style:{lineHeight:'1.8',fontSize:'14px',color:'var(--text)'} },
+    '選擇一種方式重設老師密碼：'));
+
+  // 選項 1: 一鍵重設為 admin/admin123
+  const opt1 = el('div', { style:{background:'var(--surface-2)',padding:'14px',borderRadius:'10px',marginTop:'12px'} },
+    el('div', { style:{fontWeight:'700',marginBottom:'4px',fontSize:'14px'} }, '🚀 一鍵重設為預設'),
+    el('div', { class:'small muted', style:{marginBottom:'10px'} },
+      '帳號：admin　密碼：admin123' + '\n所有學生 / 出席 / 作業資料完全保留'),
+    el('button', { class:'btn btn-primary btn-block', onclick: async ()=> {
+      const ok = await confirmDlg(
+        '確定重設老師密碼為預設值？\n\n帳號 admin\n密碼 admin123\n\n（學生資料、出席紀錄都會保留）',
+        { title:'確認重設' }
+      );
+      if(!ok) return;
+      // 重設第一個老師帳號或建立新的
+      App.db.accounts = App.db.accounts || [];
+      let acc = App.db.accounts.find(a => a.username === 'admin');
+      if(!acc) acc = App.db.accounts[0];
+      if(acc){
+        acc.username = 'admin';
+        acc.password = 'admin123';
+        acc.role = 'teacher';
+      } else {
+        App.db.accounts.push({
+          id: nid(), username:'admin', password:'admin123',
+          name:'管理員', role:'teacher', createdAt: Date.now()
+        });
+      }
+      saveDB();
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+      try { saveRemember(null); localStorage.removeItem('cms_v3_session'); } catch(e){}
+      if(typeof logOp === 'function') logOp('teacherPwReset', '老師密碼重設為預設值');
+      m.close();
+      toast('✅ 已重設！請用 admin / admin123 登入','success', 5000);
+      setTimeout(() => location.reload(), 1500);
+    }}, '✅ 立即重設為 admin / admin123')
+  );
+  m.root.appendChild(opt1);
+
+  // 選項 2: 自訂新密碼（保留原帳號）
+  const opt2 = el('div', { style:{background:'var(--surface-2)',padding:'14px',borderRadius:'10px',marginTop:'10px'} },
+    el('div', { style:{fontWeight:'700',marginBottom:'8px',fontSize:'14px'} }, '✏️ 自訂新密碼'),
+    el('div', { class:'small muted', style:{marginBottom:'10px'} }, '保留原本的老師帳號，只改密碼')
+  );
+  const accSel = el('select', { class:'input select', style:{marginBottom:'8px'} });
+  (App.db.accounts || []).forEach(a => {
+    accSel.appendChild(el('option', { value:a.id }, a.username + '（' + (a.name||'老師') + '）'));
+  });
+  if(!App.db.accounts || !App.db.accounts.length){
+    accSel.appendChild(el('option', { value:'' }, '尚無帳號'));
+    accSel.disabled = true;
+  }
+  opt2.appendChild(accSel);
+  const newPw = el('input', { class:'input', type:'text', placeholder:'新密碼（至少 4 字元）', style:{marginBottom:'8px'} });
+  opt2.appendChild(newPw);
+  opt2.appendChild(el('button', { class:'btn btn-block', onclick: async ()=> {
+    const accId = accSel.value;
+    const pw = newPw.value.trim();
+    if(!accId){ toast('請選擇帳號','warning'); return; }
+    if(!pw || pw.length < 4){ toast('密碼至少 4 字元','warning'); return; }
+    const ok = await confirmDlg('確定更改此帳號的密碼？', { title:'確認' });
+    if(!ok) return;
+    const acc = App.db.accounts.find(a => String(a.id) === String(accId));
+    if(!acc){ toast('帳號不存在','danger'); return; }
+    acc.password = pw;
+    saveDB();
+    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+    if(typeof logOp === 'function') logOp('teacherPwChange', '老師 ' + acc.username + ' 改密碼');
+    m.close();
+    toast('✅ 密碼已更新！請用新密碼登入','success', 5000);
+  }}, '✓ 更新密碼'));
+  m.root.appendChild(opt2);
+
+  // 選項 3: 全部重設
+  const opt3 = el('div', { style:{background:'var(--danger-soft)',padding:'14px',borderRadius:'10px',marginTop:'10px'} },
+    el('div', { style:{fontWeight:'700',marginBottom:'4px',fontSize:'14px',color:'var(--danger)'} }, '⚠️ 全部清除重新開始'),
+    el('div', { class:'small muted', style:{marginBottom:'10px'} }, '清空所有資料（學生、紀錄全消失）'),
+    el('button', { class:'btn btn-danger btn-block', onclick: ()=> {
+      m.close();
+      location.href = location.pathname + '?reset=1';
+    }}, '🗑️ 全部清除')
+  );
+  m.root.appendChild(opt3);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick: ()=> m.close() }, '取消'));
+  m.root.appendChild(actions);
 }
 
 function renderLoginStudentStage(){
