@@ -1,7 +1,6 @@
-/* Service Worker for 課程管理系統 v3 — Phase 3 */
-const CACHE_NAME = 'cms-v3-2026-05';
+/* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
+const CACHE_NAME = 'cms-v3-2026-05-19';
 const CORE_ASSETS = [
-  'app-v3.html',
   'manifest.json',
   'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js'
@@ -33,11 +32,29 @@ self.addEventListener('fetch', e => {
   if(url.host.includes('api.qrserver.com')) return;
   if(e.request.method !== 'GET') return;
 
+  const isHTML = e.request.destination === 'document' ||
+                 url.pathname.endsWith('.html') ||
+                 url.pathname === '/' || url.pathname.endsWith('/');
+
+  if(isHTML){
+    // 對 HTML 一律 network-first：永遠抓最新，避免使用者看到舊版
+    e.respondWith(
+      fetch(e.request).then(resp => {
+        if(resp && resp.status === 200){
+          const clone = resp.clone();
+          caches.open(CACHE_NAME).then(c => { try { c.put(e.request, clone); } catch(_){} });
+        }
+        return resp;
+      }).catch(() => caches.match(e.request).then(hit => hit || new Response('Offline', {status:503})))
+    );
+    return;
+  }
+
+  // 其他靜態資源 cache-first
   e.respondWith(
     caches.match(e.request).then(hit => {
       if(hit) return hit;
       return fetch(e.request).then(resp => {
-        // cache successful responses
         if(resp && resp.status === 200 && (url.origin === self.location.origin || url.host.includes('gstatic.com'))){
           const clone = resp.clone();
           caches.open(CACHE_NAME).then(c => { try { c.put(e.request, clone); } catch(_){} });
