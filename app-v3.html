@@ -2136,7 +2136,7 @@ function ensureDefaultsAndDemo(){
         parentPhone: '',
         parentEmail: '',
         password: sid.slice(-4),  // 預設密碼 = 學號末 4 碼
-        mustChangePw: false
+        mustChangePw: true  // 首次登入強制改密碼
       };
     });
     changed = true;
@@ -3268,8 +3268,82 @@ function finishStudentLogin(s){
   saveSession();
   saveLastUser({ role:'student', id:s.id, name:s.name, cls:s.cls||'', ts:Date.now() });
   App._loginStage = null;
+  // 第一次登入或老師重設過密碼 → 強制改密碼
+  if(s.mustChangePw){
+    toast('歡迎，' + s.name + '！首次登入請更新密碼','info', 4000);
+    setTimeout(() => forceChangePassword(s.id), 600);
+    return;
+  }
   toast('歡迎回來，' + s.name + '！','success');
   go('checkin');
+}
+
+// 強制改密碼（無法關閉的 modal）
+function forceChangePassword(studentId){
+  const s = App.db.students.find(x => x.id === studentId);
+  if(!s) return;
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '🔐 請設定新密碼'));
+  m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'14px',lineHeight:'1.6'} },
+    '為了帳號安全，首次登入需要設定屬於你自己的密碼。'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '🧑‍🎓 ' + s.name + (s.sid ? '（學號 ' + s.sid + '）' : '')));
+
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '新密碼（至少 4 個字元）'));
+  const wrap1 = el('div', { class:'pw-input-wrap' });
+  const i1 = el('input', { class:'input', type:'password', placeholder:'新密碼' });
+  const tog1 = el('button', { type:'button', class:'pw-toggle', onclick: ()=> {
+    i1.type = i1.type === 'password' ? 'text' : 'password';
+    tog1.textContent = i1.type === 'password' ? '👁' : '🙈';
+  }}, '👁');
+  wrap1.appendChild(i1); wrap1.appendChild(tog1);
+  f1.appendChild(wrap1);
+  m.root.appendChild(f1);
+
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '確認密碼'));
+  const i2 = el('input', { class:'input', type:'password', placeholder:'再輸入一次' });
+  f2.appendChild(i2);
+  m.root.appendChild(f2);
+
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
+  m.root.appendChild(err);
+
+  const submit = ()=> {
+    const p1 = i1.value;
+    const p2 = i2.value;
+    if(!p1 || p1.length < 4){
+      err.textContent = '密碼至少 4 個字元'; err.style.display='block'; return;
+    }
+    if(p1 !== p2){
+      err.textContent = '兩次密碼不一致'; err.style.display='block'; return;
+    }
+    // 不能與預設密碼相同
+    const defaultPw = String(s.sid||'0000').slice(-4);
+    if(p1 === defaultPw){
+      err.textContent = '不能使用預設密碼，請設定一個新的'; err.style.display='block'; return;
+    }
+    // 寫入
+    s.password = p1;
+    s.mustChangePw = false;
+    s.passwordChangedAt = Date.now();
+    saveDB();
+    if(typeof logOp === 'function') logOp('passwordChange', s.name + ' 完成首次密碼設定');
+    if(typeof Sync !== 'undefined' && Sync.push) Sync.push('students');
+    m.close();
+    toast('✅ 密碼設定成功，歡迎使用！','success');
+    go('checkin');
+  };
+
+  i1.addEventListener('keydown', e => { if(e.key === 'Enter') i2.focus(); });
+  i2.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '設定密碼並進入'));
+  m.root.appendChild(actions);
+
+  setTimeout(()=> i1.focus(), 100);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -3816,11 +3890,41 @@ function rStu(content){
     students.forEach(s => {
       const row = el('div', { class:'list-row' });
       row.appendChild(el('div', { class:'avatar' }, initials(s.name)));
+
+      // 密碼狀態徽章
+      const pwBadge = s.mustChangePw
+        ? el('span', { class:'pill pill-att warn', style:{fontSize:'10px',marginLeft:'6px'}, title:'學生尚未首次登入或老師已重設密碼' }, '🔐 未改密碼')
+        : (s.passwordChangedAt
+            ? el('span', { class:'pill pill-att ok', style:{fontSize:'10px',marginLeft:'6px'}, title:'學生已設定自己的密碼' }, '✅ 已改')
+            : el('span', { class:'pill', style:{fontSize:'10px',marginLeft:'6px',background:'var(--surface-2)',color:'var(--text-muted)'}, title:'使用預設密碼' }, '預設'));
+
       row.appendChild(el('div', { class:'info' },
-        el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')),
-        el('div', { class:'sub' }, (s.cls || '無班級') + (s.email?' · '+s.email:''))
+        el('div', { class:'name' }, [s.name + (s.seat ? ` (${s.seat})` : ''), pwBadge]),
+        el('div', { class:'sub' }, (s.cls || '無班級')
+          + (s.sid ? ' · 學號 ' + s.sid : '')
+          + (s.email?' · '+s.email:'')
+        )
       ));
       const acts = el('div', { class:'actions' });
+      // 重設密碼按鈕（新增）
+      acts.appendChild(el('button', { class:'btn btn-sm', title:'重設密碼為學號末 4 碼', onclick: async ()=> {
+        const defPw = String(s.sid||'0000').slice(-4);
+        const ok = await confirmDlg(
+          '確定重設 ' + s.name + ' 的密碼？\n\n新密碼將為「' + defPw + '」（學號末 4 碼）\n下次登入時學生需重新設定密碼',
+          { title:'重設密碼' }
+        );
+        if(!ok) return;
+        s.password = defPw;
+        s.mustChangePw = true;
+        s.passwordChangedAt = null;
+        s.passwordResetAt = Date.now();
+        saveDB();
+        if(typeof logOp === 'function') logOp('passwordReset', '重設 ' + s.name + ' 的密碼');
+        Sync.setMap('students', App.db.students);
+        bcNotify();
+        toast('✅ 已重設 ' + s.name + ' 的密碼為 ' + defPw,'success');
+        rerender();
+      } }, '🔑'));
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openStudentEdit(s) }, '✏️'));
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         const ok = await confirmDlg('確定刪除 ' + s.name + '？相關出席紀錄會保留', { danger:true });
@@ -3835,6 +3939,35 @@ function rStu(content){
       row.appendChild(acts);
       listWrap.appendChild(row);
     });
+
+    // 批次操作工具列（密碼相關）
+    const unchangedCount = students.filter(s => s.mustChangePw).length;
+    if(unchangedCount > 0){
+      const tools = el('div', { style:{marginTop:'10px',padding:'10px 14px',background:'var(--warn-soft)',borderRadius:'10px',display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px',flexWrap:'wrap'} },
+        el('div', { class:'small' },
+          el('span', { style:{fontWeight:'600'} }, '🔐 有 ' + unchangedCount + ' 位學生尚未自行修改密碼')
+        ),
+        el('button', { class:'btn btn-sm', onclick: async ()=> {
+          const ok = await confirmDlg('確定批次重設所有學生密碼為「學號末 4 碼」？\n\n下次登入時學生會被要求自行修改', { danger:true, title:'批次重設密碼' });
+          if(!ok) return;
+          let n = 0;
+          App.db.students.forEach(s => {
+            s.password = String(s.sid||'0000').slice(-4);
+            s.mustChangePw = true;
+            s.passwordChangedAt = null;
+            s.passwordResetAt = Date.now();
+            n++;
+          });
+          saveDB();
+          if(typeof logOp === 'function') logOp('passwordReset', '批次重設 ' + n + ' 位學生密碼');
+          Sync.setMap('students', App.db.students);
+          bcNotify();
+          toast('✅ 已批次重設 ' + n + ' 位學生密碼','success');
+          rerender();
+        }}, '🔄 全部重設為預設')
+      );
+      listWrap.appendChild(tools);
+    }
   }
   renderList();
 }
@@ -3925,12 +4058,13 @@ function quickCreateStudent(){
       name, sid, cls, seat,
       email: '', phone: '',
       password,
+      mustChangePw: true,  // 學生首次登入需自行修改密碼
       note: '快速建立'
     };
     App.db.students.push(rec);
     saveDB();
     try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){}
-    toast('✓ 已建立 ' + name + '（密碼：' + password + '）','success', 2400);
+    toast('✓ 已建立 ' + name + '（預設密碼 ' + password + '，學生首次登入需改密碼）','success', 3000);
 
     App._quickLastCls = cls;
     App._quickKeepGoing = chk.checked;
@@ -8052,6 +8186,7 @@ function renderDemoData(){
       name: d.name, sid: d.sid, cls: d.cls, seat: d.seat,
       email:'', phone:'',
       password: d.sid.slice(-4),
+      mustChangePw: true,
       note:'示範資料'
     });
   });
