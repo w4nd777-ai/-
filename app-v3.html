@@ -10454,9 +10454,60 @@ function rerender(){
    BOOT
    ──────────────────────────────────────────────────────────── */
 function boot(){
-  // ═══ 緊急重設機制 ═══
-  // 訪問 ?reset=1 → 清除所有 v3 localStorage + 解除 Service Worker
+  // ═══ 老師密碼重設專用 URL ═══
+  // 訪問 ?adminreset=1 → 只重設老師密碼為 admin/admin123，所有資料保留
   try {
+    if(location.search.indexOf('adminreset=1') >= 0){
+      // 解除 SW + 清快取（確保看新版）
+      if('serviceWorker' in navigator){
+        navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+      }
+      if('caches' in window){
+        caches.keys().then(names => names.forEach(n => caches.delete(n)));
+      }
+      // 找出所有 v3 db key 並重設 admin
+      let resetCount = 0;
+      for(let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf('cms_v3_db_') === 0){
+          try {
+            const db = JSON.parse(localStorage.getItem(k));
+            db.accounts = db.accounts || [];
+            let acc = db.accounts.find(a => a.username === 'admin');
+            if(!acc) acc = db.accounts[0];
+            if(acc){
+              acc.username = 'admin';
+              acc.password = 'admin123';
+              acc.role = 'teacher';
+              if(!acc.name) acc.name = '管理員';
+            } else {
+              db.accounts.push({
+                id: Date.now(),
+                username: 'admin', password: 'admin123',
+                name: '管理員', role: 'teacher',
+                createdAt: Date.now()
+              });
+            }
+            localStorage.setItem(k, JSON.stringify(db));
+            resetCount++;
+          } catch(e){}
+        }
+      }
+      // 清登入狀態
+      try {
+        localStorage.removeItem('cms_v3_session');
+        localStorage.removeItem('cms_v3_remember');
+      } catch(e){}
+      document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
+        + '<div style="font-size:64px;margin-bottom:20px">✅</div>'
+        + '<h1 style="font-size:24px;margin:0 0 10px;color:#16a34a">老師密碼已重設！</h1>'
+        + '<div style="font-size:16px;color:#666;margin-bottom:20px;line-height:1.8">已重設 ' + resetCount + ' 個工作區的老師密碼<br><br>'
+        + '<span style="background:#dbeafe;color:#1e40af;padding:8px 16px;border-radius:8px;font-weight:600">帳號：admin<br>密碼：admin123</span></div>'
+        + '<div style="font-size:14px;color:#999;margin-bottom:30px">所有學生資料、出席紀錄都已保留</div>'
+        + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 前往登入頁</a>'
+        + '</div>';
+      return;
+    }
     if(location.search.indexOf('reset=1') >= 0){
       // 清除所有 v3 相關的 localStorage
       const keysToDelete = [];
