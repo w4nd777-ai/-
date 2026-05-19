@@ -2267,10 +2267,10 @@ function renderLogin(root){
   const wrap = el('div', { class:'center-wrap' });
   const card = el('div', { class:'login-card' });
   card.appendChild(el('div', { class:'brand-big' },
-    el('div', { class:'logo' }, 'V3'),
+    el('div', { class:'logo' }, '🎓'),
     el('div', null,
       el('h2', null, App.db.branding.title || '課程管理系統'),
-      el('div', { class:'muted small' }, '教室：' + (App.cfg?.roomCode || '—'))
+      el('div', { class:'muted small' }, '請選擇身分登入')
     )
   ));
 
