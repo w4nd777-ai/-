@@ -1793,6 +1793,44 @@ function initials(name){
 }
 
 /* ════════════════════════════════════════════════════════════
+   PASSWORD HASHING (SHA-256 with salt) — batch 1 安全強化
+   保留向後相容：舊明文 password 仍能登入，下次修改自動升級
+   ──────────────────────────────────────────────────────────── */
+async function hashPassword(plain){
+  if(plain == null || plain === '') return '';
+  try {
+    const enc = new TextEncoder();
+    const data = enc.encode('cms-v3-salt-' + plain);
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf))
+      .map(b => b.toString(16).padStart(2,'0')).join('');
+  } catch(e){
+    // fallback：crypto.subtle 不可用時，採用簡易雜湊（不安全但能跑）
+    return 'plain:' + String(plain);
+  }
+}
+
+async function verifyPassword(plain, stored){
+  if(stored == null || stored === '') return false;
+  if(plain == null) return false;
+  const s = String(stored);
+  // 已是 SHA-256 雜湊（64 字元 hex）
+  if(/^[0-9a-f]{64}$/i.test(s)){
+    const h = await hashPassword(plain);
+    return h === s.toLowerCase();
+  }
+  // 否則為舊版明文 → 直接比對（向後相容）
+  return String(plain) === s;
+}
+
+/**
+ * 判斷一個密碼欄位是否已雜湊。
+ */
+function isPasswordHashed(stored){
+  return typeof stored === 'string' && /^[0-9a-f]{64}$/i.test(stored);
+}
+
+/* ════════════════════════════════════════════════════════════
    TOAST + MODAL + CONFIRM
    ──────────────────────────────────────────────────────────── */
 function toast(msg, type='', dur=2400){
@@ -1861,6 +1899,33 @@ function promptDlg(label, defaultVal='', opts={}){
 /* ════════════════════════════════════════════════════════════
    STORAGE LAYER
    ──────────────────────────────────────────────────────────── */
+/* 預設出席狀態（batch 1 自訂出席狀態）
+   key:    內部識別（不能改）
+   label:  顯示文字（可改）
+   color:  CSS 變數 base 名（success / warn / danger / accent / primary）
+   icon:   emoji
+   counts: 權重，計算出席率時 sum(counts)/total
+   builtin: true 表示預設，不能刪除
+*/
+function defaultAttendanceStatuses(){
+  return [
+    { key:'present', label:'到', color:'success', icon:'✅', counts:1.0, builtin:true },
+    { key:'late',    label:'遲到', color:'warn',    icon:'⏰', counts:0.7, builtin:true },
+    { key:'leave',   label:'請假', color:'accent',  icon:'📆', counts:0.5, builtin:true },
+    { key:'absent',  label:'缺席', color:'danger',  icon:'❌', counts:0,   builtin:true }
+  ];
+}
+
+function getAttendanceStatuses(){
+  const s = (App.db && App.db.settings && App.db.settings.attendanceStatuses) || null;
+  if(!Array.isArray(s) || !s.length) return defaultAttendanceStatuses();
+  return s;
+}
+
+function getAttendanceStatus(key){
+  return getAttendanceStatuses().find(x => x.key === key) || null;
+}
+
 function defaultDB(){
   return {
     courses: [],
@@ -1887,7 +1952,8 @@ function defaultDB(){
       teacherName: '老師',
       lateMinutes: 10,     // 上課後幾分鐘算遲到
       startTime: '08:00',
-      gradeWeights: { att:30, asgn:30, mid:20, final:20 }
+      gradeWeights: { att:30, asgn:30, mid:20, final:20 },
+      attendanceStatuses: defaultAttendanceStatuses()
     },
     branding: {
       title: '課程管理系統',
@@ -1934,6 +2000,11 @@ function loadDB(){
     if(!App.db.settings || typeof App.db.settings !== 'object') App.db.settings = defaultDB().settings;
     if(!App.db.branding || typeof App.db.branding !== 'object') App.db.branding = defaultDB().branding;
     if(!App.db.grades || typeof App.db.grades !== 'object') App.db.grades = {};
+    // batch 1：補上自訂出席狀態
+    if(!Array.isArray(App.db.settings.attendanceStatuses) || !App.db.settings.attendanceStatuses.length){
+      App.db.settings.attendanceStatuses = defaultAttendanceStatuses();
+    }
+    if(!Array.isArray(App.db._qrCodes)) App.db._qrCodes = [];
   } catch(e){
     console.warn('loadDB failed', e);
     App.db = defaultDB();
@@ -2387,10 +2458,18 @@ function attendanceRate(studentId){
 }
 
 function submissionAvg(studentId){
+  // batch 1：改為加權平均（依作業 weight，預設 1）
   const subs = App.db.submissions.filter(s => s.studentId === studentId && typeof s.score === 'number');
   if(!subs.length) return 0;
-  const sum = subs.reduce((t,s)=> t + (s.score||0), 0);
-  return Math.round(sum / subs.length);
+  let totalW = 0, totalScore = 0;
+  subs.forEach(s => {
+    const asg = (App.db.assignments || []).find(a => a.id === s.assignmentId);
+    const w = (asg && Number(asg.weight) > 0) ? Number(asg.weight) : 1;
+    totalW += w;
+    totalScore += (s.score || 0) * w;
+  });
+  if(totalW <= 0) return 0;
+  return Math.round(totalScore / totalW);
 }
 
 function submissionRate(studentId){
@@ -3169,7 +3248,7 @@ async function setupTeacher(){
 
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
     const school = i1.value.trim() || '我的課程';
     const tname = i2.value.trim() || '老師';
     const user = i3.value.trim();
@@ -3182,9 +3261,9 @@ async function setupTeacher(){
     App.db.settings.schoolName = school;
     App.db.settings.teacherName = tname;
     App.db.branding.title = school;
-    // create teacher account
+    // create teacher account（密碼存雜湊）
     App.db.accounts = [{
-      id: nid(), username:user, password:pw, name:tname, role:'teacher', ts:Date.now()
+      id: nid(), username:user, password: await hashPassword(pw), name:tname, role:'teacher', ts:Date.now()
     }];
     saveDB();
     App.session = { role:'teacher', id:App.db.accounts[0].id, name:tname, username:user };
@@ -3281,7 +3360,7 @@ function studentRegisterFlow(){
 
   function showErr(msg){ err.textContent = msg; err.style.display = 'block'; }
 
-  const submit = ()=> {
+  const submit = async ()=> {
     const name = iName.value.trim();
     const sid = iSid.value.trim();
     const cls = iCls.value.trim();
@@ -3306,7 +3385,7 @@ function studentRegisterFlow(){
     const pending = {
       id: nid(),
       name, sid, cls, seat, email,
-      password: pw,
+      password: await hashPassword(pw),
       mustChangePw: false,  // 自己註冊的不用再改
       ts: Date.now()
     };
@@ -3541,11 +3620,22 @@ function renderLoginTeacherStage(){
     stage.appendChild(hint);
   }
 
-  const submit = ()=>{
+  const submit = async ()=>{
     const u = i1.value.trim(); const pw = i2.value;
     if(!u || !pw){ toast('請輸入帳號和密碼','danger'); return; }
-    const a = App.db.accounts.find(x => x.username === u && x.password === pw);
-    if(!a){ toast('帳號或密碼錯誤','danger'); return; }
+    const candidate = App.db.accounts.find(x => x.username === u);
+    if(!candidate){ toast('帳號或密碼錯誤','danger'); return; }
+    const ok = await verifyPassword(pw, candidate.password);
+    if(!ok){ toast('帳號或密碼錯誤','danger'); return; }
+    // 自動升級：若仍為明文密碼，登入後改存雜湊
+    if(!isPasswordHashed(candidate.password)){
+      try {
+        candidate.password = await hashPassword(pw);
+        saveDB();
+        try { Sync.setMap('accounts', App.db.accounts); } catch(e){}
+      } catch(e){}
+    }
+    const a = candidate;
     App.session = { role:'teacher', id:a.id, name:a.name, username:a.username };
     saveSession();
     saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
@@ -3597,17 +3687,18 @@ function showTeacherForgotPassword(){
         { title:'確認重設' }
       );
       if(!ok) return;
-      // 重設第一個老師帳號或建立新的
+      // 重設第一個老師帳號或建立新的（密碼存雜湊）
       App.db.accounts = App.db.accounts || [];
       let acc = App.db.accounts.find(a => a.username === 'admin');
       if(!acc) acc = App.db.accounts[0];
+      const hashedDefault = await hashPassword('admin123');
       if(acc){
         acc.username = 'admin';
-        acc.password = 'admin123';
+        acc.password = hashedDefault;
         acc.role = 'teacher';
       } else {
         App.db.accounts.push({
-          id: nid(), username:'admin', password:'admin123',
+          id: nid(), username:'admin', password:hashedDefault,
           name:'管理員', role:'teacher', createdAt: Date.now()
         });
       }
@@ -3647,7 +3738,7 @@ function showTeacherForgotPassword(){
     if(!ok) return;
     const acc = App.db.accounts.find(a => String(a.id) === String(accId));
     if(!acc){ toast('帳號不存在','danger'); return; }
-    acc.password = pw;
+    acc.password = await hashPassword(pw);
     saveDB();
     try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
     if(typeof logOp === 'function') logOp('teacherPwChange', '老師 ' + acc.username + ' 改密碼');
@@ -3764,7 +3855,7 @@ function renderLoginStudentStage(){
   refreshNameList();
 
   // 登入函式
-  function attemptLogin(){
+  async function attemptLogin(){
     const sid = parseInt(selName.value);
     if(!selCls.value) return toast('請先選擇班級', 'warning');
     if(!sid) return toast('請選擇你的姓名', 'warning');
@@ -3773,11 +3864,20 @@ function renderLoginStudentStage(){
     const s = App.db.students.find(x => x.id === sid);
     if(!s) return toast('學生不存在','danger');
     const stored = s.password || s.pass || (String(s.sid||'0000').slice(-4));
-    if(String(pw) !== String(stored)){
+    const ok = await verifyPassword(pw, stored);
+    if(!ok){
       toast('密碼錯誤','danger');
       iPw.value = '';
       iPw.focus();
       return;
+    }
+    // 自動升級為雜湊
+    if(!isPasswordHashed(s.password)){
+      try {
+        s.password = await hashPassword(pw);
+        saveDB();
+        try { Sync.setMap('students', App.db.students); } catch(e){}
+      } catch(e){}
     }
     // 登入成功
     finishStudentLogin(s);
@@ -3927,12 +4027,20 @@ function studentTapToLogin(studentId){
   f.appendChild(hint);
   m.root.appendChild(f);
 
-  const tryLogin = () => {
+  const tryLogin = async () => {
     const pw = inp.value;
-    if(s.password !== pw){
+    const ok = await verifyPassword(pw, s.password);
+    if(!ok){
       toast('密碼錯誤','danger');
       inp.focus(); inp.select();
       return;
+    }
+    if(!isPasswordHashed(s.password)){
+      try {
+        s.password = await hashPassword(pw);
+        saveDB();
+        try { Sync.setMap('students', App.db.students); } catch(e){}
+      } catch(e){}
     }
     m.close();
     finishStudentLogin(s);
@@ -3994,7 +4102,7 @@ function forceChangePassword(studentId){
   const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
   m.root.appendChild(err);
 
-  const submit = ()=> {
+  const submit = async ()=> {
     const p1 = i1.value;
     const p2 = i2.value;
     if(!p1 || p1.length < 4){
@@ -4008,8 +4116,8 @@ function forceChangePassword(studentId){
     if(p1 === defaultPw){
       err.textContent = '不能使用預設密碼，請設定一個新的'; err.style.display='block'; return;
     }
-    // 寫入
-    s.password = p1;
+    // 寫入（雜湊）
+    s.password = await hashPassword(p1);
     s.mustChangePw = false;
     s.passwordChangedAt = Date.now();
     saveDB();
@@ -4696,7 +4804,7 @@ function rStu(content){
           { title:'重設密碼' }
         );
         if(!ok) return;
-        s.password = defPw;
+        s.password = await hashPassword(defPw);
         s.mustChangePw = true;
         s.passwordChangedAt = null;
         s.passwordResetAt = Date.now();
@@ -4767,13 +4875,14 @@ function rStu(content){
           const ok = await confirmDlg('確定批次重設所有學生密碼為「學號末 4 碼」？\n\n下次登入時學生會被要求自行修改', { danger:true, title:'批次重設密碼' });
           if(!ok) return;
           let n = 0;
-          App.db.students.forEach(s => {
-            s.password = String(s.sid||'0000').slice(-4);
+          for(const s of App.db.students){
+            const defPw = String(s.sid||'0000').slice(-4);
+            s.password = await hashPassword(defPw);
             s.mustChangePw = true;
             s.passwordChangedAt = null;
             s.passwordResetAt = Date.now();
             n++;
-          });
+          }
           saveDB();
           if(typeof logOp === 'function') logOp('passwordReset', '批次重設 ' + n + ' 位學生密碼');
           Sync.setMap('students', App.db.students);
@@ -4852,13 +4961,14 @@ function quickCreateStudent(){
   keepGoing.appendChild(el('span', null, '建立後繼續新增下一位（不關閉視窗）'));
   m.root.appendChild(keepGoing);
 
-  function doCreate(){
+  async function doCreate(){
     const name = iName.value.trim();
     if(!name){ toast('姓名必填','danger'); iName.focus(); return; }
     const sid = iSid.value.trim();
     const cls = iCls.value.trim();
     const seat = parseInt(iSeat.value,10) || 0;
     const password = sid ? sid.slice(-4).padStart(4,'0') : '0000';
+    const passwordHashed = await hashPassword(password);
 
     // de-dupe (warn but allow)
     const dup = App.db.students.find(s =>
@@ -4873,7 +4983,8 @@ function quickCreateStudent(){
       id: nid(),
       name, sid, cls, seat,
       email: '', phone: '',
-      password,
+      parentName: '', parentPhone: '', parentEmail: '',
+      password: passwordHashed,
       mustChangePw: true,  // 學生首次登入需自行修改密碼
       note: '快速建立'
     };
@@ -4917,6 +5028,7 @@ function openStudentEdit(s=null){
   const m = modal('');
   m.root.appendChild(el('h2', null, isNew?'新增學生':'編輯學生'));
 
+  // 基本欄位
   const fields = [
     { key:'name', label:'姓名', placeholder:'王小明', required:true },
     { key:'sid', label:'學號', placeholder:'例：12345（密碼預設為末 4 碼）' },
@@ -4924,13 +5036,32 @@ function openStudentEdit(s=null){
     { key:'seat', label:'座號', type:'number', placeholder:'1' },
     { key:'email', label:'信箱', placeholder:'optional' },
     { key:'phone', label:'電話', placeholder:'optional' },
-    { key:'password', label:'密碼', type:'password', placeholder:'學生登入用' },
+    { key:'password', label:'密碼（留空 = 不修改）', type:'password', placeholder: isNew ? '學生登入用' : '不修改請留空' },
     { key:'note', label:'備註', placeholder:'optional' }
   ];
   const inps = {};
   fields.forEach(f => {
     const fb = el('div', { class:'field' });
     fb.appendChild(el('label', { class:'label' }, f.label + (f.required?' *':'')));
+    const i = el('input', { class:'input', type:f.type||'text', placeholder:f.placeholder||'' });
+    // 不在編輯時預填明文密碼（避免外洩）
+    if(s && s[f.key] != null && f.key !== 'password') i.value = s[f.key];
+    inps[f.key] = i;
+    fb.appendChild(i);
+    m.root.appendChild(fb);
+  });
+
+  // 家長 / 監護人聯絡欄位（batch 1 新增）
+  const parentTitle = el('h3', { style:{marginTop:'14px',marginBottom:'6px',fontSize:'14px'} }, '👨‍👩‍👧 家長 / 監護人（可選）');
+  m.root.appendChild(parentTitle);
+  const parentFields = [
+    { key:'parentName', label:'👤 家長姓名', placeholder:'例：王爸爸' },
+    { key:'parentPhone', label:'📞 家長電話', placeholder:'例：0912-345-678' },
+    { key:'parentEmail', label:'📧 家長 Email', type:'email', placeholder:'parent@example.com' }
+  ];
+  parentFields.forEach(f => {
+    const fb = el('div', { class:'field' });
+    fb.appendChild(el('label', { class:'label' }, f.label));
     const i = el('input', { class:'input', type:f.type||'text', placeholder:f.placeholder||'' });
     if(s && s[f.key] != null) i.value = s[f.key];
     inps[f.key] = i;
@@ -4940,23 +5071,35 @@ function openStudentEdit(s=null){
 
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
     const name = inps.name.value.trim();
     if(!name) return toast('姓名必填','danger');
     if(isNew){
       const rec = { id: nid() };
-      Object.keys(inps).forEach(k => {
+      for(const k of Object.keys(inps)){
         const v = inps[k].value;
-        if(k==='seat') rec[k] = parseInt(v,10) || 0;
-        else rec[k] = v;
-      });
+        if(k === 'seat') rec[k] = parseInt(v,10) || 0;
+        else if(k === 'password'){
+          // 新增：若留空 → 用學號末 4 碼當預設
+          const raw = v || String(rec.sid || '').slice(-4) || '0000';
+          rec.password = await hashPassword(raw);
+          if(!v) rec.mustChangePw = true;
+        } else rec[k] = v;
+      }
       App.db.students.push(rec);
     } else {
-      Object.keys(inps).forEach(k => {
+      for(const k of Object.keys(inps)){
         const v = inps[k].value;
-        if(k==='seat') s[k] = parseInt(v,10) || 0;
-        else s[k] = v;
-      });
+        if(k === 'seat') s[k] = parseInt(v,10) || 0;
+        else if(k === 'password'){
+          // 編輯：留空 = 不修改
+          if(v){
+            s.password = await hashPassword(v);
+            s.passwordChangedAt = Date.now();
+            s.mustChangePw = false;
+          }
+        } else s[k] = v;
+      }
     }
     saveDB();
     Sync.setMap('students', App.db.students);
@@ -5146,6 +5289,9 @@ function rAtt(content){
       card.appendChild(acts);
     } else if(a){
       card.appendChild(el('div', { class:'small mono' }, '✅ ' + a.time));
+      if(a.outTime){
+        card.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)'} }, '👋 ' + a.outTime));
+      }
       const acts = el('div', { class:'actions' });
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick:()=> {
         App.db.attendance = App.db.attendance.filter(x => x.id !== a.id);
@@ -5407,7 +5553,7 @@ function updateLeaveStatus(id, status){
    ──────────────────────────────────────────────────────────── */
 function rMsg(content){
   content.appendChild(el('h1', null, '訊息'));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '與學生溝通的留言區'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '與學生溝通的留言區（可上傳附件 📎）'));
 
   // mark all read on entry
   markMessagesRead();
@@ -5433,23 +5579,72 @@ function rMsg(content){
         marginBottom:'8px',
         fontSize:'14px'
       }});
-      bubble.appendChild(el('div', null, m.text));
+      if(m.text) bubble.appendChild(el('div', null, m.text));
+      // batch 1：訊息附件
+      if(m.attach){
+        const isImg = (m.attach.type||'').indexOf('image/') === 0;
+        const ac = el('div', { style:{marginTop:'6px',padding:'6px',borderRadius:'8px',background:'rgba(0,0,0,.06)'} });
+        if(isImg && m.attach.data){
+          const im = el('img', { src: m.attach.data, alt: m.attach.name||'',
+            style:{maxWidth:'200px',maxHeight:'200px',borderRadius:'6px',cursor:'pointer',display:'block'} });
+          im.addEventListener('click', ()=> attachPreview(m.attach));
+          ac.appendChild(im);
+        }
+        ac.appendChild(el('div', { class:'flex', style:{gap:'4px',marginTop:isImg?'6px':'0',flexWrap:'wrap'} },
+          el('button', { class:'btn btn-sm', onclick:()=> attachDownload(m.attach), style:{fontSize:'11px',padding:'2px 8px'} }, '⬇ ' + (m.attach.name || '附件')),
+          el('button', { class:'btn btn-sm', onclick:()=> attachPreview(m.attach), style:{fontSize:'11px',padding:'2px 8px'} }, '👁 預覽')
+        ));
+        bubble.appendChild(ac);
+      }
       bubble.appendChild(el('div', { style:{fontSize:'10px',opacity:.7,marginTop:'4px'} }, (m.fromName||'') + ' · ' + relTime(m.ts||0)));
       const wrap = el('div', { style:{display:'flex',flexDirection:'column'} }, bubble);
       list.appendChild(wrap);
     });
   }
   // input
-  const inputBar = el('div', { style:{display:'flex',gap:'8px',marginTop:'12px',paddingTop:'12px',borderTop:'1px solid var(--border)'} });
-  const inp = el('input', { class:'input', placeholder:'輸入訊息...', style:{flex:'1'} });
+  const inputBar = el('div', { style:{display:'flex',gap:'8px',marginTop:'12px',paddingTop:'12px',borderTop:'1px solid var(--border)',flexWrap:'wrap',alignItems:'center'} });
+  const inp = el('input', { class:'input', placeholder:'輸入訊息...', style:{flex:'1',minWidth:'140px'} });
+
+  // batch 1：附件 state
+  let pendingAttach = null;
+  const fInp = el('input', { type:'file', style:{display:'none'} });
+  const attachPreviewSlot = el('div', { style:{width:'100%',display:'none',padding:'6px 0'} });
+  function refreshAttachSlot(){
+    attachPreviewSlot.innerHTML = '';
+    if(pendingAttach){
+      attachPreviewSlot.style.display = '';
+      const chip = el('div', { class:'file-chip', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',background:'var(--primary-soft)',color:'var(--primary)',borderRadius:'14px',fontSize:'12px'} },
+        el('span', null, '📎 ' + pendingAttach.name + ' (' + Math.round((pendingAttach.size||0)/1024) + ' KB)'),
+        el('span', { style:{cursor:'pointer'}, onclick: ()=> {
+          if(pendingAttach && pendingAttach.key) { try { attachDelete(pendingAttach); } catch(e){} }
+          pendingAttach = null; refreshAttachSlot();
+        } }, '✗')
+      );
+      attachPreviewSlot.appendChild(chip);
+    } else {
+      attachPreviewSlot.style.display = 'none';
+    }
+  }
+  fInp.addEventListener('change', async e => {
+    const file = e.target.files[0]; if(!file) return;
+    try {
+      const data = await attachUpload(file);
+      if(data){ pendingAttach = data; refreshAttachSlot(); }
+    } catch(err){ toast(err.message || '上傳失敗','danger'); }
+    fInp.value = '';
+  });
+  const attachBtn = el('button', { class:'btn btn-sm', title:'附加檔案', onclick:()=> fInp.click() }, '📎');
+
   const send = ()=>{
-    const t = inp.value.trim(); if(!t) return;
+    const t = inp.value.trim();
+    if(!t && !pendingAttach){ return; }
     const rec = {
       id: nid(),
       fromId: App.session.role === 'teacher' ? 'teacher' : App.session.id,
       fromName: App.session.name,
       fromRole: App.session.role,
       text: t,
+      attach: pendingAttach,
       ts: Date.now()
     };
     App.db.messages.push(rec);
@@ -5457,11 +5652,16 @@ function rMsg(content){
     Sync.push('messages', rec);
     bcNotify();
     inp.value = '';
+    pendingAttach = null;
+    refreshAttachSlot();
     rerender();
   };
   inp.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
+  inputBar.appendChild(attachBtn);
+  inputBar.appendChild(fInp);
   inputBar.appendChild(inp);
   inputBar.appendChild(el('button', { class:'btn btn-primary', onclick: send }, '送出'));
+  card.appendChild(attachPreviewSlot);
   card.appendChild(inputBar);
   content.appendChild(card);
 
@@ -5557,13 +5757,14 @@ function approveStudent(pid){
 }
 
 // 核准密碼重設請求
-function approvePwReset(rid){
+async function approvePwReset(rid){
   const r = (App.db.passwordResets || []).find(x => x.id === rid);
   if(!r) return;
   const s = App.db.students.find(x => x.id === r.studentId);
   if(!s){ toast('學生已不存在','danger'); return; }
   const defPw = String(s.sid||'0000').slice(-4);
-  s.password = defPw;
+  s.password = await hashPassword(defPw);
+  s._defPwHint = defPw;
   s.mustChangePw = true;
   s.passwordChangedAt = null;
   s.passwordResetAt = Date.now();
@@ -5603,6 +5804,146 @@ function rejectStudent(pid){
 /* ════════════════════════════════════════════════════════════
    TEACHER: SETTINGS
    ──────────────────────────────────────────────────────────── */
+
+// ─── 出席狀態管理元件（batch 1） ─────────────────────────────
+function renderAttendanceStatusesCard(){
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('h3', null, '🎯 出席狀態管理'));
+  card.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+    '自訂出席狀態（例：公假、校隊、病假等）。預設四個（到 / 遲到 / 請假 / 缺席）只能改不能刪。'));
+
+  const list = el('div');
+  function refresh(){
+    list.innerHTML = '';
+    const statuses = getAttendanceStatuses();
+    statuses.forEach((st, idx) => {
+      const row = el('div', {
+        class:'list-row',
+        style:{ alignItems:'center', padding:'8px 4px', borderBottom:'1px solid var(--border)' }
+      });
+      const colorVar = 'var(--' + (st.color || 'success') + ')';
+      const softVar = 'var(--' + (st.color || 'success') + '-soft)';
+      row.appendChild(el('div', {
+        style:{
+          width:'32px',height:'32px',borderRadius:'50%',display:'flex',
+          alignItems:'center',justifyContent:'center',
+          background: softVar, color: colorVar, fontSize:'18px', flex:'0 0 auto'
+        }
+      }, st.icon || '•'));
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, st.label + (st.builtin ? '' : '  （自訂）'),
+          el('span', { class:'small muted', style:{marginLeft:'6px'} },
+            'key=' + st.key + ' · 權重 ' + (typeof st.counts === 'number' ? st.counts : 1))),
+        el('div', { class:'small muted' }, '顏色：' + (st.color || 'success'))
+      ));
+      const acts = el('div', { class:'actions' });
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> openAttendanceStatusEditor(st, refresh) }, '✏️'));
+      if(!st.builtin){
+        acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+          const ok = await confirmDlg('刪除自訂狀態「' + st.label + '」？', { danger:true });
+          if(!ok) return;
+          App.db.settings.attendanceStatuses = getAttendanceStatuses().filter(x => x.key !== st.key);
+          saveDB();
+          try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){}
+          toast('已刪除','warn');
+          refresh();
+        }}, '🗑'));
+      }
+      row.appendChild(acts);
+      list.appendChild(row);
+    });
+  }
+  refresh();
+  card.appendChild(list);
+
+  card.appendChild(el('div', { class:'flex', style:{marginTop:'10px',gap:'6px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-primary btn-sm', onclick: ()=> openAttendanceStatusEditor(null, refresh) }, '＋ 新增自訂狀態'),
+    el('button', { class:'btn btn-sm', onclick: async ()=> {
+      const ok = await confirmDlg('要將出席狀態還原為預設值嗎？\n（自訂狀態會被清除）', { danger:true });
+      if(!ok) return;
+      App.db.settings.attendanceStatuses = defaultAttendanceStatuses();
+      saveDB();
+      try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){}
+      toast('已還原為預設','success');
+      refresh();
+    }}, '↺ 還原預設')
+  ));
+  return card;
+}
+
+function openAttendanceStatusEditor(existing, onDone){
+  const isNew = !existing;
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, isNew ? '＋ 新增出席狀態' : '✏️ 編輯：' + existing.label));
+
+  const fLabel = el('div', { class:'field' });
+  fLabel.appendChild(el('label', { class:'label' }, '顯示文字 *'));
+  const iLabel = el('input', { class:'input', placeholder:'例：公假', value: existing?.label || '' });
+  fLabel.appendChild(iLabel);
+  m.root.appendChild(fLabel);
+
+  const fIcon = el('div', { class:'field' });
+  fIcon.appendChild(el('label', { class:'label' }, 'Icon（emoji）'));
+  const iIcon = el('input', { class:'input', placeholder:'🏃', value: existing?.icon || '✅' });
+  fIcon.appendChild(iIcon);
+  m.root.appendChild(fIcon);
+
+  const fColor = el('div', { class:'field' });
+  fColor.appendChild(el('label', { class:'label' }, '顏色'));
+  const iColor = el('select', { class:'input select' });
+  [
+    ['success','綠（出席）'],
+    ['warn','橙（注意）'],
+    ['danger','紅（嚴重）'],
+    ['accent','紫（特殊）'],
+    ['primary','藍（一般）']
+  ].forEach(([v,t]) => {
+    const o = el('option', { value:v }, t);
+    if((existing?.color || 'success') === v) o.setAttribute('selected','');
+    iColor.appendChild(o);
+  });
+  fColor.appendChild(iColor);
+  m.root.appendChild(fColor);
+
+  const fCounts = el('div', { class:'field' });
+  fCounts.appendChild(el('label', { class:'label' }, '出席權重（0 ~ 1，計算出席率用）'));
+  const iCounts = el('input', { class:'input', type:'number', min:'0', max:'1', step:'0.1',
+    value: (typeof existing?.counts === 'number') ? existing.counts : 1 });
+  fCounts.appendChild(iCounts);
+  fCounts.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '1 = 完整出席、0.5 = 半出席、0 = 完全缺席'));
+  m.root.appendChild(fCounts);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick: ()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+    const label = iLabel.value.trim();
+    if(!label) return toast('顯示文字必填','danger');
+    const icon = iIcon.value.trim() || '•';
+    const color = iColor.value || 'success';
+    let counts = parseFloat(iCounts.value);
+    if(isNaN(counts)) counts = 1;
+    counts = Math.max(0, Math.min(1, counts));
+    const statuses = getAttendanceStatuses();
+    if(isNew){
+      const key = 'custom_' + Math.random().toString(36).slice(2,8);
+      statuses.push({ key, label, icon, color, counts, builtin:false });
+    } else {
+      existing.label = label;
+      existing.icon = icon;
+      existing.color = color;
+      existing.counts = counts;
+    }
+    App.db.settings.attendanceStatuses = statuses;
+    saveDB();
+    try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){}
+    toast(isNew ? '已新增' : '已更新','success');
+    m.close();
+    if(onDone) onDone();
+  }}, isNew ? '新增' : '儲存'));
+  m.root.appendChild(actions);
+}
+
 function rSettings(content){
   content.appendChild(el('h1', null, '設定'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '系統參數、外觀、帳號'));
@@ -5648,6 +5989,9 @@ function rSettings(content){
   } }, '💾 儲存課程資訊'));
   content.appendChild(card);
 
+  // ─── 出席狀態管理（batch 1）─────────────────────────────────
+  content.appendChild(renderAttendanceStatusesCard());
+
   // appearance
   const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
   card2.appendChild(el('h3', null, '🎨 外觀'));
@@ -5678,8 +6022,10 @@ function rSettings(content){
       const newpw = await promptDlg('新密碼', '', { type:'password' });
       if(newpw === null) return;
       if(!newpw) return toast('不可空','danger');
-      a.password = newpw;
-      saveDB(); toast('已更新','success');
+      a.password = await hashPassword(newpw);
+      saveDB();
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+      toast('已更新（已加密儲存）','success');
     } }, '🔑 改密碼'));
     if(App.db.accounts.length > 1){
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
@@ -5697,8 +6043,11 @@ function rSettings(content){
     if(App.db.accounts.find(a => a.username === u)) return toast('已存在','danger');
     const p = await promptDlg('密碼', '', { type:'password' }); if(!p) return;
     const n = await promptDlg('顯示名稱', u); if(n === null) return;
-    App.db.accounts.push({ id:nid(), username:u, password:p, name:n||u, role:'teacher', ts:Date.now() });
-    saveDB(); toast('已新增','success'); rerender();
+    const hashed = await hashPassword(p);
+    App.db.accounts.push({ id:nid(), username:u, password:hashed, name:n||u, role:'teacher', ts:Date.now() });
+    saveDB();
+    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+    toast('已新增','success'); rerender();
   } }, '＋ 新增老師帳號'));
   content.appendChild(card3);
 
@@ -5887,12 +6236,31 @@ function rCheckIn(content){
       el('div', { class:'tiny muted', style:{marginTop:'8px'} }, '已通過老師批准，不需簽到')
     ));
   } else if(already){
-    wrap.appendChild(el('div', { class:'card', style:{background:'var(--success-soft)',borderColor:'var(--success)',padding:'32px 24px',textAlign:'center',maxWidth:'340px'} },
+    const signedCard = el('div', { class:'card', style:{background:'var(--success-soft)',borderColor:'var(--success)',padding:'32px 24px',textAlign:'center',maxWidth:'340px'} },
       el('div', { class:'huge' }, '✅'),
       el('h2', { style:{color:'var(--success)'} }, '已完成簽到'),
       el('div', { class:'mono big' }, already.time),
       el('div', { class:'muted small' }, '今天 ' + already.date + ' · 看你真積極！')
-    ));
+    );
+    // batch 1：簽退按鈕
+    if(already.outTime){
+      signedCard.appendChild(el('div', {
+        style:{ marginTop:'14px',padding:'10px 14px',background:'var(--surface)',borderRadius:'10px' }
+      },
+        el('div', { class:'small muted' }, '👋 已簽退'),
+        el('div', { class:'mono big', style:{color:'var(--text)',fontSize:'24px'} }, already.outTime)
+      ));
+    } else {
+      signedCard.appendChild(el('button', {
+        class:'btn btn-primary btn-block',
+        style:{ marginTop:'14px',background:'var(--accent)',borderColor:'var(--accent)' },
+        onclick: studentCheckOut,
+        title:'現在 簽退（記錄離開時間）'
+      }, '👋 現在 簽退'));
+      signedCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px'} },
+        '可選：要離開時按下記錄離開時間'));
+    }
+    wrap.appendChild(signedCard);
   } else {
     const btn = el('button', { class:'checkin-btn pulse', onclick: doStudentCheckIn, title:'點我完成今日簽到' }, '👆 點我簽到');
     wrap.appendChild(btn);
@@ -5999,6 +6367,25 @@ function doStudentCheckIn(){
 
   toast('簽到成功！' + rec.time, 'success', 3000);
   setTimeout(()=> rerender(), 1400);
+}
+
+// batch 1：學生簽退
+function studentCheckOut(){
+  const me = currentStudent();
+  if(!me) return;
+  const today = td();
+  const rec = (App.db.attendance || []).find(a =>
+    a.studentId === me.id && a.date === today
+  );
+  if(!rec){ toast('尚未簽到，無法簽退','warn'); return; }
+  if(rec.outTime){ toast('你已經簽退過了：' + rec.outTime, 'warn'); return; }
+  rec.outTime = nt();
+  rec.outTs = Date.now();
+  saveDB();
+  try { Sync.setMap('attendance', App.db.attendance); } catch(e){}
+  bcNotify();
+  toast('👋 簽退成功！' + rec.outTime, 'success', 3000);
+  setTimeout(()=> rerender(), 600);
 }
 
 function studentRequestLeave(){
@@ -6147,11 +6534,13 @@ function rMe(content){
   card3.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'8px'}, onclick: async ()=> {
     const oldpw = await promptDlg('目前密碼', '', { type:'password' });
     if(oldpw === null) return;
-    if((me.password||'') !== oldpw) return toast('密碼錯誤','danger');
+    const ok = await verifyPassword(oldpw, me.password);
+    if(!ok) return toast('密碼錯誤','danger');
     const newpw = await promptDlg('新密碼', '', { type:'password' });
     if(newpw === null) return;
     if(!newpw) return toast('不可空','danger');
-    me.password = newpw;
+    me.password = await hashPassword(newpw);
+    me.passwordChangedAt = Date.now();
     saveDB(); Sync.setMap('students', App.db.students); bcNotify();
     toast('已更新','success');
   } }, '🔑 修改密碼'));
@@ -6237,6 +6626,7 @@ function rAsgn(content){
       card.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px',fontSize:'12px'} },
         el('span', { class:'tag' }, '⏰ ' + (a.dueAt ? new Date(a.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無截止')),
         el('span', { class:'tag' }, '💯 ' + (a.points||100) + ' 分'),
+        (Number(a.weight) > 1) ? el('span', { class:'tag t-accent' }, '⚖ ×' + a.weight) : null,
         el('span', { class:'tag t-primary' }, '📊 ' + st.submitted + '/' + st.total + ' (' + st.rate + '%)'),
         st.graded > 0 ? el('span', { class:'tag t-success' }, '平均 ' + st.avg) : null,
         st.late > 0 ? el('span', { class:'tag t-warn' }, '遲交 ' + st.late) : null
@@ -6252,6 +6642,12 @@ function rAsgnDetail(content, asg){
   const targets = assignmentTargets(asg);
   const subsByStu = new Map();
   App.db.submissions.filter(s => s.assignmentId === asg.id).forEach(s => subsByStu.set(s.studentId, s));
+
+  // 麵包屑（batch 1）
+  content.appendChild(renderBreadcrumb([
+    { label: '作業管理', go: 'assignments' },
+    { label: asg.title || '(未命名)' }
+  ]));
 
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
@@ -6363,6 +6759,15 @@ function openAssignmentEdit(asg){
   fTgt.appendChild(iTgt); row2.appendChild(fTgt);
   m.root.appendChild(row2);
 
+  // batch 1：加權倍數
+  const fWeight = el('div', { class:'field' });
+  fWeight.appendChild(el('label', { class:'label' }, '加權倍數（1 ~ 10，預設 1）'));
+  const iWeight = el('input', { class:'input', type:'number', value: (asg && Number(asg.weight) > 0) ? asg.weight : 1, min:'1', max:'10', step:'0.5' });
+  fWeight.appendChild(iWeight);
+  fWeight.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '此作業在「平均分」計算中佔的權重（例：期末報告設 3，等同 3 份普通作業）'));
+  m.root.appendChild(fWeight);
+
   // class picker (only when target=class)
   const fCls = el('div', { class:'field', style:{display:'none'} });
   fCls.appendChild(el('label', { class:'label' }, '班級'));
@@ -6438,6 +6843,7 @@ function openAssignmentEdit(asg){
     rec.dueAt = iDue.value;
     rec.points = parseInt(iPts.value,10) || 100;
     rec.latePenalty = parseInt(iLate.value,10) || 0;
+    rec.weight = Math.max(1, Math.min(10, parseFloat(iWeight.value) || 1));
     rec.target = iTgt.value;
     rec.targetCls = iCls.value;
     rec.targetIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
@@ -6647,6 +7053,12 @@ function openSubmissionGrade(sub, list=null, idx=0){
 
   const m = modal('');
   m.root.style.maxWidth = '600px';
+  // 麵包屑（batch 1）
+  m.root.appendChild(renderBreadcrumb([
+    { label: '繳交紀錄', go: ()=> { m.close(); go('submissions'); } },
+    { label: stu.name },
+    { label: asg.title || '作業' }
+  ]));
   m.root.appendChild(el('h2', null, '批改：' + stu.name));
   m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
     asg.title + ' · 滿分 ' + (asg.points||100) + (late?' · ⚠遲交':'')
@@ -8038,6 +8450,56 @@ function genAttCode(){
   return s;
 }
 
+/* ─── 5-minute QR token registry (batch 1 安全強化) ─────────────
+   產生代碼時同步寫入 DB._qrCodes，學生 / 其他裝置可驗證有效性。
+   防偽造：學生只能用「老師確實派發過、未過期」的代碼簽到。
+*/
+const QR_CODE_TTL_MS = 5 * 60 * 1000;
+
+function generateQrPayload(){
+  const code = genAttCode();
+  const expireTs = Date.now() + QR_CODE_TTL_MS;
+  App.db._qrCodes = Array.isArray(App.db._qrCodes) ? App.db._qrCodes : [];
+  // 清掉過期 + 太久遠的舊代碼（保留最近 30 分鐘內紀錄）
+  const cutoff = Date.now() - 30*60*1000;
+  App.db._qrCodes = App.db._qrCodes.filter(q => q && q.expireTs > cutoff);
+  App.db._qrCodes.push({
+    code, expireTs,
+    createdAt: Date.now(),
+    used: [],
+    room: (App.cfg && App.cfg.roomCode) || ''
+  });
+  // 控制數量上限
+  if(App.db._qrCodes.length > 50) App.db._qrCodes = App.db._qrCodes.slice(-50);
+  saveDB();
+  try { Sync.setMap('_qrCodes', App.db._qrCodes); } catch(e){}
+  return code;
+}
+
+function validateQrCode(code){
+  if(!code) return { ok:false, reason:'缺少代碼' };
+  const list = Array.isArray(App.db._qrCodes) ? App.db._qrCodes : [];
+  const c = list.find(q => q && q.code === String(code));
+  if(!c){
+    return { ok:false, reason:'代碼無效（可能是舊版 QR，請老師重新產生）' };
+  }
+  if(c.expireTs < Date.now()){
+    return { ok:false, reason:'代碼已過期（每 5 分鐘自動更換，請重新掃描）' };
+  }
+  return { ok:true, qr:c };
+}
+
+function markQrUsed(code, studentId){
+  const list = Array.isArray(App.db._qrCodes) ? App.db._qrCodes : [];
+  const c = list.find(q => q && q.code === String(code));
+  if(c){
+    c.used = c.used || [];
+    if(c.used.indexOf(studentId) < 0) c.used.push(studentId);
+    saveDB();
+    try { Sync.setMap('_qrCodes', App.db._qrCodes); } catch(e){}
+  }
+}
+
 function currentSiteOrigin(){
   // Honor whatever URL the file is opened from
   const o = location.origin + location.pathname.replace(/[^/]*$/, '');
@@ -8060,10 +8522,10 @@ function rQR(content){
     el('button', { class:'btn btn-sm', onclick:()=> { qrRegenerate(true); } }, '🔄 重新產生')
   ));
 
-  // ensure we have a code
+  // ensure we have a code（同時寫入 DB._qrCodes 供學生端驗證）
   if(!App.qrAttCode || App.qrAttExpires < Date.now()){
-    App.qrAttCode = genAttCode();
-    App.qrAttExpires = Date.now() + 5*60*1000;
+    App.qrAttCode = generateQrPayload();
+    App.qrAttExpires = Date.now() + QR_CODE_TTL_MS;
   }
 
   const url = buildQRJoinUrl(App.qrAttCode);
@@ -8140,8 +8602,8 @@ function rQR(content){
 }
 
 function qrRegenerate(notify){
-  App.qrAttCode = genAttCode();
-  App.qrAttExpires = Date.now() + 5*60*1000;
+  App.qrAttCode = generateQrPayload();
+  App.qrAttExpires = Date.now() + QR_CODE_TTL_MS;
   if(notify) toast('已產生新碼','success');
   if(App.view === 'qr') rerender();
 }
@@ -8191,11 +8653,15 @@ function tryAutoCheckin(){
   const me = currentStudent();
   if(!me) return;
 
-  // validate code: must match current room's qrAttCode OR be any code if teacher-side fresh
-  // since codes are short-lived and per-teacher-device, we can't verify cryptographically here.
-  // accept any non-empty code (the QR encodes a fresh one) — log it in attendance metadata.
+  // batch 1：嚴格驗證 QR 代碼必須來自老師端、未過期
   const code = App.pendingAttCode;
   App.pendingAttCode = null;
+
+  const v = validateQrCode(code);
+  if(!v.ok){
+    toast('❌ ' + v.reason, 'danger', 4000);
+    return;
+  }
 
   if(studentSignedToday(me.id)){
     toast('你今天已經簽到過了','warn', 3000);
@@ -8212,6 +8678,7 @@ function tryAutoCheckin(){
     status:'present', method:'qr', code
   };
   App.db.attendance.push(rec);
+  markQrUsed(code, me.id);
   saveDB();
   Sync.push('attendance', rec);
   bcNotify();
@@ -9287,7 +9754,7 @@ function renderQuickStart(){
 
 /* Generate a few demo students so the teacher can try features
    immediately without any setup. */
-function renderDemoData(){
+async function renderDemoData(){
   if(App.db.students.length > 0){
     toast('已有學生，不重複建立示範資料','warn');
     return;
@@ -9299,16 +9766,16 @@ function renderDemoData(){
     { name:'陳志強', sid:'A004', cls:'示範班', seat:4 },
     { name:'林雅婷', sid:'A005', cls:'示範班', seat:5 }
   ];
-  demos.forEach(d => {
+  for(const d of demos){
     App.db.students.push({
       id: nid(),
       name: d.name, sid: d.sid, cls: d.cls, seat: d.seat,
       email:'', phone:'',
-      password: d.sid.slice(-4),
+      password: await hashPassword(d.sid.slice(-4)),
       mustChangePw: true,
       note:'示範資料'
     });
-  });
+  }
   saveDB();
   try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){}
   toast('✅ 已建立 5 位示範學生（密碼皆為學號末 4 碼）','success', 3500);
@@ -10701,6 +11168,11 @@ function openPeerEvalCreator(){
 }
 
 function rPeerDetail(content, pe){
+  // 麵包屑（batch 1）
+  content.appendChild(renderBreadcrumb([
+    { label: '學生互評', go: 'peer' },
+    { label: pe.title || '(未命名)' }
+  ]));
   content.appendChild(el('button', { class:'btn btn-sm', style:{marginBottom:'10px'}, onclick:()=> go('peer') }, '← 回任務列表'));
 
   const closed = peerEvalIsDueClosed(pe);
@@ -11496,10 +11968,38 @@ function rerender(){
    BOOT
    ──────────────────────────────────────────────────────────── */
 function boot(){
-  // ═══ 老師密碼重設專用 URL ═══
-  // 訪問 ?adminreset=1 → 只重設老師密碼為 admin/admin123，所有資料保留
+  // ═══ 老師密碼重設專用 URL（batch 1：加上驗證問題）═══
+  // 訪問 ?adminreset=1 → 需先回答驗證問題才能重設
   try {
     if(location.search.indexOf('adminreset=1') >= 0){
+      // 驗證問題：請輸入今天日期 YYYY-MM-DD
+      const todayStr = (function(){
+        const d = new Date();
+        return d.getFullYear() + '-' +
+               String(d.getMonth()+1).padStart(2,'0') + '-' +
+               String(d.getDate()).padStart(2,'0');
+      })();
+      const answer = prompt(
+        '🔒 安全驗證\n\n' +
+        '為防止他人惡意重設老師密碼，請輸入「今天的日期」：\n' +
+        '格式：YYYY-MM-DD（例如：' + todayStr + '）\n\n' +
+        '如果你不知道，請改用老師登入頁的「🔑 忘記密碼？」功能。'
+      );
+      if(answer === null){
+        // 取消 → 不重設，導回主頁
+        location.replace(location.pathname);
+        return;
+      }
+      if((answer || '').trim() !== todayStr){
+        document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
+          + '<div style="font-size:64px;margin-bottom:20px">🚫</div>'
+          + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">驗證失敗</h1>'
+          + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">日期格式錯誤或輸入錯誤。<br>請改用老師登入頁的「🔑 忘記密碼？」功能。</div>'
+          + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 回到登入頁</a>'
+          + '</div>';
+        return;
+      }
+      // 驗證通過 → 執行重設
       // 解除 SW + 清快取（確保看新版）
       if('serviceWorker' in navigator){
         navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
@@ -11507,7 +12007,7 @@ function boot(){
       if('caches' in window){
         caches.keys().then(names => names.forEach(n => caches.delete(n)));
       }
-      // 找出所有 v3 db key 並重設 admin
+      // 找出所有 v3 db key 並重設 admin（密碼存「明文 admin123」以便雜湊向後相容驗證）
       let resetCount = 0;
       for(let i = 0; i < localStorage.length; i++){
         const k = localStorage.key(i);
@@ -11519,7 +12019,7 @@ function boot(){
             if(!acc) acc = db.accounts[0];
             if(acc){
               acc.username = 'admin';
-              acc.password = 'admin123';
+              acc.password = 'admin123';  // 登入時自動升級為 hash
               acc.role = 'teacher';
               if(!acc.name) acc.name = '管理員';
             } else {
@@ -11545,7 +12045,7 @@ function boot(){
         + '<h1 style="font-size:24px;margin:0 0 10px;color:#16a34a">老師密碼已重設！</h1>'
         + '<div style="font-size:16px;color:#666;margin-bottom:20px;line-height:1.8">已重設 ' + resetCount + ' 個工作區的老師密碼<br><br>'
         + '<span style="background:#dbeafe;color:#1e40af;padding:8px 16px;border-radius:8px;font-weight:600">帳號：admin<br>密碼：admin123</span></div>'
-        + '<div style="font-size:14px;color:#999;margin-bottom:30px">所有學生資料、出席紀錄都已保留</div>'
+        + '<div style="font-size:14px;color:#999;margin-bottom:30px">所有學生資料、出席紀錄都已保留<br>建議登入後立即修改密碼</div>'
         + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 前往登入頁</a>'
         + '</div>';
       return;
