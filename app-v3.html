@@ -2559,26 +2559,248 @@ function _newAttachKey(){
   return 'attach_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
 }
 
-// 上傳 File 到 IDB，回傳 metadata（不含 data，只含 key）
+/* ════════════════════════════════════════════════════════════
+   GOOGLE DRIVE 整合
+   ──────────────────────────────────────────────────────────── */
+let _gapiReady = false;
+let _gisReady = false;
+let _gdToken = null;
+let _gdTokenExpiry = 0;
+const GD_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+// 載入 Google API + Google Identity Services（lazy）
+async function gdLoadScripts(){
+  if(_gapiReady && _gisReady) return;
+  await Promise.all([
+    new Promise((res, rej) => {
+      if(window.gapi){ _gapiReady = true; res(); return; }
+      const s = document.createElement('script');
+      s.src = 'https://apis.google.com/js/api.js';
+      s.onload = () => { _gapiReady = true; res(); };
+      s.onerror = () => rej(new Error('無法載入 Google API'));
+      document.head.appendChild(s);
+    }),
+    new Promise((res, rej) => {
+      if(window.google && window.google.accounts){ _gisReady = true; res(); return; }
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.onload = () => { _gisReady = true; res(); };
+      s.onerror = () => rej(new Error('無法載入 Google Identity'));
+      document.head.appendChild(s);
+    })
+  ]);
+  await new Promise(res => gapi.load('client', res));
+  try {
+    await gapi.client.init({
+      discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
+    });
+  } catch(e){ /* 即使 init 失敗仍可走 raw fetch */ }
+}
+
+function gdConfig(){
+  if(!App.db || !App.db.settings) return {};
+  return App.db.settings.googleDrive || {};
+}
+
+function gdIsConfigured(){
+  const c = gdConfig();
+  return !!c.clientId;
+}
+
+function gdIsAuthed(){
+  return !!_gdToken && Date.now() < _gdTokenExpiry;
+}
+
+// 授權登入（取得 access token）
+async function gdAuth(){
+  await gdLoadScripts();
+  const cfg = gdConfig();
+  if(!cfg.clientId) throw new Error('未設定 Google Client ID');
+  return new Promise((res, rej) => {
+    try {
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: cfg.clientId,
+        scope: GD_SCOPE,
+        callback: (resp) => {
+          if(resp.error){ rej(new Error(resp.error)); return; }
+          _gdToken = resp.access_token;
+          _gdTokenExpiry = Date.now() + (parseInt(resp.expires_in) || 3600) * 1000;
+          try { gapi.client.setToken({ access_token: _gdToken }); } catch(e){}
+          res(resp);
+        },
+      });
+      client.requestAccessToken({ prompt: cfg.skipPrompt ? '' : 'consent' });
+    } catch(e){ rej(e); }
+  });
+}
+
+// 上傳檔案到 Drive（multipart）
+async function gdUpload(file, folderId){
+  if(!gdIsAuthed()) await gdAuth();
+  const metadata = {
+    name: file.name,
+    mimeType: file.type || 'application/octet-stream'
+  };
+  if(folderId) metadata.parents = [folderId];
+  const boundary = '-------314159265358979323846';
+  const delim = '\r\n--' + boundary + '\r\n';
+  const close = '\r\n--' + boundary + '--';
+
+  const base64 = await new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const r = reader.result;
+      const idx = r.indexOf(',');
+      res(idx >= 0 ? r.slice(idx + 1) : r);
+    };
+    reader.onerror = () => rej(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+  const body =
+    delim +
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify(metadata) +
+    delim +
+    'Content-Type: ' + (file.type || 'application/octet-stream') + '\r\n' +
+    'Content-Transfer-Encoding: base64\r\n\r\n' +
+    base64 +
+    close;
+
+  const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,webContentLink,name,size', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + _gdToken,
+      'Content-Type': 'multipart/related; boundary="' + boundary + '"'
+    },
+    body
+  });
+  if(!resp.ok){
+    const err = await resp.text();
+    throw new Error('Drive 上傳失敗：' + err);
+  }
+  const data = await resp.json();
+
+  // 設為任何人有連結就可看（學生 ↔ 老師共用）
+  try {
+    await fetch('https://www.googleapis.com/drive/v3/files/' + data.id + '/permissions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + _gdToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' })
+    });
+  } catch(e){ console.warn('[gdUpload permission]', e); }
+
+  return data;
+}
+
+// 從 Drive 下載為 Blob
+async function gdDownload(fileId){
+  if(!gdIsAuthed()) await gdAuth();
+  const resp = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+    headers: { Authorization: 'Bearer ' + _gdToken }
+  });
+  if(!resp.ok) throw new Error('下載失敗');
+  return await resp.blob();
+}
+
+// 刪除 Drive 檔案
+async function gdDelete(fileId){
+  if(!gdIsAuthed()) await gdAuth();
+  await fetch('https://www.googleapis.com/drive/v3/files/' + fileId, {
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer ' + _gdToken }
+  });
+}
+
+// 取得 Drive 容量資訊
+async function gdGetUsage(){
+  if(!gdIsAuthed()) await gdAuth();
+  const resp = await fetch('https://www.googleapis.com/drive/v3/about?fields=storageQuota,user', {
+    headers: { Authorization: 'Bearer ' + _gdToken }
+  });
+  if(!resp.ok) return null;
+  return await resp.json();
+}
+
+// 上傳 File，回傳 metadata：依設定智能切換 IDB / Google Drive
 async function attachUpload(file){
   if(!file) throw new Error('沒有檔案');
-  if(file.size > ATTACH_MAX_SIZE){
-    throw new Error('檔案太大（上限 ' + Math.floor(ATTACH_MAX_SIZE/1024/1024) + ' MB）');
+  const DRIVE_MAX = 1024 * 1024 * 1024; // 1 GB（單檔 Drive 限制；Drive 本身允許更大但保守）
+
+  const cfg = gdConfig();
+  const driveEnabled = !!(cfg && cfg.enabled && cfg.clientId);
+  const useDriveForAll = driveEnabled && cfg.mode === 'always';
+  const useDriveOverflow = driveEnabled && cfg.mode === 'overflow';
+  const overflowThreshold = ((cfg && cfg.overflowThreshold) || 80) / 100;
+
+  // 決定儲存目標
+  let target = 'idb';
+  if(useDriveForAll){
+    target = 'drive';
+  } else if(useDriveOverflow){
+    try {
+      const usage = await idbUsage();
+      const pct = usage.quota ? (usage.usage / usage.quota) : 0;
+      if(pct >= overflowThreshold) target = 'drive';
+    } catch(e){}
   }
+
+  // 強制 Drive：超過 IDB 單檔上限
+  if(file.size > ATTACH_MAX_SIZE){
+    if(driveEnabled){
+      target = 'drive';
+    } else {
+      throw new Error('檔案太大（' + Math.round(file.size/1024/1024) + ' MB），請啟用 Google Drive 儲存');
+    }
+  }
+
+  if(file.size > DRIVE_MAX){
+    throw new Error('檔案超過 1 GB');
+  }
+
+  if(target === 'drive'){
+    try {
+      const data = await gdUpload(file, cfg.folderId);
+      return {
+        name: file.name,
+        type: file.type || '',
+        size: file.size,
+        storage: 'drive',
+        driveFileId: data.id,
+        driveLink: data.webViewLink,
+        driveDownloadLink: data.webContentLink,
+        storedAt: Date.now()
+      };
+    } catch(e){
+      console.warn('[Drive upload failed, fallback to IDB]', e);
+      if(file.size > ATTACH_MAX_SIZE){
+        throw new Error('Drive 上傳失敗且本機容量不足：' + e.message);
+      }
+      try { toast('Drive 上傳失敗，改用本機儲存：' + e.message, 'warn', 5000); } catch(_){}
+      // fallthrough to IDB
+    }
+  }
+
+  // IDB 儲存（預設路徑）
   const key = _newAttachKey();
   await idbPut(key, file);
   return {
     name: file.name,
     type: file.type || '',
     size: file.size,
+    storage: 'idb',
     key: key,
     storedAt: Date.now()
   };
 }
 
-// 從 IDB 取得 Blob URL（呼叫端記得 revoke）
+// 取得附件的可訪問 URL（IDB → blob: URL；Drive → webViewLink）
 async function attachGetUrl(meta){
   if(!meta) return null;
+  // Drive 檔案：直接回 webViewLink（公開連結）
+  if(meta.storage === 'drive' || meta.driveFileId){
+    return meta.driveLink || ('https://drive.google.com/file/d/' + meta.driveFileId + '/view');
+  }
   // 新版：key 在 IDB
   if(meta.key){
     try {
@@ -2594,9 +2816,15 @@ async function attachGetUrl(meta){
   return null;
 }
 
-// 下載附件（新舊版皆可）
+// 下載附件（新舊版 + Drive 皆可）
 async function attachDownload(meta){
   if(!meta){ toast('找不到附件','danger'); return; }
+  // Drive：直接開連結讓使用者下載
+  if(meta.storage === 'drive' || meta.driveFileId){
+    const url = meta.driveLink || ('https://drive.google.com/file/d/' + meta.driveFileId + '/view');
+    window.open(url, '_blank');
+    return;
+  }
   const url = await attachGetUrl(meta);
   if(!url){ toast('找不到附件檔案','danger'); return; }
   const a = document.createElement('a');
@@ -2614,6 +2842,11 @@ async function attachDownload(meta){
 // 預覽附件（新分頁）
 async function attachPreview(meta){
   if(!meta){ toast('找不到附件','danger'); return; }
+  if(meta.storage === 'drive' || meta.driveFileId){
+    const url = meta.driveLink || ('https://drive.google.com/file/d/' + meta.driveFileId + '/view');
+    window.open(url, '_blank');
+    return;
+  }
   const url = await attachGetUrl(meta);
   if(!url){ toast('找不到附件檔案','danger'); return; }
   window.open(url, '_blank');
@@ -2622,10 +2855,16 @@ async function attachPreview(meta){
   }
 }
 
-// 刪除 IDB 中的附件
+// 刪除附件（IDB + Drive 皆可）
 async function attachDelete(meta){
-  if(!meta || !meta.key) return;
-  try { await idbDelete(meta.key); } catch(e){}
+  if(!meta) return;
+  if((meta.storage === 'drive' || meta.driveFileId) && meta.driveFileId){
+    try { await gdDelete(meta.driveFileId); } catch(e){ console.warn('[gdDelete]', e); }
+    return;
+  }
+  if(meta.key){
+    try { await idbDelete(meta.key); } catch(e){}
+  }
 }
 
 // 把舊版 base64 data URL → 轉成 Blob → 存 IDB
@@ -9645,6 +9884,54 @@ function rStorage(content){
   })();
   content.appendChild(cardIdb);
 
+  // ═══ Google Drive 雲端儲存 ═══
+  const gd = el('div', { class:'card', style:{marginTop:'10px'} });
+  gd.appendChild(el('h3', null, '☁️ Google Drive 雲端儲存'));
+  gd.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
+    '當本機容量不夠時，自動切換到您的 Google 雲端硬碟（每位 Google 帳號免費 15 GB）'));
+
+  const cfg = gdConfig();
+  if(!cfg.clientId){
+    gd.appendChild(el('div', { style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px'} },
+      el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '🔧 尚未設定'),
+      el('div', { class:'small muted' }, '請先設定 Google Client ID（一次性設定，約 5 分鐘）')
+    ));
+    gd.appendChild(el('button', { class:'btn btn-primary', onclick: openGoogleDriveSetup }, '🔧 設定 Google Drive'));
+  } else {
+    const modeLabel = cfg.mode === 'always' ? '全部用 Drive'
+      : cfg.mode === 'overflow' ? ('本機滿 ' + (cfg.overflowThreshold || 80) + '% 時切換')
+      : '手動';
+    const info = el('div', { style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px'} });
+    const row = el('div', { class:'flex', style:{justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'8px'} });
+    row.appendChild(el('div', null,
+      el('div', { style:{fontWeight:'700'} }, cfg.enabled ? '🟢 已啟用' : '🔵 已設定但停用'),
+      el('div', { class:'small muted' }, '模式：' + modeLabel),
+      cfg.folderId ? el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '資料夾：' + cfg.folderId) : null
+    ));
+    const btns = el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap'} });
+    btns.appendChild(el('button', { class:'btn btn-sm', onclick: openGoogleDriveSetup }, '⚙ 設定'));
+    btns.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+      try {
+        await gdAuth();
+        const u = await gdGetUsage();
+        if(u && u.storageQuota){
+          const used = parseInt(u.storageQuota.usage || 0);
+          const limit = parseInt(u.storageQuota.limit || 0);
+          const usedGB = (used/1024/1024/1024).toFixed(2);
+          const limitGB = limit ? (limit/1024/1024/1024).toFixed(0) : '∞';
+          const who = (u.user && u.user.emailAddress) ? (' · ' + u.user.emailAddress) : '';
+          toast('Drive 容量：' + usedGB + ' GB / ' + limitGB + ' GB' + who, 'info', 5000);
+        } else {
+          toast('無法取得容量資訊','warn');
+        }
+      } catch(e){ toast('查詢失敗：' + e.message,'danger'); }
+    }}, '📊 查容量'));
+    row.appendChild(btns);
+    info.appendChild(row);
+    gd.appendChild(info);
+  }
+  content.appendChild(gd);
+
   // cleanup actions
   const card3 = el('div', { class:'card', style:{marginTop:'10px'} });
   card3.appendChild(el('h3', null, '🧹 清理工具'));
@@ -9668,6 +9955,114 @@ function rStorage(content){
   }}, '🗑 清備份'));
   card3.appendChild(actions);
   content.appendChild(card3);
+}
+
+// ═══ Google Drive 設定 modal ═══
+function openGoogleDriveSetup(){
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, '🔧 Google Drive 設定'));
+  m.root.appendChild(el('p', { class:'small muted', style:{marginBottom:'12px'} },
+    '請依下方步驟取得 Google Client ID（約 5 分鐘）'));
+
+  // 教學折疊
+  m.root.appendChild(el('details', { style:{background:'var(--surface-2)',padding:'10px',borderRadius:'8px',marginBottom:'12px'} },
+    el('summary', { style:{cursor:'pointer',fontWeight:'600'} }, '📖 如何取得 Google Client ID（點開）'),
+    el('ol', { style:{fontSize:'13px',lineHeight:'1.8',marginTop:'8px',paddingLeft:'20px'} },
+      el('li', null, '前往 ', el('a', { href:'https://console.cloud.google.com/', target:'_blank' }, 'Google Cloud Console')),
+      el('li', null, '建立新專案（或使用既有專案）'),
+      el('li', null, '左側「API 與服務」→「啟用 API」→ 找「Google Drive API」→ 啟用'),
+      el('li', null, '左側「憑證」→ 點「建立憑證」→「OAuth 用戶端 ID」'),
+      el('li', null, '應用程式類型選「網路應用程式」'),
+      el('li', null, '已授權的 JavaScript 來源加：', el('code', { style:{padding:'2px 6px',background:'var(--surface)',borderRadius:'4px'} }, location.origin)),
+      el('li', null, '建立後複製「用戶端 ID」貼到下方欄位')
+    )
+  ));
+
+  const cfg = gdConfig();
+
+  const f1 = el('div', { class:'field', style:{marginBottom:'10px'} });
+  f1.appendChild(el('label', { class:'label' }, 'Google Client ID *'));
+  const i1 = el('input', { class:'input', type:'text', placeholder:'xxxxxxxxxx.apps.googleusercontent.com' });
+  i1.value = cfg.clientId || '';
+  f1.appendChild(i1);
+  m.root.appendChild(f1);
+
+  const f2 = el('div', { class:'field', style:{marginBottom:'4px'} });
+  f2.appendChild(el('label', { class:'label' }, '指定 Drive 資料夾 ID（選填）'));
+  const i2 = el('input', { class:'input', type:'text', placeholder:'從 Drive 網址複製，例：1aBcD...' });
+  i2.value = cfg.folderId || '';
+  f2.appendChild(i2);
+  m.root.appendChild(f2);
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
+    '留空會存在 Drive 根目錄。建議先在 Drive 建一個「課程附件」資料夾，把網址裡 /folders/ 後的 ID 貼進來'));
+
+  const f3 = el('div', { class:'field', style:{marginBottom:'10px'} });
+  f3.appendChild(el('label', { class:'label' }, '儲存策略'));
+  const sel = el('select', { class:'input select' });
+  [
+    ['manual', '手動（程式碼指定）'],
+    ['overflow', '本機滿到指定 % 時切換'],
+    ['always', '全部用 Drive']
+  ].forEach(([val, label]) => {
+    const o = el('option', { value: val }, label);
+    if(cfg.mode === val) o.setAttribute('selected', '');
+    sel.appendChild(o);
+  });
+  if(!cfg.mode){
+    // 預設選 overflow
+    Array.from(sel.options).forEach(o => { if(o.value === 'overflow') o.selected = true; });
+  }
+  f3.appendChild(sel);
+  m.root.appendChild(f3);
+
+  const f4 = el('div', { class:'field', style:{marginBottom:'10px'} });
+  f4.appendChild(el('label', { class:'label' }, '切換閾值 %（僅 overflow 模式）'));
+  const i4 = el('input', { class:'input', type:'number', min:'10', max:'95' });
+  i4.value = String(cfg.overflowThreshold || 80);
+  f4.appendChild(i4);
+  m.root.appendChild(f4);
+
+  const chkWrap = el('label', { style:{display:'flex',alignItems:'center',gap:'8px',padding:'10px',background:'var(--surface-2)',borderRadius:'8px',cursor:'pointer',marginBottom:'4px'} });
+  const chk = el('input', { type:'checkbox' });
+  if(cfg.enabled) chk.checked = true;
+  chkWrap.appendChild(chk);
+  chkWrap.appendChild(el('span', null, '✅ 啟用 Google Drive 儲存'));
+  m.root.appendChild(chkWrap);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async (ev)=> {
+    const newCfg = {
+      enabled: !!chk.checked,
+      clientId: i1.value.trim(),
+      folderId: i2.value.trim(),
+      mode: sel.value,
+      overflowThreshold: parseInt(i4.value, 10) || 80
+    };
+    if(newCfg.enabled && !newCfg.clientId){
+      toast('請填入 Client ID','danger');
+      return;
+    }
+    if(!App.db.settings) App.db.settings = {};
+    App.db.settings.googleDrive = newCfg;
+    saveDB();
+    if(typeof logOp === 'function'){
+      try { logOp('settings','更新 Google Drive 設定（' + (newCfg.enabled ? '啟用' : '停用') + '）'); } catch(_){}
+    }
+    if(newCfg.enabled){
+      try {
+        await gdAuth();
+        toast('✅ Google Drive 已連接','success');
+      } catch(e){
+        toast('授權失敗：' + e.message,'danger', 5000);
+      }
+    } else {
+      toast('已儲存（Drive 停用中）','info');
+    }
+    m.close();
+    if(typeof rerender === 'function') rerender();
+  }}, '💾 儲存設定'));
+  m.root.appendChild(actions);
 }
 
 function rLogs(content){
