@@ -4621,19 +4621,22 @@ function rAtt(content){
   // student grid
   let students = App.db.students.slice().sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0));
 
+  // 計算遲到判斷的閾值（給 header 統計用）
+  const lateMinSetting = App.db.settings.lateMinutes || 10;
+  const startSetting = App.db.settings.startTime || '08:00';
+  const [shAll, smAll] = startSetting.split(':').map(Number);
+  const lateThreshold = shAll*60 + smAll + lateMinSetting;
+  function isStudentLate(stu){
+    const a = att.find(x => x.studentId === stu.id);
+    if(!a || !a.time) return false;
+    const [h,m] = a.time.split(':').map(Number);
+    return h*60+m > lateThreshold;
+  }
+
   if(filter === 'signed') students = students.filter(s => signedIds.has(s.id));
   else if(filter === 'absent') students = students.filter(s => !signedIds.has(s.id) && !leaveIds.has(s.id));
   else if(filter === 'late') {
-    const lateMin = App.db.settings.lateMinutes || 10;
-    const start = App.db.settings.startTime || '08:00';
-    const [sh, sm] = start.split(':').map(Number);
-    const thr = sh*60 + sm + lateMin;
-    students = students.filter(s => {
-      const a = att.find(x => x.studentId === s.id);
-      if(!a || !a.time) return false;
-      const [h,m] = a.time.split(':').map(Number);
-      return h*60+m > thr;
-    });
+    students = students.filter(s => isStudentLate(s));
   }
 
   if(students.length === 0){
@@ -4644,8 +4647,8 @@ function rAtt(content){
     return;
   }
 
-  const sgrid = el('div', { class:'stu-grid' });
-  students.forEach(s => {
+  // 渲染單一學生卡片（共用）
+  function renderStudentCard(s){
     const a = att.find(x => x.studentId === s.id);
     const lv = leaveIds.has(s.id) ? App.db.leaves.find(l => l.studentId === s.id && l.date === date) : null;
     let cls = 'stu-card';
@@ -4677,9 +4680,82 @@ function rAtt(content){
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假'));
       card.appendChild(acts);
     }
-    sgrid.appendChild(card);
+    return card;
+  }
+
+  // 班級分組（可摺疊）
+  App._attExpandedCls = App._attExpandedCls || {};
+  const classes = [...new Set(students.map(s => s.cls || '未分班'))].sort();
+
+  // 全展開 / 全收合工具列
+  if(classes.length > 1){
+    const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        classes.forEach(c => { App._attExpandedCls[c] = true; });
+        rerender();
+      }}, '全部展開 ▼'),
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        classes.forEach(c => { App._attExpandedCls[c] = false; });
+        rerender();
+      }}, '全部收合 ▲')
+    );
+    content.appendChild(toolbar);
+  }
+
+  classes.forEach(cls => {
+    const stuInCls = students.filter(s => (s.cls || '未分班') === cls)
+      .sort((a,b)=> (a.seat||0) - (b.seat||0));
+
+    // 班級統計
+    const stCls = { total: stuInCls.length, signed:0, late:0, leave:0, absent:0 };
+    stuInCls.forEach(s => {
+      if(leaveIds.has(s.id)){ stCls.leave++; return; }
+      const a = att.find(x => x.studentId === s.id);
+      if(a){
+        if(isStudentLate(s)) stCls.late++;
+        else stCls.signed++;
+      } else {
+        stCls.absent++;
+      }
+    });
+    const attendedTotal = stCls.signed + stCls.late;
+    const rate = stCls.total ? Math.round(attendedTotal / stCls.total * 100) : 0;
+    const rateColor = rate >= 80 ? 'var(--success)' : rate >= 50 ? 'var(--warn)' : 'var(--danger)';
+
+    const isExpanded = App._attExpandedCls[cls] !== false;
+
+    // 班級 header
+    const header = el('div', { class:'cls-section-header', style:{
+      padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+      background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+      marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+      transition:'background .15s'
+    }, onclick:()=> {
+      App._attExpandedCls[cls] = !isExpanded;
+      rerender();
+    }});
+    header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+    header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+      el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
+      el('span', { class:'small muted' }, '（' + stCls.total + ' 人）')
+    ));
+    header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
+      el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} }, '✅ ' + stCls.signed),
+      stCls.late > 0 ? el('span', { class:'pill', style:{background:'var(--warn-soft)',color:'var(--warn)',fontSize:'11px',fontWeight:'700'} }, '⏰ ' + stCls.late) : null,
+      stCls.leave > 0 ? el('span', { class:'pill', style:{background:'var(--accent-soft)',color:'var(--accent)',fontSize:'11px',fontWeight:'700'} }, '📆 ' + stCls.leave) : null,
+      el('span', { class:'pill', style:{background: stCls.absent > 0 ? 'var(--danger-soft)' : 'var(--surface-2)',color: stCls.absent > 0 ? 'var(--danger)' : 'var(--text-muted)',fontSize:'11px',fontWeight:'700'} }, '❌ ' + stCls.absent),
+      el('span', { style:{fontWeight:'700',fontSize:'14px',color:rateColor,marginLeft:'4px'} }, rate + '%')
+    ));
+    content.appendChild(header);
+
+    if(isExpanded){
+      const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',padding:'12px'} });
+      const sgrid = el('div', { class:'stu-grid' });
+      stuInCls.forEach(s => sgrid.appendChild(renderStudentCard(s)));
+      body.appendChild(sgrid);
+      content.appendChild(body);
+    }
   });
-  content.appendChild(sgrid);
 }
 
 function bulkMark(status){
@@ -5976,8 +6052,9 @@ function rSub(content){
       ));
       return;
     }
-    const card = el('div', { class:'card' });
-    list.forEach((s, i) => {
+
+    // 共用：渲染單一繳交 row
+    function renderSubRow(s, i){
       const stu = findStudent(s.studentId);
       const asg = App.db.assignments.find(x => x.id === s.assignmentId);
       const late = asg && isSubmissionLate(asg, s);
@@ -5999,9 +6076,76 @@ function rSub(content){
       }
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openSubmissionGrade(s, list, i) }, '批改'));
       row.appendChild(acts);
-      card.appendChild(row);
+      return row;
+    }
+
+    // 將繳交紀錄按「學生所屬班級」分組
+    App._subExpandedCls = App._subExpandedCls || {};
+    // 給每筆繳交補上學生班級資料
+    const grouped = {};  // cls -> [{sub, origIdx}]
+    list.forEach((s, i) => {
+      const stu = findStudent(s.studentId);
+      const cls = (stu && stu.cls) ? stu.cls : (s.cls || '未分班');
+      if(!grouped[cls]) grouped[cls] = [];
+      grouped[cls].push({ sub:s, origIdx:i });
     });
-    listWrap.appendChild(card);
+    const classes = Object.keys(grouped).sort();
+
+    // 全展開 / 全收合工具列
+    if(classes.length > 1){
+      const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._subExpandedCls[c] = true; });
+          renderList();
+        }}, '全部展開 ▼'),
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._subExpandedCls[c] = false; });
+          renderList();
+        }}, '全部收合 ▲')
+      );
+      listWrap.appendChild(toolbar);
+    }
+
+    classes.forEach(cls => {
+      const items = grouped[cls];
+      const studentIdsInCls = new Set(items.map(x => x.sub.studentId));
+      const peopleCount = studentIdsInCls.size;
+      const gradedCount = items.filter(x => typeof x.sub.score === 'number').length;
+      const pendingCount = items.length - gradedCount;
+      const totalCount = items.length;
+      const rate = totalCount ? Math.round(gradedCount / totalCount * 100) : 0;
+      const rateColor = rate >= 80 ? 'var(--success)' : rate >= 50 ? 'var(--warn)' : 'var(--danger)';
+
+      const isExpanded = App._subExpandedCls[cls] !== false;
+
+      // 班級 header
+      const header = el('div', { class:'cls-section-header', style:{
+        padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+        background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+        marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+        transition:'background .15s'
+      }, onclick:()=> {
+        App._subExpandedCls[cls] = !isExpanded;
+        renderList();
+      }});
+      header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+      header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+        el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
+        el('span', { class:'small muted' }, '（' + peopleCount + ' 人 · ' + totalCount + ' 筆）')
+      ));
+      header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
+        el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} }, '✅ ' + gradedCount),
+        pendingCount > 0 ? el('span', { class:'pill', style:{background:'var(--warn-soft)',color:'var(--warn)',fontSize:'11px',fontWeight:'700'} }, '🟡 ' + pendingCount) : null,
+        el('span', { style:{fontWeight:'700',fontSize:'14px',color:rateColor,marginLeft:'4px'} }, rate + '%')
+      ));
+      listWrap.appendChild(header);
+
+      if(isExpanded){
+        const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px'} });
+        items.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
+        listWrap.appendChild(body);
+      }
+    });
   }
   renderList();
 }
@@ -6160,8 +6304,44 @@ function rGrades(content){
   sBox.appendChild(sInp);
   content.appendChild(sBox);
 
-  const wrap = el('div', { class:'scroll-x card', style:{padding:'0'} });
+  const wrap = el('div');
   content.appendChild(wrap);
+
+  // 建立單一學生的成績表格 row
+  function buildRow(s, renderTbl){
+    const g = calcGrade(s.id);
+    const r = studentRank(s.id);
+    const tr = el('tr');
+    tr.appendChild(el('td', null, s.name + (s.seat?` (${s.seat})`:'')));
+    tr.appendChild(el('td', null, s.cls || '—'));
+    tr.appendChild(el('td', null, g.att + '%'));
+    tr.appendChild(el('td', null, String(g.asgn)));
+    const tdMid = el('td');
+    const iMid = el('input', { type:'number', min:0, max:100, value: g.mid });
+    iMid.addEventListener('change', () => {
+      if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+      App.db.grades[s.id].midterm = parseFloat(iMid.value) || 0;
+      saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+      renderTbl();
+    });
+    tdMid.appendChild(iMid); tr.appendChild(tdMid);
+    const tdFinal = el('td');
+    const iFinal = el('input', { type:'number', min:0, max:100, value: g.final });
+    iFinal.addEventListener('change', () => {
+      if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+      App.db.grades[s.id].final = parseFloat(iFinal.value) || 0;
+      saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+      renderTbl();
+    });
+    tdFinal.appendChild(iFinal); tr.appendChild(tdFinal);
+    tr.appendChild(el('td', { class:'total' }, String(g.total)));
+    tr.appendChild(el('td', null, r.rank ? '#' + r.rank : '-'));
+    const tdActs = el('td');
+    tdActs.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openGradeComment(s) }, '💬'));
+    tr.appendChild(tdActs);
+    return tr;
+  }
+
   function renderTbl(){
     wrap.innerHTML = '';
     const q = App._grSearch || '';
@@ -6169,50 +6349,83 @@ function rGrades(content){
     if(q) stus = stus.filter(s => (s.name||'').toLowerCase().includes(q) || (s.cls||'').toLowerCase().includes(q));
     stus.sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0));
 
-    const tbl = el('table', { class:'matrix' });
-    const thead = el('thead');
-    const trh = el('tr');
-    ['學生','班級','出席','作業','期中','期末','總分','排名',''].forEach(h => trh.appendChild(el('th', null, h)));
-    thead.appendChild(trh); tbl.appendChild(thead);
+    if(stus.length === 0){
+      wrap.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '🔍'),
+        el('div', null, '沒有符合的學生')
+      ));
+      return;
+    }
 
-    const tbody = el('tbody');
-    stus.forEach(s => {
-      const g = calcGrade(s.id);
-      const r = studentRank(s.id);
-      const tr = el('tr');
-      tr.appendChild(el('td', null, s.name + (s.seat?` (${s.seat})`:'')));
-      tr.appendChild(el('td', null, s.cls || '—'));
-      tr.appendChild(el('td', null, g.att + '%'));
-      tr.appendChild(el('td', null, String(g.asgn)));
-      // mid input
-      const tdMid = el('td');
-      const iMid = el('input', { type:'number', min:0, max:100, value: g.mid });
-      iMid.addEventListener('change', () => {
-        if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
-        App.db.grades[s.id].midterm = parseFloat(iMid.value) || 0;
-        saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+    // 班級分組（每班一獨立成績矩陣）
+    App._gradesExpandedCls = App._gradesExpandedCls || {};
+    const classes = [...new Set(stus.map(s => s.cls || '未分班'))].sort();
+
+    // 全展開 / 全收合工具列
+    if(classes.length > 1){
+      const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._gradesExpandedCls[c] = true; });
+          renderTbl();
+        }}, '全部展開 ▼'),
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._gradesExpandedCls[c] = false; });
+          renderTbl();
+        }}, '全部收合 ▲')
+      );
+      wrap.appendChild(toolbar);
+    }
+
+    classes.forEach(cls => {
+      const stuInCls = stus.filter(s => (s.cls || '未分班') === cls)
+        .sort((a,b)=> (a.seat||0) - (b.seat||0));
+
+      // 班級統計
+      const totals = stuInCls.map(s => calcGrade(s.id).total).filter(t => typeof t === 'number' && !isNaN(t));
+      const avg = totals.length ? Math.round(totals.reduce((a,b)=>a+b,0) / totals.length) : 0;
+      const maxScore = totals.length ? Math.max(...totals) : 0;
+      const minScore = totals.length ? Math.min(...totals) : 0;
+      const avgColor = avg >= 80 ? 'var(--success)' : avg >= 60 ? 'var(--warn)' : 'var(--danger)';
+
+      const isExpanded = App._gradesExpandedCls[cls] !== false;
+
+      // 班級 header
+      const header = el('div', { class:'cls-section-header', style:{
+        padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+        background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+        marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+        transition:'background .15s'
+      }, onclick:()=> {
+        App._gradesExpandedCls[cls] = !isExpanded;
         renderTbl();
-      });
-      tdMid.appendChild(iMid); tr.appendChild(tdMid);
-      // final input
-      const tdFinal = el('td');
-      const iFinal = el('input', { type:'number', min:0, max:100, value: g.final });
-      iFinal.addEventListener('change', () => {
-        if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
-        App.db.grades[s.id].final = parseFloat(iFinal.value) || 0;
-        saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
-        renderTbl();
-      });
-      tdFinal.appendChild(iFinal); tr.appendChild(tdFinal);
-      tr.appendChild(el('td', { class:'total' }, String(g.total)));
-      tr.appendChild(el('td', null, r.rank ? '#' + r.rank : '-'));
-      const tdActs = el('td');
-      tdActs.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openGradeComment(s) }, '💬'));
-      tr.appendChild(tdActs);
-      tbody.appendChild(tr);
+      }});
+      header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+      header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+        el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
+        el('span', { class:'small muted' }, '（' + stuInCls.length + ' 人）')
+      ));
+      header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
+        el('span', { class:'pill', style:{background:'var(--surface)',color:avgColor,fontSize:'11px',fontWeight:'700',border:'1px solid var(--border)'} }, '平均 ' + avg),
+        el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} }, '↑ ' + maxScore),
+        el('span', { class:'pill', style:{background:'var(--danger-soft)',color:'var(--danger)',fontSize:'11px',fontWeight:'700'} }, '↓ ' + minScore)
+      ));
+      wrap.appendChild(header);
+
+      if(isExpanded){
+        const body = el('div', { class:'scroll-x', style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',padding:'0'} });
+        const tbl = el('table', { class:'matrix' });
+        const thead = el('thead');
+        const trh = el('tr');
+        ['學生','班級','出席','作業','期中','期末','總分','排名',''].forEach(h => trh.appendChild(el('th', null, h)));
+        thead.appendChild(trh); tbl.appendChild(thead);
+
+        const tbody = el('tbody');
+        stuInCls.forEach(s => tbody.appendChild(buildRow(s, renderTbl)));
+        tbl.appendChild(tbody);
+        body.appendChild(tbl);
+        wrap.appendChild(body);
+      }
     });
-    tbl.appendChild(tbody);
-    wrap.appendChild(tbl);
   }
   renderTbl();
 }
