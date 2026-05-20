@@ -3944,46 +3944,126 @@ function rOv(content){
     content.appendChild(alert);
   }
 
-  // today's roster
-  const card = el('div', { class:'card' });
-  card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
-    el('h3', null, '今日班況'),
-    el('div', { class:'tag' }, stats.signed + ' / ' + stats.total)
-  ));
+  // today's roster — 班級分組可摺疊
   if(App.db.students.length === 0){
+    const card = el('div', { class:'card' });
+    card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+      el('h3', null, '今日班況'),
+      el('div', { class:'tag' }, stats.signed + ' / ' + stats.total)
+    ));
     card.appendChild(el('div', { class:'empty' },
       el('div', { class:'ico' }, '👥'),
       el('div', null, '還沒有學生'),
       el('button', { class:'btn btn-primary', style:{marginTop:'12px'}, onclick:()=> go('students') }, '＋ 新增學生')
     ));
+    content.appendChild(card);
   } else {
-    const sgrid = el('div', { class:'stu-grid' });
-    const sortedStu = App.db.students.slice().sort((a,b)=> (a.seat||0)-(b.seat||0));
-    sortedStu.forEach(s => {
-      const att = studentSignedToday(s.id);
-      const leave = studentOnLeaveToday(s.id);
-      let cls = 'stu-card';
-      if(leave) cls += ' leave';
-      else if(att) cls += ' signed';
-      else cls += ' absent';
-      const card = el('div', { class: cls });
-      card.appendChild(el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')));
-      card.appendChild(el('div', { class:'meta' }, s.cls || '—'));
-      if(leave){
-        card.appendChild(el('div', { class:'small' }, '📆 ' + (leave.reason || '請假中')));
-      } else if(att){
-        card.appendChild(el('div', { class:'small mono' }, '✅ ' + att.time));
-      } else {
-        const acts = el('div', { class:'actions' });
-        acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> markPresent(s.id) }, '✓ 補簽'));
-        acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假'));
-        card.appendChild(acts);
+    // 班級工具列
+    App._ovExpandedCls = App._ovExpandedCls || {};
+    const classes = [...new Set(App.db.students.map(s => s.cls || '未分班'))].sort();
+
+    // 全展開 / 全收合按鈕
+    const toolbar = el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
+      el('h3', { style:{margin:'0'} }, '今日班況 · 依班級'),
+      el('div', { class:'flex no-print' },
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._ovExpandedCls[c] = true; });
+          rerender();
+        }}, '全部展開 ▼'),
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._ovExpandedCls[c] = false; });
+          rerender();
+        }}, '全部收合 ▲')
+      )
+    );
+    content.appendChild(toolbar);
+
+    // 每個班級一張卡片
+    classes.forEach(cls => {
+      const stuInCls = App.db.students.filter(s => (s.cls || '未分班') === cls)
+        .sort((a,b)=> (a.seat||0)-(b.seat||0));
+      const stats_cls = {
+        total: stuInCls.length,
+        signed: 0, leave: 0, late: 0, absent: 0
+      };
+      stuInCls.forEach(s => {
+        const att = studentSignedToday(s.id);
+        const lv = studentOnLeaveToday(s.id);
+        if(lv) stats_cls.leave++;
+        else if(att) {
+          if(att.status === 'late') stats_cls.late++;
+          else stats_cls.signed++;
+        }
+        else stats_cls.absent++;
+      });
+
+      const isExpanded = App._ovExpandedCls[cls] !== false;  // 預設展開
+      const card = el('div', { class:'card cls-section', style:{marginBottom:'12px',padding:'0',overflow:'hidden'} });
+
+      // 班級 header（可點擊摺疊）
+      const sigRate = stats_cls.total ? Math.round((stats_cls.signed + stats_cls.late) / stats_cls.total * 100) : 0;
+      const sigColor = sigRate >= 80 ? 'var(--success)' : sigRate >= 50 ? 'var(--warn)' : 'var(--danger)';
+      const header = el('div', { class:'cls-section-header', style:{
+        padding:'14px 16px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+        background: 'var(--surface)',borderBottom: isExpanded ? '1px solid var(--border)' : 'none',
+        transition:'background .15s'
+      }, onclick:()=> {
+        App._ovExpandedCls[cls] = !isExpanded;
+        rerender();
+      }});
+      // 摺疊箭頭
+      header.appendChild(el('span', { style:{fontSize:'14px',transition:'transform .2s',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'} }, '▼'));
+      // 班級名
+      header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+        el('span', { style:{fontWeight:'700',fontSize:'16px'} }, '🏫 ' + cls),
+        el('span', { class:'small muted' }, '（' + stats_cls.total + ' 人）')
+      ));
+      // 班級統計小數字
+      header.appendChild(el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap'} },
+        el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} },
+          '✅ ' + (stats_cls.signed + stats_cls.late)),
+        stats_cls.late > 0 ? el('span', { class:'pill', style:{background:'var(--warn-soft)',color:'var(--warn)',fontSize:'11px',fontWeight:'700'} },
+          '🟡 ' + stats_cls.late) : null,
+        stats_cls.leave > 0 ? el('span', { class:'pill', style:{background:'var(--accent-soft)',color:'var(--accent)',fontSize:'11px',fontWeight:'700'} },
+          '📆 ' + stats_cls.leave) : null,
+        el('span', { class:'pill', style:{background: stats_cls.absent > 0 ? 'var(--danger-soft)' : 'var(--surface-2)',color: stats_cls.absent > 0 ? 'var(--danger)' : 'var(--text-muted)',fontSize:'11px',fontWeight:'700'} },
+          '❌ ' + stats_cls.absent),
+        el('span', { style:{fontWeight:'700',fontSize:'14px',color:sigColor,marginLeft:'4px'} }, sigRate + '%')
+      ));
+      card.appendChild(header);
+
+      if(isExpanded){
+        const body = el('div', { style:{padding:'14px 16px'} });
+        const sgrid = el('div', { class:'stu-grid' });
+        stuInCls.forEach(s => {
+          const att = studentSignedToday(s.id);
+          const leave = studentOnLeaveToday(s.id);
+          let scls = 'stu-card';
+          if(leave) scls += ' leave';
+          else if(att) scls += ' signed';
+          else scls += ' absent';
+          const c = el('div', { class: scls });
+          c.appendChild(el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')));
+          c.appendChild(el('div', { class:'meta' }, '學號 ' + (s.sid || '—')));
+          if(leave){
+            c.appendChild(el('div', { class:'small' }, '📆 ' + (leave.reason || '請假中')));
+          } else if(att){
+            c.appendChild(el('div', { class:'small mono' }, '✅ ' + att.time));
+          } else {
+            const acts = el('div', { class:'actions' });
+            acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> markPresent(s.id) }, '✓ 補簽'));
+            acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假'));
+            c.appendChild(acts);
+          }
+          sgrid.appendChild(c);
+        });
+        body.appendChild(sgrid);
+        card.appendChild(body);
       }
-      sgrid.appendChild(card);
+
+      content.appendChild(card);
     });
-    card.appendChild(sgrid);
   }
-  content.appendChild(card);
 }
 
 function markPresent(studentId, options={}){
@@ -4093,11 +4173,30 @@ function rStu(content){
       return;
     }
 
-    students.forEach(s => {
+    // 班級分組可摺疊
+    App._stuExpandedCls = App._stuExpandedCls || {};
+    const classes = [...new Set(students.map(s => s.cls || '未分班'))].sort();
+
+    // 全展開 / 全收合工具列
+    if(classes.length > 1){
+      const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._stuExpandedCls[c] = true; });
+          renderList();
+        }}, '全部展開 ▼'),
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._stuExpandedCls[c] = false; });
+          renderList();
+        }}, '全部收合 ▲')
+      );
+      listWrap.appendChild(toolbar);
+    }
+
+    // 共用：學生 row 渲染
+    function renderStudentRow(s){
       const row = el('div', { class:'list-row' });
       row.appendChild(el('div', { class:'avatar' }, initials(s.name)));
 
-      // 密碼狀態徽章
       const pwBadge = s.mustChangePw
         ? el('span', { class:'pill pill-att warn', style:{fontSize:'10px',marginLeft:'6px'}, title:'學生尚未首次登入或老師已重設密碼' }, '🔐 未改密碼')
         : (s.passwordChangedAt
@@ -4112,7 +4211,6 @@ function rStu(content){
         )
       ));
       const acts = el('div', { class:'actions' });
-      // 重設密碼按鈕（新增）
       acts.appendChild(el('button', { class:'btn btn-sm', title:'重設密碼為學號末 4 碼', onclick: async ()=> {
         const defPw = String(s.sid||'0000').slice(-4);
         const ok = await confirmDlg(
@@ -4143,7 +4241,41 @@ function rStu(content){
         rerender();
       } }, '🗑'));
       row.appendChild(acts);
-      listWrap.appendChild(row);
+      return row;
+    }
+
+    // 依班級分組顯示
+    classes.forEach(cls => {
+      const arr = students.filter(s => (s.cls || '未分班') === cls)
+        .sort((a,b) => (a.seat||0) - (b.seat||0));
+      const isExpanded = App._stuExpandedCls[cls] !== false;
+      const unchangedInCls = arr.filter(s => s.mustChangePw).length;
+
+      // 班級 header（可摺疊）
+      const header = el('div', { class:'cls-section-header', style:{
+        padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+        background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+        marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+        transition:'background .15s'
+      }, onclick:()=> {
+        App._stuExpandedCls[cls] = !isExpanded;
+        renderList();
+      }});
+      header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+      header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+        el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
+        el('span', { class:'small muted' }, '（' + arr.length + ' 人）'),
+        unchangedInCls > 0 ? el('span', { class:'pill pill-att warn', style:{fontSize:'10px'} },
+          '🔐 ' + unchangedInCls + ' 未改密碼') : null
+      ));
+      header.appendChild(el('span', { class:'small muted' }, isExpanded ? '收合' : '展開'));
+      listWrap.appendChild(header);
+
+      if(isExpanded){
+        const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px'} });
+        arr.forEach(s => body.appendChild(renderStudentRow(s)));
+        listWrap.appendChild(body);
+      }
     });
 
     // 批次操作工具列（密碼相關）
