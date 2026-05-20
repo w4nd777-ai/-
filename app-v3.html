@@ -2481,6 +2481,245 @@ function downloadDataUrl(dataUrl, filename){
   a.click();
 }
 
+/* ════════════════════════════════════════════════════════════
+   IndexedDB 大檔案儲存（PDF / Word / 圖片 / 影片 等）
+   ──────────────────────────────────────────────────────────── */
+const IDB_NAME = 'cms_v3_files';
+const IDB_STORE = 'attachments';
+const IDB_VERSION = 1;
+const ATTACH_MAX_SIZE = 50 * 1024 * 1024; // 50 MB 單檔上限
+let _idbPromise = null;
+
+function idbOpen(){
+  if(_idbPromise) return _idbPromise;
+  _idbPromise = new Promise((resolve, reject) => {
+    if(!('indexedDB' in window)) return reject(new Error('IndexedDB 不支援'));
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if(!db.objectStoreNames.contains(IDB_STORE)){
+        db.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return _idbPromise;
+}
+
+async function idbPut(key, blob){
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    const req = tx.objectStore(IDB_STORE).put(blob, key);
+    req.onsuccess = () => resolve(key);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGet(key){
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbDelete(key){
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    const req = tx.objectStore(IDB_STORE).delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbKeys(){
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).getAllKeys();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbUsage(){
+  if(navigator.storage && navigator.storage.estimate){
+    try { return await navigator.storage.estimate(); } catch(e){}
+  }
+  return { usage: 0, quota: 0 };
+}
+
+// 產生 attach key
+function _newAttachKey(){
+  return 'attach_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
+}
+
+// 上傳 File 到 IDB，回傳 metadata（不含 data，只含 key）
+async function attachUpload(file){
+  if(!file) throw new Error('沒有檔案');
+  if(file.size > ATTACH_MAX_SIZE){
+    throw new Error('檔案太大（上限 ' + Math.floor(ATTACH_MAX_SIZE/1024/1024) + ' MB）');
+  }
+  const key = _newAttachKey();
+  await idbPut(key, file);
+  return {
+    name: file.name,
+    type: file.type || '',
+    size: file.size,
+    key: key,
+    storedAt: Date.now()
+  };
+}
+
+// 從 IDB 取得 Blob URL（呼叫端記得 revoke）
+async function attachGetUrl(meta){
+  if(!meta) return null;
+  // 新版：key 在 IDB
+  if(meta.key){
+    try {
+      const blob = await idbGet(meta.key);
+      if(!blob) return null;
+      return URL.createObjectURL(blob);
+    } catch(e){ return null; }
+  }
+  // 舊版：base64 data URL
+  if(meta.data && typeof meta.data === 'string'){
+    return meta.data;
+  }
+  return null;
+}
+
+// 下載附件（新舊版皆可）
+async function attachDownload(meta){
+  if(!meta){ toast('找不到附件','danger'); return; }
+  const url = await attachGetUrl(meta);
+  if(!url){ toast('找不到附件檔案','danger'); return; }
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = meta.name || 'attachment';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    // 只 revoke Blob URL（base64 data URL 不需要）
+    if(url.indexOf('blob:') === 0) URL.revokeObjectURL(url);
+  }, 200);
+}
+
+// 預覽附件（新分頁）
+async function attachPreview(meta){
+  if(!meta){ toast('找不到附件','danger'); return; }
+  const url = await attachGetUrl(meta);
+  if(!url){ toast('找不到附件檔案','danger'); return; }
+  window.open(url, '_blank');
+  if(url.indexOf('blob:') === 0){
+    setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+  }
+}
+
+// 刪除 IDB 中的附件
+async function attachDelete(meta){
+  if(!meta || !meta.key) return;
+  try { await idbDelete(meta.key); } catch(e){}
+}
+
+// 把舊版 base64 data URL → 轉成 Blob → 存 IDB
+async function migrateAttachIfNeeded(meta){
+  if(!meta) return meta;
+  if(meta.key) return meta; // 已是新版
+  if(meta.data && typeof meta.data === 'string' && meta.data.indexOf('data:') === 0){
+    try {
+      const resp = await fetch(meta.data);
+      const blob = await resp.blob();
+      const key = _newAttachKey();
+      await idbPut(key, blob);
+      return {
+        name: meta.name,
+        type: meta.type || blob.type || '',
+        size: meta.size || blob.size,
+        key: key,
+        storedAt: Date.now(),
+        migrated: true
+      };
+    } catch(e){
+      console.warn('[migrate attach]', e);
+      return meta;
+    }
+  }
+  return meta;
+}
+
+// 啟動時批量 migrate
+async function migrateAllAttachments(){
+  if(!App.db) return 0;
+  let migrated = 0;
+  // submissions: attach + attaches[]
+  for(const s of App.db.submissions || []){
+    if(s.attach && !s.attach.key && s.attach.data){
+      const nm = await migrateAttachIfNeeded(s.attach);
+      if(nm && nm.key){ s.attach = nm; migrated++; }
+    }
+    if(Array.isArray(s.attaches)){
+      for(let i = 0; i < s.attaches.length; i++){
+        const a = s.attaches[i];
+        if(a && !a.key && a.data){
+          const nm = await migrateAttachIfNeeded(a);
+          if(nm && nm.key){ s.attaches[i] = nm; migrated++; }
+        }
+      }
+    }
+  }
+  // assignments: attach
+  for(const a of App.db.assignments || []){
+    if(a.attach && !a.attach.key && a.attach.data){
+      const nm = await migrateAttachIfNeeded(a.attach);
+      if(nm && nm.key){ a.attach = nm; migrated++; }
+    }
+  }
+  if(migrated > 0) saveDB();
+  return migrated;
+}
+
+// 清理沒被引用的孤兒附件
+async function cleanupOrphanAttachments(){
+  let allKeys;
+  try { allKeys = await idbKeys(); } catch(e){ toast('讀取 IDB 失敗','danger'); return; }
+  const used = new Set();
+  (App.db.submissions || []).forEach(s => {
+    if(s.attach && s.attach.key) used.add(s.attach.key);
+    if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) used.add(a.key); });
+  });
+  (App.db.assignments || []).forEach(a => {
+    if(a.attach && a.attach.key) used.add(a.attach.key);
+  });
+  const orphans = allKeys.filter(k => typeof k === 'string' && k.indexOf('attach_') === 0 && !used.has(k));
+  if(!orphans.length){ toast('沒有孤兒附件','info'); return; }
+  const ok = await confirmDlg('找到 ' + orphans.length + ' 個未被引用的附件，是否刪除？', { danger:true });
+  if(!ok) return;
+  let n = 0;
+  for(const k of orphans){
+    try { await idbDelete(k); n++; } catch(e){}
+  }
+  toast('已清除 ' + n + ' 個孤兒附件','success');
+  if(typeof rerender === 'function') rerender();
+}
+
+// 申請持久化儲存（避免被瀏覽器自動清除）
+function requestPersistentStorage(){
+  if(!navigator.storage || !navigator.storage.persist) return;
+  navigator.storage.persisted().then(p => {
+    if(p) return;
+    navigator.storage.persist().then(g => {
+      if(g) console.log('[storage] 已取得持久化權限');
+    }).catch(() => {});
+  }).catch(() => {});
+}
+
 function downloadCSV(rows, filename){
   const csv = '﻿' + rows.map(r => r.map(v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"').join(',')).join('\n');
   const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
@@ -5796,8 +6035,9 @@ function rAsgnDetail(content, asg){
   if(asg.attach){
     content.appendChild(el('div', { class:'card', style:{marginBottom:'12px'} },
       el('h3', null, '📎 附件'),
-      el('div', { class:'flex', style:{marginTop:'6px'} },
-        el('button', { class:'btn btn-sm', onclick:()=> downloadDataUrl(asg.attach.data, asg.attach.name) }, '⬇ ' + asg.attach.name)
+      el('div', { class:'flex', style:{marginTop:'6px',flexWrap:'wrap',gap:'6px'} },
+        el('button', { class:'btn btn-sm', onclick:()=> attachDownload(asg.attach) }, '⬇ ' + asg.attach.name),
+        el('button', { class:'btn btn-sm', onclick:()=> attachPreview(asg.attach) }, '👁 預覽')
       )
     ));
   }
@@ -5918,7 +6158,7 @@ function openAssignmentEdit(asg){
 
   // attachment
   const fAtt = el('div', { class:'field' });
-  fAtt.appendChild(el('label', { class:'label' }, '題目附件 (≤ 1MB，可選)'));
+  fAtt.appendChild(el('label', { class:'label' }, '題目附件（單檔 ≤ 50MB，可選）'));
   let attached = asg?.attach || null;
   const upBox = el('div', { class:'upload-area' + (attached?' has-file':'') });
   function refreshAtt(){
@@ -5926,19 +6166,20 @@ function openAssignmentEdit(asg){
     if(attached){
       const chip = el('div', { class:'file-chip' },
         el('span', null, '📎 ' + attached.name),
-        el('span', { class:'x', onclick: e => { e.stopPropagation(); attached = null; upBox.classList.remove('has-file'); refreshAtt(); } }, '✗')
+        el('span', { class:'x', onclick: e => { e.stopPropagation(); attachDelete(attached); attached = null; upBox.classList.remove('has-file'); refreshAtt(); } }, '✗')
       );
       upBox.appendChild(chip);
     } else {
       upBox.appendChild(el('div', null, '點此選擇檔案或拖曳'));
-      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 1MB'));
+      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 50MB（PDF / Word / 圖片等）'));
     }
   }
   const fInp = el('input', { type:'file' });
   fInp.addEventListener('change', async e => {
     try {
       const file = e.target.files[0];
-      const data = await readFileAsBase64(file);
+      if(!file) return;
+      const data = await attachUpload(file);
       if(data){ attached = data; upBox.classList.add('has-file'); refreshAtt(); toast('已加入附件','success'); }
     } catch(err){ toast(err.message || '上傳失敗','danger'); }
   });
@@ -5977,12 +6218,21 @@ function openAssignmentEdit(asg){
 async function deleteAssignment(asg){
   const ok = await confirmDlg('確定刪除「' + asg.title + '」？所有相關繳交也會清除', { danger:true });
   if(!ok) return;
+  // 刪除前先收集所有要釋放的 IDB key（題目附件 + 學生繳交附件）
+  const keysToFree = [];
+  if(asg.attach && asg.attach.key) keysToFree.push(asg.attach.key);
+  App.db.submissions.filter(s => s.assignmentId === asg.id).forEach(s => {
+    if(s.attach && s.attach.key) keysToFree.push(s.attach.key);
+    if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
+  });
   App.db.assignments = App.db.assignments.filter(a => a.id !== asg.id);
   App.db.submissions = App.db.submissions.filter(s => s.assignmentId !== asg.id);
   saveDB();
   Sync.setMap('assignments', App.db.assignments);
   Sync.setMap('submissions', App.db.submissions);
   bcNotify();
+  // 非同步釋放 IDB 空間
+  (async () => { for(const k of keysToFree){ try { await idbDelete(k); } catch(e){} } })();
   toast('已刪除','warn');
   go('assignments');
 }
@@ -6173,8 +6423,9 @@ function openSubmissionGrade(sub, list=null, idx=0){
     subCard.appendChild(el('div', { style:{marginTop:'6px'} }, el('a', { href: sub.link, target:'_blank' }, '🔗 ' + sub.link)));
   }
   if(sub.attach){
-    subCard.appendChild(el('div', { style:{marginTop:'6px'} },
-      el('button', { class:'btn btn-sm', onclick:()=> downloadDataUrl(sub.attach.data, sub.attach.name) }, '⬇ ' + sub.attach.name)
+    subCard.appendChild(el('div', { style:{marginTop:'6px',display:'flex',gap:'6px',flexWrap:'wrap'} },
+      el('button', { class:'btn btn-sm', onclick:()=> attachDownload(sub.attach) }, '⬇ ' + sub.attach.name),
+      el('button', { class:'btn btn-sm', onclick:()=> attachPreview(sub.attach) }, '👁 預覽')
     ));
   }
   if(!sub.text && !sub.link && !sub.attach){
@@ -7050,7 +7301,10 @@ function rSAsgnDetail(content, asg, me){
   if(asg.attach){
     content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
       el('h3', null, '📎 老師附件'),
-      el('button', { class:'btn btn-sm', style:{marginTop:'4px'}, onclick:()=> downloadDataUrl(asg.attach.data, asg.attach.name) }, '⬇ ' + asg.attach.name)
+      el('div', { class:'flex', style:{marginTop:'4px',gap:'6px',flexWrap:'wrap'} },
+        el('button', { class:'btn btn-sm', onclick:()=> attachDownload(asg.attach) }, '⬇ ' + asg.attach.name),
+        el('button', { class:'btn btn-sm', onclick:()=> attachPreview(asg.attach) }, '👁 預覽')
+      )
     ));
   }
 
@@ -7103,7 +7357,7 @@ function rSAsgnDetail(content, asg, me){
 
   // file
   const fF = el('div', { class:'field' });
-  fF.appendChild(el('label', { class:'label' }, '檔案（≤ 1MB，可選）'));
+  fF.appendChild(el('label', { class:'label' }, '檔案（單檔 ≤ 50MB，可選）'));
   let attached = null;
   const upBox = el('div', { class:'upload-area' });
   const fInp = el('input', { type:'file' });
@@ -7113,18 +7367,19 @@ function rSAsgnDetail(content, asg, me){
       upBox.classList.add('has-file');
       const chip = el('div', { class:'file-chip' },
         el('span', null, '📎 ' + attached.name),
-        el('span', { class:'x', onclick: e => { e.stopPropagation(); attached = null; upBox.classList.remove('has-file'); refresh(); }}, '✗')
+        el('span', { class:'x', onclick: e => { e.stopPropagation(); attachDelete(attached); attached = null; upBox.classList.remove('has-file'); refresh(); }}, '✗')
       );
       upBox.appendChild(chip);
     } else {
       upBox.appendChild(el('div', null, '點此選擇檔案'));
-      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 1MB'));
+      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 50MB（PDF / Word / 圖片等）'));
     }
   }
   fInp.addEventListener('change', async e => {
     try {
       const file = e.target.files[0];
-      const data = await readFileAsBase64(file);
+      if(!file) return;
+      const data = await attachUpload(file);
       if(data){ attached = data; refresh(); }
     } catch(err){ toast(err.message,'danger'); }
   });
@@ -9349,6 +9604,47 @@ function rStorage(content){
   }
   content.appendChild(card2);
 
+  // ═══ IndexedDB 大檔案儲存區塊 ═══
+  const cardIdb = el('div', { class:'card', style:{marginTop:'10px'} });
+  cardIdb.appendChild(el('h3', null, '📂 大檔案儲存（IndexedDB）'));
+  cardIdb.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '用於儲存學生繳交的 PDF、Word、圖片等大檔案（單檔上限 50 MB）'));
+  const idbBody = el('div', null, el('div', { class:'small muted' }, '正在讀取使用量...'));
+  cardIdb.appendChild(idbBody);
+  // 非同步取得 IDB usage
+  (async () => {
+    let usage = 0, quota = 0, fileCount = 0;
+    try {
+      const info = await idbUsage();
+      usage = info.usage || 0;
+      quota = info.quota || 0;
+    } catch(e){}
+    try {
+      const keys = await idbKeys();
+      fileCount = (keys || []).filter(k => typeof k === 'string' && k.indexOf('attach_') === 0).length;
+    } catch(e){}
+    const usedMB = (usage / 1024 / 1024).toFixed(1);
+    const quotaMB = quota ? (quota / 1024 / 1024).toFixed(0) : '?';
+    const pct = quota ? Math.min(100, (usage / quota * 100)).toFixed(1) : 0;
+    const barColor = pct > 80 ? 'var(--danger)' : pct > 50 ? 'var(--warn)' : 'var(--success)';
+    idbBody.innerHTML = '';
+    idbBody.appendChild(el('div', { style:{fontSize:'20px',fontWeight:'700'} }, usedMB + ' MB / ' + quotaMB + ' MB'));
+    idbBody.appendChild(el('div', { class:'small muted' }, '使用率 ' + pct + '%  ·  ' + fileCount + ' 個檔案'));
+    idbBody.appendChild(el('div', { style:{height:'8px',background:'var(--surface-2)',borderRadius:'4px',overflow:'hidden',marginTop:'10px'} },
+      el('div', { style:{width: pct + '%', height:'100%', background: barColor, transition:'width .3s'} })
+    ));
+    idbBody.appendChild(el('div', { class:'flex', style:{marginTop:'12px',gap:'8px',flexWrap:'wrap'} },
+      el('button', { class:'btn btn-sm', onclick: cleanupOrphanAttachments }, '🧹 清理孤兒附件'),
+      el('button', { class:'btn btn-sm', onclick: async ()=> {
+        const n = await migrateAllAttachments();
+        if(n > 0) toast('已移轉 ' + n + ' 個附件到 IDB','success');
+        else toast('沒有需要移轉的附件','info');
+        rerender();
+      }}, '🔄 移轉舊版附件')
+    ));
+  })();
+  content.appendChild(cardIdb);
+
   // cleanup actions
   const card3 = el('div', { class:'card', style:{marginTop:'10px'} });
   card3.appendChild(el('h3', null, '🧹 清理工具'));
@@ -9560,7 +9856,10 @@ function rSAsgnDetailV2(content, asg, me){
   if(asg.attach){
     content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
       el('h3', null, '📎 老師附件'),
-      el('button', { class:'btn btn-sm', style:{marginTop:'4px'}, onclick:()=> downloadDataUrl(asg.attach.data, asg.attach.name) }, '⬇ ' + asg.attach.name)
+      el('div', { class:'flex', style:{marginTop:'4px',gap:'6px',flexWrap:'wrap'} },
+        el('button', { class:'btn btn-sm', onclick:()=> attachDownload(asg.attach) }, '⬇ ' + asg.attach.name),
+        el('button', { class:'btn btn-sm', onclick:()=> attachPreview(asg.attach) }, '👁 預覽')
+      )
     ));
   }
 
@@ -9629,7 +9928,7 @@ function submissionPreview(sub){
   if(files.length){
     const fwrap = el('div', { style:{marginTop:'6px',display:'flex',flexWrap:'wrap',gap:'4px'} });
     files.forEach(f => {
-      const chip = el('span', { class:'mfile-chip', onclick:()=> downloadDataUrl(f.data, f.name) },
+      const chip = el('span', { class:'mfile-chip', onclick:()=> attachDownload(f) },
         el('span', null, '📎'), el('span', { class:'nm' }, f.name));
       fwrap.appendChild(chip);
     });
@@ -9656,7 +9955,7 @@ function buildSubmissionForm(asg, me, existing){
 
   // multi-file
   const fF = el('div', { class:'field' });
-  fF.appendChild(el('label', { class:'label' }, '檔案（最多 5 個，每個 ≤ 1MB）'));
+  fF.appendChild(el('label', { class:'label' }, '檔案（最多 5 個，每個 ≤ 50MB）'));
   let attaches = existing ? (existing.attaches || (existing.attach?[existing.attach]:[])).slice() : [];
   const upBox = el('div', { class:'upload-area' });
   const fInp = el('input', { type:'file', multiple:'multiple', style:{display:'none'} });
@@ -9668,7 +9967,10 @@ function buildSubmissionForm(asg, me, existing){
           el('span', null, '📎'),
           el('span', { class:'nm', title:a.name }, a.name),
           el('span', { class:'x', onclick: e => {
-            e.stopPropagation(); attaches.splice(idx,1); refresh();
+            e.stopPropagation();
+            const removed = attaches.splice(idx,1)[0];
+            if(removed) attachDelete(removed);
+            refresh();
           }}, '✗')
         );
         upBox.appendChild(chip);
@@ -9678,7 +9980,7 @@ function buildSubmissionForm(asg, me, existing){
       }
     } else {
       upBox.appendChild(el('div', null, '點此選擇檔案'));
-      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 1MB · 最多 5 個'));
+      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 50MB · 最多 5 個 (PDF / Word / 圖片)'));
     }
   }
   fInp.addEventListener('change', async e => {
@@ -9686,7 +9988,7 @@ function buildSubmissionForm(asg, me, existing){
     for(const file of files){
       if(attaches.length >= 5){ toast('最多 5 個檔案','warn'); break; }
       try {
-        const data = await readFileAsBase64(file);
+        const data = await attachUpload(file);
         if(data) attaches.push(data);
       } catch(err){ toast(err.message,'danger'); }
     }
@@ -10943,6 +11245,15 @@ function boot(){
 
   // background scheduler for assignment-due notifications
   schedulePeriodicNotifications();
+
+  // ═══ IndexedDB 持久化 + 舊版 attach 自動遷移 ═══
+  try { requestPersistentStorage(); } catch(e){}
+  setTimeout(async () => {
+    try {
+      const n = await migrateAllAttachments();
+      if(n > 0) console.log('[v3] 已移轉 ' + n + ' 個附件到 IndexedDB');
+    } catch(e){ console.warn('[migrate]', e); }
+  }, 2500);
 }
 
 function schedulePeriodicNotifications(){
