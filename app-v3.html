@@ -1711,6 +1711,9 @@ const App = {
   listeners: [],
   bc: null,            // BroadcastChannel
   pendingSync: [],
+  _syncEchoes: {},     // batch 3: Firebase echo-suppression { 'node::id' : ts }
+  _syncRerTimer: null, // batch 3: debounced rerender from sync events
+  _notify: null,       // batch 3: notifications module state
 };
 
 /* ════════════════════════════════════════════════════════════
@@ -2275,33 +2278,122 @@ const Sync = (() => {
       return false;
     }
   }
+  // batch 3：child-level listeners — 避免多裝置同時編輯時整包覆寫造成丟資料
+  //   * child_added / child_changed / child_removed 各自處理單筆，不再 Object.values 整包替換
+  //   * 自己 push 的記錄會被 echo-suppression 過濾掉（避免無限迴圈）
+  // 各 array-style collection
+  const ARRAY_COLLECTIONS = [
+    'students','attendance','messages','leaves','pending','announcements',
+    'assignments','submissions','evals','peerEvals','selfEvals','feedbacks',
+    'attendanceNotes','passwordResets','accounts','_qrCodes'
+  ];
+  // 物件型（key→value）的 collection
+  const OBJ_COLLECTIONS = ['settings','grades','branding'];
+
+  function _saveDBLocal(){
+    // 只寫 localStorage，不會推回 Firebase（避免 listener 觸發 -> push -> listener 迴圈）
+    try { saveDB(); } catch(e){}
+  }
+  function _shouldIgnoreEcho(node, id){
+    // 自己 push 後 2 秒內忽略相同 id 的 echo
+    if(!App._syncEchoes) return false;
+    const key = node + '::' + id;
+    const ts = App._syncEchoes[key];
+    if(!ts) return false;
+    if(Date.now() - ts < 2500) return true;
+    delete App._syncEchoes[key];
+    return false;
+  }
+  function _markEcho(node, id){
+    App._syncEchoes = App._syncEchoes || {};
+    App._syncEchoes[node + '::' + id] = Date.now();
+  }
+  function _scheduleRerender(){
+    // debounce 避免大量 child_added 時暴衝
+    if(App._syncRerTimer) return;
+    App._syncRerTimer = setTimeout(()=> {
+      App._syncRerTimer = null;
+      try { rerender(); } catch(e){}
+    }, 80);
+  }
+
   function attachListeners(){
     if(!App.fbRef) return;
-    const nodes = ['students','attendance','messages','leaves','pending','announcements','assignments','submissions','evals'];
-    nodes.forEach(node => {
+
+    // ── Array collections：child-level listener ──
+    ARRAY_COLLECTIONS.forEach(node => {
+      const ref = App.fbRef.child(node);
+
+      const addCb = ref.on('child_added', snap => {
+        const v = snap.val();
+        if(!v) return;
+        const id = v.id != null ? v.id : snap.key;
+        if(_shouldIgnoreEcho(node, id)) return;
+        App.db[node] = App.db[node] || [];
+        const idx = App.db[node].findIndex(x => x && (x.id == id));
+        const isNew = idx < 0;
+        if(idx >= 0){
+          App.db[node][idx] = v;
+        } else {
+          App.db[node].push(v);
+        }
+        _saveDBLocal();
+        _scheduleRerender();
+        // batch 3: 收到其它裝置 push 來的新項 → 觸發桌面通知
+        if(isNew){
+          try { dispatchInboundNotify(node, v); } catch(e){ console.warn('[notify dispatch]', e); }
+        }
+      });
+
+      const chgCb = ref.on('child_changed', snap => {
+        const v = snap.val();
+        if(!v) return;
+        const id = v.id != null ? v.id : snap.key;
+        if(_shouldIgnoreEcho(node, id)) return;
+        App.db[node] = App.db[node] || [];
+        const idx = App.db[node].findIndex(x => x && (x.id == id));
+        if(idx >= 0){
+          App.db[node][idx] = v;
+        } else {
+          App.db[node].push(v);
+        }
+        _saveDBLocal();
+        _scheduleRerender();
+      });
+
+      const rmCb = ref.on('child_removed', snap => {
+        const v = snap.val();
+        const id = (v && v.id != null) ? v.id : snap.key;
+        if(_shouldIgnoreEcho(node, id)) return;
+        if(!Array.isArray(App.db[node])) return;
+        App.db[node] = App.db[node].filter(x => x && (x.id != id));
+        _saveDBLocal();
+        _scheduleRerender();
+      });
+
+      App.listeners.push(()=> ref.off('child_added', addCb));
+      App.listeners.push(()=> ref.off('child_changed', chgCb));
+      App.listeners.push(()=> ref.off('child_removed', rmCb));
+    });
+
+    // ── 物件型 collections：仍用 value listener（settings/grades/branding）──
+    OBJ_COLLECTIONS.forEach(node => {
       const ref = App.fbRef.child(node);
       const cb = ref.on('value', snap => {
         const v = snap.val();
-        App.db[node] = v ? Object.values(v) : [];
-        saveDB();
-        rerender();
+        if(!v) return;
+        if(node === 'settings'){
+          App.db.settings = Object.assign(defaultDB().settings, App.db.settings || {}, v);
+        } else if(node === 'branding'){
+          App.db.branding = Object.assign(defaultDB().branding, App.db.branding || {}, v);
+        } else {
+          App.db[node] = v;
+        }
+        _saveDBLocal();
+        _scheduleRerender();
       });
       App.listeners.push(()=> ref.off('value', cb));
     });
-    // settings is object
-    const sref = App.fbRef.child('settings');
-    const scb = sref.on('value', snap => {
-      const v = snap.val();
-      if(v){ App.db.settings = Object.assign(defaultDB().settings, v); saveDB(); }
-    });
-    App.listeners.push(()=> sref.off('value', scb));
-    // grades is object keyed by studentId
-    const gref = App.fbRef.child('grades');
-    const gcb = gref.on('value', snap => {
-      const v = snap.val();
-      if(v){ App.db.grades = v; saveDB(); }
-    });
-    App.listeners.push(()=> gref.off('value', gcb));
 
     // connection
     const cref = firebase.database().ref('.info/connected');
@@ -2316,8 +2408,15 @@ const Sync = (() => {
   function push(node, data){
     saveDB();
     if(!App.fbRef) return Promise.resolve(false);
+    // batch 3: data 可能為 null（表示「同步整個 collection」的舊呼叫慣例）
+    if(!data){
+      if(Array.isArray(App.db[node])) return setMap(node, App.db[node]);
+      return Promise.resolve(false);
+    }
     // use the data's id as the key for idempotency
     const key = data.id || App.fbRef.child(node).push().key;
+    // batch 3: 標記 echo，避免 listener 把自己 push 的東西重新 apply（造成 rerender 迴圈）
+    _markEcho(node, key);
     return App.fbRef.child(node).child(key).set(data).then(()=>true).catch(()=>false);
   }
   function setNode(node, data){
@@ -2329,16 +2428,210 @@ const Sync = (() => {
     saveDB();
     if(!App.fbRef) return Promise.resolve(false);
     const obj = {};
-    arr.forEach(x => { obj[String(x[keyField])] = x; });
+    (arr || []).forEach(x => {
+      if(!x) return;
+      const k = String(x[keyField] != null ? x[keyField] : nid());
+      obj[k] = x;
+      // batch 3: 每一筆都要標記 echo
+      _markEcho(node, k);
+    });
     return App.fbRef.child(node).set(obj).then(()=>true).catch(()=>false);
   }
   function remove(node, id){
     saveDB();
     if(!App.fbRef) return Promise.resolve(false);
+    // batch 3: 移除也算自己造成的事件，標記 echo
+    _markEcho(node, id);
     return App.fbRef.child(node).child(String(id)).remove().then(()=>true).catch(()=>false);
   }
   return { init, push, setNode, setMap, remove, detachAll };
 })();
+
+/* ════════════════════════════════════════════════════════════
+   BATCH 3 — WEB PUSH / NOTIFICATIONS（前景通知，使用瀏覽器 Notification API）
+   不需要 VAPID server；只要使用者授權即可在前景與背景（Service Worker tag）顯示
+   ──────────────────────────────────────────────────────────── */
+const NOTIFY_TYPES = [
+  { key:'message',       label:'收到新訊息',     forStudent:true,  forTeacher:true  },
+  { key:'announcement',  label:'收到新公告',     forStudent:true,  forTeacher:false },
+  { key:'leaveRequest',  label:'學生請假申請',   forStudent:false, forTeacher:true  },
+  { key:'studentSignin', label:'學生簽到',       forStudent:false, forTeacher:true  },
+  { key:'dueReminder',   label:'作業到期提醒',   forStudent:true,  forTeacher:false }
+];
+
+function notifyPermission(){
+  if(!('Notification' in window)) return 'unsupported';
+  return Notification.permission; // 'default' | 'granted' | 'denied'
+}
+
+function notifyRequest(){
+  if(!('Notification' in window)){
+    toast('此瀏覽器不支援通知','warn');
+    return Promise.resolve('unsupported');
+  }
+  if(Notification.permission === 'granted') return Promise.resolve('granted');
+  if(Notification.permission === 'denied'){
+    toast('已被封鎖，請到瀏覽器網址列旁的鎖頭圖示重設權限','warn', 5000);
+    return Promise.resolve('denied');
+  }
+  return Notification.requestPermission().then(p => {
+    if(p === 'granted'){
+      toast('通知已啟用','success');
+      // 啟用後預設打勾全部
+      const prefs = (App.db.settings.notifications) || {};
+      NOTIFY_TYPES.forEach(t => { if(prefs[t.key] !== false) prefs[t.key] = true; });
+      App.db.settings.notifications = prefs;
+      saveDB();
+      try { Sync.setNode && Sync.setNode('settings', App.db.settings); } catch(e){}
+      // 顯示測試
+      notify('🔔 通知已啟用', '之後重要事件會推到桌面 / 鎖定畫面', { silent:true });
+    } else if(p === 'denied'){
+      toast('使用者已拒絕通知','warn');
+    }
+    return p;
+  });
+}
+
+function notifyEnabledFor(type){
+  if(notifyPermission() !== 'granted') return false;
+  const prefs = (App.db && App.db.settings && App.db.settings.notifications) || {};
+  // 預設：未設定的視為「不啟用」（避免使用者沒看過設定就被連環通知）
+  return prefs[type] === true;
+}
+
+function notify(title, body, options){
+  options = options || {};
+  try {
+    if(!('Notification' in window)) return null;
+    if(Notification.permission !== 'granted') return null;
+    if(options.type && !notifyEnabledFor(options.type)) return null;
+    // 自己觸發的（例如老師自己發訊息），不要通知自己
+    if(options.skipSelf) return null;
+
+    const opts = {
+      body: body || '',
+      icon: options.icon || './icon-192.png',
+      tag: options.tag || (options.type || 'cms-v3'),
+      silent: !!options.silent,
+      requireInteraction: !!options.requireInteraction
+    };
+    if(options.badge) opts.badge = options.badge;
+    if(options.data) opts.data = options.data;
+    let n;
+    try {
+      n = new Notification(title, opts);
+    } catch(e){
+      // 某些瀏覽器（特別是 Android Chrome）不允許直接 new Notification，必須透過 SW
+      if(navigator.serviceWorker && navigator.serviceWorker.ready){
+        navigator.serviceWorker.ready.then(reg => {
+          try { reg.showNotification(title, opts); } catch(_){}
+        });
+      }
+      return null;
+    }
+    n.onclick = () => {
+      try { window.focus(); } catch(_){}
+      if(options.url){
+        try { location.hash = options.url; } catch(_){}
+      }
+      try { n.close(); } catch(_){}
+    };
+    // 沒指定 requireInteraction 時自動 5 秒後關閉
+    if(!options.requireInteraction){
+      setTimeout(()=> { try { n.close(); } catch(_){} }, 5500);
+    }
+    return n;
+  } catch(e){
+    console.warn('[notify]', e);
+    return null;
+  }
+}
+
+// 收到其它裝置同步來的新項，分派到適當的通知類型
+function dispatchInboundNotify(node, v){
+  if(!App.session) return;
+  if(notifyPermission() !== 'granted') return;
+  // 來自啟動時的 backlog 不通知（看 ts 是否太舊）
+  const ts = v && v.ts;
+  if(ts && (Date.now() - ts > 60 * 1000)) return; // 1 分鐘前的事件不再 ping
+  const role = App.session.role;
+  const meId = role === 'teacher' ? 'teacher' : App.session.id;
+
+  // 不要因為自己「另一個分頁」push 的事件而通知自己
+  if(v.fromId === meId) return;
+
+  if(node === 'messages'){
+    const to = v.toId || 'all';
+    // 只在這位使用者是收件人時通知
+    if(to !== 'all' && to !== meId) return;
+    const title = '💬 ' + (v.fromName || '未知') + ' ' + (to === 'all' ? '在公開留言' : '私訊你');
+    notify(title, (v.text || '(附件)').slice(0, 120), {
+      type:'message', tag:'msg-' + (v.fromId || ''),
+      url: role === 'teacher' ? 'messages/dm' : 'smsg'
+    });
+    return;
+  }
+  if(node === 'announcements'){
+    if(role !== 'student') return;
+    notify('📢 新公告：' + (v.title || ''), (v.body || '').slice(0, 160), {
+      type:'announcement', tag:'ann-' + v.id, url:'sannouncements'
+    });
+    return;
+  }
+  if(node === 'leaves'){
+    if(role !== 'teacher') return;
+    if(v.status && v.status !== 'pending') return; // 自動批准的、或已審核的不通知
+    notify('📝 學生請假申請', (v.name || '') + ' · ' + (v.date || '') + ' · ' + (v.reason || ''), {
+      type:'leaveRequest', tag:'lv-' + v.id, url:'leaves'
+    });
+    return;
+  }
+  if(node === 'attendance'){
+    if(role !== 'teacher') return;
+    if(v.method !== 'student-self' && v.method !== 'qr') return;
+    notify('✋ 學生簽到', (v.studentName || '') + ' · ' + (v.time || ''), {
+      type:'studentSignin', tag:'att-' + v.studentId, silent:true,
+      url:'overview'
+    });
+    return;
+  }
+}
+
+// 啟動排程：學生端 — 作業到期提醒（每小時跑一次，剩 < 24h 提醒一次）
+function scheduleDueReminders(){
+  if(App._dueReminderTimer) return;
+  function check(){
+    try {
+      if(!App.db || !App.session || App.session.role !== 'student') return;
+      if(!notifyEnabledFor('dueReminder')) return;
+      const me = currentStudent();
+      if(!me) return;
+      (App.db.assignments || []).forEach(asg => {
+        const dueAt = asg.dueAt || asg.dueDate;
+        if(!dueAt) return;
+        const due = new Date(dueAt).getTime();
+        if(isNaN(due)) return;
+        const hoursLeft = (due - Date.now()) / 3600000;
+        if(hoursLeft <= 0 || hoursLeft > 24) return;
+        // 該學生是否在目標範圍內
+        try {
+          const targets = assignmentTargets(asg);
+          if(!targets.has(me.id)) return;
+        } catch(e){}
+        // 已繳交？
+        const sub = (App.db.submissions || []).find(s => s.studentId === me.id && s.assignmentId === asg.id);
+        if(sub) return;
+        const key = 'cms_v3_reminded_' + asg.id + '_' + me.id;
+        if(localStorage.getItem(key)) return;
+        notify('📚 作業即將到期', (asg.title || '未命名作業') + ' 剩 ' + Math.max(1, Math.round(hoursLeft)) + ' 小時',
+          { type:'dueReminder', tag:'due-' + asg.id, url:'sasgn/' + asg.id });
+        try { localStorage.setItem(key, '1'); } catch(e){}
+      });
+    } catch(e){ console.warn('[dueReminder]', e); }
+  }
+  App._dueReminderTimer = setInterval(check, 3600 * 1000); // 1 hr
+  setTimeout(check, 5000); // 啟動 5 秒後跑一次
+}
 
 /* ---- BroadcastChannel for same-domain multi-tab ---- */
 function initBC(){
@@ -5741,6 +6034,12 @@ function pushMsg(toId, text, attach, opts){
   saveDB();
   Sync.push('messages', rec);
   bcNotify();
+  // batch 3: 通知對方（自己端不通知自己）
+  try {
+    // 對方 = 收件人；若是廣播 'all'，自己端只通知「不是自己發的」
+    // pushMsg 是由自己呼叫的 → 自己端絕對 skip
+    // 其它端則由 child_added listener 觸發後再通知
+  } catch(e){}
   return rec;
 }
 
@@ -6558,6 +6857,70 @@ function rejectStudent(pid){
    ──────────────────────────────────────────────────────────── */
 
 // ─── 出席狀態管理元件（batch 1） ─────────────────────────────
+// batch 3: 設定畫面 — 「🔔 通知設定」卡
+function renderNotifyCard(){
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('h3', null, '🔔 通知設定'));
+  card.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '啟用後，瀏覽器會在收到新訊息 / 公告 / 學生事件時推送桌面通知（前景）。'));
+
+  const perm = notifyPermission();
+  const stateRow = el('div', { class:'flex-between', style:{alignItems:'center',marginBottom:'10px',flexWrap:'wrap',gap:'8px'} });
+  const stateLabel = (() => {
+    if(perm === 'unsupported') return el('span', { class:'tag' }, '此瀏覽器不支援');
+    if(perm === 'granted')     return el('span', { class:'tag t-success' }, '已啟用 (granted)');
+    if(perm === 'denied')      return el('span', { class:'tag t-danger' }, '已封鎖 (denied)');
+    return el('span', { class:'tag t-warn' }, '尚未授權 (default)');
+  })();
+  stateRow.appendChild(el('div', null,
+    el('div', { class:'small muted' }, '目前權限狀態'),
+    stateLabel
+  ));
+  if(perm === 'default'){
+    stateRow.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+      await notifyRequest();
+      rerender();
+    } }, '🔔 啟用通知'));
+  } else if(perm === 'denied'){
+    stateRow.appendChild(el('div', { class:'small muted' },
+      '請到網址列旁的鎖頭圖示中將「通知」改為允許'));
+  } else if(perm === 'granted'){
+    stateRow.appendChild(el('button', { class:'btn', onclick: ()=> {
+      notify('🔔 測試通知', '看到我，代表通知運作正常！', { silent:false });
+    } }, '🧪 測試通知'));
+  }
+  card.appendChild(stateRow);
+
+  // 通知類型偏好
+  const role = App.session && App.session.role;
+  const filtered = NOTIFY_TYPES.filter(t => role === 'teacher' ? t.forTeacher : t.forStudent);
+  const prefs = (App.db.settings.notifications) || {};
+  const list = el('div', { style:{display:'grid',gap:'6px',marginTop:'4px'} });
+  filtered.forEach(t => {
+    const checked = (prefs[t.key] === true);
+    const lbl = el('label', { class:'flex', style:{alignItems:'center',gap:'8px',padding:'8px 10px',border:'1px solid var(--border)',borderRadius:'8px',cursor:'pointer'} });
+    const ck = el('input', { type:'checkbox' });
+    if(checked) ck.checked = true;
+    if(perm !== 'granted') ck.disabled = true;
+    ck.onchange = ()=> {
+      App.db.settings.notifications = App.db.settings.notifications || {};
+      App.db.settings.notifications[t.key] = ck.checked;
+      saveDB();
+      try { Sync.setNode && Sync.setNode('settings', App.db.settings); } catch(e){}
+    };
+    lbl.appendChild(ck);
+    lbl.appendChild(el('span', null, t.label));
+    list.appendChild(lbl);
+  });
+  card.appendChild(list);
+
+  if(perm !== 'granted'){
+    card.appendChild(el('div', { class:'small muted', style:{marginTop:'8px'} },
+      '提示：須先「啟用通知」才能勾選類型'));
+  }
+  return card;
+}
+
 function renderAttendanceStatusesCard(){
   const card = el('div', { class:'card', style:{marginTop:'12px'} });
   card.appendChild(el('h3', null, '🎯 出席狀態管理'));
@@ -6852,6 +7215,9 @@ function rSettings(content){
     }}, '重置提示')
   ));
   content.appendChild(cardP);
+
+  // batch 3: 通知設定
+  content.appendChild(renderNotifyCard());
 
   // danger zone
   const card4 = el('div', { class:'card', style:{marginTop:'12px',borderColor:'var(--danger)'} });
@@ -13055,6 +13421,9 @@ function boot(){
 
   // background scheduler for assignment-due notifications
   schedulePeriodicNotifications();
+
+  // batch 3: 啟動學生端「作業到期」桌面通知排程
+  try { scheduleDueReminders(); } catch(e){ console.warn('[scheduleDueReminders]', e); }
 
   // ═══ IndexedDB 持久化 + 舊版 attach 自動遷移 ═══
   try { requestPersistentStorage(); } catch(e){}

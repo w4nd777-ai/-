@@ -67,4 +67,38 @@ self.addEventListener('fetch', e => {
 
 self.addEventListener('message', e => {
   if(e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  // batch 3: 前景頁面要求 SW 代為顯示通知（某些瀏覽器不允許頁面直接 new Notification）
+  if(e.data && e.data.type === 'SHOW_NOTIFICATION'){
+    const { title, options } = e.data;
+    try { self.registration.showNotification(title, options || {}); } catch(_){}
+  }
+});
+
+// batch 3: Web Push 預備（需要 VAPID server 才會收到，這裡先保留 listener）
+self.addEventListener('push', e => {
+  if(!e.data) return;
+  let data;
+  try { data = e.data.json(); } catch(_) { data = { title:'通知', body: e.data.text() }; }
+  const title = data.title || '通知';
+  const opts = {
+    body: data.body || '',
+    icon: data.icon || './icon-192.png',
+    badge: data.badge,
+    tag: data.tag || 'cms-v3',
+    data: data.data
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil(
+    self.clients.matchAll({ type:'window', includeUncontrolled:true }).then(list => {
+      for(const c of list){
+        if('focus' in c){ try { c.focus(); } catch(_){} return; }
+      }
+      if(self.clients.openWindow) return self.clients.openWindow(url);
+    })
+  );
 });
