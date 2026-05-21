@@ -4032,14 +4032,38 @@ function quickContinueAsLast(){
 
 function renderLogin(root){
   root.innerHTML = '';
+  // 確保 _uiCustom 已載入（首次登入時可能尚未 boot 到該分支）
+  try { App._uiCustom = App._uiCustom || loadUiCustom(); } catch(e){}
+  const lc = (App._uiCustom && App._uiCustom.login) || {};
+
   const wrap = el('div', { class:'center-wrap' });
   const card = el('div', { class:'login-card login-v2' });
 
-  // Hero
+  // Hero — Logo（圖片優先，否則 emoji）
+  const logoEl = el('div', { class:'logo-xl' });
+  if(lc.logoImage){
+    // 圖片：先放 emoji 預設，背景非同步換成圖片
+    logoEl.textContent = lc.logoEmoji || '🎓';
+    (async ()=>{
+      try {
+        const url = await attachGetUrl(lc.logoImage);
+        if(url){
+          logoEl.innerHTML = '';
+          logoEl.appendChild(el('img', { src:url, style:{
+            width:'100%', height:'100%', objectFit:'cover', borderRadius:'inherit'
+          } }));
+        }
+      } catch(e){}
+    })();
+  } else {
+    logoEl.textContent = lc.logoEmoji || '🎓';
+  }
+  const heroTitle = lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統';
+  const heroSub = lc.subtitle || '極簡校園管理工具';
   const hero = el('div', { class:'login-hero' },
-    el('div', { class:'logo-xl' }, '🎓'),
-    el('h1', { class:'brand-h1' }, App.db.branding.title || '課程管理系統'),
-    el('div', { class:'brand-sub' }, '極簡校園管理工具')
+    logoEl,
+    el('h1', { class:'brand-h1' }, heroTitle),
+    el('div', { class:'brand-sub' }, heroSub)
   );
   card.appendChild(hero);
 
@@ -4051,7 +4075,7 @@ function renderLogin(root){
 
   // ─── Last user quick entry (only on choose stage) ───
   const lastUser = loadLastUser();
-  if(App._loginStage === 'choose' && lastUser){
+  if(App._loginStage === 'choose' && lastUser && !lc.hideLastUser){
     const stillExists = (lastUser.role === 'teacher')
       ? !!App.db.accounts.find(a => a.id === lastUser.id || a.username === lastUser.username)
       : !!App.db.students.find(s => s.id === lastUser.id);
@@ -4084,24 +4108,32 @@ function renderLogin(root){
   if(App._loginStage === 'choose'){
     const stage = el('div', { class:'login-stage' });
     const grid = el('div', { class:'role-choice' });
-    const teacherCard = el('button', { class:'role-choice-card', onclick: e => {
-      e.currentTarget.classList.add('tapped');
-      setTimeout(()=> { App._loginStage = 'teacher'; rerender(); }, 220);
-    }},
-      el('span', { class:'rc-ico' }, '🧑‍🏫'),
-      el('div', { class:'rc-title' }, '我是老師'),
-      el('div', { class:'rc-sub' }, '班級管理 / 成績 / 公告')
-    );
-    const studentCard = el('button', { class:'role-choice-card', onclick: e => {
-      e.currentTarget.classList.add('tapped');
-      setTimeout(()=> { App._loginStage = 'student'; rerender(); }, 220);
-    }},
-      el('span', { class:'rc-ico' }, '🧑‍🎓'),
-      el('div', { class:'rc-title' }, '我是學生'),
-      el('div', { class:'rc-sub' }, '簽到 / 作業 / 成績')
-    );
-    grid.appendChild(teacherCard);
-    grid.appendChild(studentCard);
+
+    const showT = lc.showTeacherBtn !== false;
+    const showS = lc.showStudentBtn !== false;
+
+    if(showT){
+      const teacherCard = el('button', { class:'role-choice-card', onclick: e => {
+        e.currentTarget.classList.add('tapped');
+        setTimeout(()=> { App._loginStage = 'teacher'; rerender(); }, 220);
+      }},
+        el('span', { class:'rc-ico' }, lc.teacherIcon || '🧑‍🏫'),
+        el('div', { class:'rc-title' }, lc.teacherLabel || '我是老師'),
+        el('div', { class:'rc-sub' }, lc.teacherSub || '班級管理 / 成績 / 公告')
+      );
+      grid.appendChild(teacherCard);
+    }
+    if(showS){
+      const studentCard = el('button', { class:'role-choice-card', onclick: e => {
+        e.currentTarget.classList.add('tapped');
+        setTimeout(()=> { App._loginStage = 'student'; rerender(); }, 220);
+      }},
+        el('span', { class:'rc-ico' }, lc.studentIcon || '🧑‍🎓'),
+        el('div', { class:'rc-title' }, lc.studentLabel || '我是學生'),
+        el('div', { class:'rc-sub' }, lc.studentSub || '簽到 / 作業 / 成績')
+      );
+      grid.appendChild(studentCard);
+    }
     stage.appendChild(grid);
     card.appendChild(stage);
   }
@@ -4112,21 +4144,37 @@ function renderLogin(root){
     card.appendChild(renderLoginStudentStage());
   }
 
-  card.appendChild(el('hr', { class:'sep' }));
-  const back = el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',width:'100%'}, onclick: async ()=> {
-    const ok = await confirmDlg('要切換到別的教室嗎？目前的設定會被清除（資料保留）');
-    if(ok){
-      App.cfg = null; App.session = null;
-      try {
-        localStorage.removeItem(LS_CFG);
-        localStorage.removeItem(LS_SESSION);
-        localStorage.removeItem(LS_LAST_USER);
-        localStorage.removeItem(LS_REMEMBER);
-      } catch(e){}
-      rerender();
-    }
-  }}, '← 切換教室');
-  card.appendChild(back);
+  // 自訂歡迎訊息
+  if(lc.welcomeText){
+    card.appendChild(el('div', { class:'card', style:{
+      marginTop:'14px', background:'var(--primary-soft)', borderColor:'var(--primary)',
+      padding:'10px 12px'
+    } },
+      el('div', { style:{whiteSpace:'pre-wrap',fontSize:'13px',lineHeight:'1.7',color:'var(--text)'} },
+        lc.welcomeText)
+    ));
+  }
+
+  // 自訂內容 (position='login-bottom')
+  card.appendChild(renderCustomBlocks('login-bottom'));
+
+  if(!lc.hideSwitchRoom){
+    card.appendChild(el('hr', { class:'sep' }));
+    const back = el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',width:'100%'}, onclick: async ()=> {
+      const ok = await confirmDlg('要切換到別的教室嗎？目前的設定會被清除（資料保留）');
+      if(ok){
+        App.cfg = null; App.session = null;
+        try {
+          localStorage.removeItem(LS_CFG);
+          localStorage.removeItem(LS_SESSION);
+          localStorage.removeItem(LS_LAST_USER);
+          localStorage.removeItem(LS_REMEMBER);
+        } catch(e){}
+        rerender();
+      }
+    }}, '← 切換教室');
+    card.appendChild(back);
+  }
 
   wrap.appendChild(card);
   root.appendChild(wrap);
@@ -4168,7 +4216,8 @@ function renderLoginTeacherStage(){
   rememberLabel.appendChild(document.createTextNode(' 記住我（7 天內免輸入密碼）'));
   stage.appendChild(rememberLabel);
 
-  if(hasDefault){
+  const _lcT = (App._uiCustom && App._uiCustom.login) || {};
+  if(hasDefault && !_lcT.hideDefaultHint){
     const hint = el('div', { class:'default-hint' },
       el('span', null, '💡 預設帳號：'),
       el('code', { style:{fontSize:'12px'} }, 'admin / admin123'),
@@ -4216,11 +4265,13 @@ function renderLoginTeacherStage(){
   stage.appendChild(btnRow);
 
   // 🔑 忘記密碼連結
-  stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'14px'} },
-    el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword,
-      style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
-      '🔑 忘記密碼？')
-  ));
+  if(!_lcT.hideForgot){
+    stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'14px'} },
+      el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword,
+        style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
+        '🔑 忘記密碼？')
+    ));
+  }
 
   i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
   i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
@@ -4326,6 +4377,7 @@ function showTeacherForgotPassword(){
 function renderLoginStudentStage(){
   // 🔒 隱私友善版：班級下拉 → 姓名下拉 → 密碼
   // 不顯示其他同學的卡片清單
+  const _lcS = (App._uiCustom && App._uiCustom.login) || {};
   const stage = el('div', { class:'login-stage' });
   stage.appendChild(el('h3', null, '🧑‍🎓 學生登入'));
   stage.appendChild(el('div', { class:'small muted', style:{marginBottom:'14px'} },
@@ -4337,7 +4389,9 @@ function renderLoginStudentStage(){
       el('div', null, '老師還沒建立學生名單'),
       el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '你可以申請註冊，等待老師審核')
     ));
-    stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
+    if(!_lcS.hideRegister){
+      stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
+    }
     stage.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'6px'}, onclick: ()=> { App._loginStage = 'choose'; rerender(); } }, '← 返回'));
     return stage;
   }
@@ -4448,17 +4502,22 @@ function renderLoginStudentStage(){
   stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'8px'}, onclick: attemptLogin }, '登入'));
 
   // 忘記密碼
-  stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'10px'} },
-    el('a', { href:'javascript:void(0)', onclick: showForgotPassword,
-      style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
-      '🔑 忘記密碼？')
-  ));
+  if(!_lcS.hideForgot){
+    stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'10px'} },
+      el('a', { href:'javascript:void(0)', onclick: showForgotPassword,
+        style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
+        '🔑 忘記密碼？')
+    ));
+  }
 
   stage.appendChild(el('hr', { class:'sep' }));
-  stage.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px'} },
-    el('button', { class:'btn', style:{flex:'1'}, onclick: ()=> { App._loginStage = 'choose'; App._loginCls=''; App._loginStuId=''; rerender(); } }, '← 返回'),
-    el('button', { class:'btn', style:{flex:'1'}, onclick: studentRegisterFlow }, '＋ 申請註冊')
-  ));
+  const bottomRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px'} },
+    el('button', { class:'btn', style:{flex:'1'}, onclick: ()=> { App._loginStage = 'choose'; App._loginCls=''; App._loginStuId=''; rerender(); } }, '← 返回')
+  );
+  if(!_lcS.hideRegister){
+    bottomRow.appendChild(el('button', { class:'btn', style:{flex:'1'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
+  }
+  stage.appendChild(bottomRow);
   return stage;
 }
 
@@ -4930,7 +4989,8 @@ function renderTopbar(role){
     uieditor:'🛠️ 介面編輯器',
     help:'📖 使用說明', install:'📲 安裝 App'
   };
-  const t = titles[App.view] || (role === 'teacher' ? '課程管理' : '學生');
+  const defaultT = titles[App.view] || (role === 'teacher' ? '課程管理' : '學生');
+  const t = getPageTitle(App.view, defaultT);
   bar.appendChild(el('h1', null, t));
 
   const actions = el('div', { class:'topbar-actions' });
@@ -5134,11 +5194,27 @@ function rOv(content){
   const stats = computeTodayStats();
   const today = td();
 
+  // 自訂內容（總覽頁頂端）
+  content.appendChild(renderCustomBlocks('overview-top'));
+
   // hello bar (time-aware greeting)
   if(isOverviewVisible('helloBar')){
     const hb = renderHelloBar();
     if(hb) content.appendChild(hb);
   }
+
+  // 自訂歡迎詞（附在 hello bar 之下）
+  try {
+    const extra = App._uiCustom?.overview?.welcomeExtra;
+    if(extra){
+      content.appendChild(el('div', { class:'card', style:{
+        background:'var(--primary-soft)', borderColor:'var(--primary)',
+        padding:'10px 14px', marginBottom:'10px'
+      } },
+        el('div', { style:{whiteSpace:'pre-wrap',fontSize:'14px',lineHeight:'1.7'} }, extra)
+      ));
+    }
+  } catch(e){}
 
   // quick-start CTA (only when no students)
   if(isOverviewVisible('quickstart')){
@@ -5152,10 +5228,13 @@ function rOv(content){
     if(j) content.appendChild(j);
   }
 
+  const ovTitle = getPageTitle('overview', '今日總覽').replace(/^📊\s*/, '');
+  const ovSubDefault = '掌握今天整班的出席狀況 · ' + today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' });
+  const ovSub = getPageSub('overview', ovSubDefault);
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
     el('div', null,
-      el('h1', null, '今日總覽'),
-      el('div', { class:'muted small' }, '掌握今天整班的出席狀況 · ' + today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' }))
+      el('h1', null, ovTitle),
+      el('div', { class:'muted small' }, ovSub)
     ),
     el('div', { class:'flex no-print' },
       el('button', { class:'btn btn-sm', onclick:()=> rerender(), title:'重新載入資料' }, '🔄 重整'),
@@ -5208,6 +5287,8 @@ function rOv(content){
 
   // today's roster — 班級分組可摺疊（可在介面編輯器隱藏）
   if(!isOverviewVisible('today')){
+    // 仍然要顯示 overview-bottom 自訂內容
+    content.appendChild(renderCustomBlocks('overview-bottom'));
     return;
   }
   if(App.db.students.length === 0){
@@ -5329,6 +5410,9 @@ function rOv(content){
       content.appendChild(card);
     });
   }
+
+  // 自訂內容（總覽頁底端）
+  content.appendChild(renderCustomBlocks('overview-bottom'));
 }
 
 function markPresent(studentId, options={}){
@@ -7824,14 +7908,19 @@ function rCheckIn(content){
   const already = studentSignedToday(me.id);
   const onLeave = studentOnLeaveToday(me.id);
 
+  // 自訂內容（學生簽到頁）
+  content.appendChild(renderCustomBlocks('student-checkin'));
+
   // hello bar (time-aware)
   const hb = renderHelloBar();
   if(hb) content.appendChild(hb);
 
   // header
+  const ciTitle = getPageTitle('checkin', '✋ 我要簽到').replace(/^✋\s*/, '✋ ');
+  const ciSub = getPageSub('checkin', td() + ' · ' + nt());
   content.appendChild(el('div', { style:{textAlign:'center',marginBottom:'8px'} },
-    el('h1', null, '✋ 我要簽到'),
-    el('div', { class:'muted small' }, td() + ' · ' + nt())
+    el('h1', null, ciTitle),
+    el('div', { class:'muted small' }, ciSub)
   ));
 
   // ── HUGE check-in button (takes ~1/3 screen) ──
@@ -9914,10 +10003,14 @@ function rSGrade(content){
   const g = calcGrade(me.id);
   const r = studentRank(me.id);
 
-  content.appendChild(el('h1', null, '🎯 我的成績'));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
-    '加權公式：出席 ' + g.w.att + '% + 作業 ' + g.w.asgn + '% + 期中 ' + g.w.mid + '% + 期末 ' + g.w.final + '%'
-  ));
+  // 自訂內容（學生成績頁）
+  content.appendChild(renderCustomBlocks('student-grade'));
+
+  const sgTitle = getPageTitle('sgrade', '🎯 我的成績');
+  const sgSubDefault = '加權公式：出席 ' + g.w.att + '% + 作業 ' + g.w.asgn + '% + 期中 ' + g.w.mid + '% + 期末 ' + g.w.final + '%';
+  const sgSub = getPageSub('sgrade', sgSubDefault);
+  content.appendChild(el('h1', null, sgTitle));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, sgSub));
 
   const big = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
   big.appendChild(el('div', { class:'muted' }, '學期總分'));
@@ -14038,7 +14131,7 @@ function boot(){
   applyTheme();
 
   // 介面編輯器自訂設定（須在 boot 早期載入，避免 sideItem 讀到 undefined）
-  try { App._uiCustom = loadUiCustom(); } catch(e){ App._uiCustom = { sections:{}, items:{}, order:{}, overview:{} }; }
+  try { App._uiCustom = loadUiCustom(); } catch(e){ App._uiCustom = { sections:{}, items:{}, order:{}, overview:{}, login:{}, pageTexts:{}, customBlocks:[] }; }
 
   // cfg & session
   App.cfg = loadCfg();
@@ -16305,24 +16398,80 @@ const UI_CUSTOM_LS_KEY = 'cms_v3_ui_custom';
 function loadUiCustom(){
   try {
     const raw = localStorage.getItem(UI_CUSTOM_LS_KEY);
-    if(!raw) return { sections:{}, items:{}, order:{}, overview:{} };
+    if(!raw) return { sections:{}, items:{}, order:{}, overview:{}, login:{}, pageTexts:{}, customBlocks:[] };
     const obj = JSON.parse(raw);
     return {
       sections: obj.sections || {},
       items: obj.items || {},
       order: obj.order || {},
-      overview: obj.overview || {}
+      overview: obj.overview || {},
+      login: obj.login || {},
+      pageTexts: obj.pageTexts || {},
+      customBlocks: Array.isArray(obj.customBlocks) ? obj.customBlocks : []
     };
   } catch(e){
-    return { sections:{}, items:{}, order:{}, overview:{} };
+    return { sections:{}, items:{}, order:{}, overview:{}, login:{}, pageTexts:{}, customBlocks:[] };
   }
 }
 
 function saveUiCustom(){
   try {
-    App._uiCustom = App._uiCustom || { sections:{}, items:{}, order:{}, overview:{} };
+    App._uiCustom = App._uiCustom || { sections:{}, items:{}, order:{}, overview:{}, login:{}, pageTexts:{}, customBlocks:[] };
+    // 補齊新欄位（向前相容）
+    App._uiCustom.login = App._uiCustom.login || {};
+    App._uiCustom.pageTexts = App._uiCustom.pageTexts || {};
+    App._uiCustom.customBlocks = Array.isArray(App._uiCustom.customBlocks) ? App._uiCustom.customBlocks : [];
     localStorage.setItem(UI_CUSTOM_LS_KEY, JSON.stringify(App._uiCustom));
   } catch(e){ console.warn('[saveUiCustom]', e); }
+}
+
+/* 取得頁面標題（自訂優先） */
+function getPageTitle(viewKey, fallbackTitle){
+  try {
+    App._uiCustom = App._uiCustom || loadUiCustom();
+    const pt = (App._uiCustom.pageTexts || {})[viewKey];
+    if(pt && pt.title) return pt.title;
+  } catch(e){}
+  return fallbackTitle;
+}
+function getPageSub(viewKey, fallbackSub){
+  try {
+    App._uiCustom = App._uiCustom || loadUiCustom();
+    const pt = (App._uiCustom.pageTexts || {})[viewKey];
+    if(pt && pt.sub) return pt.sub;
+  } catch(e){}
+  return fallbackSub;
+}
+
+/* 渲染指定位置的自訂訊息卡 — 回傳 DocumentFragment */
+function renderCustomBlocks(position){
+  const frag = document.createDocumentFragment();
+  try {
+    App._uiCustom = App._uiCustom || loadUiCustom();
+    const blocks = (App._uiCustom.customBlocks || []).filter(b => b && b.visible !== false && b.position === position);
+    const colorMap = {
+      info:    { bg:'var(--primary-soft)', border:'var(--primary)', text:'var(--primary)' },
+      success: { bg:'var(--success-soft)', border:'var(--success)', text:'var(--success)' },
+      warn:    { bg:'var(--warn-soft)',    border:'var(--warn)',    text:'var(--warn)'    },
+      danger:  { bg:'var(--danger-soft)',  border:'var(--danger)',  text:'var(--danger)'  }
+    };
+    blocks.forEach(b => {
+      const c = colorMap[b.style] || colorMap.info;
+      const card = el('div', { class:'card', style:{
+        background: c.bg, borderColor: c.border, marginBottom:'10px'
+      }});
+      if(b.title){
+        card.appendChild(el('h3', { style:{ color:c.text, margin:'0 0 6px' } }, b.title));
+      }
+      if(b.content){
+        card.appendChild(el('div', { style:{
+          whiteSpace:'pre-wrap', fontSize:'14px', lineHeight:'1.7'
+        } }, b.content));
+      }
+      frag.appendChild(card);
+    });
+  } catch(e){ console.warn('[renderCustomBlocks]', e); }
+  return frag;
 }
 
 /* 預設項目清單 — 與 renderSidebarTeacher / renderSidebarStudent 對齊 */
@@ -16441,14 +16590,77 @@ function rUiEditor(content){
 
   content.appendChild(el('h1', null, '🛠️ 介面編輯器'));
   content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
-    '拖曳 ⋮⋮ 排序 · 取消勾選隱藏 · 點 🎨 改圖示 · 直接編輯改名稱'));
-
-  const isTeacher = App.session?.role === 'teacher';
+    '完整介面客製化：側邊欄 · 登入頁 · 總覽頁 · 頁面文字 · 自訂內容'));
 
   // 確保載入
   App._uiCustom = App._uiCustom || loadUiCustom();
+  App._uiCustom.login = App._uiCustom.login || {};
+  App._uiCustom.pageTexts = App._uiCustom.pageTexts || {};
+  App._uiCustom.customBlocks = Array.isArray(App._uiCustom.customBlocks) ? App._uiCustom.customBlocks : [];
 
-  // 1. 側邊欄項目編排
+  // tab 狀態
+  App._uiEditorTab = App._uiEditorTab || 'sidebar';
+
+  const isTeacher = App.session?.role === 'teacher';
+  // 學生端不顯示「總覽頁」tab
+  const tabs = [
+    { key:'sidebar',  label:'📑 側邊欄',    render: renderSidebarEditor   },
+    { key:'login',    label:'🔐 登入頁',    render: renderLoginEditor     },
+    isTeacher ? { key:'overview', label:'📊 總覽頁', render: renderOverviewEditor } : null,
+    { key:'pagetext', label:'🎨 頁面文字',  render: renderPageTextEditor  },
+    { key:'custom',   label:'➕ 自訂內容',  render: renderCustomBlockEditor }
+  ].filter(Boolean);
+
+  // 若目前 tab 不在可用清單（例如學生切到 overview），落回 sidebar
+  if(!tabs.find(t => t.key === App._uiEditorTab)) App._uiEditorTab = 'sidebar';
+
+  // tab bar
+  const tabBar = el('div', { class:'tabs-line', style:{marginBottom:'14px'} });
+  tabs.forEach(t => {
+    const btn = el('button', {
+      class: (App._uiEditorTab === t.key ? 'active' : ''),
+      onclick:()=> { App._uiEditorTab = t.key; rerender(); }
+    }, t.label);
+    tabBar.appendChild(btn);
+  });
+  content.appendChild(tabBar);
+
+  // tab content
+  const tabContent = el('div');
+  const active = tabs.find(t => t.key === App._uiEditorTab);
+  if(active){
+    try { active.render(tabContent); }
+    catch(err){
+      console.warn('[uiEditor tab render]', err);
+      tabContent.appendChild(el('div', { class:'card', style:{background:'var(--danger-soft)',borderColor:'var(--danger)'} },
+        el('h3', null, '⚠️ 渲染失敗'),
+        el('div', { class:'small' }, String(err.message || err))
+      ));
+    }
+  }
+  content.appendChild(tabContent);
+
+  // 全域：重置全部
+  const cardReset = el('div', { class:'card', style:{marginTop:'14px',background:'var(--danger-soft)',borderColor:'var(--danger)'} });
+  cardReset.appendChild(el('h3', null, '🔄 重置全部編排'));
+  cardReset.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '把所有自訂（側邊欄、登入頁、總覽、頁面文字、自訂內容）還原為預設'));
+  cardReset.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+    const ok = await confirmDlg('確定重置所有介面編排？此動作無法復原。', { danger:true, okText:'確定重置' });
+    if(!ok) return;
+    App._uiCustom = { sections:{}, items:{}, order:{}, overview:{}, login:{}, pageTexts:{}, customBlocks:[] };
+    saveUiCustom();
+    toast('已重置全部介面編排','success');
+    rerender();
+  }}, '🗑 重置全部'));
+  content.appendChild(cardReset);
+}
+
+/* ─── 區塊 1：側邊欄編輯器 ─── */
+function renderSidebarEditor(content){
+  const isTeacher = App.session?.role === 'teacher';
+  App._uiCustom = App._uiCustom || loadUiCustom();
+
   const card1 = el('div', { class:'card' });
   card1.appendChild(el('h3', null, '📑 側邊欄項目'));
   card1.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
@@ -16671,40 +16883,7 @@ function rUiEditor(content){
   });
   content.appendChild(card1);
 
-  // 2. 總覽頁卡片編排（僅老師端有意義）
-  if(isTeacher){
-    const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
-    card2.appendChild(el('h3', null, '📊 總覽頁卡片'));
-    card2.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
-      '勾選要在「📊 總覽」顯示的統計卡片與區塊'));
-    const ovOpts = [
-      { key:'helloBar', label:'👋 歡迎卡（時間問候）' },
-      { key:'quickstart', label:'🚀 快速開始引導（新老師）' },
-      { key:'journey', label:'🎉 歡迎旅程引導' },
-      { key:'signed', label:'✅ 已簽到 / 未簽到 統計' },
-      { key:'absent', label:'❌ 未簽到 統計' },
-      { key:'leave', label:'📆 請假中 統計' },
-      { key:'late', label:'⏰ 今日遲到 統計' },
-      { key:'pending', label:'📥 待審核項目提醒' },
-      { key:'today', label:'📅 今日班況詳細表' }
-    ];
-    App._uiCustom.overview = App._uiCustom.overview || {};
-    ovOpts.forEach(o => {
-      const chk = el('input', { type:'checkbox' });
-      chk.checked = App._uiCustom.overview[o.key] !== false;
-      chk.addEventListener('change', ()=> {
-        App._uiCustom.overview[o.key] = chk.checked;
-        saveUiCustom();
-      });
-      const lbl = el('label', { class:'flex', style:{padding:'6px 0',gap:'8px',alignItems:'center',cursor:'pointer'} });
-      lbl.appendChild(chk);
-      lbl.appendChild(el('span', null, o.label));
-      card2.appendChild(lbl);
-    });
-    content.appendChild(card2);
-  }
-
-  // 3. 套用變更（重新渲染）
+  // 套用變更
   const cardApply = el('div', { class:'card', style:{marginTop:'12px',background:'var(--primary-soft)',borderColor:'var(--primary)'} });
   cardApply.appendChild(el('h3', null, '✅ 套用變更'));
   cardApply.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
@@ -16715,21 +16894,482 @@ function rUiEditor(content){
     rerender();
   }}, '🔄 立即套用'));
   content.appendChild(cardApply);
+}
 
-  // 4. 重置
-  const card3 = el('div', { class:'card', style:{marginTop:'12px',background:'var(--danger-soft)',borderColor:'var(--danger)'} });
-  card3.appendChild(el('h3', null, '🔄 重置全部編排'));
-  card3.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
-    '把所有自訂分組、項目、順序與總覽卡片設定還原為預設'));
-  card3.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
-    const ok = await confirmDlg('確定重置所有介面編排？此動作無法復原。', { danger:true, okText:'確定重置' });
-    if(!ok) return;
-    App._uiCustom = { sections:{}, items:{}, order:{}, overview:{} };
+/* ─── 區塊 2：登入頁編輯器 ─── */
+function renderLoginEditor(content){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  App._uiCustom.login = App._uiCustom.login || {};
+  const lc = App._uiCustom.login;
+
+  content.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '客製化登入畫面的標題、Logo、身分選擇按鈕與提示。改完設定後，登出即可看到效果。'));
+
+  // a) 標題與 Logo
+  const card1 = el('div', { class:'card' });
+  card1.appendChild(el('h3', null, '🏷️ 標題與 Logo'));
+
+  // Logo（emoji 或圖片）
+  const fLogo = el('div', { class:'field' });
+  fLogo.appendChild(el('label', { class:'label' }, 'Logo'));
+  const logoRow = el('div', { class:'flex', style:{gap:'10px',alignItems:'flex-start',flexWrap:'wrap'} });
+  const logoPreview = el('div', { style:{
+    fontSize:'48px', width:'80px', height:'80px', borderRadius:'12px',
+    background:'var(--surface-2)', display:'flex', alignItems:'center',
+    justifyContent:'center', overflow:'hidden', flex:'0 0 80px',
+    border:'1px solid var(--border)'
+  } });
+
+  async function refreshLogo(){
+    logoPreview.innerHTML = '';
+    if(lc.logoImage){
+      try {
+        const url = await attachGetUrl(lc.logoImage);
+        if(url){
+          logoPreview.appendChild(el('img', { src:url, style:{width:'100%',height:'100%',objectFit:'cover'} }));
+          return;
+        }
+      } catch(e){}
+    }
+    logoPreview.textContent = lc.logoEmoji || '🎓';
+  }
+  refreshLogo();
+  logoRow.appendChild(logoPreview);
+
+  const logoActs = el('div', { style:{flex:'1',minWidth:'180px'} });
+  logoActs.appendChild(el('label', { class:'tiny muted' }, 'Emoji（如 🎓 📚 📖；圖片優先）'));
+  const inpEmoji = el('input', { class:'input', value: lc.logoEmoji || '🎓' });
+  inpEmoji.addEventListener('change', ()=> {
+    lc.logoEmoji = inpEmoji.value.trim();
     saveUiCustom();
-    toast('已重置介面編排','success');
-    rerender();
-  }}, '🗑 重置全部'));
+    refreshLogo();
+  });
+  logoActs.appendChild(inpEmoji);
+
+  // 圖片上傳
+  logoActs.appendChild(el('div', { class:'tiny muted', style:{marginTop:'8px'} }, '或上傳圖片（建議 < 1 MB）'));
+  const inpImg = el('input', { type:'file', accept:'image/*', style:{marginTop:'4px',width:'100%'} });
+  inpImg.addEventListener('change', async e => {
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    if(f.size > 1024*1024){ toast('圖片不能超過 1 MB','danger'); inpImg.value=''; return; }
+    try {
+      if(lc.logoImage){ try { await attachDelete(lc.logoImage); } catch(_){} }
+      lc.logoImage = await attachUpload(f);
+      saveUiCustom();
+      await refreshLogo();
+      toast('Logo 已更新','success');
+      // 觸發重繪讓「移除圖片」按鈕出現
+      rerender();
+    } catch(err){ toast('上傳失敗：'+err.message,'danger'); }
+  });
+  logoActs.appendChild(inpImg);
+
+  if(lc.logoImage){
+    logoActs.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
+      try { await attachDelete(lc.logoImage); } catch(_){}
+      lc.logoImage = null;
+      saveUiCustom();
+      await refreshLogo();
+      rerender();
+    }}, '🗑 移除圖片'));
+  }
+  logoRow.appendChild(logoActs);
+  fLogo.appendChild(logoRow);
+  card1.appendChild(fLogo);
+
+  // 主標題
+  const fTitle = el('div', { class:'field' });
+  fTitle.appendChild(el('label', { class:'label' }, '主標題'));
+  const inpTitle = el('input', { class:'input',
+    placeholder: (App.db.branding && App.db.branding.title) || '課程管理系統',
+    value: lc.title || '' });
+  inpTitle.addEventListener('change', ()=> { lc.title = inpTitle.value.trim(); saveUiCustom(); });
+  fTitle.appendChild(inpTitle);
+  fTitle.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '留空則使用：' + ((App.db.branding && App.db.branding.title) || '課程管理系統')));
+  card1.appendChild(fTitle);
+
+  // 副標題
+  const fSub = el('div', { class:'field' });
+  fSub.appendChild(el('label', { class:'label' }, '副標題'));
+  const inpSub = el('input', { class:'input', placeholder:'極簡校園管理工具', value: lc.subtitle || '' });
+  inpSub.addEventListener('change', ()=> { lc.subtitle = inpSub.value.trim(); saveUiCustom(); });
+  fSub.appendChild(inpSub);
+  fSub.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '留空則使用：極簡校園管理工具'));
+  card1.appendChild(fSub);
+
+  content.appendChild(card1);
+
+  // b) 身分選擇按鈕
+  const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card2.appendChild(el('h3', null, '👥 身分選擇按鈕'));
+
+  // 老師按鈕
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '老師按鈕'));
+  const tIcon = el('input', { class:'input', placeholder:'🧑‍🏫',
+    value: lc.teacherIcon || '🧑‍🏫', style:{maxWidth:'80px'} });
+  tIcon.addEventListener('change', ()=> { lc.teacherIcon = tIcon.value.trim(); saveUiCustom(); });
+  const tLabel = el('input', { class:'input', placeholder:'我是老師',
+    value: lc.teacherLabel || '', style:{flex:'1',minWidth:'140px'} });
+  tLabel.addEventListener('change', ()=> { lc.teacherLabel = tLabel.value.trim(); saveUiCustom(); });
+  const tSub = el('input', { class:'input', placeholder:'班級管理 / 成績 / 公告',
+    value: lc.teacherSub || '', style:{flex:'1',minWidth:'140px'} });
+  tSub.addEventListener('change', ()=> { lc.teacherSub = tSub.value.trim(); saveUiCustom(); });
+  fT.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap'} }, tIcon, tLabel));
+  fT.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px',marginBottom:'2px'} }, '老師按鈕副標：'));
+  fT.appendChild(tSub);
+  card2.appendChild(fT);
+
+  // 學生按鈕
+  const fS = el('div', { class:'field' });
+  fS.appendChild(el('label', { class:'label' }, '學生按鈕'));
+  const sIcon = el('input', { class:'input', placeholder:'🧑‍🎓',
+    value: lc.studentIcon || '🧑‍🎓', style:{maxWidth:'80px'} });
+  sIcon.addEventListener('change', ()=> { lc.studentIcon = sIcon.value.trim(); saveUiCustom(); });
+  const sLabel = el('input', { class:'input', placeholder:'我是學生',
+    value: lc.studentLabel || '', style:{flex:'1',minWidth:'140px'} });
+  sLabel.addEventListener('change', ()=> { lc.studentLabel = sLabel.value.trim(); saveUiCustom(); });
+  const sSub = el('input', { class:'input', placeholder:'簽到 / 作業 / 成績',
+    value: lc.studentSub || '', style:{flex:'1',minWidth:'140px'} });
+  sSub.addEventListener('change', ()=> { lc.studentSub = sSub.value.trim(); saveUiCustom(); });
+  fS.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap'} }, sIcon, sLabel));
+  fS.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px',marginBottom:'2px'} }, '學生按鈕副標：'));
+  fS.appendChild(sSub);
+  card2.appendChild(fS);
+
+  // 顯示控制
+  const showRow = el('div', { class:'flex', style:{gap:'12px',marginTop:'10px',flexWrap:'wrap'} });
+  const showT = el('input', { type:'checkbox' });
+  showT.checked = lc.showTeacherBtn !== false;
+  showT.addEventListener('change', ()=> { lc.showTeacherBtn = showT.checked; saveUiCustom(); });
+  showRow.appendChild(el('label', { class:'small flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} },
+    showT, el('span', null, '顯示老師按鈕')));
+  const showS = el('input', { type:'checkbox' });
+  showS.checked = lc.showStudentBtn !== false;
+  showS.addEventListener('change', ()=> { lc.showStudentBtn = showS.checked; saveUiCustom(); });
+  showRow.appendChild(el('label', { class:'small flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} },
+    showS, el('span', null, '顯示學生按鈕')));
+  card2.appendChild(showRow);
+
+  content.appendChild(card2);
+
+  // c) 提示與說明文字
+  const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card3.appendChild(el('h3', null, '💬 提示與說明文字'));
+
+  // 自訂歡迎訊息
+  const fWelcome = el('div', { class:'field' });
+  fWelcome.appendChild(el('label', { class:'label' }, '歡迎訊息（顯示在登入畫面下方）'));
+  const taWelcome = el('textarea', { class:'textarea',
+    placeholder:'例：歡迎使用本校課程系統，如有問題請聯絡 OOO 老師',
+    rows:3 });
+  taWelcome.value = lc.welcomeText || '';
+  taWelcome.addEventListener('change', ()=> { lc.welcomeText = taWelcome.value.trim(); saveUiCustom(); });
+  fWelcome.appendChild(taWelcome);
+  card3.appendChild(fWelcome);
+
+  // 隱藏「預設帳號提示」
+  const mkChk = (key, label) => {
+    const lbl = el('label', { class:'small flex', style:{gap:'8px',alignItems:'center',padding:'8px',background:'var(--surface-2)',borderRadius:'8px',marginTop:'8px',cursor:'pointer'} });
+    const chk = el('input', { type:'checkbox' });
+    chk.checked = !!lc[key];
+    chk.addEventListener('change', ()=> { lc[key] = chk.checked; saveUiCustom(); });
+    lbl.appendChild(chk);
+    lbl.appendChild(el('span', null, label));
+    return lbl;
+  };
+  card3.appendChild(mkChk('hideDefaultHint', '隱藏「預設帳號 admin / admin123」提示框（建議學校用）'));
+  card3.appendChild(mkChk('hideForgot',     '隱藏「忘記密碼」連結'));
+  card3.appendChild(mkChk('hideRegister',   '隱藏「申請註冊」按鈕'));
+  card3.appendChild(mkChk('hideLastUser',   '隱藏「上次登入快速繼續」卡片'));
+  card3.appendChild(mkChk('hideSwitchRoom', '隱藏「← 切換教室」按鈕'));
+
   content.appendChild(card3);
+
+  // d) 預覽
+  const card4 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card4.appendChild(el('h3', null, '👁 預覽'));
+  card4.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+    '改完設定後，登出即可看到登入畫面效果'));
+  card4.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+    confirmDlg('要立即登出查看登入畫面預覽？', { title:'登出預覽' }).then(ok => {
+      if(!ok) return;
+      try {
+        App.session = null;
+        if(typeof saveSession === 'function') saveSession();
+        App._loginStage = 'choose';
+        App._loginPrefill = null;
+      } catch(e){}
+      rerender();
+    });
+  }}, '🔄 立即預覽（會登出）'));
+  content.appendChild(card4);
+}
+
+/* ─── 區塊 3：總覽頁編輯器 ─── */
+function renderOverviewEditor(content){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  App._uiCustom.overview = App._uiCustom.overview || {};
+
+  content.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '勾選要在「📊 總覽」顯示的統計卡片與區塊。'));
+
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '📊 總覽頁卡片'));
+  const ovOpts = [
+    { key:'helloBar',   label:'👋 歡迎卡（時間問候）' },
+    { key:'quickstart', label:'🚀 快速開始引導（新老師）' },
+    { key:'journey',    label:'🎉 歡迎旅程引導' },
+    { key:'signed',     label:'✅ 已簽到 / 未簽到 統計' },
+    { key:'absent',     label:'❌ 未簽到 統計' },
+    { key:'leave',      label:'📆 請假中 統計' },
+    { key:'late',       label:'⏰ 今日遲到 統計' },
+    { key:'pending',    label:'📥 待審核項目提醒' },
+    { key:'today',      label:'📅 今日班況詳細表' }
+  ];
+  ovOpts.forEach(o => {
+    const chk = el('input', { type:'checkbox' });
+    chk.checked = App._uiCustom.overview[o.key] !== false;
+    chk.addEventListener('change', ()=> {
+      App._uiCustom.overview[o.key] = chk.checked;
+      saveUiCustom();
+    });
+    const lbl = el('label', { class:'flex', style:{padding:'6px 0',gap:'8px',alignItems:'center',cursor:'pointer'} });
+    lbl.appendChild(chk);
+    lbl.appendChild(el('span', null, o.label));
+    card.appendChild(lbl);
+  });
+  content.appendChild(card);
+
+  // 自訂歡迎詞（附加在 hello bar 下方）
+  const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
+  card2.appendChild(el('h3', null, '✏️ 自訂歡迎詞（附加在 hello bar 下方）'));
+  const ta = el('textarea', { class:'textarea',
+    placeholder:'例：今天是學期第 6 週，請別忘了繳交本週作業！',
+    rows:3 });
+  ta.value = (App._uiCustom.overview.welcomeExtra) || '';
+  ta.addEventListener('change', ()=> {
+    App._uiCustom.overview.welcomeExtra = ta.value.trim();
+    saveUiCustom();
+  });
+  card2.appendChild(ta);
+  card2.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '提示：若想顯示更多訊息，請使用「➕ 自訂內容」tab，可選擇放在總覽頁頂端或底端。'));
+  content.appendChild(card2);
+}
+
+/* ─── 區塊 4：頁面文字編輯器 ─── */
+function renderPageTextEditor(content){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  App._uiCustom.pageTexts = App._uiCustom.pageTexts || {};
+  const pt = App._uiCustom.pageTexts;
+  const isTeacher = App.session?.role === 'teacher';
+
+  content.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '改任何頁面的標題（頂端 topbar）；空白則使用系統預設。'));
+
+  // 完整頁面清單
+  const teacherPages = [
+    { key:'overview',      defaultTitle:'📊 今日總覽',     defaultSub:'掌握今天整班的出席狀況' },
+    { key:'students',      defaultTitle:'👥 學生名單',     defaultSub:'' },
+    { key:'attendance',    defaultTitle:'✅ 出席管理',     defaultSub:'' },
+    { key:'matrix',        defaultTitle:'🪑 座位矩陣',     defaultSub:'' },
+    { key:'qr',            defaultTitle:'📱 QR Code 簽到', defaultSub:'' },
+    { key:'leave',         defaultTitle:'📆 請假管理',     defaultSub:'' },
+    { key:'messages',      defaultTitle:'💬 訊息',         defaultSub:'' },
+    { key:'assignments',   defaultTitle:'📋 作業管理',     defaultSub:'' },
+    { key:'submissions',   defaultTitle:'📥 繳交記錄',     defaultSub:'' },
+    { key:'grades',        defaultTitle:'🎯 學期成績',     defaultSub:'' },
+    { key:'evals',         defaultTitle:'💬 課程評價',     defaultSub:'' },
+    { key:'feedback',      defaultTitle:'🗳️ 學生回饋',     defaultSub:'' },
+    { key:'announcements', defaultTitle:'📢 公告管理',     defaultSub:'' },
+    { key:'analytics',     defaultTitle:'📈 分析工具',     defaultSub:'' },
+    { key:'calendar',      defaultTitle:'📅 行事曆',       defaultSub:'' },
+    { key:'gantt',         defaultTitle:'📊 作業甘特圖',   defaultSub:'' },
+    { key:'peer',          defaultTitle:'⭐ 學生互評',     defaultSub:'' },
+    { key:'workspace',     defaultTitle:'🏢 多教室管理',   defaultSub:'' },
+    { key:'settings',      defaultTitle:'⚙️ 設定',         defaultSub:'' },
+    { key:'help',          defaultTitle:'📖 使用說明',     defaultSub:'快速上手指南' }
+  ];
+  const studentPages = [
+    { key:'checkin',   defaultTitle:'✋ 我要簽到',   defaultSub:'' },
+    { key:'myatt',     defaultTitle:'📅 出席紀錄',   defaultSub:'' },
+    { key:'myleave',   defaultTitle:'📆 請假',       defaultSub:'' },
+    { key:'messages',  defaultTitle:'💬 訊息',       defaultSub:'' },
+    { key:'sasgn',     defaultTitle:'📤 作業',       defaultSub:'' },
+    { key:'sgrade',    defaultTitle:'🎯 我的成績',   defaultSub:'' },
+    { key:'sev',       defaultTitle:'⭐ 課程評價',   defaultSub:'' },
+    { key:'sfeedback', defaultTitle:'📝 課程回饋',   defaultSub:'' },
+    { key:'sann',      defaultTitle:'📢 公告',       defaultSub:'' },
+    { key:'me',        defaultTitle:'👤 個人',       defaultSub:'' },
+    { key:'help',      defaultTitle:'📖 使用說明',   defaultSub:'快速上手指南' }
+  ];
+
+  const renderGroup = (title, list) => {
+    const groupCard = el('div', { class:'card', style:{padding:'10px 14px',marginBottom:'10px'} });
+    groupCard.appendChild(el('h3', { style:{margin:'0 0 8px'} }, title));
+    list.forEach(p => {
+      const pc = pt[p.key] || {};
+      const row = el('div', { style:{
+        padding:'10px',borderRadius:'8px',background:'var(--surface-2)',marginBottom:'8px',
+        border:'1px solid var(--border)'
+      } });
+      row.appendChild(el('div', { class:'small', style:{fontWeight:'600',marginBottom:'4px'} },
+        p.defaultTitle + ' ', el('span', { class:'tiny muted' }, '（key: ' + p.key + '）')));
+
+      // 標題
+      row.appendChild(el('div', { class:'tiny muted' }, '標題（留空 = 預設）'));
+      const tInp = el('input', { class:'input', placeholder: p.defaultTitle, value: pc.title || '' });
+      tInp.addEventListener('change', ()=> {
+        pt[p.key] = pt[p.key] || {};
+        pt[p.key].title = tInp.value.trim();
+        saveUiCustom();
+      });
+      row.appendChild(tInp);
+
+      // 副標題
+      row.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px'} },
+        '副標題' + (p.defaultSub ? '（預設：' + p.defaultSub + '）' : '')));
+      const sInp = el('input', { class:'input', placeholder: p.defaultSub || '（無預設）', value: pc.sub || '' });
+      sInp.addEventListener('change', ()=> {
+        pt[p.key] = pt[p.key] || {};
+        pt[p.key].sub = sInp.value.trim();
+        saveUiCustom();
+      });
+      row.appendChild(sInp);
+
+      groupCard.appendChild(row);
+    });
+    return groupCard;
+  };
+
+  if(isTeacher){
+    content.appendChild(renderGroup('🧑‍🏫 老師端頁面', teacherPages));
+    content.appendChild(renderGroup('🧑‍🎓 學生端頁面（也可一併編輯）', studentPages));
+  } else {
+    content.appendChild(renderGroup('🧑‍🎓 學生端頁面', studentPages));
+  }
+}
+
+/* ─── 區塊 5：自訂內容（訊息卡） ─── */
+function renderCustomBlockEditor(content){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  App._uiCustom.customBlocks = Array.isArray(App._uiCustom.customBlocks) ? App._uiCustom.customBlocks : [];
+  const blocks = App._uiCustom.customBlocks;
+
+  content.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '在頁面上加自訂訊息卡（如校規、聯絡資訊、注意事項）。可以選擇顯示在不同位置。'));
+
+  // 新增按鈕
+  content.appendChild(el('button', { class:'btn btn-primary', style:{marginBottom:'12px'},
+    onclick: ()=> {
+      blocks.push({
+        id: 'cb_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+        position: 'overview-top',
+        title: '新訊息',
+        content: '',
+        style: 'info',
+        visible: true
+      });
+      saveUiCustom();
+      rerender();
+    }}, '＋ 新增自訂內容'));
+
+  if(!blocks.length){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '➕'),
+      el('div', null, '尚無自訂內容'),
+      el('div', { class:'small muted' }, '點上方按鈕新增')
+    ));
+    return;
+  }
+
+  // 位置選項
+  const POS_OPTIONS = [
+    ['overview-top',     '📊 總覽頁頂端'],
+    ['overview-bottom',  '📊 總覽頁底端'],
+    ['login-bottom',     '🔐 登入畫面底端'],
+    ['student-checkin',  '✋ 學生簽到頁'],
+    ['student-grade',    '🎯 學生成績頁']
+  ];
+  const STYLE_OPTIONS = [
+    ['info',    '💙 資訊'],
+    ['success', '💚 成功'],
+    ['warn',    '💛 警告'],
+    ['danger',  '❤️ 危險']
+  ];
+
+  blocks.forEach((b, idx) => {
+    const card = el('div', { class:'card' });
+
+    card.appendChild(el('div', { class:'flex-between' },
+      el('h4', { style:{margin:'0'} }, '訊息卡 #' + (idx+1) + (b.title ? '：' + b.title : '')),
+      el('div', { class:'flex', style:{gap:'4px'} },
+        el('button', { class:'btn btn-sm', title:'上移', disabled: idx === 0 ? 'disabled' : null, onclick: ()=> {
+          if(idx === 0) return;
+          [blocks[idx-1], blocks[idx]] = [blocks[idx], blocks[idx-1]];
+          saveUiCustom(); rerender();
+        }}, '▲'),
+        el('button', { class:'btn btn-sm', title:'下移', disabled: idx === blocks.length-1 ? 'disabled' : null, onclick: ()=> {
+          if(idx >= blocks.length-1) return;
+          [blocks[idx+1], blocks[idx]] = [blocks[idx], blocks[idx+1]];
+          saveUiCustom(); rerender();
+        }}, '▼'),
+        el('button', { class:'btn btn-sm btn-danger', title:'刪除', onclick: async ()=> {
+          const ok = await confirmDlg('刪除此卡？', { danger:true });
+          if(!ok) return;
+          blocks.splice(idx, 1);
+          saveUiCustom(); rerender();
+        }}, '🗑')
+      )
+    ));
+
+    // 位置
+    const posSel = el('select', { class:'input select' });
+    POS_OPTIONS.forEach(([v,l]) => {
+      const o = el('option', { value:v }, l);
+      if(b.position === v) o.setAttribute('selected','');
+      posSel.appendChild(o);
+    });
+    posSel.addEventListener('change', ()=> { b.position = posSel.value; saveUiCustom(); });
+    card.appendChild(el('div', { class:'field' },
+      el('label', { class:'label' }, '顯示位置'), posSel));
+
+    // 樣式
+    const styleSel = el('select', { class:'input select' });
+    STYLE_OPTIONS.forEach(([v,l]) => {
+      const o = el('option', { value:v }, l);
+      if(b.style === v) o.setAttribute('selected','');
+      styleSel.appendChild(o);
+    });
+    styleSel.addEventListener('change', ()=> { b.style = styleSel.value; saveUiCustom(); });
+    card.appendChild(el('div', { class:'field' },
+      el('label', { class:'label' }, '樣式'), styleSel));
+
+    // 標題
+    const tInp = el('input', { class:'input', placeholder:'標題（可空）', value: b.title || '' });
+    tInp.addEventListener('change', ()=> { b.title = tInp.value.trim(); saveUiCustom(); });
+    card.appendChild(el('div', { class:'field' },
+      el('label', { class:'label' }, '標題'), tInp));
+
+    // 內容
+    const cTa = el('textarea', { class:'textarea', placeholder:'訊息內容（支援多行）', rows:3 });
+    cTa.value = b.content || '';
+    cTa.addEventListener('change', ()=> { b.content = cTa.value; saveUiCustom(); });
+    card.appendChild(el('div', { class:'field' },
+      el('label', { class:'label' }, '內容'), cTa));
+
+    // 顯示開關
+    const visChk = el('input', { type:'checkbox' });
+    visChk.checked = b.visible !== false;
+    visChk.addEventListener('change', ()=> { b.visible = visChk.checked; saveUiCustom(); });
+    card.appendChild(el('label', { class:'flex', style:{gap:'8px',alignItems:'center',padding:'8px',background:'var(--surface-2)',borderRadius:'8px',cursor:'pointer'} },
+      visChk, el('span', null, '顯示此卡')));
+
+    content.appendChild(card);
+  });
 }
 
 /* 將 fromKey 移到 toKey 之前/之後（依目前順序方向） */
