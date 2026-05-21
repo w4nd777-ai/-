@@ -4522,6 +4522,9 @@ function renderSidebarTeacher(){
   side.appendChild(sideItem('analytics','📈','分析工具'));
   side.appendChild(sideItem('calendar','📅','行事曆'));
   side.appendChild(sideItem('gantt','📊','作業甘特圖'));
+  side.appendChild(el('div', { class:'side-section-title' }, '課堂工具'));
+  side.appendChild(sideItem('picker','🎲','隨機抽籤'));
+  side.appendChild(sideItem('timer','⏰','課堂計時器'));
   side.appendChild(el('div', { class:'side-section-title' }, '系統'));
   // AI 助教 button (acts like nav)
   side.appendChild(el('button', { class:'side-item', onclick: openAIAssistant },
@@ -4603,7 +4606,8 @@ function renderTopbar(role){
     backup:'💼 備份與還原', logs:'📜 操作紀錄', storage:'💾 儲存空間',
     peer:'⭐ 學生互評', matrix:'🪑 座位矩陣',
     groups:'👥 分組管理', attreport:'📊 出席報表',
-    feedback:'🗳️ 學生回饋'
+    feedback:'🗳️ 學生回饋',
+    picker:'🎲 隨機抽籤', timer:'⏰ 課堂計時器'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
@@ -4696,6 +4700,7 @@ function openMoreMenuTeacher(){
     ['feedback','🗳️ 學生回饋'],['peer','⭐ 學生互評'],
     ['announcements','📢 公告管理'],['analytics','📈 分析工具'],
     ['calendar','📅 行事曆'],['gantt','📊 甘特圖'],
+    ['picker','🎲 隨機抽籤'],['timer','⏰ 課堂計時器'],
     ['workspace','🏢 多教室'],['notify','📲 通知設定'],
     ['backup','💼 備份'],['logs','📜 操作紀錄'],['storage','💾 儲存空間'],
     ['settings','⚙️ 設定'],['firebase','☁️ 跨裝置同步']
@@ -4792,6 +4797,7 @@ function isAnnouncementExpired(a){
 function toggleTheme(){
   App.theme = App.theme === 'dark' ? 'light' : 'dark';
   saveTheme();
+  try { applyBranding(); } catch(e){}
   rerender();
 }
 function doLogout(){
@@ -7121,6 +7127,17 @@ function rSettings(content){
   });
   card2.appendChild(row2);
   content.appendChild(card2);
+
+  // batch 4: 背景設定卡片
+  try { content.appendChild(renderBrandingCard()); } catch(e){ console.warn('[brandingCard]', e); }
+
+  // batch 4: 老師個人資料快捷
+  const cardProfile = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardProfile.appendChild(el('h3', null, '👤 個人資料'));
+  cardProfile.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+    '修改頭像、顯示名稱、密碼'));
+  cardProfile.appendChild(el('button', { class:'btn btn-primary', onclick: openTeacherProfile }, '✏️ 編輯我的個人資料'));
+  content.appendChild(cardProfile);
 
   // account
   const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
@@ -12979,6 +12996,9 @@ function cmdItems(){
       { i:'📈', t:'分析工具', h:'analytics', go: ()=> go('analytics') },
       { i:'📅', t:'行事曆', h:'calendar', go: ()=> go('calendar') },
       { i:'📊', t:'甘特圖', h:'gantt', go: ()=> go('gantt') },
+      { i:'🎲', t:'隨機抽籤', h:'random picker pick', go: ()=> go('picker') },
+      { i:'⏰', t:'課堂計時器', h:'timer countdown stopwatch pomodoro', go: ()=> go('timer') },
+      { i:'👤', t:'我的個人資料', h:'profile teacher avatar password', go: ()=> openTeacherProfile() },
       { i:'🏢', t:'多教室管理', h:'workspace', go: ()=> go('workspace') },
       { i:'📲', t:'通知設定', h:'notify', go: ()=> go('notify') },
       { i:'🤖', t:'AI 助教', h:'AI', go: ()=> openAIAssistant() },
@@ -13216,6 +13236,8 @@ function rerender(){
       else if(v === 'groups') rGroups(content);
       else if(v === 'attreport') rAttReport(content);
       else if(v === 'feedback') rFeedback(content);   // batch 2
+      else if(v === 'picker') rRandomPicker(content);  // batch 4
+      else if(v === 'timer') rTimer(content);          // batch 4
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -13404,6 +13426,9 @@ function boot(){
   try { backupAutoIfNeeded(); } catch(e){}
 
   rerender();
+
+  // batch 4: 套用背景設定（圖片、顏色、透明度）
+  try { applyBranding(); } catch(e){ console.warn('[applyBranding]', e); }
 
   // V1 import toast (after first render so the user actually sees it)
   if(App._v1ImportedCount){
@@ -14763,6 +14788,551 @@ function exportAttReportCSV(){
   a.click();
   setTimeout(()=> URL.revokeObjectURL(url), 1000);
   toast('已匯出 CSV','success');
+}
+
+/* ════════════════════════════════════════════════════════════
+   BATCH 4 ▒▒  TEACHER PROFILE / BRANDING BG / RANDOM PICKER / TIMER
+   ──────────────────────────────────────────────────────────── */
+
+// ── 1) 老師個人資料 modal ────────────────────────────────────
+function openTeacherProfile(){
+  if(!App.session || App.session.role !== 'teacher'){ toast('僅老師可使用','warn'); return; }
+  const me = App.db.accounts.find(a => a.id === App.session.id) ||
+             App.db.accounts.find(a => a.username === App.session.username);
+  if(!me){ toast('找不到帳號','danger'); return; }
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, '👤 我的個人資料'));
+
+  // 頭像
+  const avBox = el('div', { class:'field', style:{textAlign:'center'} });
+  avBox.appendChild(el('label', { class:'label' }, '頭像'));
+  let avatarMeta = me.avatar || null;
+  const preview = el('div', { style:{width:'90px',height:'90px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--primary-soft)',color:'var(--primary)',fontWeight:'700',fontSize:'30px',margin:'0 auto 8px',overflow:'hidden',border:'2px solid var(--border)'} });
+  async function refreshAvatar(){
+    if(avatarMeta){
+      try {
+        const url = await attachGetUrl(avatarMeta);
+        if(url){
+          preview.innerHTML = '';
+          preview.style.background = 'var(--surface-2)';
+          preview.appendChild(el('img', { src:url, style:{width:'100%',height:'100%',objectFit:'cover'} }));
+          return;
+        }
+      } catch(e){}
+    }
+    preview.style.background = 'var(--primary-soft)';
+    preview.textContent = initials(me.name || 'T');
+  }
+  refreshAvatar();
+  avBox.appendChild(preview);
+
+  const fileInp = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
+  fileInp.addEventListener('change', async e => {
+    const f = e.target.files[0]; if(!f) return;
+    if(f.size > 2 * 1024 * 1024){ toast('圖片不能超過 2MB','danger'); return; }
+    try {
+      if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){} }
+      avatarMeta = await attachUpload(f);
+      await refreshAvatar();
+      toast('頭像已上傳','success');
+    } catch(err){ toast('上傳失敗：' + (err.message||err),'danger'); }
+  });
+  const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-sm', onclick:()=> fileInp.click() }, '📷 選擇圖片'),
+    el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+      if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){} }
+      avatarMeta = null;
+      await refreshAvatar();
+      toast('已移除頭像','info');
+    }}, '🗑 移除')
+  );
+  avBox.appendChild(avRow);
+  avBox.appendChild(fileInp);
+  m.root.appendChild(avBox);
+
+  // 顯示名稱
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '顯示名稱'));
+  const i1 = el('input', { class:'input', value: me.name || '' });
+  f1.appendChild(i1);
+  m.root.appendChild(f1);
+
+  // 改密碼
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '新密碼（留空 = 不修改）'));
+  const i2 = el('input', { class:'input', type:'password', placeholder:'至少 4 字元' });
+  f2.appendChild(i2);
+  m.root.appendChild(f2);
+
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '確認新密碼'));
+  const i3 = el('input', { class:'input', type:'password' });
+  f3.appendChild(i3);
+  m.root.appendChild(f3);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    const name = i1.value.trim();
+    if(name) me.name = name;
+    me.avatar = avatarMeta;
+    if(i2.value){
+      if(i2.value.length < 4){ toast('密碼至少 4 字元','danger'); return; }
+      if(i2.value !== i3.value){ toast('兩次密碼不一致','danger'); return; }
+      try {
+        me.password = await hashPassword(i2.value);
+        if(typeof logOp === 'function') logOp('teacherPwChange','改密碼');
+      } catch(e){ toast('密碼加密失敗：'+(e.message||e),'danger'); return; }
+    }
+    saveDB();
+    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+    if(App.session) App.session.name = me.name;
+    try { saveSession(); } catch(e){}
+    toast('已儲存','success');
+    m.close();
+    rerender();
+  }}, '💾 儲存'));
+  m.root.appendChild(actions);
+}
+
+// ── 2) 背景圖片 / 顏色 / 透明度 ────────────────────────────────
+function renderBrandingCard(){
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('h3', null, '🖼️ 背景設定'));
+  card.appendChild(el('div', { class:'small muted', style:{marginBottom:'6px'} },
+    '自訂 app 背景圖片、底色、透明度（會即時套用）'));
+
+  // 背景圖
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '背景圖片（選填，最大 3MB）'));
+  const fileInp = el('input', { type:'file', accept:'image/*' });
+  fileInp.addEventListener('change', async e => {
+    const f = e.target.files[0]; if(!f) return;
+    if(f.size > 3 * 1024 * 1024){ toast('圖片不能超過 3MB','danger'); return; }
+    try {
+      if(App.db.branding.bgImage){
+        try { await attachDelete(App.db.branding.bgImage); } catch(_){}
+      }
+      App.db.branding.bgImage = await attachUpload(f);
+      saveDB();
+      try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+      await applyBranding();
+      toast('背景已設定','success');
+      rerender();
+    } catch(err){ toast('失敗：'+(err.message||err),'danger'); }
+  });
+  f2.appendChild(fileInp);
+  if(App.db.branding.bgImage){
+    f2.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
+      if(App.db.branding.bgImage){
+        try { await attachDelete(App.db.branding.bgImage); } catch(_){}
+      }
+      App.db.branding.bgImage = null;
+      saveDB();
+      try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+      await applyBranding();
+      toast('已移除背景','info');
+      rerender();
+    }}, '🗑 移除背景'));
+  }
+  card.appendChild(f2);
+
+  // 背景顏色
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '底色 / 遮罩顏色'));
+  const colorRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px'} });
+  const presets = ['#fafafa','#fef3c7','#dbeafe','#dcfce7','#fce7f3','#e0e7ff','#fff7ed','#0a0a0a'];
+  presets.forEach(c => {
+    const active = App.db.branding.bgColor === c;
+    const sw = el('div', {
+      style:{
+        width:'40px',height:'40px',borderRadius:'8px',background:c,cursor:'pointer',
+        border: active ? '3px solid var(--primary)' : '2px solid var(--border)',
+        boxShadow: active ? '0 0 0 2px var(--primary-soft)' : 'none'
+      },
+      title: c,
+      onclick: async ()=> {
+        App.db.branding.bgColor = c;
+        saveDB();
+        try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+        await applyBranding();
+        rerender();
+      }
+    });
+    colorRow.appendChild(sw);
+  });
+  // 重置按鈕
+  const resetBtn = el('button', { class:'btn btn-sm', style:{marginLeft:'auto'}, onclick: async ()=> {
+    App.db.branding.bgColor = null;
+    saveDB();
+    try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+    await applyBranding();
+    toast('已重置底色','info');
+    rerender();
+  }}, '↺ 重置');
+  colorRow.appendChild(resetBtn);
+  f3.appendChild(colorRow);
+  card.appendChild(f3);
+
+  // 透明度
+  const f4 = el('div', { class:'field' });
+  const opVal = (App.db.branding.bgOpacity != null) ? App.db.branding.bgOpacity : 50;
+  const opLabel = el('label', { class:'label' }, '背景圖片不透明度（' + opVal + '%）');
+  f4.appendChild(opLabel);
+  const rng = el('input', { type:'range', min:'0', max:'100', value: opVal, style:{width:'100%'} });
+  rng.addEventListener('input', async e => {
+    App.db.branding.bgOpacity = parseInt(e.target.value);
+    opLabel.textContent = '背景圖片不透明度（' + App.db.branding.bgOpacity + '%）';
+    await applyBranding();
+  });
+  rng.addEventListener('change', async ()=> {
+    saveDB();
+    try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+  });
+  f4.appendChild(rng);
+  card.appendChild(f4);
+
+  return card;
+}
+
+async function applyBranding(){
+  const b = (App.db && App.db.branding) || {};
+  const body = document.body;
+  if(!body) return;
+  if(b.bgImage){
+    try {
+      const url = await attachGetUrl(b.bgImage);
+      if(url){
+        const opacity = ((b.bgOpacity != null) ? b.bgOpacity : 50) / 100;
+        // 用半透明遮罩 + 背景圖（遮罩用底色或預設白/黑依主題）
+        const themeDark = (App.theme === 'dark');
+        const overlayBase = b.bgColor || (themeDark ? '0,0,0' : '255,255,255');
+        // 將 hex 轉成 rgb
+        const rgb = (function(c){
+          if(!c) return themeDark ? '0,0,0' : '255,255,255';
+          if(c.startsWith('rgb')) return c.replace(/rgba?\(|\)/g,'');
+          if(c[0] === '#'){
+            const hex = c.slice(1);
+            const n = hex.length === 3
+              ? hex.split('').map(x => parseInt(x+x,16))
+              : [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+            return n.join(',');
+          }
+          return themeDark ? '0,0,0' : '255,255,255';
+        })(b.bgColor);
+        const alpha = (1 - opacity).toFixed(3);
+        const overlay = `linear-gradient(rgba(${rgb},${alpha}),rgba(${rgb},${alpha}))`;
+        body.style.backgroundImage = overlay + `, url("${url}")`;
+        body.style.backgroundSize = 'cover';
+        body.style.backgroundPosition = 'center';
+        body.style.backgroundAttachment = 'fixed';
+        body.style.backgroundRepeat = 'no-repeat';
+        return;
+      }
+    } catch(e){ console.warn('[applyBranding]', e); }
+  }
+  // 沒背景圖
+  body.style.backgroundImage = '';
+  body.style.backgroundAttachment = '';
+  body.style.backgroundSize = '';
+  body.style.backgroundPosition = '';
+  body.style.backgroundRepeat = '';
+  if(b.bgColor){
+    body.style.backgroundColor = b.bgColor;
+  } else {
+    body.style.backgroundColor = '';
+  }
+}
+
+// ── 3) 隨機抽籤 ──────────────────────────────────────────────
+function rRandomPicker(content){
+  content.appendChild(renderBreadcrumb([{label:'課堂工具'},{label:'🎲 隨機抽籤'}]));
+  content.appendChild(el('h1', null, '🎲 隨機抽籤'));
+  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
+    '隨機選一位學生回答 / 上台 / 任務分配'));
+
+  // 篩選班級
+  const classes = [...new Set((App.db.students||[]).map(s => s.cls || '未分班'))].sort();
+  const filters = el('div', { class:'card', style:{marginBottom:'14px'} });
+  filters.appendChild(el('label', { class:'label' }, '抽籤範圍'));
+  const sel = el('select', { class:'input select' });
+  sel.appendChild(el('option', { value:'all' }, '全部學生 (' + (App.db.students||[]).length + ' 人)'));
+  classes.forEach(c => {
+    const count = (App.db.students||[]).filter(s => (s.cls||'未分班') === c).length;
+    const o = el('option', { value:c }, c + ' (' + count + ' 人)');
+    if(App._pickerCls === c) o.setAttribute('selected','');
+    sel.appendChild(o);
+  });
+  if(App._pickerCls && App._pickerCls !== 'all'){
+    try { sel.value = App._pickerCls; } catch(e){}
+  }
+  filters.appendChild(sel);
+
+  // 排除選項
+  const opts = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'12px',marginTop:'10px'} });
+  const chkAbsent = el('input', { type:'checkbox' });
+  if(App._pickerExAbsent !== false) chkAbsent.checked = true;
+  const lblA = el('label', { style:{cursor:'pointer'} });
+  lblA.appendChild(chkAbsent);
+  lblA.appendChild(el('span', { style:{marginLeft:'4px'} }, '排除請假/缺席'));
+  opts.appendChild(lblA);
+
+  const chkRecent = el('input', { type:'checkbox' });
+  if(App._pickerExRecent) chkRecent.checked = true;
+  const lblR = el('label', { style:{cursor:'pointer'} });
+  lblR.appendChild(chkRecent);
+  lblR.appendChild(el('span', { style:{marginLeft:'4px'} }, '排除最近 1 小時抽過的'));
+  opts.appendChild(lblR);
+
+  filters.appendChild(opts);
+  content.appendChild(filters);
+
+  // 顯示區域
+  const stage = el('div', { class:'card', style:{textAlign:'center',padding:'40px 20px',marginBottom:'14px',minHeight:'260px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'} });
+  const display = el('div', { id:'picker-display', style:{fontSize:'56px',fontWeight:'800',marginBottom:'20px',transition:'all .15s',minHeight:'72px'} }, '？');
+  const meta = el('div', { class:'muted', id:'picker-meta', style:{fontSize:'16px'} }, '按下「開始」抽籤');
+  stage.appendChild(display);
+  stage.appendChild(meta);
+  content.appendChild(stage);
+
+  // 按鈕
+  const btnRow = el('div', { class:'flex', style:{gap:'10px',justifyContent:'center',flexWrap:'wrap'} });
+  const btnStart = el('button', { class:'btn btn-primary btn-lg', style:{minWidth:'140px'}, onclick: ()=> doPick() }, '🎲 開始抽籤');
+  const btnReset = el('button', { class:'btn', onclick: ()=> {
+    App._pickerHistory = [];
+    toast('已清除紀錄','info');
+    rerender();
+  }}, '🗑 清紀錄');
+  btnRow.appendChild(btnStart);
+  btnRow.appendChild(btnReset);
+  content.appendChild(btnRow);
+
+  // 歷史
+  const hist = App._pickerHistory || [];
+  if(hist.length){
+    const histCard = el('div', { class:'card', style:{marginTop:'14px'} });
+    histCard.appendChild(el('h3', null, '📜 本次紀錄（' + hist.length + ' 人次）'));
+    const histRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px',marginTop:'8px'} });
+    hist.slice(-20).reverse().forEach(h => {
+      histRow.appendChild(el('span', { class:'pill', style:{background:'var(--primary-soft)',color:'var(--primary)'} },
+        h.name + (h.cls ? ' (' + h.cls + ')' : '')));
+    });
+    histCard.appendChild(histRow);
+    content.appendChild(histCard);
+  }
+
+  function doPick(){
+    App._pickerCls = sel.value;
+    App._pickerExAbsent = chkAbsent.checked;
+    App._pickerExRecent = chkRecent.checked;
+
+    const today = td();
+    let pool = (App.db.students || []).slice();
+    if(App._pickerCls !== 'all'){
+      pool = pool.filter(s => (s.cls || '未分班') === App._pickerCls);
+    }
+    if(chkAbsent.checked){
+      pool = pool.filter(s => {
+        const att = (App.db.attendance || []).find(a => a.studentId === s.id && a.date === today);
+        if(att && (att.status === 'leave' || att.status === 'absent')) return false;
+        return true;
+      });
+    }
+    if(chkRecent.checked){
+      const recentIds = new Set((App._pickerHistory||[])
+        .filter(h => Date.now() - h.ts < 3600 * 1000)
+        .map(h => h.id));
+      pool = pool.filter(s => !recentIds.has(s.id));
+    }
+    if(!pool.length){
+      toast('沒有符合的學生','warn');
+      return;
+    }
+
+    btnStart.disabled = true;
+    let count = 0;
+    const colors = ['#2563eb','#16a34a','#ea580c','#8b5cf6','#dc2626'];
+    const interval = setInterval(()=> {
+      const rand = pool[Math.floor(Math.random() * pool.length)];
+      display.textContent = rand.name;
+      display.style.color = colors[count % colors.length];
+      meta.textContent = '抽籤中...';
+      count++;
+      if(count >= 20){
+        clearInterval(interval);
+        const final = pool[Math.floor(Math.random() * pool.length)];
+        display.textContent = final.name;
+        display.style.color = 'var(--success)';
+        meta.textContent = (final.cls || '無班級')
+          + (final.seat ? ' · 座號 ' + final.seat : '')
+          + (final.sid ? ' · 學號 ' + final.sid : '');
+        App._pickerHistory = App._pickerHistory || [];
+        App._pickerHistory.push({ id: final.id, name: final.name, cls: final.cls, ts: Date.now() });
+        btnStart.disabled = false;
+        if(typeof logOp === 'function') logOp('random-pick', final.name);
+        setTimeout(()=> rerender(), 1800);
+      }
+    }, 75);
+  }
+}
+
+// ── 4) 課堂計時器 ────────────────────────────────────────────
+function rTimer(content){
+  content.appendChild(renderBreadcrumb([{label:'課堂工具'},{label:'⏰ 計時器'}]));
+  content.appendChild(el('h1', null, '⏰ 課堂計時器'));
+  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
+    '倒數計時 / 正計時 / 番茄鐘工作法'));
+
+  const mode = App._timerMode || 'countdown';
+
+  // 模式切換
+  const tabBar = el('div', { class:'tabs-line', style:{marginBottom:'14px'} });
+  [['countdown','⏳ 倒數計時'],['stopwatch','⏱ 正計時'],['pomodoro','🍅 番茄鐘']].forEach(([k, label]) => {
+    const active = mode === k;
+    const b = el('button', {
+      class: active ? 'active' : '',
+      style: active ? { color:'var(--primary)', borderBottomColor:'var(--primary)' } : {},
+      onclick: ()=> {
+        if(App._timerMode === k) return;
+        App._timerMode = k;
+        resetTimer();
+        rerender();
+      }
+    }, label);
+    tabBar.appendChild(b);
+  });
+  content.appendChild(tabBar);
+
+  // 顯示
+  const stage = el('div', { class:'card', style:{textAlign:'center',padding:'40px 20px'} });
+  const display = el('div', { id:'timer-display', style:{fontSize:'80px',fontWeight:'800',fontFamily:'ui-monospace,"SF Mono",Menlo,monospace',letterSpacing:'-2px',lineHeight:'1'} }, '00:00');
+  const status = el('div', { class:'muted', id:'timer-status', style:{fontSize:'16px',marginTop:'10px'} }, '就緒');
+  stage.appendChild(display);
+  stage.appendChild(status);
+  if(mode === 'pomodoro'){
+    const cyc = App._pomCycle || 'work';
+    stage.appendChild(el('div', { id:'timer-pom', style:{fontSize:'14px',marginTop:'8px',color:'var(--primary)',fontWeight:'600'} },
+      cyc === 'work' ? '🍅 工作時段（25 分鐘）' : '☕ 休息時段（5 分鐘）'));
+  }
+  content.appendChild(stage);
+
+  // 倒數設定
+  if(mode === 'countdown'){
+    const setBar = el('div', { class:'card', style:{marginTop:'14px',display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'} });
+    setBar.appendChild(el('label', { class:'small' }, '時間（分）：'));
+    const i = el('input', { type:'number', class:'input', value: App._timerMin || 5, min:'1', max:'120', style:{width:'80px'} });
+    i.addEventListener('change', ()=> {
+      const v = parseInt(i.value);
+      if(v >= 1 && v <= 120){
+        App._timerMin = v;
+        if(!App._timerRunning && !App._timerElapsed) updateTimerDisplay();
+      }
+    });
+    setBar.appendChild(i);
+    [1,3,5,10,15,30].forEach(m => {
+      setBar.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> {
+        i.value = m;
+        App._timerMin = m;
+        if(!App._timerRunning && !App._timerElapsed) updateTimerDisplay();
+      }}, m + '分'));
+    });
+    content.appendChild(setBar);
+  }
+
+  // 控制按鈕
+  const ctrl = el('div', { class:'flex', style:{gap:'10px',justifyContent:'center',marginTop:'14px',flexWrap:'wrap'} });
+  ctrl.appendChild(el('button', { class:'btn btn-primary btn-lg', onclick:()=> startTimer() }, '▶ 開始'));
+  ctrl.appendChild(el('button', { class:'btn btn-lg', onclick:()=> pauseTimer() }, '⏸ 暫停'));
+  ctrl.appendChild(el('button', { class:'btn btn-lg', onclick:()=> { resetTimer(); updateTimerDisplay(); } }, '⏹ 重置'));
+  content.appendChild(ctrl);
+
+  // 立即更新顯示
+  setTimeout(updateTimerDisplay, 50);
+}
+
+function getTimerSeconds(){
+  const mode = App._timerMode || 'countdown';
+  if(mode === 'countdown'){
+    const total = (App._timerMin || 5) * 60;
+    let elapsed = App._timerElapsed || 0;
+    if(App._timerRunning) elapsed += (Date.now() - App._timerStart) / 1000;
+    return Math.max(0, total - elapsed);
+  } else if(mode === 'stopwatch'){
+    let elapsed = App._timerElapsed || 0;
+    if(App._timerRunning) elapsed += (Date.now() - App._timerStart) / 1000;
+    return elapsed;
+  } else if(mode === 'pomodoro'){
+    const cyc = App._pomCycle || 'work';
+    const cycle = (cyc === 'work') ? 25 * 60 : 5 * 60;
+    let elapsed = App._timerElapsed || 0;
+    if(App._timerRunning) elapsed += (Date.now() - App._timerStart) / 1000;
+    return Math.max(0, cycle - elapsed);
+  }
+  return 0;
+}
+
+function updateTimerDisplay(){
+  const d = document.getElementById('timer-display');
+  if(!d) return;
+  const sec = Math.max(0, Math.round(getTimerSeconds()));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  d.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  const st = document.getElementById('timer-status');
+  if(st){
+    if(App._timerRunning) st.textContent = '⏱ 計時中';
+    else if((App._timerElapsed || 0) > 0) st.textContent = '⏸ 已暫停';
+    else st.textContent = '就緒';
+  }
+  // countdown / pomodoro 時間到
+  const mode = App._timerMode || 'countdown';
+  if(mode !== 'stopwatch' && App._timerRunning && sec <= 0){
+    pauseTimer();
+    if(mode === 'pomodoro'){
+      // 切換工作/休息
+      const wasWork = (App._pomCycle || 'work') === 'work';
+      App._pomCycle = wasWork ? 'rest' : 'work';
+      App._timerElapsed = 0;
+      try { notify('🍅 番茄鐘', wasWork ? '工作時段結束，休息 5 分鐘' : '休息結束，回到工作', { type:'timer' }); } catch(e){}
+      toast(wasWork ? '工作時段結束！休息 5 分鐘' : '休息結束！回到工作','success', 5000);
+      rerender();
+    } else {
+      try { notify('⏰ 時間到', '倒數計時結束', { type:'timer' }); } catch(e){}
+      toast('⏰ 時間到！','success', 5000);
+    }
+    // 響鈴（嘗試）
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.8);
+      osc.start(); osc.stop(ctx.currentTime + 0.8);
+    } catch(e){}
+  }
+}
+
+function startTimer(){
+  if(App._timerRunning) return;
+  App._timerRunning = true;
+  App._timerStart = Date.now();
+  if(App._timerTick){ clearInterval(App._timerTick); }
+  App._timerTick = setInterval(updateTimerDisplay, 200);
+  updateTimerDisplay();
+}
+function pauseTimer(){
+  if(!App._timerRunning) return;
+  App._timerElapsed = (App._timerElapsed || 0) + (Date.now() - App._timerStart) / 1000;
+  App._timerRunning = false;
+  if(App._timerTick){ clearInterval(App._timerTick); App._timerTick = null; }
+  updateTimerDisplay();
+}
+function resetTimer(){
+  App._timerElapsed = 0;
+  App._timerRunning = false;
+  if(App._timerTick){ clearInterval(App._timerTick); App._timerTick = null; }
 }
 
 // expose for debugging
