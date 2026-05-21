@@ -1514,7 +1514,35 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 }
 .matrix-seat.s-present{ background:var(--success-soft); border-color:var(--success); }
 .matrix-seat.s-late{ background:var(--warn-soft); border-color:var(--warn); }
-.matrix-seat.s-leave{ background:var(--accent-soft); border-color:var(--accent); }
+.matrix-seat.s-leave{
+  background: repeating-linear-gradient(45deg, var(--accent-soft), var(--accent-soft) 8px, rgba(255,255,255,0.5) 8px, rgba(255,255,255,0.5) 16px);
+  border-color: var(--accent);
+  border-width: 3px;
+  box-shadow: 0 0 0 2px var(--accent), 0 4px 12px rgba(139,92,246,.4);
+  color: var(--accent);
+  font-weight: 800;
+  position: relative;
+}
+.matrix-seat.s-leave::before{
+  content: '請假';
+  position: absolute;
+  top: -10px;
+  right: -6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 1px;
+  z-index: 2;
+  box-shadow: 0 2px 4px rgba(0,0,0,.2);
+  white-space: nowrap;
+}
+.matrix-seat.s-leave .seat-st{
+  font-size: 20px;
+  filter: drop-shadow(0 1px 2px rgba(139,92,246,.4));
+}
 .matrix-seat.s-absent{ background:var(--danger-soft); border-color:var(--danger); }
 .matrix-seat.s-empty{ background:var(--surface-3); border-style:dashed; opacity:.45; cursor:default; }
 .matrix-seat.s-empty:hover{ transform:none; box-shadow:none; }
@@ -4679,6 +4707,8 @@ function finishStudentLogin(s){
   saveSession();
   saveLastUser({ role:'student', id:s.id, name:s.name, cls:s.cls||'', ts:Date.now() });
   App._loginStage = null;
+  // 套用學生個人背景
+  setTimeout(()=> { try { applyStudentBg(); } catch(e){} }, 100);
   // 第一次登入或老師重設過密碼 → 強制改密碼
   if(s.mustChangePw){
     toast('歡迎，' + s.name + '！首次登入請更新密碼','info', 4000);
@@ -6078,7 +6108,20 @@ function rAtt(content){
     card.appendChild(el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')));
     card.appendChild(el('div', { class:'meta' }, s.cls || '—'));
     if(lv){
-      card.appendChild(el('div', { class:'small' }, '📆 ' + (lv.reason||'請假')));
+      // 請假詳細：類型 + 原因 + 申請時間
+      const leaveType = lv.type || lv.leaveType || '請假';
+      const reason = lv.reason || '(未填原因)';
+      const fromTime = lv.ts ? new Date(lv.ts).toLocaleString('zh-TW', { dateStyle:'short', timeStyle:'short' }) : '';
+      card.appendChild(el('div', { class:'small', style:{fontWeight:'700',color:'var(--accent)'} }, '📆 ' + leaveType));
+      card.appendChild(el('div', { class:'small', style:{lineHeight:'1.4',marginTop:'2px'} }, '原因：' + reason));
+      if(fromTime){
+        card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '申請：' + fromTime));
+      }
+      if(lv.status){
+        const stColor = lv.status === 'approved' ? 'var(--success)' : lv.status === 'rejected' ? 'var(--danger)' : 'var(--warn)';
+        const stLabel = lv.status === 'approved' ? '✓ 已核准' : lv.status === 'rejected' ? '✗ 已拒絕' : '⏳ 待審';
+        card.appendChild(el('div', { class:'tiny', style:{color:stColor,fontWeight:'700',marginTop:'2px'} }, stLabel));
+      }
       const acts = el('div', { class:'actions' });
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> {
         App.db.leaves = App.db.leaves.filter(x => x.id !== lv.id);
@@ -6086,10 +6129,28 @@ function rAtt(content){
       }}, '撤銷'));
       card.appendChild(acts);
     } else if(a){
-      card.appendChild(el('div', { class:'small mono' }, '✅ ' + a.time));
+      card.appendChild(el('div', { class:'small mono', style:{color:'var(--success)',fontWeight:'700'} }, '✅ 簽到 ' + a.time));
       if(a.outTime){
-        card.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)'} }, '👋 ' + a.outTime));
+        // 計算上課時長
+        let duration = '';
+        try {
+          const [h1,m1] = (a.time||'').split(':').map(Number);
+          const [h2,m2] = (a.outTime||'').split(':').map(Number);
+          if(!isNaN(h1) && !isNaN(h2)){
+            const min = (h2*60 + m2) - (h1*60 + m1);
+            if(min > 0){
+              const hrs = Math.floor(min/60);
+              const mn = min%60;
+              duration = ' (' + (hrs?hrs+'h':'') + (mn?mn+'m':'') + ')';
+            }
+          }
+        } catch(e){}
+        card.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)',fontWeight:'700',marginTop:'2px'} },
+          '👋 簽退 ' + a.outTime + duration));
+      } else {
+        card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '尚未簽退'));
       }
+      if(a.status === 'late') card.appendChild(el('div', { class:'tiny', style:{color:'var(--warn)',fontWeight:'700'} }, '⏰ 遲到'));
       const acts = el('div', { class:'actions' });
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick:()=> {
         App.db.attendance = App.db.attendance.filter(x => x.id !== a.id);
@@ -8231,35 +8292,163 @@ function rMyLeave(content){
    ──────────────────────────────────────────────────────────── */
 function rMe(content){
   const me = currentStudent(); if(!me) return;
-  content.appendChild(el('h1', null, '個人資料'));
+  content.appendChild(el('h1', null, '個人'));
+
+  // ─── 個人資料卡 ───
   const card = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
-  // batch 2: 頭像（若有自訂則顯示圖片，否則顯示縮寫）
   if(me.avatar){
     card.appendChild(el('img', { src: me.avatar, alt: me.name,
-      style:{width:'80px',height:'80px',borderRadius:'50%',objectFit:'cover',margin:'0 auto 12px',display:'block',border:'2px solid var(--border)'} }));
+      style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',margin:'0 auto 12px',display:'block',border:'3px solid var(--primary)'} }));
   } else {
-    card.appendChild(el('div', { class:'avatar', style:{width:'80px',height:'80px',fontSize:'28px',margin:'0 auto 12px'} }, initials(me.name)));
+    card.appendChild(el('div', { class:'avatar', style:{width:'100px',height:'100px',fontSize:'36px',margin:'0 auto 12px',border:'3px solid var(--primary)'} }, initials(me.name)));
   }
   card.appendChild(el('h2', null, me.name));
   card.appendChild(el('div', { class:'muted' }, (me.cls||'') + (me.seat?' · '+me.seat+'號':'')));
   if(me.sid) card.appendChild(el('div', { class:'small muted' }, '學號 ' + me.sid));
-  if(me.email) card.appendChild(el('div', { class:'small muted' }, '📧 ' + me.email));
-  if(me.phone) card.appendChild(el('div', { class:'small muted' }, '📞 ' + me.phone));
-  if(me.parentName) card.appendChild(el('div', { class:'small muted' }, '👨‍👩‍👧 家長：' + me.parentName + (me.parentPhone?' · '+me.parentPhone:'')));
-  // batch 2: 編輯按鈕
-  card.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'14px'}, onclick: openStudentSelfEdit }, '✏️ 編輯資料'));
   content.appendChild(card);
 
-  // settings
-  const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
-  card2.appendChild(el('h3', null, '🎨 外觀'));
-  const row = el('div', { class:'flex', style:{marginTop:'8px',flexWrap:'wrap'} },
-    el('button', { class:'btn ' + (App.theme==='light'?'btn-primary':''), onclick:()=> { App.theme='light'; saveTheme(); rerender(); } }, '☀️ 亮色'),
-    el('button', { class:'btn ' + (App.theme==='dark'?'btn-primary':''), onclick:()=> { App.theme='dark'; saveTheme(); rerender(); } }, '🌙 暗色')
-  );
-  card2.appendChild(row);
-  content.appendChild(card2);
+  // ─── 1. 頭像照片 ───
+  const cardAv = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardAv.appendChild(el('h3', null, '📷 頭像照片'));
+  cardAv.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} }, '上傳自己的照片當作頭像'));
+  const avFile = el('input', { type:'file', accept:'image/*' });
+  avFile.addEventListener('change', async e => {
+    const f = e.target.files[0]; if(!f) return;
+    if(f.size > 2*1024*1024){ toast('圖片不能超過 2MB','danger'); return; }
+    try {
+      // 簡單壓縮：縮成 200x200 base64
+      const dataUrl = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const size = 200;
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            // 等比例縮放置中
+            const ratio = Math.max(size/img.width, size/img.height);
+            const w = img.width * ratio;
+            const h = img.height * ratio;
+            ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
+            res(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = rej;
+          img.src = e.target.result;
+        };
+        reader.onerror = rej;
+        reader.readAsDataURL(f);
+      });
+      me.avatar = dataUrl;
+      saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+      toast('✅ 頭像已更新','success');
+      rerender();
+    } catch(err){ toast('上傳失敗：'+err.message,'danger'); }
+  });
+  cardAv.appendChild(avFile);
+  if(me.avatar){
+    cardAv.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'8px'}, onclick: async ()=> {
+      if(!await confirmDlg('確定移除頭像？')) return;
+      me.avatar = null;
+      saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+      rerender();
+    }}, '🗑 移除頭像'));
+  }
+  content.appendChild(cardAv);
 
+  // ─── 2. 背景顏色 / 主題色 ───
+  const cardColor = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardColor.appendChild(el('h3', null, '🎨 主題顏色'));
+  cardColor.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} }, '選擇你喜歡的顏色'));
+  const colorRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'10px'} });
+  const ACCENTS = [
+    {key:'blue', color:'#2563eb'}, {key:'green', color:'#16a34a'},
+    {key:'violet', color:'#8b5cf6'}, {key:'red', color:'#dc2626'},
+    {key:'orange', color:'#ea580c'}, {key:'amber', color:'#d97706'},
+    {key:'emerald', color:'#10b981'}, {key:'teal', color:'#0d9488'},
+    {key:'cyan', color:'#0891b2'}, {key:'indigo', color:'#4f46e5'},
+    {key:'pink', color:'#db2777'}, {key:'rose', color:'#e11d48'}
+  ];
+  ACCENTS.forEach(a => {
+    const sw = el('button', {
+      style:{width:'48px',height:'48px',borderRadius:'12px',background:a.color,cursor:'pointer',
+        border: App.accent === a.key ? '3px solid var(--text)' : '2px solid var(--border)',
+        position:'relative'},
+      onclick:()=> { App.accent = a.key; applyTheme(); if(typeof saveAppearance==='function') saveAppearance(); rerender(); }
+    });
+    if(App.accent === a.key){
+      sw.appendChild(el('span', { style:{position:'absolute',top:'4px',right:'4px',color:'#fff',fontSize:'14px'} }, '✓'));
+    }
+    colorRow.appendChild(sw);
+  });
+  cardColor.appendChild(colorRow);
+
+  // 亮暗模式
+  cardColor.appendChild(el('div', { style:{marginTop:'14px',fontSize:'13px',fontWeight:'600'} }, '亮 / 暗模式'));
+  const themeRow = el('div', { class:'flex', style:{marginTop:'6px',flexWrap:'wrap',gap:'6px'} },
+    el('button', { class:'btn ' + (App.theme==='light'?'btn-primary':''), onclick:()=> { App.theme='light'; applyTheme(); if(typeof saveAppearance==='function') saveAppearance(); rerender(); } }, '☀️ 亮色'),
+    el('button', { class:'btn ' + (App.theme==='dark'?'btn-primary':''), onclick:()=> { App.theme='dark'; applyTheme(); if(typeof saveAppearance==='function') saveAppearance(); rerender(); } }, '🌙 暗色'),
+    el('button', { class:'btn ' + (App.theme==='auto'?'btn-primary':''), onclick:()=> { App.theme='auto'; applyTheme(); if(typeof saveAppearance==='function') saveAppearance(); rerender(); } }, '🔄 跟隨系統')
+  );
+  cardColor.appendChild(themeRow);
+  content.appendChild(cardColor);
+
+  // ─── 3. 背景圖片 ───
+  const cardBg = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardBg.appendChild(el('h3', null, '🖼️ 背景圖片'));
+  cardBg.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} }, '上傳自己喜歡的背景圖（個人設定，不影響別人）'));
+
+  // 個人背景存在 localStorage 而非 DB (僅自己看到)
+  const myBgKey = 'cms_v3_stu_bg_' + me.id;
+  let curBg = '';
+  try { curBg = localStorage.getItem(myBgKey) || ''; } catch(e){}
+
+  // 預覽
+  if(curBg){
+    cardBg.appendChild(el('img', { src: curBg, style:{maxWidth:'200px',maxHeight:'120px',borderRadius:'8px',marginBottom:'8px',objectFit:'cover',display:'block',border:'1px solid var(--border)'} }));
+  }
+
+  const bgFile = el('input', { type:'file', accept:'image/*' });
+  bgFile.addEventListener('change', async e => {
+    const f = e.target.files[0]; if(!f) return;
+    if(f.size > 3*1024*1024){ toast('圖片不能超過 3MB','danger'); return; }
+    try {
+      const dataUrl = await new Promise((res,rej)=>{
+        const reader = new FileReader();
+        reader.onload = ev => res(ev.target.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(f);
+      });
+      try { localStorage.setItem(myBgKey, dataUrl); } catch(err){ toast('儲存失敗（容量？）','danger'); return; }
+      applyStudentBg();
+      toast('✅ 背景已更新','success');
+      rerender();
+    } catch(err){ toast('上傳失敗','danger'); }
+  });
+  cardBg.appendChild(bgFile);
+  if(curBg){
+    cardBg.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'8px'}, onclick: ()=> {
+      try { localStorage.removeItem(myBgKey); } catch(e){}
+      applyStudentBg();
+      rerender();
+    }}, '🗑 移除背景'));
+  }
+  // 不透明度
+  if(curBg){
+    let curOpacity = parseFloat(localStorage.getItem(myBgKey + '_opacity') || '0.3');
+    cardBg.appendChild(el('div', { style:{marginTop:'10px',fontSize:'13px'} }, '背景透明度：' + Math.round((1-curOpacity)*100) + '%'));
+    const rng = el('input', { type:'range', min:0, max:90, value: Math.round((1-curOpacity)*100), style:{width:'100%'} });
+    rng.addEventListener('input', e => {
+      const opacity = 1 - (e.target.value / 100);
+      try { localStorage.setItem(myBgKey + '_opacity', String(opacity)); } catch(err){}
+      applyStudentBg();
+    });
+    cardBg.appendChild(rng);
+  }
+  content.appendChild(cardBg);
+
+  // ─── 改密碼 ───
   const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
   card3.appendChild(el('h3', null, '🔐 修改密碼'));
   card3.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'8px'}, onclick: async ()=> {
@@ -8277,10 +8466,35 @@ function rMe(content){
   } }, '🔑 修改密碼'));
   content.appendChild(card3);
 
-  // logout
+  // ─── 登出 ───
   const card4 = el('div', { class:'card', style:{marginTop:'12px'} });
   card4.appendChild(el('button', { class:'btn btn-danger btn-block', onclick: doLogout }, '⎋ 登出'));
   content.appendChild(card4);
+}
+
+// 套用學生個人背景（每位學生不同）
+function applyStudentBg(){
+  const me = currentStudent();
+  if(!me){
+    document.body.style.backgroundImage = '';
+    return;
+  }
+  const key = 'cms_v3_stu_bg_' + me.id;
+  let bg = '';
+  try { bg = localStorage.getItem(key) || ''; } catch(e){}
+  if(!bg){
+    document.body.style.backgroundImage = '';
+    document.body.style.backgroundSize = '';
+    return;
+  }
+  let opacity = 0.3;
+  try { opacity = parseFloat(localStorage.getItem(key + '_opacity') || '0.3'); } catch(e){}
+  // 取得當前 bg 色
+  const bgColor = getComputedStyle(document.body).backgroundColor || '#fff';
+  document.body.style.backgroundImage = `linear-gradient(rgba(255,255,255,${1-opacity}), rgba(255,255,255,${1-opacity})), url("${bg}")`;
+  document.body.style.backgroundSize = 'cover';
+  document.body.style.backgroundPosition = 'center';
+  document.body.style.backgroundAttachment = 'fixed';
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -13759,7 +13973,6 @@ function cmdItems(){
       { i:'📢', t:'公告', h:'sann', go: ()=> go('sann') },
       { i:'🤖', t:'AI 學習助教', h:'AI', go: ()=> openAIAssistant() },
       { i:'👤', t:'個人', h:'me', go: ()=> go('me') },
-      { i:'🛠️', t:'介面編輯器（自訂側邊欄）', h:'uieditor ui editor sidebar customize 介面 編輯 自訂 排序', go: ()=> go('uieditor') },
       { i:'📖', t:'使用說明', h:'help guide manual faq 教學 指南', go: ()=> go('help') },
       { i:'📲', t:'安裝 App / QR Code', h:'install app pwa qr 安裝', go: ()=> go('install') },
       { i:'🗂', t:'收合/展開側邊欄', h:'sidebar collapse toggle 收合', go: toggleSidebar },
@@ -13995,7 +14208,7 @@ function rerender(){
       else if(v === 'sgroups') rSGroups(content);
       else if(v === 'selfeval') rSelfEval(content);
       else if(v === 'sfeedback') rSFeedback(content); // batch 2
-      else if(v === 'uieditor') rUiEditor(content);   // 介面編輯器（學生端共用）
+      // 學生端不顯示介面編輯器
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else { App.view = 'checkin'; rCheckIn(content); }
@@ -14132,6 +14345,9 @@ function boot(){
 
   // 介面編輯器自訂設定（須在 boot 早期載入，避免 sideItem 讀到 undefined）
   try { App._uiCustom = loadUiCustom(); } catch(e){ App._uiCustom = { sections:{}, items:{}, order:{}, overview:{}, login:{}, pageTexts:{}, customBlocks:[] }; }
+
+  // 學生個人背景套用（若已登入）
+  setTimeout(()=> { try { if(typeof applyStudentBg === 'function') applyStudentBg(); } catch(e){} }, 200);
 
   // cfg & session
   App.cfg = loadCfg();
@@ -16535,7 +16751,6 @@ function getSidebarItems(role){
         { key:'me', icon:'👤', label:'個人' }
       ]},
       s_other: { label:'其他', items: [
-        { key:'uieditor', icon:'🛠️', label:'介面編輯器' },
         { key:'install', icon:'📲', label:'安裝 App' },
         { key:'help', icon:'📖', label:'使用說明' }
       ]}
