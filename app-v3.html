@@ -5885,8 +5885,8 @@ function rLeave(content){
     return;
   }
 
-  const listWrap = el('div', { class:'card' });
-  leaves.forEach(l => {
+  // 單列渲染（共用）
+  function renderLeaveRow(l){
     const row = el('div', { class:'list-row' });
     row.appendChild(el('div', { class:'avatar' }, initials(l.name)));
     row.appendChild(el('div', { class:'info' },
@@ -5911,9 +5911,74 @@ function rLeave(content){
       } }, '🗑'));
     }
     row.appendChild(acts);
-    listWrap.appendChild(row);
+    return row;
+  }
+
+  // 班級分組
+  App._leaveExpandedCls = App._leaveExpandedCls || {};
+  function clsOf(l){
+    if(l.cls) return l.cls;
+    const stu = l.studentId ? findStudent(l.studentId) : null;
+    return (stu && stu.cls) || '未分班';
+  }
+  const classes = [...new Set(leaves.map(l => clsOf(l)))].sort();
+
+  if(classes.length > 1){
+    const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        classes.forEach(c => { App._leaveExpandedCls[c] = true; });
+        rerender();
+      }}, '全部展開 ▼'),
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        classes.forEach(c => { App._leaveExpandedCls[c] = false; });
+        rerender();
+      }}, '全部收合 ▲')
+    );
+    content.appendChild(toolbar);
+  }
+
+  classes.forEach(cls => {
+    const inCls = leaves.filter(l => clsOf(l) === cls);
+    const stCls = { total: inCls.length, pending:0, approved:0, rejected:0 };
+    inCls.forEach(l => {
+      const s = l.status || 'pending';
+      if(s === 'pending') stCls.pending++;
+      else if(s === 'approved') stCls.approved++;
+      else if(s === 'rejected') stCls.rejected++;
+    });
+
+    const isExpanded = App._leaveExpandedCls[cls] !== false;
+
+    const header = el('div', { class:'cls-section-header', style:{
+      padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+      background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+      marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+      transition:'background .15s'
+    }, onclick:()=> {
+      App._leaveExpandedCls[cls] = !isExpanded;
+      rerender();
+    }});
+    header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+    header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+      el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
+      el('span', { class:'small muted' }, '（' + stCls.total + ' 件）')
+    ));
+    header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
+      stCls.pending > 0 ? el('span', { class:'pill', style:{background:'var(--warn-soft)',color:'var(--warn)',fontSize:'11px',fontWeight:'700'} }, '⏳ ' + stCls.pending) : null,
+      stCls.approved > 0 ? el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} }, '✅ ' + stCls.approved) : null,
+      stCls.rejected > 0 ? el('span', { class:'pill', style:{background:'var(--danger-soft)',color:'var(--danger)',fontSize:'11px',fontWeight:'700'} }, '❌ ' + stCls.rejected) : null
+    ));
+    content.appendChild(header);
+
+    if(isExpanded){
+      const body = el('div', { class:'card', style:{
+        border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',
+        marginTop:'0',marginBottom:'8px',padding:'0'
+      }});
+      inCls.forEach(l => body.appendChild(renderLeaveRow(l)));
+      content.appendChild(body);
+    }
   });
-  content.appendChild(listWrap);
 }
 
 function updateLeaveStatus(id, status){
@@ -6544,7 +6609,8 @@ function rFeedback(content){
     return;
   }
 
-  sorted.forEach(f => {
+  // 渲染單一回饋卡（共用）
+  function renderFeedbackCard(f){
     const avg = avgOf(f.ratings);
     const card = el('div', { class:'card', style:{marginBottom:'10px'} });
     card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'6px',flexWrap:'wrap',gap:'6px'} },
@@ -6596,7 +6662,79 @@ function rFeedback(content){
       rerender();
     }}, '🗑'));
     card.appendChild(acts);
-    content.appendChild(card);
+    return card;
+  }
+
+  // 班級分組（可摺疊）
+  App._feedbackExpandedCls = App._feedbackExpandedCls || {};
+  // 每筆回饋分配班級 (fallback 從學生資料反查)
+  function clsOf(f){
+    if(f.cls) return f.cls;
+    const stu = f.studentId ? findStudent(f.studentId) : null;
+    return (stu && stu.cls) || '未分班';
+  }
+  const classes = [...new Set(sorted.map(f => clsOf(f)))].sort();
+
+  // 全展開 / 全收合工具列
+  if(classes.length > 1){
+    const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        classes.forEach(c => { App._feedbackExpandedCls[c] = true; });
+        rerender();
+      }}, '全部展開 ▼'),
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        classes.forEach(c => { App._feedbackExpandedCls[c] = false; });
+        rerender();
+      }}, '全部收合 ▲')
+    );
+    content.appendChild(toolbar);
+  }
+
+  classes.forEach(cls => {
+    const inCls = sorted.filter(f => clsOf(f) === cls);
+    // 班級統計
+    const dimAvgs = FEEDBACK_DIMS.map(d => {
+      const vs = inCls.map(f => (f.ratings && f.ratings[d.key]) || 0).filter(v => v > 0);
+      return vs.length ? (vs.reduce((a,b)=>a+b,0)/vs.length) : 0;
+    });
+    const validDims = dimAvgs.filter(v => v > 0);
+    const overallAvg = validDims.length ? (validDims.reduce((a,b)=>a+b,0)/validDims.length) : 0;
+    // 該班學生 → 繳交率
+    const stuInCls = App.db.students.filter(s => (s.cls || '未分班') === cls);
+    const submittedStus = new Set(inCls.map(f => f.studentId).filter(Boolean));
+    const submitRate = stuInCls.length ? Math.round([...submittedStus].filter(id => stuInCls.some(s => s.id === id)).length / stuInCls.length * 100) : 0;
+    const avgColor = overallAvg >= 4 ? 'var(--success)' : overallAvg >= 3 ? 'var(--warn)' : 'var(--danger)';
+
+    const isExpanded = App._feedbackExpandedCls[cls] !== false;
+
+    const header = el('div', { class:'cls-section-header', style:{
+      padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+      background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+      marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+      transition:'background .15s'
+    }, onclick:()=> {
+      App._feedbackExpandedCls[cls] = !isExpanded;
+      rerender();
+    }});
+    header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+    header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+      el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
+      el('span', { class:'small muted' }, '（' + inCls.length + ' 份）')
+    ));
+    header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
+      overallAvg > 0 ? el('span', { class:'stars readonly', style:{fontSize:'12px'} },
+        ...Array.from({length:5}, (_,i) => el('span', { class:'s ' + (i < Math.round(overallAvg) ? 'on' : '') }, '★'))) : null,
+      el('span', { class:'pill', style:{background:'var(--primary-soft)',color:avgColor,fontSize:'11px',fontWeight:'700'} }, '平均 ' + overallAvg.toFixed(1)),
+      stuInCls.length > 0 ? el('span', { class:'pill', style:{background:'var(--surface)',color:'var(--text-muted)',fontSize:'11px',fontWeight:'700'} },
+        '📝 ' + submittedStus.size + '/' + stuInCls.length + ' (' + submitRate + '%)') : null
+    ));
+    content.appendChild(header);
+
+    if(isExpanded){
+      const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',padding:'12px'} });
+      inCls.forEach(f => body.appendChild(renderFeedbackCard(f)));
+      content.appendChild(body);
+    }
   });
 }
 
@@ -8777,7 +8915,9 @@ function rEv(content){
       ));
       return;
     }
-    list.forEach(e => {
+
+    // 單筆評價卡片（共用）
+    function renderEvCard(e){
       const card = el('div', { class:'feed-msg' });
       const who = el('div', { class:'who' });
       who.appendChild(el('div', { class:'avatar' }, initials(e.fromName||'?')));
@@ -8792,7 +8932,73 @@ function rEv(content){
         ));
       }
       if(e.text) card.appendChild(el('div', { class:'text', style:{marginTop:'4px'} }, e.text));
-      inner.appendChild(card);
+      return card;
+    }
+
+    // 班級分組（從 fromId 反查學生 → 班級；找不到 / 教師發的 → 匿名/其他）
+    App._evExpandedCls = App._evExpandedCls || {};
+    function clsOf(e){
+      if(!e.fromId) return '匿名/其他';
+      const stu = findStudent(e.fromId);
+      if(!stu) return '匿名/其他';
+      return stu.cls || '未分班';
+    }
+    const classes = [...new Set(list.map(e => clsOf(e)))].sort((a,b)=> {
+      // 「匿名/其他」放最後
+      if(a === '匿名/其他') return 1;
+      if(b === '匿名/其他') return -1;
+      return a.localeCompare(b);
+    });
+
+    if(classes.length > 1){
+      const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._evExpandedCls[c] = true; });
+          rerender();
+        }}, '全部展開 ▼'),
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          classes.forEach(c => { App._evExpandedCls[c] = false; });
+          rerender();
+        }}, '全部收合 ▲')
+      );
+      inner.appendChild(toolbar);
+    }
+
+    classes.forEach(cls => {
+      const inCls = list.filter(e => clsOf(e) === cls);
+      // 平均星等（只對有 stars 的計算）
+      const starVals = inCls.map(e => e.stars).filter(s => typeof s === 'number');
+      const avg = starVals.length ? (starVals.reduce((a,b)=>a+b,0)/starVals.length) : 0;
+      const avgColor = avg >= 4 ? 'var(--success)' : avg >= 3 ? 'var(--warn)' : avg > 0 ? 'var(--danger)' : 'var(--text-muted)';
+
+      const isExpanded = App._evExpandedCls[cls] !== false;
+
+      const header = el('div', { class:'cls-section-header', style:{
+        padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+        background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+        marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+        transition:'background .15s'
+      }, onclick:()=> {
+        App._evExpandedCls[cls] = !isExpanded;
+        renderInner();
+      }});
+      header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+      header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+        el('span', { style:{fontWeight:'700',fontSize:'15px'} }, (cls === '匿名/其他' ? '👻 ' : '🏫 ') + cls),
+        el('span', { class:'small muted' }, '（' + inCls.length + ' 則）')
+      ));
+      header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
+        starVals.length > 0 ? el('span', { class:'stars readonly', style:{fontSize:'12px'} },
+          ...Array.from({length:5}, (_,i) => el('span', { class:'s ' + (i < Math.round(avg) ? 'on' : '') }, '★'))) : null,
+        starVals.length > 0 ? el('span', { class:'pill', style:{background:'var(--primary-soft)',color:avgColor,fontSize:'11px',fontWeight:'700'} }, '平均 ' + avg.toFixed(1)) : null
+      ));
+      inner.appendChild(header);
+
+      if(isExpanded){
+        const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',padding:'12px'} });
+        inCls.forEach(e => body.appendChild(renderEvCard(e)));
+        inner.appendChild(body);
+      }
     });
   }
   renderInner();
@@ -12343,8 +12549,8 @@ function rPeer(content){
     return;
   }
 
-  const grid = el('div', { class:'grid', style:{gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'12px'} });
-  list.forEach(pe => {
+  // 渲染單一互評任務卡（共用）
+  function renderPeerCard(pe){
     const closed = peerEvalIsDueClosed(pe);
     const card = el('div', { class:'pe-task-card ' + (closed?'closed':'open'), onclick: ()=> go('peer', 'p_'+pe.id) });
     const head = el('div', { class:'pe-task-head' },
@@ -12358,9 +12564,78 @@ function rPeer(content){
     meta.push((pe.scores||[]).length + ' 筆回應');
     if(pe.dueDate) meta.push('截止 ' + pe.dueDate);
     card.appendChild(el('div', { class:'tiny muted' }, meta.join(' · ')));
-    grid.appendChild(card);
+    return card;
+  }
+
+  // 分組鍵：scope='class' → targetCls；'group' → '__group__'；'custom' → '__custom__'
+  function groupKeyOf(pe){
+    if(pe.scope === 'class') return pe.targetCls || '未分班';
+    if(pe.scope === 'group') return '__group__';
+    if(pe.scope === 'custom') return '__custom__';
+    return '其他';
+  }
+  function groupLabelOf(key){
+    if(key === '__group__') return '👥 群組指派';
+    if(key === '__custom__') return '✍️ 自定指派';
+    return '🏫 ' + key;
+  }
+
+  App._peerExpandedCls = App._peerExpandedCls || {};
+  // 收集所有分組鍵；班級放前、群組/自定放後
+  const allKeys = [...new Set(list.map(pe => groupKeyOf(pe)))];
+  const classKeys = allKeys.filter(k => k !== '__group__' && k !== '__custom__').sort();
+  const specialKeys = allKeys.filter(k => k === '__group__' || k === '__custom__');
+  const groupKeys = classKeys.concat(specialKeys);
+
+  if(groupKeys.length > 1){
+    const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        groupKeys.forEach(c => { App._peerExpandedCls[c] = true; });
+        rerender();
+      }}, '全部展開 ▼'),
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        groupKeys.forEach(c => { App._peerExpandedCls[c] = false; });
+        rerender();
+      }}, '全部收合 ▲')
+    );
+    content.appendChild(toolbar);
+  }
+
+  groupKeys.forEach(key => {
+    const inGroup = list.filter(pe => groupKeyOf(pe) === key);
+    const openCount = inGroup.filter(pe => !peerEvalIsDueClosed(pe)).length;
+    const closedCount = inGroup.length - openCount;
+
+    const isExpanded = App._peerExpandedCls[key] !== false;
+
+    const header = el('div', { class:'cls-section-header', style:{
+      padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+      background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+      marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+      transition:'background .15s'
+    }, onclick:()=> {
+      App._peerExpandedCls[key] = !isExpanded;
+      rerender();
+    }});
+    header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+    header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
+      el('span', { style:{fontWeight:'700',fontSize:'15px'} }, groupLabelOf(key)),
+      el('span', { class:'small muted' }, '（' + inGroup.length + ' 件）')
+    ));
+    header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
+      openCount > 0 ? el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} }, '🔵 進行 ' + openCount) : null,
+      closedCount > 0 ? el('span', { class:'pill', style:{background:'var(--surface)',color:'var(--text-muted)',fontSize:'11px',fontWeight:'700'} }, '⚫ 結束 ' + closedCount) : null
+    ));
+    content.appendChild(header);
+
+    if(isExpanded){
+      const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',padding:'12px'} });
+      const grid = el('div', { class:'grid', style:{gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'12px'} });
+      inGroup.forEach(pe => grid.appendChild(renderPeerCard(pe)));
+      body.appendChild(grid);
+      content.appendChild(body);
+    }
   });
-  content.appendChild(grid);
 }
 
 function openPeerEvalCreator(){
