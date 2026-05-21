@@ -8603,7 +8603,6 @@ function rGrades(content){
   const sBox = el('div', { class:'search-box' });
   const sInp = el('input', { class:'input', placeholder:'搜尋學生', oninput: e => {
     App._grSearch = e.target.value.toLowerCase();
-    App._grPage = 1; // batch 2: 換搜尋 → 第 1 頁
     renderTbl();
   }});
   if(App._grSearch) sInp.value = App._grSearch;
@@ -8663,31 +8662,17 @@ function rGrades(content){
       return;
     }
 
-    // batch 2: 分頁
-    const totalFiltered = stus.length;
-    const perPage = App._grPerPage || 30;
-    let page = App._grPage || 1;
-    const totalPages = Math.max(1, Math.ceil(totalFiltered / perPage));
-    if(page > totalPages) page = totalPages;
-    const startIdx = (page - 1) * perPage;
-    const pagedStus = stus.slice(startIdx, startIdx + perPage);
+    // 顯示全部，不分頁
+    const pagedStus = stus;
 
-    // 班級分組（每班一獨立成績矩陣）— 基於分頁後資料
+    // 班級分組（每班一獨立成績矩陣）
     App._gradesExpandedCls = App._gradesExpandedCls || {};
     const classes = [...new Set(pagedStus.map(s => s.cls || '未分班'))].sort();
 
-    // 工具列：每頁筆數 + 全展開/收合
+    // 工具列：全展開/收合 + 總人數
     const headerBar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'space-between',flexWrap:'wrap',alignItems:'center'} });
     const leftBar = el('div', { class:'flex', style:{gap:'6px',alignItems:'center',flexWrap:'wrap'} });
-    if(totalFiltered > 30){
-      leftBar.appendChild(renderPerPageSelect(perPage, [20, 30, 50, 100], v => {
-        App._grPerPage = v;
-        App._grPage = 1;
-        renderTbl();
-      }));
-      leftBar.appendChild(el('span', { class:'small muted' },
-        '顯示 ' + (startIdx + 1) + '–' + Math.min(startIdx + perPage, totalFiltered) + ' / 共 ' + totalFiltered + ' 位'));
-    }
+    leftBar.appendChild(el('span', { class:'small muted' }, '共 ' + stus.length + ' 位學生'));
     headerBar.appendChild(leftBar);
     if(classes.length > 1){
       const ctrl = el('div', { class:'flex', style:{gap:'6px'} },
@@ -8755,13 +8740,6 @@ function rGrades(content){
       }
     });
 
-    // batch 2: 分頁控制
-    if(totalPages > 1){
-      wrap.appendChild(renderPagination(totalFiltered, page, perPage, p => {
-        App._grPage = p;
-        renderTbl();
-      }));
-    }
   }
   renderTbl();
 }
