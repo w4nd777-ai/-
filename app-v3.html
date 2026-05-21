@@ -35,10 +35,16 @@
   --shadow:0 1px 3px rgba(0,0,0,.05),0 1px 2px rgba(0,0,0,.04);
   --shadow-lg:0 10px 25px rgba(0,0,0,.08),0 4px 10px rgba(0,0,0,.04);
   --r-sm:8px; --r-md:12px; --r-lg:16px; --r-xl:24px;
+  --radius-sm:8px; --radius-md:12px; --radius-lg:16px;
   --tx:150ms ease-out;
   --sidebar-w:220px;
   --topbar-h:56px;
   --nav-h:64px;
+  /* appearance tokens (overridable) */
+  --font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --font-size-base:15px;
+  --pad-sm:6px; --pad-md:12px; --pad-lg:16px;
+  --row-h:44px;
 }
 [data-theme="dark"]{
   --bg:#0a0a0a; --surface:#18181b; --surface-2:#27272a; --surface-3:#3f3f46;
@@ -50,14 +56,61 @@
   --shadow:0 1px 3px rgba(0,0,0,.4);
   --shadow-lg:0 10px 25px rgba(0,0,0,.5);
 }
-[data-accent="green"]{ --primary:#16a34a; --primary-hover:#15803d; --primary-soft:#dcfce7;}
-[data-accent="violet"]{ --primary:#8b5cf6; --primary-hover:#7c3aed; --primary-soft:#ede9fe;}
+[data-accent="blue"]   { --primary:#2563eb; --primary-hover:#1d4ed8; --primary-soft:#dbeafe;}
+[data-accent="green"]  { --primary:#16a34a; --primary-hover:#15803d; --primary-soft:#dcfce7;}
+[data-accent="violet"] { --primary:#8b5cf6; --primary-hover:#7c3aed; --primary-soft:#ede9fe;}
+[data-accent="red"]    { --primary:#dc2626; --primary-hover:#b91c1c; --primary-soft:#fee2e2;}
+[data-accent="orange"] { --primary:#ea580c; --primary-hover:#c2410c; --primary-soft:#ffedd5;}
+[data-accent="amber"]  { --primary:#d97706; --primary-hover:#b45309; --primary-soft:#fef3c7;}
+[data-accent="emerald"]{ --primary:#10b981; --primary-hover:#059669; --primary-soft:#d1fae5;}
+[data-accent="teal"]   { --primary:#0d9488; --primary-hover:#0f766e; --primary-soft:#ccfbf1;}
+[data-accent="cyan"]   { --primary:#0891b2; --primary-hover:#0e7490; --primary-soft:#cffafe;}
+[data-accent="indigo"] { --primary:#4f46e5; --primary-hover:#4338ca; --primary-soft:#e0e7ff;}
+[data-accent="pink"]   { --primary:#db2777; --primary-hover:#be185d; --primary-soft:#fce7f3;}
+[data-accent="rose"]   { --primary:#e11d48; --primary-hover:#be123c; --primary-soft:#ffe4e6;}
+
+/* font-size scaling */
+[data-fontsize="xs"] { --font-size-base:12px; }
+[data-fontsize="sm"] { --font-size-base:13px; }
+[data-fontsize="md"] { --font-size-base:15px; }
+[data-fontsize="lg"] { --font-size-base:17px; }
+[data-fontsize="xl"] { --font-size-base:19px; }
+
+/* density */
+[data-density="compact"]    { --pad-sm:4px; --pad-md:8px;  --pad-lg:12px; --row-h:36px; }
+[data-density="normal"]     { --pad-sm:6px; --pad-md:12px; --pad-lg:16px; --row-h:44px; }
+[data-density="comfortable"]{ --pad-sm:8px; --pad-md:16px; --pad-lg:24px; --row-h:52px; }
+
+/* density applied through commonly-used selectors so changes are visible without rewriting every rule */
+[data-density="compact"] .card        { padding:var(--pad-md); }
+[data-density="comfortable"] .card    { padding:calc(var(--pad-lg) + 4px); }
+[data-density="compact"] .list-row    { min-height:var(--row-h); padding:var(--pad-sm) var(--pad-md); }
+[data-density="comfortable"] .list-row{ min-height:var(--row-h); padding:var(--pad-md) var(--pad-lg); }
+[data-density="compact"] .btn         { padding:var(--pad-sm) var(--pad-md); }
+[data-density="comfortable"] .btn     { padding:var(--pad-md) var(--pad-lg); }
+[data-density="compact"] .content     { padding-top:var(--pad-md); padding-left:var(--pad-md); padding-right:var(--pad-md); }
+[data-density="comfortable"] .content { padding-top:calc(var(--pad-lg) + 4px); padding-left:calc(var(--pad-lg) + 4px); padding-right:calc(var(--pad-lg) + 4px); }
+[data-density="compact"] .field       { margin-bottom:var(--pad-sm); }
+[data-density="comfortable"] .field   { margin-bottom:var(--pad-lg); }
+
+/* radius shape */
+[data-radius="sharp"]  { --r-sm:4px; --r-md:6px;  --r-lg:8px;  --radius-sm:4px; --radius-md:6px;  --radius-lg:8px; }
+[data-radius="normal"] { --r-sm:8px; --r-md:12px; --r-lg:16px; --radius-sm:8px; --radius-md:12px; --radius-lg:16px; }
+[data-radius="pill"]   { --r-sm:12px;--r-md:18px; --r-lg:24px; --radius-sm:12px;--radius-md:18px; --radius-lg:24px; }
+[data-radius="sharp"] .card,
+[data-radius="sharp"] .btn,
+[data-radius="sharp"] .input,
+[data-radius="sharp"] .login-card { border-radius:var(--r-sm) !important; }
+[data-radius="pill"] .card,
+[data-radius="pill"] .login-card  { border-radius:var(--r-lg) !important; }
+[data-radius="pill"] .btn,
+[data-radius="pill"] .input       { border-radius:var(--r-md) !important; }
 
 *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 html,body{
   margin:0; padding:0; background:var(--bg); color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
-  font-weight:500; font-size:15px; line-height:1.5;
+  font-family:var(--font-family);
+  font-weight:500; font-size:var(--font-size-base); line-height:1.5;
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
 }
@@ -1692,6 +1745,26 @@ const LS_DB  = LS_KEY + '_db';
 const LS_FB  = LS_KEY + '_fb_cfg';
 const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
+const LS_APPEARANCE = LS_KEY + '_appearance';
+
+/* font presets — Google Fonts loaded lazily on first use */
+const FONT_PRESETS = [
+  { key:'system',  label:'系統預設', stack:'-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif' },
+  { key:'sans',    label:'無襯線',   stack:'"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif',  gf:'Noto+Sans+TC:wght@400;500;700' },
+  { key:'serif',   label:'襯線（明體）', stack:'"Noto Serif TC","Songti TC","PMingLiU",serif',              gf:'Noto+Serif+TC:wght@400;500;700' },
+  { key:'rounded', label:'圓潤',     stack:'"Quicksand","Noto Sans TC",sans-serif',                         gf:'Quicksand:wght@400;500;700|Noto+Sans+TC:wght@400;500;700' },
+  { key:'mono',    label:'等寬',     stack:'"JetBrains Mono","SF Mono",Menlo,Consolas,"Courier New",monospace' },
+  { key:'kai',     label:'楷體',     stack:'"DFKai-SB","BiauKai","標楷體","Kaiti TC",serif' }
+];
+function _loadGoogleFont(gf){
+  if(!gf) return;
+  const id = 'gfont-' + gf.replace(/[^a-z0-9]/gi,'-');
+  if(document.getElementById(id)) return;
+  const link = document.createElement('link');
+  link.id = id; link.rel = 'stylesheet';
+  link.href = 'https://fonts.googleapis.com/css2?family=' + gf + '&display=swap';
+  document.head.appendChild(link);
+}
 const LS_SESSION = LS_KEY + '_session';
 const LS_LAST_USER  = LS_KEY + '_last_user';
 const LS_REMEMBER   = LS_KEY + '_remember';
@@ -1705,6 +1778,11 @@ const App = {
   subview: null,       // sub-view (for drill-downs)
   theme: 'light',
   accent: 'blue',
+  font: 'system',     // appearance: font preset key
+  fontSize: 'md',     // xs|sm|md|lg|xl
+  density: 'normal',  // compact|normal|comfortable
+  radius: 'normal',   // sharp|normal|pill
+  _customAccent: null,// hex string when accent === 'custom'
   fb: null,
   fbRef: null,
   fbStatus: 'idle',    // idle|connecting|online|error
@@ -2227,11 +2305,119 @@ function saveTheme(){
     localStorage.setItem(LS_THEME, App.theme);
     localStorage.setItem(LS_ACCENT, App.accent);
   } catch(e){}
+  saveAppearance();
   applyTheme();
 }
+
+/* persist all appearance settings together */
+function saveAppearance(){
+  try {
+    localStorage.setItem(LS_APPEARANCE, JSON.stringify({
+      theme:        App.theme,
+      accent:       App.accent,
+      font:         App.font,
+      fontSize:     App.fontSize,
+      density:      App.density,
+      radius:       App.radius,
+      customAccent: App._customAccent || null
+    }));
+    // keep legacy keys in sync (other tabs / older code paths still read these)
+    localStorage.setItem(LS_THEME, App.theme || 'light');
+    localStorage.setItem(LS_ACCENT, App.accent || 'blue');
+  } catch(e){}
+}
+function loadAppearance(){
+  let loaded = false;
+  try {
+    const raw = localStorage.getItem(LS_APPEARANCE);
+    if(raw){
+      const v = JSON.parse(raw) || {};
+      if(v.theme)        App.theme        = v.theme;
+      if(v.accent)       App.accent       = v.accent;
+      if(v.font)         App.font         = v.font;
+      if(v.fontSize)     App.fontSize     = v.fontSize;
+      if(v.density)      App.density      = v.density;
+      if(v.radius)       App.radius       = v.radius;
+      if(v.customAccent) App._customAccent= v.customAccent;
+      loaded = true;
+    }
+  } catch(e){}
+  // legacy fallback (older installs only had LS_THEME / LS_ACCENT)
+  if(!loaded){
+    try {
+      const t = localStorage.getItem(LS_THEME);
+      const a = localStorage.getItem(LS_ACCENT);
+      if(t) App.theme  = t;
+      if(a) App.accent = a;
+    } catch(e){}
+  }
+  // safe defaults
+  if(!App.theme)    App.theme    = 'light';
+  if(!App.accent)   App.accent   = 'blue';
+  if(!App.font)     App.font     = 'system';
+  if(!App.fontSize) App.fontSize = 'md';
+  if(!App.density)  App.density  = 'normal';
+  if(!App.radius)   App.radius   = 'normal';
+}
+
 function applyTheme(){
-  document.documentElement.setAttribute('data-theme', App.theme);
-  document.documentElement.setAttribute('data-accent', App.accent);
+  const root = document.documentElement;
+  // auto theme follows system
+  let effectiveTheme = App.theme || 'light';
+  if(effectiveTheme === 'auto'){
+    const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    effectiveTheme = dark ? 'dark' : 'light';
+  }
+  root.setAttribute('data-theme',    effectiveTheme);
+  root.setAttribute('data-accent',   App.accent   || 'blue');
+  root.setAttribute('data-fontsize', App.fontSize || 'md');
+  root.setAttribute('data-density',  App.density  || 'normal');
+  root.setAttribute('data-radius',   App.radius   || 'normal');
+
+  // font family
+  const fp = FONT_PRESETS.find(f => f.key === (App.font || 'system')) || FONT_PRESETS[0];
+  try { _loadGoogleFont(fp.gf); } catch(e){}
+  root.style.setProperty('--font-family', fp.stack);
+
+  // custom accent — clear inline overrides first, then re-apply if active
+  root.style.removeProperty('--primary');
+  root.style.removeProperty('--primary-hover');
+  root.style.removeProperty('--primary-soft');
+  if(App.accent === 'custom' && App._customAccent){
+    applyCustomAccent(App._customAccent);
+  }
+
+  // attach a 'auto-theme' listener once for live OS-theme changes
+  if(!App._autoThemeBound){
+    App._autoThemeBound = true;
+    try {
+      const mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+      if(mq && mq.addEventListener){
+        mq.addEventListener('change', ()=> { if(App.theme === 'auto') applyTheme(); });
+      } else if(mq && mq.addListener){
+        mq.addListener(()=> { if(App.theme === 'auto') applyTheme(); });
+      }
+    } catch(e){}
+  }
+}
+
+/* graceful hex -> primary/hover/soft */
+function applyCustomAccent(color){
+  const c = (color || '').trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c);
+  if(!hex) return; // ignore invalid input — fall back to data-accent presets
+  let h = c.slice(1);
+  if(h.length === 3) h = h.split('').map(x => x+x).join('');
+  const r = parseInt(h.slice(0,2),16);
+  const g = parseInt(h.slice(2,4),16);
+  const b = parseInt(h.slice(4,6),16);
+  // darken ~12% for hover
+  const dk = v => Math.max(0, Math.round(v * 0.85));
+  const hover = '#' + [dk(r),dk(g),dk(b)].map(v => v.toString(16).padStart(2,'0')).join('');
+  const root = document.documentElement;
+  root.style.setProperty('--primary', c);
+  root.style.setProperty('--primary-hover', hover);
+  root.style.setProperty('--primary-soft', `rgba(${r},${g},${b},0.15)`);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2660,9 +2846,8 @@ window.addEventListener('storage', e => {
   } else if(e.key === LS_SESSION){
     App.session = loadSession();
     rerender();
-  } else if(e.key === LS_THEME || e.key === LS_ACCENT){
-    App.theme = localStorage.getItem(LS_THEME) || 'light';
-    App.accent = localStorage.getItem(LS_ACCENT) || 'blue';
+  } else if(e.key === LS_THEME || e.key === LS_ACCENT || e.key === LS_APPEARANCE){
+    loadAppearance();
     applyTheme();
   }
 });
@@ -4607,7 +4792,8 @@ function renderTopbar(role){
     peer:'⭐ 學生互評', matrix:'🪑 座位矩陣',
     groups:'👥 分組管理', attreport:'📊 出席報表',
     feedback:'🗳️ 學生回饋',
-    picker:'🎲 隨機抽籤', timer:'⏰ 課堂計時器'
+    picker:'🎲 隨機抽籤', timer:'⏰ 課堂計時器',
+    appearance:'🎨 外觀設定'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
@@ -4703,7 +4889,7 @@ function openMoreMenuTeacher(){
     ['picker','🎲 隨機抽籤'],['timer','⏰ 課堂計時器'],
     ['workspace','🏢 多教室'],['notify','📲 通知設定'],
     ['backup','💼 備份'],['logs','📜 操作紀錄'],['storage','💾 儲存空間'],
-    ['settings','⚙️ 設定'],['firebase','☁️ 跨裝置同步']
+    ['settings','⚙️ 設定'],['appearance','🎨 外觀設定'],['firebase','☁️ 跨裝置同步']
   ];
   const grid = el('div', { class:'grid grid-2' });
   items.forEach(([v,t]) => {
@@ -7251,23 +7437,19 @@ function rSettings(content){
   // ─── 出席狀態管理（batch 1）─────────────────────────────────
   content.appendChild(renderAttendanceStatusesCard());
 
-  // appearance
+  // appearance — quick shortcut + inline mini-controls
   const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
   card2.appendChild(el('h3', null, '🎨 外觀'));
-  const row1 = el('div', { class:'flex', style:{marginTop:'8px',flexWrap:'wrap'} });
+  card2.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+    '主題、主題色、字型、字型大小、版面密度、圓角、背景圖一次設定'));
+  const row1 = el('div', { class:'flex', style:{marginTop:'4px',flexWrap:'wrap'} });
   row1.appendChild(el('button', { class:'btn ' + (App.theme==='light'?'btn-primary':''), onclick:()=> { App.theme='light'; saveTheme(); rerender(); } }, '☀️ 亮色'));
-  row1.appendChild(el('button', { class:'btn ' + (App.theme==='dark'?'btn-primary':''), onclick:()=> { App.theme='dark'; saveTheme(); rerender(); } }, '🌙 暗色'));
+  row1.appendChild(el('button', { class:'btn ' + (App.theme==='dark'?'btn-primary':''),  onclick:()=> { App.theme='dark';  saveTheme(); rerender(); } }, '🌙 暗色'));
+  row1.appendChild(el('button', { class:'btn ' + (App.theme==='auto'?'btn-primary':''),  onclick:()=> { App.theme='auto';  saveTheme(); rerender(); } }, '🔄 跟隨系統'));
   card2.appendChild(row1);
-  const row2 = el('div', { class:'flex', style:{marginTop:'8px',flexWrap:'wrap'} });
-  ['blue','green','violet'].forEach(c => {
-    const map = { blue:'藍色', green:'綠色', violet:'紫色' };
-    row2.appendChild(el('button', { class:'btn ' + (App.accent===c?'btn-primary':''), onclick:()=> { App.accent=c; saveTheme(); rerender(); } }, map[c]));
-  });
-  card2.appendChild(row2);
+  card2.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'10px'},
+    onclick:()=> go('appearance') }, '🎨 開啟「外觀設定」中心 →'));
   content.appendChild(card2);
-
-  // batch 4: 背景設定卡片
-  try { content.appendChild(renderBrandingCard()); } catch(e){ console.warn('[brandingCard]', e); }
 
   // batch 4: 老師個人資料快捷
   const cardProfile = el('div', { class:'card', style:{marginTop:'12px'} });
@@ -13262,6 +13444,7 @@ function cmdItems(){
       { i:'⌨', t:'鍵盤快捷鍵', h:'shortcuts', go: openShortcutHelp },
       { i:'🖨', t:'列印目前頁', h:'print', go: printCurrent },
       { i:'⚙️', t:'設定', h:'settings', go: ()=> go('settings') },
+      { i:'🎨', t:'外觀設定（主題色 / 字型 / 密度）', h:'appearance theme font size density radius', go: ()=> go('appearance') },
       { i:'☁️', t:'Firebase 同步', h:'firebase', go: ()=> go('firebase') },
       { i:'🌓', t:'切換亮/暗主題', h:'theme', go: toggleTheme },
       { i:'⎋', t:'登出', h:'logout', go: doLogout },
@@ -13491,6 +13674,7 @@ function rerender(){
       else if(v === 'feedback') rFeedback(content);   // batch 2
       else if(v === 'picker') rRandomPicker(content);  // batch 4
       else if(v === 'timer') rTimer(content);          // batch 4
+      else if(v === 'appearance') rAppearance(content);// 外觀設定
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -13635,9 +13819,8 @@ function boot(){
     }
   } catch(e){ console.warn('[reset]', e); }
 
-  // theme
-  App.theme = localStorage.getItem(LS_THEME) || 'light';
-  App.accent = localStorage.getItem(LS_ACCENT) || 'blue';
+  // theme + appearance
+  loadAppearance();
   applyTheme();
 
   // cfg & session
@@ -15146,6 +15329,189 @@ function openTeacherProfile(){
     rerender();
   }}, '💾 儲存'));
   m.root.appendChild(actions);
+}
+
+// ── 1.5) 外觀設定中心 ────────────────────────────────────────
+const APPEARANCE_ACCENTS = [
+  { key:'blue',    color:'#2563eb', label:'藍' },
+  { key:'green',   color:'#16a34a', label:'綠' },
+  { key:'violet',  color:'#8b5cf6', label:'紫' },
+  { key:'red',     color:'#dc2626', label:'紅' },
+  { key:'orange',  color:'#ea580c', label:'橘' },
+  { key:'amber',   color:'#d97706', label:'琥珀' },
+  { key:'emerald', color:'#10b981', label:'翡翠' },
+  { key:'teal',    color:'#0d9488', label:'松石' },
+  { key:'cyan',    color:'#0891b2', label:'青' },
+  { key:'indigo',  color:'#4f46e5', label:'靛' },
+  { key:'pink',    color:'#db2777', label:'粉' },
+  { key:'rose',    color:'#e11d48', label:'玫瑰' }
+];
+
+function rAppearance(content){
+  // breadcrumb back to settings
+  try { content.appendChild(renderBreadcrumb([{label:'⚙️ 設定', go:'settings'},{label:'🎨 外觀設定'}])); }
+  catch(e){
+    content.appendChild(el('button', { class:'btn btn-sm', style:{marginBottom:'10px'}, onclick:()=> go('settings') }, '← 返回設定'));
+  }
+  content.appendChild(el('h1', null, '🎨 外觀設定'));
+  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
+    '客製化主題色、字型、字型大小、版面密度、圓角樣式與背景圖。每項修改都會即時預覽。'));
+
+  // ── 1：主題模式 ──────────────────────────────────────────
+  const c1 = el('div', { class:'card' });
+  c1.appendChild(el('h3', null, '🌗 主題模式'));
+  const r1 = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  [['light','☀️ 亮色'],['dark','🌙 暗色'],['auto','🔄 跟隨系統']].forEach(([v,l]) => {
+    r1.appendChild(el('button', {
+      class:'btn ' + (App.theme===v ? 'btn-primary' : ''),
+      onclick:()=> { App.theme = v; saveAppearance(); applyTheme(); try{ applyBranding(); }catch(e){} rerender(); }
+    }, l));
+  });
+  c1.appendChild(r1);
+  content.appendChild(c1);
+
+  // ── 2：主題色 ────────────────────────────────────────────
+  const c2 = el('div', { class:'card', style:{marginTop:'12px'} });
+  c2.appendChild(el('h3', null, '🎨 主題色'));
+  c2.appendChild(el('div', { class:'small muted', style:{marginBottom:'6px'} },
+    '12 種預設色 + 自訂顏色'));
+  const swatchRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'10px',marginTop:'8px'} });
+  APPEARANCE_ACCENTS.forEach(a => {
+    const active = (App.accent === a.key);
+    const sw = el('button', {
+      title: a.label,
+      style:{
+        width:'52px',height:'52px',borderRadius:'12px',background:a.color,cursor:'pointer',
+        border: active ? '3px solid var(--text)' : '2px solid var(--border)',
+        position:'relative', padding:'0', flex:'0 0 auto'
+      },
+      onclick:()=> {
+        App.accent = a.key; App._customAccent = null;
+        saveAppearance(); applyTheme(); rerender();
+      }
+    });
+    if(active) sw.appendChild(el('span', {
+      style:{ position:'absolute', top:'2px', right:'4px', color:'#fff',
+              fontSize:'16px', fontWeight:'700', textShadow:'0 1px 2px rgba(0,0,0,.4)' }
+    }, '✓'));
+    swatchRow.appendChild(sw);
+  });
+  c2.appendChild(swatchRow);
+
+  // custom color picker
+  const customWrap = el('div', { style:{marginTop:'14px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} });
+  customWrap.appendChild(el('label', { class:'small', style:{fontWeight:'600'} }, '自訂顏色：'));
+  const colorInp = el('input', {
+    type:'color',
+    value: (App._customAccent && /^#[0-9a-f]{6}$/i.test(App._customAccent)) ? App._customAccent : '#2563eb',
+    style:{width:'56px',height:'40px',border:'1px solid var(--border)',borderRadius:'8px',cursor:'pointer',padding:'2px',background:'var(--surface)'}
+  });
+  colorInp.addEventListener('input', e => {
+    const v = e.target.value;
+    App._customAccent = v;
+    App.accent = 'custom';
+    applyCustomAccent(v);
+  });
+  colorInp.addEventListener('change', e => {
+    saveAppearance();
+    rerender();
+  });
+  customWrap.appendChild(colorInp);
+  const customBadge = el('span', { class:'small ' + (App.accent==='custom'?'':'muted') },
+    App.accent==='custom' ? ('已啟用 ' + (App._customAccent||'')) : '尚未啟用');
+  customWrap.appendChild(customBadge);
+  c2.appendChild(customWrap);
+  content.appendChild(c2);
+
+  // ── 3：字型 ──────────────────────────────────────────────
+  const c3 = el('div', { class:'card', style:{marginTop:'12px'} });
+  c3.appendChild(el('h3', null, '🔤 字型'));
+  const fontRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  FONT_PRESETS.forEach(f => {
+    fontRow.appendChild(el('button', {
+      class:'btn ' + (App.font===f.key ? 'btn-primary' : ''),
+      style:{fontFamily:f.stack},
+      onclick:()=> {
+        App.font = f.key;
+        try { _loadGoogleFont(f.gf); } catch(e){}
+        saveAppearance(); applyTheme(); rerender();
+      }
+    }, f.label));
+  });
+  c3.appendChild(fontRow);
+  c3.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} },
+    '部分字型會從 Google Fonts 載入（需要網路）'));
+  content.appendChild(c3);
+
+  // ── 4：字型大小 ──────────────────────────────────────────
+  const c4 = el('div', { class:'card', style:{marginTop:'12px'} });
+  c4.appendChild(el('h3', null, '🔍 字型大小'));
+  const sizeRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  [['xs','極小'],['sm','小'],['md','中（預設）'],['lg','大'],['xl','極大']].forEach(([v,l]) => {
+    sizeRow.appendChild(el('button', {
+      class:'btn ' + (App.fontSize===v ? 'btn-primary' : ''),
+      onclick:()=> { App.fontSize = v; saveAppearance(); applyTheme(); rerender(); }
+    }, l));
+  });
+  c4.appendChild(sizeRow);
+  content.appendChild(c4);
+
+  // ── 5：版面密度 ──────────────────────────────────────────
+  const c5 = el('div', { class:'card', style:{marginTop:'12px'} });
+  c5.appendChild(el('h3', null, '📏 版面密度'));
+  const densRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  [['compact','緊湊'],['normal','標準'],['comfortable','寬鬆']].forEach(([v,l]) => {
+    densRow.appendChild(el('button', {
+      class:'btn ' + (App.density===v ? 'btn-primary' : ''),
+      onclick:()=> { App.density = v; saveAppearance(); applyTheme(); rerender(); }
+    }, l));
+  });
+  c5.appendChild(densRow);
+  content.appendChild(c5);
+
+  // ── 6：圓角樣式 ──────────────────────────────────────────
+  const c6 = el('div', { class:'card', style:{marginTop:'12px'} });
+  c6.appendChild(el('h3', null, '🔘 圓角樣式'));
+  const radRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'8px'} });
+  [['sharp','銳利'],['normal','標準'],['pill','圓潤']].forEach(([v,l]) => {
+    radRow.appendChild(el('button', {
+      class:'btn ' + (App.radius===v ? 'btn-primary' : ''),
+      onclick:()=> { App.radius = v; saveAppearance(); applyTheme(); rerender(); }
+    }, l));
+  });
+  c6.appendChild(radRow);
+  content.appendChild(c6);
+
+  // ── 7：背景設定（沿用既有卡片）──────────────────────────
+  try { content.appendChild(renderBrandingCard()); } catch(e){ console.warn('[brandingCard]', e); }
+
+  // ── 8：重置 ──────────────────────────────────────────────
+  const cR = el('div', { class:'card', style:{marginTop:'12px',borderColor:'var(--danger-soft)'} });
+  cR.appendChild(el('h3', null, '🔄 重置外觀'));
+  cR.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+    '把所有外觀設定（主題、主題色、字型、字型大小、密度、圓角、背景）恢復為預設值'));
+  cR.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+    const ok = await confirmDlg('確定重置所有外觀設定為預設值？背景圖也會清除', { danger:true, title:'重置外觀' });
+    if(!ok) return;
+    App.theme = 'light';
+    App.accent = 'blue';
+    App.font = 'system';
+    App.fontSize = 'md';
+    App.density = 'normal';
+    App.radius = 'normal';
+    App._customAccent = null;
+    if(App.db && App.db.branding){
+      App.db.branding.bgImage = null;
+      App.db.branding.bgColor = null;
+      App.db.branding.bgOpacity = null;
+      try { saveDB(); Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+    }
+    saveAppearance(); applyTheme();
+    try { await applyBranding(); } catch(e){}
+    toast('已重置全部外觀','success');
+    rerender();
+  }}, '🗑 重置全部外觀'));
+  content.appendChild(cR);
 }
 
 // ── 2) 背景圖片 / 顏色 / 透明度 ────────────────────────────────
