@@ -204,6 +204,60 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   }
   .bottom-nav{ display:none; }
   .content{ padding:24px 32px; padding-bottom:32px; }
+
+  /* ── sidebar collapse ── */
+  .app.sb-collapsed{ grid-template-columns:56px 1fr; }
+  .sidebar.collapsed{
+    width:56px !important; min-width:56px !important;
+    padding:16px 4px;
+  }
+  .sidebar.collapsed .brand-title,
+  .sidebar.collapsed .side-section-title,
+  .sidebar.collapsed .side-item > span:not(.ico):not(.badge),
+  .sidebar.collapsed .side-label,
+  .sidebar.collapsed .side-badge,
+  .sidebar.collapsed .card{
+    display:none !important;
+  }
+  .sidebar.collapsed .brand{ justify-content:center; padding:6px 4px 16px; }
+  .sidebar.collapsed .side-item{
+    justify-content:center;
+    padding:10px 4px;
+  }
+  .sidebar.collapsed .side-item .ico{
+    margin-right:0;
+    font-size:22px;
+    width:auto;
+  }
+  .sidebar.collapsed .side-item .badge{
+    position:absolute; right:4px; top:4px;
+    font-size:9px; padding:0 4px; min-width:14px;
+  }
+  .sidebar.collapsed .side-toggle-btn{
+    transform:rotate(180deg);
+  }
+  .sidebar{ position:relative; }
+  .sidebar .side-toggle-btn{
+    position:absolute;
+    top:10px;
+    right:-12px;
+    width:24px;
+    height:24px;
+    border-radius:50%;
+    background:var(--surface);
+    border:1px solid var(--border-strong);
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    transition:transform .2s, background var(--tx);
+    z-index:6;
+    color:var(--text-muted);
+    font-size:12px;
+    padding:0;
+    box-shadow:0 1px 3px rgba(0,0,0,.08);
+  }
+  .sidebar .side-toggle-btn:hover{ background:var(--surface-2); color:var(--text); }
 }
 
 /* ---------- buttons & inputs ---------- */
@@ -4649,7 +4703,7 @@ function forceChangePassword(studentId){
    ──────────────────────────────────────────────────────────── */
 function renderChrome(root, role){
   root.innerHTML = '';
-  const app = el('div', { class:'app' });
+  const app = el('div', { class:'app' + (App.sidebarCollapsed ? ' sb-collapsed' : '') });
 
   // sidebar (desktop)
   if(role === 'teacher'){
@@ -4674,7 +4728,7 @@ function renderChrome(root, role){
 
 function sideItem(view, icon, label, badge){
   const active = App.view === view;
-  const b = el('button', { class:'side-item ' + (active?'active':''), onclick:()=> go(view) },
+  const b = el('button', { class:'side-item ' + (active?'active':''), onclick:()=> go(view), title: label },
     el('span', { class:'ico' }, icon),
     el('span', null, label)
   );
@@ -4682,8 +4736,18 @@ function sideItem(view, icon, label, badge){
   return b;
 }
 
+function sidebarToggleButton(){
+  return el('button', {
+    class:'side-toggle-btn',
+    onclick: toggleSidebar,
+    title:'收合 / 展開側邊欄',
+    'aria-label':'收合側邊欄'
+  }, '◀');
+}
+
 function renderSidebarTeacher(){
-  const side = el('aside', { class:'sidebar' });
+  const side = el('aside', { class:'sidebar' + (App.sidebarCollapsed ? ' collapsed' : '') });
+  side.appendChild(sidebarToggleButton());
   side.appendChild(el('div', { class:'brand' },
     el('div', { class:'brand-logo' }, 'V3'),
     el('div', { class:'brand-title' }, App.db.branding.title || '課程管理')
@@ -4723,6 +4787,8 @@ function renderSidebarTeacher(){
   side.appendChild(sideItem('storage','💾','儲存空間'));
   side.appendChild(sideItem('settings','⚙️','設定'));
   side.appendChild(sideItem('firebase','☁️','跨裝置同步'));
+  side.appendChild(sideItem('install','📲','安裝 App'));
+  side.appendChild(sideItem('help','📖','使用說明'));
 
   // bottom: user info + logout
   const spacer = el('div', { style:{flex:'1'} });
@@ -4742,7 +4808,8 @@ function renderSidebarTeacher(){
 }
 
 function renderSidebarStudent(){
-  const side = el('aside', { class:'sidebar' });
+  const side = el('aside', { class:'sidebar' + (App.sidebarCollapsed ? ' collapsed' : '') });
+  side.appendChild(sidebarToggleButton());
   const me = currentStudent();
   side.appendChild(el('div', { class:'brand' },
     el('div', { class:'brand-logo' }, 'V3'),
@@ -4765,6 +4832,9 @@ function renderSidebarStudent(){
     el('span', null, 'AI 學習助教')
   ));
   side.appendChild(sideItem('me','👤','個人'));
+  side.appendChild(el('div', { class:'side-section-title' }, '其他'));
+  side.appendChild(sideItem('install','📲','安裝 App'));
+  side.appendChild(sideItem('help','📖','使用說明'));
 
   side.appendChild(el('div', { style:{flex:'1'} }));
   side.appendChild(el('div', { class:'card', style:{padding:'10px'} },
@@ -4793,12 +4863,14 @@ function renderTopbar(role){
     groups:'👥 分組管理', attreport:'📊 出席報表',
     feedback:'🗳️ 學生回饋',
     picker:'🎲 隨機抽籤', timer:'⏰ 課堂計時器',
-    appearance:'🎨 外觀設定'
+    appearance:'🎨 外觀設定',
+    help:'📖 使用說明', install:'📲 安裝 App'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
     speer:'⭐ 我的互評', sgroups:'👥 我的小組', selfeval:'✍️ 學期自評',
-    sfeedback:'📝 課程回饋'
+    sfeedback:'📝 課程回饋',
+    help:'📖 使用說明', install:'📲 安裝 App'
   };
   const t = titles[App.view] || (role === 'teacher' ? '課程管理' : '學生');
   bar.appendChild(el('h1', null, t));
@@ -7556,6 +7628,13 @@ function rSettings(content){
   // batch 3: 通知設定
   content.appendChild(renderNotifyCard());
 
+  // 安裝 App / QR 卡片
+  try {
+    const installWrap = el('div', { style:{marginTop:'12px'} });
+    installWrap.appendChild(renderInstallCard());
+    content.appendChild(installWrap);
+  } catch(e){ console.warn('[install card]', e); }
+
   // danger zone
   const card4 = el('div', { class:'card', style:{marginTop:'12px',borderColor:'var(--danger)'} });
   card4.appendChild(el('h3', { style:{color:'var(--danger)'} }, '⚠️ 危險區'));
@@ -7775,6 +7854,28 @@ function rCheckIn(content){
   lc.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '送出申請後等待老師批准'));
   lc.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'10px'}, onclick:()=> studentRequestLeave() }, '📆 申請請假'));
   content.appendChild(lc);
+
+  // 安裝 App 提醒（學生首次登入後顯示，可關閉）
+  try {
+    if(!localStorage.getItem('cms_v3_install_dismissed')){
+      const hint = el('div', { class:'card', style:{marginTop:'14px',background:'var(--primary-soft)',borderColor:'var(--primary)'} },
+        el('div', { class:'flex-between', style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'8px',flexWrap:'wrap'} },
+          el('div', null,
+            el('div', { style:{fontWeight:'700'} }, '📲 把這個加到手機桌面'),
+            el('div', { class:'small' }, '下次直接點圖示開啟，更方便')
+          ),
+          el('div', { style:{display:'flex',gap:'4px'} },
+            el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('install') }, '看說明'),
+            el('button', { class:'btn btn-sm', onclick:()=> {
+              try { localStorage.setItem('cms_v3_install_dismissed','1'); } catch(e){}
+              rerender();
+            }}, '不再提醒')
+          )
+        )
+      );
+      content.appendChild(hint);
+    }
+  } catch(e){}
 }
 
 function doStudentCheckIn(){
@@ -9958,7 +10059,30 @@ Object.assign(App, {
   cmdOpen: false,
   cmdHandler: null,
   pwaPrompt: null,        // beforeinstallprompt event
+  sidebarCollapsed: false, // 側邊欄收合狀態
 });
+
+// 還原側邊欄收合狀態
+try { App.sidebarCollapsed = localStorage.getItem('cms_v3_sb_collapsed') === '1'; } catch(e){}
+
+function applySidebarCollapse(){
+  const sb = document.querySelector('.sidebar');
+  const app = document.querySelector('.app');
+  if(sb){
+    if(App.sidebarCollapsed) sb.classList.add('collapsed');
+    else sb.classList.remove('collapsed');
+  }
+  if(app){
+    if(App.sidebarCollapsed) app.classList.add('sb-collapsed');
+    else app.classList.remove('sb-collapsed');
+  }
+}
+
+function toggleSidebar(){
+  App.sidebarCollapsed = !App.sidebarCollapsed;
+  try { localStorage.setItem('cms_v3_sb_collapsed', App.sidebarCollapsed ? '1':'0'); } catch(e){}
+  applySidebarCollapse();
+}
 
 /* ════════════════════════════════════════════════════════════
    PHASE 3 ▒▒  WORKSPACE MANAGEMENT (multi-classroom isolation)
@@ -13446,6 +13570,9 @@ function cmdItems(){
       { i:'⚙️', t:'設定', h:'settings', go: ()=> go('settings') },
       { i:'🎨', t:'外觀設定（主題色 / 字型 / 密度）', h:'appearance theme font size density radius', go: ()=> go('appearance') },
       { i:'☁️', t:'Firebase 同步', h:'firebase', go: ()=> go('firebase') },
+      { i:'📖', t:'使用說明', h:'help guide manual faq 教學 指南', go: ()=> go('help') },
+      { i:'📲', t:'安裝 App / QR Code', h:'install app pwa qr 安裝', go: ()=> go('install') },
+      { i:'🗂', t:'收合/展開側邊欄', h:'sidebar collapse toggle 收合', go: toggleSidebar },
       { i:'🌓', t:'切換亮/暗主題', h:'theme', go: toggleTheme },
       { i:'⎋', t:'登出', h:'logout', go: doLogout },
     ];
@@ -13462,6 +13589,9 @@ function cmdItems(){
       { i:'📢', t:'公告', h:'sann', go: ()=> go('sann') },
       { i:'🤖', t:'AI 學習助教', h:'AI', go: ()=> openAIAssistant() },
       { i:'👤', t:'個人', h:'me', go: ()=> go('me') },
+      { i:'📖', t:'使用說明', h:'help guide manual faq 教學 指南', go: ()=> go('help') },
+      { i:'📲', t:'安裝 App / QR Code', h:'install app pwa qr 安裝', go: ()=> go('install') },
+      { i:'🗂', t:'收合/展開側邊欄', h:'sidebar collapse toggle 收合', go: toggleSidebar },
       { i:'🌓', t:'切換亮/暗主題', h:'theme', go: toggleTheme },
       { i:'⎋', t:'登出', h:'logout', go: doLogout },
     ];
@@ -13675,6 +13805,8 @@ function rerender(){
       else if(v === 'picker') rRandomPicker(content);  // batch 4
       else if(v === 'timer') rTimer(content);          // batch 4
       else if(v === 'appearance') rAppearance(content);// 外觀設定
+      else if(v === 'help') rHelp(content);
+      else if(v === 'install') rInstall(content);
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -13691,6 +13823,8 @@ function rerender(){
       else if(v === 'sgroups') rSGroups(content);
       else if(v === 'selfeval') rSelfEval(content);
       else if(v === 'sfeedback') rSFeedback(content); // batch 2
+      else if(v === 'help') rHelp(content);
+      else if(v === 'install') rInstall(content);
       else { App.view = 'checkin'; rCheckIn(content); }
     }
   } catch(e){
@@ -15952,6 +16086,219 @@ function resetTimer(){
   App._timerElapsed = 0;
   App._timerRunning = false;
   if(App._timerTick){ clearInterval(App._timerTick); App._timerTick = null; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   HELP PAGE (使用說明) — 老師端 / 學生端共用
+   ──────────────────────────────────────────────────────────── */
+function rHelp(content){
+  content.appendChild(el('h1', null, '📖 使用說明'));
+  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
+    '快速上手指南 · 點各區塊展開'));
+
+  const isTeacher = App.session && App.session.role === 'teacher';
+  const sections = [];
+
+  // 1. 快速開始
+  sections.push({ icon:'🚀', title:'快速開始', items: isTeacher ? [
+    { q:'我是新老師，從哪開始？',
+      a:'1. 進「👥 學生名單」→ ⚡ 快速建立學生（只要姓名+學號）\n2. 進「📋 作業管理」→ 建立第一份作業\n3. 進「📱 QR 點名」→ 投影給學生掃' },
+    { q:'怎麼改自己的密碼？',
+      a:'⚙️ 設定 → 個人資料 → 編輯 → 設定新密碼' },
+    { q:'怎麼匯入學生 CSV？',
+      a:'👥 學生名單 → 📥 CSV 匯入 → 選檔案（需有 姓名/學號/班級 欄位）' }
+  ] : [
+    { q:'第一次怎麼登入？',
+      a:'回登入畫面 → 選班級 → 選自己 → 預設密碼是學號最後 4 碼' },
+    { q:'怎麼簽到？',
+      a:'進「✋ 我要簽到」→ 點大圓按鈕（或請老師投影 QR 用手機相機掃）' },
+    { q:'怎麼繳作業？',
+      a:'進「📤 作業」→ 點作業 → 上傳檔案或貼連結 → 送出' }
+  ]});
+
+  // 2. 出席相關
+  sections.push({ icon:'✅', title:'出席與簽到', items: isTeacher ? [
+    { q:'QR 點名怎麼用？',
+      a:'進「📱 QR 點名」→ 投影 QR Code → 學生用手機相機掃 → 自動簽到\n注意：5 分鐘自動換碼防偽造' },
+    { q:'學生忘記簽到？',
+      a:'進「✅ 出席管理」→ 找該學生 → 點「✓ 補簽」' },
+    { q:'學生請假？',
+      a:'進「📆 請假管理」→ 看待審 → 核准/拒絕' }
+  ] : [
+    { q:'我忘記簽到？',
+      a:'請聯絡老師補簽，或下次提早簽到' },
+    { q:'怎麼請假？',
+      a:'進「📆 請假」→ 填日期+原因 → 送出（等老師審核）' },
+    { q:'怎麼看自己的出席率？',
+      a:'進「📅 出席紀錄」' }
+  ]});
+
+  // 3. 作業相關
+  sections.push({ icon:'📋', title:'作業與成績', items: isTeacher ? [
+    { q:'怎麼派發作業給特定班級？',
+      a:'新增作業時 → 派發對象選「特定班級」→ 勾選班級' },
+    { q:'怎麼批改作業？',
+      a:'進「📥 繳交紀錄」→ 點繳交 → 評分 + 評語\n「儲存並下一位」可連續批改' },
+    { q:'學期成績怎麼計算？',
+      a:'進「🎯 學期成績」→ ⚖ 加權設定（出席/作業/期中/期末 各 %）' }
+  ] : [
+    { q:'怎麼看作業？',
+      a:'進「📤 作業」→ 看到老師指派的作業（紅色=即將到期）' },
+    { q:'怎麼看成績？',
+      a:'進「🎯 我的成績」→ 看總分+排名+各項細項' }
+  ]});
+
+  // 4. 訊息與通知
+  sections.push({ icon:'💬', title:'訊息與通知', items: [
+    { q:'怎麼傳私訊？',
+      a: isTeacher ? '進「💬 訊息」→ 🔒 私訊 tab → 選學生 → 對話' : '進「💬 訊息」→ 🔒 與老師對話 tab → 直接輸入' },
+    { q:'怎麼開啟桌面通知？',
+      a:'⚙️ 設定 → 🔔 通知設定 → 啟用通知 → 選通知類型' },
+    { q:'訊息可以傳檔案嗎？',
+      a:'可以！訊息輸入框旁有 📎 按鈕，圖片自動內嵌縮圖' }
+  ]});
+
+  // 5. 個人化
+  sections.push({ icon:'🎨', title:'個人化', items: [
+    { q:'怎麼改主題色？',
+      a:'⚙️ 設定 → 🎨 開啟外觀設定中心 → 12 色主題色 / 自訂顏色' },
+    { q:'怎麼換背景圖？',
+      a:'⚙️ 設定 → 外觀設定中心 → 背景設定 → 上傳圖片或選色票' },
+    { q:'怎麼改頭像？',
+      a: isTeacher ? '⚙️ 設定 → 個人資料 → ✏️ 編輯' : '👤 個人 → ✏️ 編輯資料 → 頭像上傳' }
+  ]});
+
+  // 6. 進階功能
+  sections.push({ icon:'⚡', title:'進階技巧', items: [
+    { q:'有快捷鍵嗎？',
+      a:'按 Ctrl+K（Mac: Cmd+K）開啟命令面板，輸入功能名稱直接跳轉' },
+    { q:'怎麼安裝成 App？',
+      a:'手機/電腦瀏覽器網址列旁有「安裝」按鈕，或進⚙️設定看「📲 安裝 App」' },
+    { q:'資料會不會掉？',
+      a:'系統每天自動備份 7 天，也可⚙️設定→備份→手動匯出 JSON' },
+    isTeacher ? { q:'怎麼即時跨裝置同步？',
+      a:'⚙️ 設定 → ☁️ Firebase 設定 → 貼上 Firebase Config（5 分鐘設定一次永久同步）' } : null
+  ].filter(Boolean) });
+
+  // 渲染
+  sections.forEach(sec => {
+    const card = el('div', { class:'card', style:{marginBottom:'10px'} });
+    const header = el('div', { style:{display:'flex',alignItems:'center',gap:'10px',cursor:'pointer',padding:'4px'},
+      onclick: e => {
+        const body = card.querySelector('.help-body');
+        body.style.display = body.style.display === 'none' ? 'block' : 'none';
+        const chev = header.querySelector('.chev');
+        chev.style.transform = body.style.display === 'none' ? 'rotate(-90deg)' : 'rotate(0deg)';
+      }
+    });
+    header.appendChild(el('span', { style:{fontSize:'24px'} }, sec.icon));
+    header.appendChild(el('span', { class:'chev', style:{fontSize:'14px',transition:'transform .2s'} }, '▼'));
+    header.appendChild(el('span', { style:{fontWeight:'700',fontSize:'16px'} }, sec.title));
+    card.appendChild(header);
+
+    const body = el('div', { class:'help-body', style:{marginTop:'10px'} });
+    sec.items.forEach(it => {
+      body.appendChild(el('div', { style:{background:'var(--surface-2)',padding:'10px 12px',borderRadius:'8px',marginBottom:'6px'} },
+        el('div', { style:{fontWeight:'600',marginBottom:'4px'} }, '❓ ' + it.q),
+        el('div', { class:'small', style:{lineHeight:'1.7',whiteSpace:'pre-wrap'} }, it.a)
+      ));
+    });
+    card.appendChild(body);
+    content.appendChild(card);
+  });
+
+  // 聯絡與支援
+  content.appendChild(el('div', { class:'card', style:{marginTop:'14px',background:'var(--primary-soft)',borderColor:'var(--primary)'} },
+    el('h3', null, '💡 找不到答案？'),
+    el('div', { class:'small' }, '按 Ctrl+K（Mac: Cmd+K）開啟命令面板搜尋任何功能，或聯絡老師詢問')
+  ));
+}
+
+/* ════════════════════════════════════════════════════════════
+   INSTALL PAGE (安裝 App / QR Code)
+   ──────────────────────────────────────────────────────────── */
+function renderInstallCard(){
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '📲 安裝為 App / 學生加入'));
+  card.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
+    '把這個網站加到手機桌面，就能像 App 一樣使用'));
+
+  // 兩欄：QR + 連結
+  const row = el('div', { class:'grid grid-2', style:{gap:'14px',marginBottom:'10px'} });
+
+  // QR Code
+  const url = location.origin + location.pathname;
+  const qrSide = el('div', { style:{textAlign:'center'} });
+  const qrImg = el('img', {
+    src: 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(url),
+    alt: 'QR Code',
+    style:{maxWidth:'200px',width:'100%',background:'#fff',padding:'8px',borderRadius:'8px',border:'1px solid var(--border)'}
+  });
+  qrSide.appendChild(qrImg);
+  qrSide.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} }, '用手機相機掃 →'));
+  row.appendChild(qrSide);
+
+  // 操作說明
+  const textSide = el('div', null,
+    el('div', { style:{fontWeight:'700',marginBottom:'8px'} }, '📱 安裝步驟：'),
+    el('div', { class:'small', style:{lineHeight:'1.8'} },
+      el('div', { style:{fontWeight:'600'} }, '【iPhone Safari】'),
+      el('div', null, '1. 用 Safari 開此網址'),
+      el('div', null, '2. 點底部「分享」'),
+      el('div', null, '3. 選「加入主畫面」'),
+      el('div', { style:{marginTop:'10px',fontWeight:'600'} }, '【Android Chrome】'),
+      el('div', null, '1. 點右上「⋮」'),
+      el('div', null, '2. 選「加入主畫面」'),
+      el('div', { style:{marginTop:'10px',fontWeight:'600'} }, '【電腦】'),
+      el('div', null, '1. 網址列旁有「安裝」圖示'),
+      el('div', null, '2. 點擊即可')
+    )
+  );
+  row.appendChild(textSide);
+  card.appendChild(row);
+
+  // URL + copy button
+  const urlBox = el('div', { class:'flex', style:{gap:'6px',padding:'8px',background:'var(--surface-2)',borderRadius:'8px',alignItems:'center'} });
+  const urlInput = el('input', { class:'input', value:url, readonly:true, style:{flex:'1',fontFamily:'monospace',fontSize:'12px'} });
+  urlBox.appendChild(urlInput);
+  urlBox.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> {
+    try {
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(url).then(()=> toast('已複製連結','success'));
+      } else {
+        urlInput.select();
+        document.execCommand('copy');
+        toast('已複製連結','success');
+      }
+    } catch(e){ toast('複製失敗，請手動選取','warn'); }
+  }}, '📋 複製'));
+  card.appendChild(urlBox);
+
+  // Native install button (if available)
+  if(App.pwaPrompt){
+    card.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'},
+      onclick: async ()=> {
+        try {
+          App.pwaPrompt.prompt();
+          await App.pwaPrompt.userChoice;
+        } catch(e){}
+        App.pwaPrompt = null;
+        toast('安裝指令已送出','success');
+      }
+    }, '⬇ 立即安裝'));
+  } else {
+    card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'10px',textAlign:'center'} },
+      '💡 若瀏覽器支援，可從網址列旁的安裝按鈕直接安裝'));
+  }
+
+  return card;
+}
+
+function rInstall(content){
+  content.appendChild(el('h1', null, '📲 安裝 App'));
+  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
+    '把系統加到主畫面 → 隨時一鍵打開，跨網路也能用'));
+  content.appendChild(renderInstallCard());
 }
 
 // expose for debugging
