@@ -1961,15 +1961,27 @@ function initials(name){
    ──────────────────────────────────────────────────────────── */
 async function hashPassword(plain){
   if(plain == null || plain === '') return '';
-  try {
-    const enc = new TextEncoder();
-    const data = enc.encode('cms-v3-salt-' + plain);
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(buf))
-      .map(b => b.toString(16).padStart(2,'0')).join('');
-  } catch(e){
-    // fallback：crypto.subtle 不可用時，採用簡易雜湊（不安全但能跑）
-    return 'plain:' + String(plain);
+  if(!(typeof crypto !== 'undefined' && crypto && crypto.subtle && typeof crypto.subtle.digest === 'function')){
+    // 安全環境不足：絕不靜默存明文。拋例外讓呼叫端顯示提示。
+    const err = new Error('安全環境不足：請改用 HTTPS 開啟此網站（不能使用 file:// 或 HTTP），密碼才能安全雜湊儲存。');
+    err.code = 'NO_CRYPTO_SUBTLE';
+    throw err;
+  }
+  const enc = new TextEncoder();
+  const data = enc.encode('cms-v3-salt-' + plain);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// 友善地把 hashPassword 失敗顯示給使用者（呼叫端可直接用此 wrapper）
+async function hashPasswordSafe(plain){
+  try { return { ok:true, value: await hashPassword(plain) }; }
+  catch(e){
+    if(typeof toast === 'function'){
+      toast('🚨 ' + (e && e.message ? e.message : '密碼雜湊失敗，請改用 HTTPS'), 'danger', 6000);
+    }
+    return { ok:false, error: e };
   }
 }
 
@@ -1979,10 +1991,25 @@ async function verifyPassword(plain, stored){
   const s = String(stored);
   // 已是 SHA-256 雜湊（64 字元 hex）
   if(/^[0-9a-f]{64}$/i.test(s)){
-    const h = await hashPassword(plain);
-    return h === s.toLowerCase();
+    try {
+      const h = await hashPassword(plain);
+      return h === s.toLowerCase();
+    } catch(e){
+      // crypto.subtle 不可用 → 無法驗證 hash
+      if(typeof toast === 'function'){
+        toast('🚨 ' + (e && e.message ? e.message : '無法驗證密碼，請改用 HTTPS'), 'danger', 6000);
+      }
+      return false;
+    }
   }
-  // 否則為舊版明文 → 直接比對（向後相容）
+  // 偵測到 'plain:' 開頭 → 舊版明文存檔（極不安全）
+  if(s.indexOf('plain:') === 0){
+    if(typeof toast === 'function'){
+      toast('⚠️ 此帳號密碼仍為明文，登入後請立即修改密碼', 'warn', 6000);
+    }
+    return String(plain) === s.slice(6);
+  }
+  // 否則為舊版明文 → 直接比對（向後相容；登入後會自動升級為 hash）
   return String(plain) === s;
 }
 
@@ -2138,14 +2165,50 @@ function dbKey(){
 }
 function saveDB(){
   if(!App.db) return;
-  try { localStorage.setItem(dbKey(), JSON.stringify(App.db)); } catch(e){
-    // quota: try without messages/feeds
-    try {
-      const trimmed = JSON.parse(JSON.stringify(App.db));
-      trimmed.messages = trimmed.messages.slice(-200);
-      trimmed.feeds = trimmed.feeds.slice(-50);
-      localStorage.setItem(dbKey(), JSON.stringify(trimmed));
-    } catch(e2){}
+  // batch 1：保險。確保 feeds 欄位存在，避免 .slice 失敗
+  if(!Array.isArray(App.db.feeds)) App.db.feeds = [];
+  if(!Array.isArray(App.db.feedbacks)) App.db.feedbacks = [];
+  if(!Array.isArray(App.db.messages)) App.db.messages = [];
+  try {
+    const json = JSON.stringify(App.db);
+    localStorage.setItem(dbKey(), json);
+  } catch(e){
+    const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 ||
+      e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 1014);
+    if(isQuota){
+      console.warn('[saveDB] localStorage 容量已滿', e);
+      let size = 0;
+      try { size = JSON.stringify(App.db).length; } catch(_){}
+      const mb = (size/1024/1024).toFixed(2);
+      // 明顯告警（不再悄悄截斷）
+      if(typeof toast === 'function'){
+        toast('🚨 儲存空間已滿（約 ' + mb + ' MB）！請立即匯出備份','danger', 10000);
+      }
+      // 降級嘗試：只把附件 metadata 留下，並截斷較舊資料，但記下警告
+      try {
+        const lite = JSON.parse(JSON.stringify(App.db));
+        if(Array.isArray(lite.messages) && lite.messages.length > 500){
+          lite.messages = lite.messages.slice(-500);
+        }
+        if(Array.isArray(lite.feeds) && lite.feeds.length > 100){
+          lite.feeds = lite.feeds.slice(-100);
+        }
+        lite._truncWarning = '⚠️ 儲存空間曾達上限，部分舊資料已暫時隱藏。請盡快匯出備份後清理舊資料。';
+        lite._truncAt = Date.now();
+        localStorage.setItem(dbKey(), JSON.stringify(lite));
+        // 自動觸發匯出備份（如果函式存在）
+        if(typeof exportFullJSON === 'function'){
+          setTimeout(()=> { try { exportFullJSON(); } catch(_){} }, 800);
+        } else if(typeof exportAll === 'function'){
+          setTimeout(()=> { try { exportAll(); } catch(_){} }, 800);
+        }
+      } catch(e2){
+        console.error('[saveDB] 降級寫入也失敗', e2);
+        try { alert('💥 緊急：localStorage 完全寫不入，請立即手動匯出資料以免遺失！'); } catch(_){}
+      }
+    } else {
+      console.error('[saveDB] 未預期錯誤', e);
+    }
   }
 }
 function loadDB(){
@@ -4043,6 +4106,12 @@ function quickContinueAsLast(){
       saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
       toast('歡迎回來，' + a.name + '！','success');
       go('overview');
+      // batch 1：仍要檢查老師是否標記為 mustChangePw
+      try {
+        if(a.mustChangePw){
+          setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){} }, 500);
+        }
+      } catch(_){}
       return;
     }
     // otherwise prompt for password
@@ -4284,6 +4353,13 @@ function renderLoginTeacherStage(){
     App._loginStage = null; App._loginPrefill = null;
     toast('歡迎，' + a.name + '！','success');
     go('overview');
+    // batch 1 強化：若是 admin/admin123 預設組合 或 帳號標記 mustChangePw → 強制改密碼
+    try {
+      const isDefaultPair = (a.username === 'admin' && pw === 'admin123');
+      if(isDefaultPair || a.mustChangePw){
+        setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){} }, 500);
+      }
+    } catch(_){}
   };
 
   const btnRow = el('div', { class:'flex', style:{marginTop:'10px'} },
@@ -4719,7 +4795,7 @@ function finishStudentLogin(s){
   go('checkin');
 }
 
-// 強制改密碼（無法關閉的 modal）
+// 強制改密碼（無法關閉的 modal）— batch 1 強化：複雜度檢查
 function forceChangePassword(studentId){
   const s = App.db.students.find(x => x.id === studentId);
   if(!s) return;
@@ -4731,7 +4807,7 @@ function forceChangePassword(studentId){
     '🧑‍🎓 ' + s.name + (s.sid ? '（學號 ' + s.sid + '）' : '')));
 
   const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, '新密碼（至少 4 個字元）'));
+  f1.appendChild(el('label', { class:'label' }, '新密碼（至少 6 個字元）'));
   const wrap1 = el('div', { class:'pw-input-wrap' });
   const i1 = el('input', { class:'input', type:'password', placeholder:'新密碼' });
   const tog1 = el('button', { type:'button', class:'pw-toggle', onclick: ()=> {
@@ -4751,22 +4827,34 @@ function forceChangePassword(studentId){
   const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
   m.root.appendChild(err);
 
+  // batch 1：禁止的密碼清單
+  const forbidden = new Set([
+    'admin', 'admin123', 'password', '123456', '12345678', 'qwerty', '000000', '111111',
+    String(s.sid||'0000').slice(-4),   // 學號末 4 碼
+    String(s.sid||''),                  // 完整學號
+    String(s.name||'').toLowerCase()    // 姓名
+  ]);
+
   const submit = async ()=> {
     const p1 = i1.value;
     const p2 = i2.value;
-    if(!p1 || p1.length < 4){
-      err.textContent = '密碼至少 4 個字元'; err.style.display='block'; return;
+    err.style.display='none';
+    if(!p1 || p1.length < 6){
+      err.textContent = '密碼至少 6 個字元'; err.style.display='block'; return;
     }
     if(p1 !== p2){
       err.textContent = '兩次密碼不一致'; err.style.display='block'; return;
     }
-    // 不能與預設密碼相同
-    const defaultPw = String(s.sid||'0000').slice(-4);
-    if(p1 === defaultPw){
-      err.textContent = '不能使用預設密碼，請設定一個新的'; err.style.display='block'; return;
+    if(forbidden.has(p1) || forbidden.has(p1.toLowerCase())){
+      err.textContent = '密碼太簡單（不可為預設密碼/學號/姓名/常見密碼）'; err.style.display='block'; return;
     }
     // 寫入（雜湊）
-    s.password = await hashPassword(p1);
+    const hashed = await hashPasswordSafe(p1);
+    if(!hashed.ok){
+      err.textContent = '密碼雜湊失敗，請改用 HTTPS 開啟此網站';
+      err.style.display='block'; return;
+    }
+    s.password = hashed.value;
     s.mustChangePw = false;
     s.passwordChangedAt = Date.now();
     saveDB();
@@ -4782,6 +4870,78 @@ function forceChangePassword(studentId){
 
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '設定密碼並進入'));
+  m.root.appendChild(actions);
+
+  setTimeout(()=> i1.focus(), 100);
+}
+
+// batch 1：老師首次以預設密碼 admin/admin123 登入時，強制改密碼
+function forceChangeTeacherPassword(accountId){
+  const a = App.db.accounts.find(x => x.id === accountId);
+  if(!a) return;
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '🔐 老師首次登入：請更新預設密碼'));
+  m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'14px',lineHeight:'1.6'} },
+    '系統偵測到你仍在使用「admin / admin123」預設密碼。為避免他人非法登入，' +
+    '請立即設定一個只有你知道的新密碼。'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '👤 帳號：' + a.username));
+
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '新密碼（至少 6 個字元）'));
+  const wrap1 = el('div', { class:'pw-input-wrap' });
+  const i1 = el('input', { class:'input', type:'password', placeholder:'新密碼' });
+  const tog1 = el('button', { type:'button', class:'pw-toggle', onclick: ()=> {
+    i1.type = i1.type === 'password' ? 'text' : 'password';
+    tog1.textContent = i1.type === 'password' ? '👁' : '🙈';
+  }}, '👁');
+  wrap1.appendChild(i1); wrap1.appendChild(tog1);
+  f1.appendChild(wrap1);
+  m.root.appendChild(f1);
+
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '確認密碼'));
+  const i2 = el('input', { class:'input', type:'password', placeholder:'再輸入一次' });
+  f2.appendChild(i2);
+  m.root.appendChild(f2);
+
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
+  m.root.appendChild(err);
+
+  const forbidden = new Set([
+    'admin', 'admin123', 'password', '123456', '12345678', 'qwerty',
+    '000000', '111111', a.username
+  ]);
+
+  const submit = async ()=> {
+    const p1 = i1.value;
+    const p2 = i2.value;
+    err.style.display='none';
+    if(!p1 || p1.length < 6){ err.textContent='密碼至少 6 個字元'; err.style.display='block'; return; }
+    if(p1 !== p2){ err.textContent='兩次密碼不一致'; err.style.display='block'; return; }
+    if(forbidden.has(p1) || forbidden.has(p1.toLowerCase())){
+      err.textContent='密碼太簡單（不可為 admin123/帳號/常見密碼）'; err.style.display='block'; return;
+    }
+    const hashed = await hashPasswordSafe(p1);
+    if(!hashed.ok){
+      err.textContent='密碼雜湊失敗，請改用 HTTPS 開啟此網站';
+      err.style.display='block'; return;
+    }
+    a.password = hashed.value;
+    a.mustChangePw = false;
+    a.passwordChangedAt = Date.now();
+    saveDB();
+    try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts); } catch(_){}
+    if(typeof logOp === 'function') logOp('passwordChange', '老師 ' + a.username + ' 更新預設密碼');
+    m.close();
+    toast('✅ 密碼已更新，請妥善保管！','success');
+  };
+
+  i1.addEventListener('keydown', e => { if(e.key === 'Enter') i2.focus(); });
+  i2.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '設定新密碼'));
   m.root.appendChild(actions);
 
   setTimeout(()=> i1.focus(), 100);
@@ -7952,6 +8112,110 @@ function rFirebase(content){
   card2.appendChild(el('div', { class:'mono', style:{padding:'12px',background:'var(--surface-2)',borderRadius:'8px',fontSize:'18px',textAlign:'center'} }, App.cfg?.roomCode || '—'));
   card2.appendChild(el('div', { class:'small muted', style:{marginTop:'8px'} }, '提示：學生也要設定相同的 Firebase（或老師可分享連結）'));
   content.appendChild(card2);
+
+  /* ── batch 1 安全強化：Firebase Rules 範本與一鍵套用 ── */
+  const warnCard = el('div', { class:'card', style:{marginTop:'12px',background:'var(--warn-soft)',borderColor:'var(--warn)'} });
+  warnCard.appendChild(el('h3', null, '⚠️ Firebase 安全規則（重要）'));
+  warnCard.appendChild(el('p', { class:'small', style:{lineHeight:'1.7'} },
+    '預設 Firebase Realtime Database 允許「任何人讀寫」，這代表只要知道你的 databaseURL，' +
+    '任何人都能讀取或竄改你的學生資料、出席紀錄、密碼。'));
+  warnCard.appendChild(el('p', { style:{fontWeight:'700',color:'var(--warn)',marginTop:'8px'} },
+    '🚨 強烈建議立即套用以下安全規則！'));
+  content.appendChild(warnCard);
+
+  const myRoom = (App.cfg && App.cfg.roomCode) || 'YOUR_ROOM_CODE';
+  // 基本版：只限定本房間（不開放給其他房間讀寫）
+  const rulesTemplate = '{\n' +
+    '  "rules": {\n' +
+    '    "cms-v3": {\n' +
+    '      "$roomCode": {\n' +
+    '        ".read": true,\n' +
+    '        ".write": true\n' +
+    '      }\n' +
+    '    }\n' +
+    '  }\n' +
+    '}';
+  // 進階版：需 Firebase Authentication
+  const rulesTemplateSecure = '{\n' +
+    '  "rules": {\n' +
+    '    "cms-v3": {\n' +
+    '      "$roomCode": {\n' +
+    '        ".read": "auth != null",\n' +
+    '        ".write": "auth != null"\n' +
+    '      }\n' +
+    '    }\n' +
+    '  }\n' +
+    '}';
+
+  const rulesCard = el('div', { class:'card', style:{marginTop:'12px'} });
+  rulesCard.appendChild(el('h3', null, '📜 套用步驟'));
+  rulesCard.appendChild(el('ol', { style:{paddingLeft:'20px',lineHeight:'1.8',margin:'8px 0'} },
+    el('li', null, '打開 Firebase Console → Realtime Database'),
+    el('li', null, '點擊上方「規則」分頁'),
+    el('li', null, '貼上下方 JSON 並按「發佈」儲存')
+  ));
+
+  // 標準規則（建議第一步）
+  rulesCard.appendChild(el('div', { class:'small', style:{fontWeight:'700',marginTop:'10px',marginBottom:'4px'} },
+    '📘 標準規則（推薦給絕大多數使用者）'));
+  rulesCard.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} },
+    '功能：限制只能在 /cms-v3/<roomCode> 路徑下讀寫，外部根節點不可被刷取。'));
+  const ta1 = el('textarea', {
+    class:'textarea', rows:9, readonly:true,
+    style:{fontFamily:'monospace',fontSize:'12px',width:'100%'}
+  });
+  ta1.value = rulesTemplate;
+  rulesCard.appendChild(ta1);
+  rulesCard.appendChild(el('div', { class:'flex', style:{marginTop:'6px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-primary', onclick: ()=> {
+      try {
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(rulesTemplate);
+          toast('已複製規則到剪貼簿','success');
+        } else {
+          ta1.select(); document.execCommand('copy');
+          toast('已複製','success');
+        }
+      } catch(e){ toast('複製失敗，請手動複製','warn'); }
+    }}, '📋 複製標準規則'),
+    el('button', { class:'btn', onclick: ()=> {
+      try {
+        const cfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+        if(cfg && cfg.projectId){
+          window.open('https://console.firebase.google.com/project/' + encodeURIComponent(cfg.projectId) + '/database/rules', '_blank');
+        } else {
+          window.open('https://console.firebase.google.com/', '_blank');
+        }
+      } catch(e){ window.open('https://console.firebase.google.com/', '_blank'); }
+    }}, '🔗 打開 Firebase Console')
+  ));
+
+  // 進階規則
+  rulesCard.appendChild(el('div', { class:'small', style:{fontWeight:'700',marginTop:'16px',marginBottom:'4px'} },
+    '🔐 進階規則（需先啟用 Firebase Authentication）'));
+  rulesCard.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} },
+    '功能：必須登入過 Firebase Auth 才能讀寫。本系統目前未整合 Firebase Auth，僅供進階使用者參考。'));
+  const ta2 = el('textarea', {
+    class:'textarea', rows:9, readonly:true,
+    style:{fontFamily:'monospace',fontSize:'12px',width:'100%'}
+  });
+  ta2.value = rulesTemplateSecure;
+  rulesCard.appendChild(ta2);
+  rulesCard.appendChild(el('button', { class:'btn', style:{marginTop:'6px'}, onclick: ()=> {
+    try {
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(rulesTemplateSecure);
+        toast('已複製進階規則','success');
+      } else {
+        ta2.select(); document.execCommand('copy');
+        toast('已複製','success');
+      }
+    } catch(e){ toast('複製失敗','warn'); }
+  }}, '📋 複製進階規則'));
+
+  rulesCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'12px',lineHeight:'1.6'} },
+    '💡 提示：你目前的教室代碼是 「' + myRoom + '」。即使套用了規則，仍然建議定期更換複雜的 roomCode（含隨機字母數字），以免被人猜中。'));
+  content.appendChild(rulesCard);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -14228,86 +14492,196 @@ function rerender(){
    BOOT
    ──────────────────────────────────────────────────────────── */
 function boot(){
-  // ═══ 老師密碼重設專用 URL（batch 1：加上驗證問題）═══
-  // 訪問 ?adminreset=1 → 需先回答驗證問題才能重設
+  // ═══ 老師密碼重設專用 URL（batch 1 強化：身分驗證 + 失敗鎖定）═══
+  // 訪問 ?adminreset=1 →
+  //   ・首次使用（無非預設帳號）：直接重設（救急用）
+  //   ・否則：必須提供任一現有老師帳號密碼 或 Firebase 同步代碼
+  //   ・連續 3 次失敗 → 鎖定 5 分鐘
   try {
     if(location.search.indexOf('adminreset=1') >= 0){
-      // 驗證問題：請輸入今天日期 YYYY-MM-DD
-      const todayStr = (function(){
-        const d = new Date();
-        return d.getFullYear() + '-' +
-               String(d.getMonth()+1).padStart(2,'0') + '-' +
-               String(d.getDate()).padStart(2,'0');
-      })();
-      const answer = prompt(
-        '🔒 安全驗證\n\n' +
-        '為防止他人惡意重設老師密碼，請輸入「今天的日期」：\n' +
-        '格式：YYYY-MM-DD（例如：' + todayStr + '）\n\n' +
-        '如果你不知道，請改用老師登入頁的「🔑 忘記密碼？」功能。'
-      );
-      if(answer === null){
-        // 取消 → 不重設，導回主頁
-        location.replace(location.pathname);
-        return;
-      }
-      if((answer || '').trim() !== todayStr){
-        document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
-          + '<div style="font-size:64px;margin-bottom:20px">🚫</div>'
-          + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">驗證失敗</h1>'
-          + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">日期格式錯誤或輸入錯誤。<br>請改用老師登入頁的「🔑 忘記密碼？」功能。</div>'
-          + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 回到登入頁</a>'
-          + '</div>';
-        return;
-      }
-      // 驗證通過 → 執行重設
-      // 解除 SW + 清快取（確保看新版）
-      if('serviceWorker' in navigator){
-        navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
-      }
-      if('caches' in window){
-        caches.keys().then(names => names.forEach(n => caches.delete(n)));
-      }
-      // 找出所有 v3 db key 並重設 admin（密碼存「明文 admin123」以便雜湊向後相容驗證）
-      let resetCount = 0;
-      for(let i = 0; i < localStorage.length; i++){
-        const k = localStorage.key(i);
-        if(k && k.indexOf('cms_v3_db_') === 0){
-          try {
-            const db = JSON.parse(localStorage.getItem(k));
-            db.accounts = db.accounts || [];
-            let acc = db.accounts.find(a => a.username === 'admin');
-            if(!acc) acc = db.accounts[0];
-            if(acc){
-              acc.username = 'admin';
-              acc.password = 'admin123';  // 登入時自動升級為 hash
-              acc.role = 'teacher';
-              if(!acc.name) acc.name = '管理員';
-            } else {
-              db.accounts.push({
-                id: Date.now(),
-                username: 'admin', password: 'admin123',
-                name: '管理員', role: 'teacher',
-                createdAt: Date.now()
-              });
+      (async function(){
+        // 1) 先判斷是否已有「非預設」帳號（不是 admin/admin123 明文 或 admin 雜湊）
+        let hasNonDefault = false;
+        const defaultAdminHashes = new Set(); // 預設密碼的雜湊（若 crypto 可用，計算一次）
+        try {
+          if(crypto && crypto.subtle){
+            const enc = new TextEncoder();
+            const buf = await crypto.subtle.digest('SHA-256', enc.encode('cms-v3-salt-admin123'));
+            const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+            defaultAdminHashes.add(hex);
+          }
+        } catch(e){}
+        try {
+          for(let i=0; i<localStorage.length; i++){
+            const k = localStorage.key(i);
+            if(k && k.indexOf('cms_v3_db_') === 0){
+              const db = JSON.parse(localStorage.getItem(k) || 'null');
+              if(db && Array.isArray(db.accounts)){
+                for(const a of db.accounts){
+                  if(!a) continue;
+                  const isDefaultUser = (a.username === 'admin');
+                  const stored = String(a.password || '');
+                  const isPlainDefault = stored === 'admin123';
+                  const isHashedDefault = defaultAdminHashes.has(stored.toLowerCase());
+                  if(!(isDefaultUser && (isPlainDefault || isHashedDefault))){
+                    hasNonDefault = true; break;
+                  }
+                }
+              }
+              if(hasNonDefault) break;
             }
-            localStorage.setItem(k, JSON.stringify(db));
-            resetCount++;
-          } catch(e){}
+          }
+        } catch(e){}
+
+        if(hasNonDefault){
+          // 2) 鎖定檢查
+          const lockUntil = parseInt(localStorage.getItem('cms_v3_adminreset_lock') || '0', 10);
+          if(Date.now() < lockUntil){
+            const mins = Math.ceil((lockUntil - Date.now())/60000);
+            document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
+              + '<div style="font-size:64px;margin-bottom:20px">⛔</div>'
+              + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">已鎖定</h1>'
+              + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">因連續驗證失敗，請於 <b>' + mins + ' 分鐘</b> 後再試。</div>'
+              + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">← 返回登入</a>'
+              + '</div>';
+            return;
+          }
+
+          // 3) 要求驗證：老師帳密 或 Firebase 同步代碼（教室代碼）
+          const u = prompt(
+            '🔒 安全驗證\n\n' +
+            '請輸入任一「現有老師帳號」以證明你是合法管理員：\n\n' +
+            '帳號（或留空後按「確定」改用 Firebase 同步代碼驗證）：'
+          );
+          if(u === null){ location.replace(location.pathname); return; }
+          let verified = false;
+          const trimmedU = (u || '').trim();
+          if(trimmedU === ''){
+            // 改用 Firebase 同步代碼
+            const code = prompt('請輸入 Firebase 同步代碼（roomCode）：');
+            if(code === null){ location.replace(location.pathname); return; }
+            try {
+              const cfgRaw = localStorage.getItem('cms_v3_cfg');
+              if(cfgRaw){
+                const cfg = JSON.parse(cfgRaw);
+                if(cfg && cfg.roomCode && String(cfg.roomCode) === String(code).trim()){
+                  verified = true;
+                }
+              }
+              // 也允許比對任一 db key 中的 room
+              if(!verified){
+                for(let i=0; i<localStorage.length; i++){
+                  const k = localStorage.key(i);
+                  if(k && k.indexOf('cms_v3_db_') === 0){
+                    const room = k.substring('cms_v3_db_'.length);
+                    if(room && room === String(code).trim()){ verified = true; break; }
+                  }
+                }
+              }
+            } catch(e){}
+          } else {
+            const p = prompt('密碼：');
+            if(p === null){ location.replace(location.pathname); return; }
+            try {
+              for(let i=0; i<localStorage.length && !verified; i++){
+                const k = localStorage.key(i);
+                if(k && k.indexOf('cms_v3_db_') === 0){
+                  const db = JSON.parse(localStorage.getItem(k) || 'null');
+                  if(!db || !Array.isArray(db.accounts)) continue;
+                  const acc = db.accounts.find(a => a && a.username === trimmedU);
+                  if(!acc) continue;
+                  const stored = String(acc.password || '');
+                  let match = false;
+                  if(/^[0-9a-f]{64}$/i.test(stored)){
+                    if(crypto && crypto.subtle){
+                      const enc = new TextEncoder();
+                      const buf = await crypto.subtle.digest('SHA-256', enc.encode('cms-v3-salt-' + p));
+                      const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+                      match = hex === stored.toLowerCase();
+                    }
+                  } else if(stored.indexOf('plain:') === 0){
+                    match = stored.slice(6) === p;
+                  } else {
+                    match = stored === p;
+                  }
+                  if(match){ verified = true; break; }
+                }
+              }
+            } catch(e){}
+          }
+
+          if(!verified){
+            const fails = parseInt(localStorage.getItem('cms_v3_adminreset_fails') || '0', 10) + 1;
+            try { localStorage.setItem('cms_v3_adminreset_fails', String(fails)); } catch(e){}
+            if(fails >= 3){
+              try {
+                localStorage.setItem('cms_v3_adminreset_lock', String(Date.now() + 5*60*1000));
+                localStorage.removeItem('cms_v3_adminreset_fails');
+              } catch(e){}
+            }
+            const remain = Math.max(0, 3 - fails);
+            document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
+              + '<div style="font-size:64px;margin-bottom:20px">❌</div>'
+              + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">驗證失敗</h1>'
+              + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">剩餘嘗試 <b>' + remain + '</b> 次<br>連續 3 次失敗將鎖定 5 分鐘</div>'
+              + '<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">'
+              + '<a href="' + location.pathname + '?adminreset=1" style="background:#dc2626;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600">重試</a>'
+              + '<a href="' + location.pathname + '" style="background:#6b7280;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600">返回</a>'
+              + '</div></div>';
+            return;
+          }
+          try { localStorage.removeItem('cms_v3_adminreset_fails'); } catch(e){}
         }
-      }
-      // 清登入狀態
-      try {
-        localStorage.removeItem('cms_v3_session');
-        localStorage.removeItem('cms_v3_remember');
-      } catch(e){}
-      document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
-        + '<div style="font-size:64px;margin-bottom:20px">✅</div>'
-        + '<h1 style="font-size:24px;margin:0 0 10px;color:#16a34a">老師密碼已重設！</h1>'
-        + '<div style="font-size:16px;color:#666;margin-bottom:20px;line-height:1.8">已重設 ' + resetCount + ' 個工作區的老師密碼<br><br>'
-        + '<span style="background:#dbeafe;color:#1e40af;padding:8px 16px;border-radius:8px;font-weight:600">帳號：admin<br>密碼：admin123</span></div>'
-        + '<div style="font-size:14px;color:#999;margin-bottom:30px">所有學生資料、出席紀錄都已保留<br>建議登入後立即修改密碼</div>'
-        + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 前往登入頁</a>'
-        + '</div>';
+
+        // 4) 通過驗證（或無非預設帳號）→ 執行重設
+        if('serviceWorker' in navigator){
+          navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+        }
+        if('caches' in window){
+          caches.keys().then(names => names.forEach(n => caches.delete(n)));
+        }
+        let resetCount = 0;
+        for(let i = 0; i < localStorage.length; i++){
+          const k = localStorage.key(i);
+          if(k && k.indexOf('cms_v3_db_') === 0){
+            try {
+              const db = JSON.parse(localStorage.getItem(k));
+              db.accounts = db.accounts || [];
+              let acc = db.accounts.find(a => a.username === 'admin');
+              if(!acc) acc = db.accounts[0];
+              if(acc){
+                acc.username = 'admin';
+                acc.password = 'admin123';  // 登入時自動升級為 hash
+                acc.role = 'teacher';
+                acc.mustChangePw = true;    // batch 1：登入後強制改密碼
+                if(!acc.name) acc.name = '管理員';
+              } else {
+                db.accounts.push({
+                  id: Date.now(),
+                  username: 'admin', password: 'admin123',
+                  name: '管理員', role: 'teacher',
+                  mustChangePw: true,       // batch 1：登入後強制改密碼
+                  createdAt: Date.now()
+                });
+              }
+              localStorage.setItem(k, JSON.stringify(db));
+              resetCount++;
+            } catch(e){}
+          }
+        }
+        try {
+          localStorage.removeItem('cms_v3_session');
+          localStorage.removeItem('cms_v3_remember');
+        } catch(e){}
+        document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
+          + '<div style="font-size:64px;margin-bottom:20px">✅</div>'
+          + '<h1 style="font-size:24px;margin:0 0 10px;color:#16a34a">老師密碼已重設！</h1>'
+          + '<div style="font-size:16px;color:#666;margin-bottom:20px;line-height:1.8">已重設 ' + resetCount + ' 個工作區的老師密碼<br><br>'
+          + '<span style="background:#dbeafe;color:#1e40af;padding:8px 16px;border-radius:8px;font-weight:600">帳號：admin<br>密碼：admin123</span></div>'
+          + '<div style="font-size:14px;color:#999;margin-bottom:30px">所有學生資料、出席紀錄都已保留<br>建議登入後立即修改密碼</div>'
+          + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 前往登入頁</a>'
+          + '</div>';
+      })();
       return;
     }
     if(location.search.indexOf('reset=1') >= 0){
@@ -17701,9 +18075,53 @@ function rInstall(content){
   content.appendChild(renderInstallCard());
 }
 
-// expose for debugging
-window.__App = App;
-window.__Sync = Sync;
+// batch 1 安全強化：只在 ?debug=1 時暴露完整 App / Sync；
+// 否則學生 session 拿到的只有非敏感欄位（避免 console 一行抓全班密碼）
+(function exposeDebug(){
+  const isDebug = (typeof location !== 'undefined') && (location.search.indexOf('debug=1') >= 0);
+  if(isDebug){
+    try {
+      window.__App = App;
+      window.__Sync = Sync;
+      console.info('[debug] window.__App / __Sync 已暴露（?debug=1）');
+    } catch(e){}
+    return;
+  }
+  // 非 debug 模式：用 getter 過濾
+  try {
+    Object.defineProperty(window, '__App', {
+      configurable: true,
+      get(){
+        if(App && App.session && App.session.role === 'student'){
+          // 學生端：不暴露 db / accounts 等敏感資料
+          return {
+            session: App.session,
+            view: App.view,
+            cfg: App.cfg ? { roomCode: App.cfg.roomCode, role: App.cfg.role } : null,
+            theme: App.theme,
+            _restricted: true
+          };
+        }
+        // 老師端：仍可 debug，但加個提示
+        return App;
+      }
+    });
+    Object.defineProperty(window, '__Sync', {
+      configurable: true,
+      get(){
+        if(App && App.session && App.session.role === 'student'){
+          // 學生端不暴露 Sync（含 firebase token 等）
+          return { _restricted: true };
+        }
+        return Sync;
+      }
+    });
+  } catch(e){
+    // 環境不支援 defineProperty 時退回原行為
+    window.__App = App;
+    window.__Sync = Sync;
+  }
+})();
 </script>
 </body>
 </html>
