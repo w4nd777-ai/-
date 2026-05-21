@@ -4727,10 +4727,15 @@ function renderChrome(root, role){
 }
 
 function sideItem(view, icon, label, badge){
+  // 自訂介面：讀取自訂 icon / label / 隱藏狀態
+  const cust = ((App._uiCustom && App._uiCustom.items) || {})[view] || {};
+  if(cust.hidden) return null;  // null 會被 el() 過濾
+  const finalIcon = cust.icon || icon;
+  const finalLabel = cust.label || label;
   const active = App.view === view;
-  const b = el('button', { class:'side-item ' + (active?'active':''), onclick:()=> go(view), title: label },
-    el('span', { class:'ico' }, icon),
-    el('span', null, label)
+  const b = el('button', { class:'side-item ' + (active?'active':''), onclick:()=> go(view), title: finalLabel },
+    el('span', { class:'ico' }, finalIcon),
+    el('span', null, finalLabel)
   );
   if(badge) b.appendChild(el('span', { class:'badge' }, String(badge)));
   return b;
@@ -4746,6 +4751,13 @@ function sidebarToggleButton(){
 }
 
 function sideSection(key, title, items){
+  // 介面編輯器：若分組被隱藏 → 不渲染
+  if(typeof isSectionVisible === 'function' && !isSectionVisible(key)){
+    return document.createDocumentFragment();
+  }
+  // 介面編輯器：自訂分組標題
+  const finalTitle = (typeof getSectionLabel === 'function') ? getSectionLabel(key, title) : title;
+
   // 分組可摺疊
   App._sideExpanded = App._sideExpanded || {};
   // 預設展開（true）
@@ -4759,14 +4771,38 @@ function sideSection(key, title, items){
       rerender();
     }
   },
-    el('span', null, title),
+    el('span', null, finalTitle),
     el('span', { style:{fontSize:'10px',transition:'transform .2s',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',opacity:'.6'} }, '▼')
   );
   wrap.appendChild(header);
   if(isExpanded){
-    items.forEach(it => wrap.appendChild(it));
+    // 過濾 null（被 sideItem 隱藏的項目）
+    items.filter(it => it != null).forEach(it => wrap.appendChild(it));
   }
   return wrap;
+}
+
+/* 依使用者自訂順序產出側邊欄項目陣列；非 sideItem 的特殊元件以 specialMap 補入 */
+function buildSidebarItems(role, secKey, badgeMap, specialMap){
+  badgeMap = badgeMap || {};
+  specialMap = specialMap || {};
+  const ordered = (typeof getOrderedSidebarItems === 'function')
+    ? getOrderedSidebarItems(role, secKey)
+    : (getSidebarItems(role)[secKey]?.items || []);
+  const out = [];
+  ordered.forEach(it => {
+    if(specialMap[it.key]){
+      // 特殊項目（非標準 view，如 AI 助教按鈕）— 也支援隱藏
+      const cust = ((App._uiCustom && App._uiCustom.items) || {})[it.key] || {};
+      if(cust.hidden) return;
+      const node = specialMap[it.key](cust);
+      if(node) out.push(node);
+    } else {
+      const node = sideItem(it.key, it.icon, it.label, badgeMap[it.key] || null);
+      if(node) out.push(node);
+    }
+  });
+  return out;
 }
 
 function renderSidebarTeacher(){
@@ -4777,53 +4813,37 @@ function renderSidebarTeacher(){
     el('div', { class:'brand-title' }, App.db.branding.title || '課程管理')
   ));
 
-  // 日常
-  side.appendChild(sideSection('daily', '日常', [
-    sideItem('overview','📊','總覽'),
-    sideItem('students','👥','學生名單'),
-    sideItem('attendance','✅','出席管理'),
-    sideItem('matrix','🪑','座位矩陣'),
-    sideItem('qr','📱','QR Code 簽到'),
-    sideItem('leave','📆','請假管理'),
-    sideItem('messages','💬','訊息', unreadMessages() || null),
-  ]));
+  // badges 對應表
+  const badges = {
+    messages: unreadMessages() || null,
+    submissions: pendingGradeCount() || null,
+    feedback: teacherFeedbackBadge() || null
+  };
+
+  // 日常 — 依使用者自訂順序輸出
+  side.appendChild(sideSection('daily', '日常', buildSidebarItems('teacher', 'daily', badges)));
 
   // 教學
-  side.appendChild(sideSection('teaching', '教學', [
-    sideItem('assignments','📋','作業管理'),
-    sideItem('submissions','📥','繳交記錄', pendingGradeCount() || null),
-    sideItem('grades','🎯','學期成績'),
-    sideItem('evals','💬','課程評價'),
-    sideItem('feedback','🗳️','學生回饋', teacherFeedbackBadge() || null),
-    sideItem('peer','⭐','學生互評'),
-    sideItem('announcements','📢','公告管理'),
-    sideItem('analytics','📈','分析工具'),
-    sideItem('calendar','📅','行事曆'),
-    sideItem('gantt','📊','作業甘特圖'),
-  ]));
+  side.appendChild(sideSection('teaching', '教學', buildSidebarItems('teacher', 'teaching', badges)));
 
   // 課堂工具
-  side.appendChild(sideSection('tools', '課堂工具', [
-    sideItem('picker','🎲','隨機抽籤'),
-    sideItem('timer','⏰','課堂計時器'),
-  ]));
+  side.appendChild(sideSection('tools', '課堂工具', buildSidebarItems('teacher', 'tools', badges)));
 
-  // 系統
-  side.appendChild(sideSection('system', '系統', [
-    el('button', { class:'side-item', onclick: openAIAssistant, title:'AI 助教' },
-      el('span', { class:'ico' }, '🤖'),
-      el('span', null, 'AI 助教')
-    ),
-    sideItem('workspace','🏢','多教室管理'),
-    sideItem('notify','📲','通知設定'),
-    sideItem('backup','💼','備份與還原'),
-    sideItem('logs','📜','操作紀錄'),
-    sideItem('storage','💾','儲存空間'),
-    sideItem('settings','⚙️','設定'),
-    sideItem('firebase','☁️','跨裝置同步'),
-    sideItem('install','📲','安裝 App'),
-    sideItem('help','📖','使用說明'),
-  ]));
+  // 系統 — AI 助教為特殊按鈕（無對應 view）
+  const systemSpecials = {
+    // 注意：AI 助教在 getSidebarItems 內並未列出，因此這裡在 section 開頭額外塞一個
+  };
+  const systemItems = buildSidebarItems('teacher', 'system', badges, systemSpecials);
+  // 在系統分組前頭插入 AI 助教按鈕（若使用者未在 items 中隱藏「ai」key 則顯示）
+  const aiCust = ((App._uiCustom && App._uiCustom.items) || {})['ai_assistant'] || {};
+  if(!aiCust.hidden){
+    const aiBtn = el('button', { class:'side-item', onclick: openAIAssistant, title: aiCust.label || 'AI 助教' },
+      el('span', { class:'ico' }, aiCust.icon || '🤖'),
+      el('span', null, aiCust.label || 'AI 助教')
+    );
+    systemItems.unshift(aiBtn);
+  }
+  side.appendChild(sideSection('system', '系統', systemItems));
 
   // bottom: user info + logout
   const spacer = el('div', { style:{flex:'1'} });
@@ -4850,29 +4870,27 @@ function renderSidebarStudent(){
     el('div', { class:'brand-logo' }, 'V3'),
     el('div', { class:'brand-title' }, '我的課程')
   ));
-  side.appendChild(sideSection('s_func', '功能', [
-    sideItem('checkin','✋','簽到'),
-    sideItem('myatt','📅','出席紀錄'),
-    sideItem('myleave','📆','請假'),
-    sideItem('messages','💬','訊息', unreadMessages() || null),
-  ]));
-  side.appendChild(sideSection('s_learn', '學習', [
-    sideItem('sasgn','📤','作業', studentNewAssignmentCount() || null),
-    sideItem('sgrade','🎯','我的成績'),
-    sideItem('sev','⭐','課程評價'),
-    sideItem('sfeedback','📝','課程回饋'),
-    sideItem('speer','⭐','我的互評', studentPendingPeerCount() || null),
-    sideItem('sann','📢','公告', studentUnreadAnnouncements() || null),
-    el('button', { class:'side-item', onclick: openAIAssistant, title:'AI 學習助教' },
-      el('span', { class:'ico' }, '🤖'),
-      el('span', null, 'AI 學習助教')
-    ),
-    sideItem('me','👤','個人'),
-  ]));
-  side.appendChild(sideSection('s_other', '其他', [
-    sideItem('install','📲','安裝 App'),
-    sideItem('help','📖','使用說明'),
-  ]));
+  const sBadges = {
+    messages: unreadMessages() || null,
+    sasgn: studentNewAssignmentCount() || null,
+    speer: studentPendingPeerCount() || null,
+    sann: studentUnreadAnnouncements() || null
+  };
+  side.appendChild(sideSection('s_func', '功能', buildSidebarItems('student', 's_func', sBadges)));
+
+  // 學習 — AI 學習助教為特殊按鈕（插在最後一項之前）
+  const learnItems = buildSidebarItems('student', 's_learn', sBadges);
+  const sAiCust = ((App._uiCustom && App._uiCustom.items) || {})['ai_assistant'] || {};
+  if(!sAiCust.hidden){
+    const aiBtn = el('button', { class:'side-item', onclick: openAIAssistant, title: sAiCust.label || 'AI 學習助教' },
+      el('span', { class:'ico' }, sAiCust.icon || '🤖'),
+      el('span', null, sAiCust.label || 'AI 學習助教')
+    );
+    learnItems.push(aiBtn);
+  }
+  side.appendChild(sideSection('s_learn', '學習', learnItems));
+
+  side.appendChild(sideSection('s_other', '其他', buildSidebarItems('student', 's_other', sBadges)));
 
   side.appendChild(el('div', { style:{flex:'1'} }));
   side.appendChild(el('div', { class:'card', style:{padding:'10px'} },
@@ -4902,12 +4920,14 @@ function renderTopbar(role){
     feedback:'🗳️ 學生回饋',
     picker:'🎲 隨機抽籤', timer:'⏰ 課堂計時器',
     appearance:'🎨 外觀設定',
+    uieditor:'🛠️ 介面編輯器',
     help:'📖 使用說明', install:'📲 安裝 App'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
     speer:'⭐ 我的互評', sgroups:'👥 我的小組', selfeval:'✍️ 學期自評',
     sfeedback:'📝 課程回饋',
+    uieditor:'🛠️ 介面編輯器',
     help:'📖 使用說明', install:'📲 安裝 App'
   };
   const t = titles[App.view] || (role === 'teacher' ? '課程管理' : '學生');
@@ -4999,7 +5019,7 @@ function openMoreMenuTeacher(){
     ['picker','🎲 隨機抽籤'],['timer','⏰ 課堂計時器'],
     ['workspace','🏢 多教室'],['notify','📲 通知設定'],
     ['backup','💼 備份'],['logs','📜 操作紀錄'],['storage','💾 儲存空間'],
-    ['settings','⚙️ 設定'],['appearance','🎨 外觀設定'],['firebase','☁️ 跨裝置同步']
+    ['settings','⚙️ 設定'],['appearance','🎨 外觀設定'],['uieditor','🛠️ 介面編輯器'],['firebase','☁️ 跨裝置同步']
   ];
   const grid = el('div', { class:'grid grid-2' });
   items.forEach(([v,t]) => {
@@ -5115,16 +5135,22 @@ function rOv(content){
   const today = td();
 
   // hello bar (time-aware greeting)
-  const hb = renderHelloBar();
-  if(hb) content.appendChild(hb);
+  if(isOverviewVisible('helloBar')){
+    const hb = renderHelloBar();
+    if(hb) content.appendChild(hb);
+  }
 
   // quick-start CTA (only when no students)
-  const qs = renderQuickStart();
-  if(qs) content.appendChild(qs);
+  if(isOverviewVisible('quickstart')){
+    const qs = renderQuickStart();
+    if(qs) content.appendChild(qs);
+  }
 
   // welcome journey card (auto-hides after completion)
-  const j = renderWelcomeJourney();
-  if(j) content.appendChild(j);
+  if(isOverviewVisible('journey')){
+    const j = renderWelcomeJourney();
+    if(j) content.appendChild(j);
+  }
 
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
     el('div', null,
@@ -5138,28 +5164,36 @@ function rOv(content){
     )
   ));
 
-  // stat tiles (with subtitles explaining each)
+  // stat tiles (with subtitles explaining each) — 各卡片可獨立隱藏
   const grid = el('div', { class:'grid grid-4', style:{marginBottom:'16px'} });
-  grid.appendChild(el('div', { class:'stat s-success card-hover', onclick:()=> go('attendance','signed'), title:'點此查看已簽到名單' },
-    el('div', { class:'num' }, String(stats.signed)),
-    el('div', { class:'lbl' }, '已簽到 / ' + stats.total + ' 人')
-  ));
-  grid.appendChild(el('div', { class:'stat s-danger card-hover', onclick:()=> go('attendance','absent'), title:'點此查看尚未到課學生' },
-    el('div', { class:'num' }, String(stats.absent)),
-    el('div', { class:'lbl' }, '未簽到 · 待處理')
-  ));
-  grid.appendChild(el('div', { class:'stat s-accent card-hover', onclick:()=> go('leave'), title:'點此管理請假' },
-    el('div', { class:'num' }, String(stats.leave)),
-    el('div', { class:'lbl' }, '請假中 · 已批准')
-  ));
-  grid.appendChild(el('div', { class:'stat s-warn card-hover', onclick:()=> go('attendance','late'), title:'點此查看遲到名單' },
-    el('div', { class:'num' }, String(stats.late)),
-    el('div', { class:'lbl' }, '今日遲到')
-  ));
-  content.appendChild(grid);
+  if(isOverviewVisible('signed')){
+    grid.appendChild(el('div', { class:'stat s-success card-hover', onclick:()=> go('attendance','signed'), title:'點此查看已簽到名單' },
+      el('div', { class:'num' }, String(stats.signed)),
+      el('div', { class:'lbl' }, '已簽到 / ' + stats.total + ' 人')
+    ));
+  }
+  if(isOverviewVisible('absent')){
+    grid.appendChild(el('div', { class:'stat s-danger card-hover', onclick:()=> go('attendance','absent'), title:'點此查看尚未到課學生' },
+      el('div', { class:'num' }, String(stats.absent)),
+      el('div', { class:'lbl' }, '未簽到 · 待處理')
+    ));
+  }
+  if(isOverviewVisible('leave')){
+    grid.appendChild(el('div', { class:'stat s-accent card-hover', onclick:()=> go('leave'), title:'點此管理請假' },
+      el('div', { class:'num' }, String(stats.leave)),
+      el('div', { class:'lbl' }, '請假中 · 已批准')
+    ));
+  }
+  if(isOverviewVisible('late')){
+    grid.appendChild(el('div', { class:'stat s-warn card-hover', onclick:()=> go('attendance','late'), title:'點此查看遲到名單' },
+      el('div', { class:'num' }, String(stats.late)),
+      el('div', { class:'lbl' }, '今日遲到')
+    ));
+  }
+  if(grid.childNodes.length) content.appendChild(grid);
 
   // pending registrations
-  if(App.db.pending && App.db.pending.length){
+  if(isOverviewVisible('pending') && App.db.pending && App.db.pending.length){
     const alert = el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'12px'} },
       el('div', { class:'flex-between' },
         el('div', null,
@@ -5172,7 +5206,10 @@ function rOv(content){
     content.appendChild(alert);
   }
 
-  // today's roster — 班級分組可摺疊
+  // today's roster — 班級分組可摺疊（可在介面編輯器隱藏）
+  if(!isOverviewVisible('today')){
+    return;
+  }
   if(App.db.students.length === 0){
     const card = el('div', { class:'card' });
     card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
@@ -13608,6 +13645,7 @@ function cmdItems(){
       { i:'🖨', t:'列印目前頁', h:'print', go: printCurrent },
       { i:'⚙️', t:'設定', h:'settings', go: ()=> go('settings') },
       { i:'🎨', t:'外觀設定（主題色 / 字型 / 密度）', h:'appearance theme font size density radius', go: ()=> go('appearance') },
+      { i:'🛠️', t:'介面編輯器（自訂側邊欄 / 總覽卡片）', h:'uieditor ui editor sidebar customize 介面 編輯 自訂 排序', go: ()=> go('uieditor') },
       { i:'☁️', t:'Firebase 同步', h:'firebase', go: ()=> go('firebase') },
       { i:'📖', t:'使用說明', h:'help guide manual faq 教學 指南', go: ()=> go('help') },
       { i:'📲', t:'安裝 App / QR Code', h:'install app pwa qr 安裝', go: ()=> go('install') },
@@ -13628,6 +13666,7 @@ function cmdItems(){
       { i:'📢', t:'公告', h:'sann', go: ()=> go('sann') },
       { i:'🤖', t:'AI 學習助教', h:'AI', go: ()=> openAIAssistant() },
       { i:'👤', t:'個人', h:'me', go: ()=> go('me') },
+      { i:'🛠️', t:'介面編輯器（自訂側邊欄）', h:'uieditor ui editor sidebar customize 介面 編輯 自訂 排序', go: ()=> go('uieditor') },
       { i:'📖', t:'使用說明', h:'help guide manual faq 教學 指南', go: ()=> go('help') },
       { i:'📲', t:'安裝 App / QR Code', h:'install app pwa qr 安裝', go: ()=> go('install') },
       { i:'🗂', t:'收合/展開側邊欄', h:'sidebar collapse toggle 收合', go: toggleSidebar },
@@ -13844,6 +13883,7 @@ function rerender(){
       else if(v === 'picker') rRandomPicker(content);  // batch 4
       else if(v === 'timer') rTimer(content);          // batch 4
       else if(v === 'appearance') rAppearance(content);// 外觀設定
+      else if(v === 'uieditor') rUiEditor(content);   // 介面編輯器
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else { App.view = 'overview'; rOv(content); }
@@ -13862,6 +13902,7 @@ function rerender(){
       else if(v === 'sgroups') rSGroups(content);
       else if(v === 'selfeval') rSelfEval(content);
       else if(v === 'sfeedback') rSFeedback(content); // batch 2
+      else if(v === 'uieditor') rUiEditor(content);   // 介面編輯器（學生端共用）
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else { App.view = 'checkin'; rCheckIn(content); }
@@ -13995,6 +14036,9 @@ function boot(){
   // theme + appearance
   loadAppearance();
   applyTheme();
+
+  // 介面編輯器自訂設定（須在 boot 早期載入，避免 sideItem 讀到 undefined）
+  try { App._uiCustom = loadUiCustom(); } catch(e){ App._uiCustom = { sections:{}, items:{}, order:{}, overview:{} }; }
 
   // cfg & session
   App.cfg = loadCfg();
@@ -16251,6 +16295,468 @@ function rHelp(content){
     el('h3', null, '💡 找不到答案？'),
     el('div', { class:'small' }, '按 Ctrl+K（Mac: Cmd+K）開啟命令面板搜尋任何功能，或聯絡老師詢問')
   ));
+}
+
+/* ════════════════════════════════════════════════════════════
+   UI EDITOR (介面編輯器) — 自訂側邊欄/總覽卡片
+   ──────────────────────────────────────────────────────────── */
+const UI_CUSTOM_LS_KEY = 'cms_v3_ui_custom';
+
+function loadUiCustom(){
+  try {
+    const raw = localStorage.getItem(UI_CUSTOM_LS_KEY);
+    if(!raw) return { sections:{}, items:{}, order:{}, overview:{} };
+    const obj = JSON.parse(raw);
+    return {
+      sections: obj.sections || {},
+      items: obj.items || {},
+      order: obj.order || {},
+      overview: obj.overview || {}
+    };
+  } catch(e){
+    return { sections:{}, items:{}, order:{}, overview:{} };
+  }
+}
+
+function saveUiCustom(){
+  try {
+    App._uiCustom = App._uiCustom || { sections:{}, items:{}, order:{}, overview:{} };
+    localStorage.setItem(UI_CUSTOM_LS_KEY, JSON.stringify(App._uiCustom));
+  } catch(e){ console.warn('[saveUiCustom]', e); }
+}
+
+/* 預設項目清單 — 與 renderSidebarTeacher / renderSidebarStudent 對齊 */
+function getSidebarItems(role){
+  if(role === 'teacher'){
+    return {
+      daily: { label:'日常', items: [
+        { key:'overview', icon:'📊', label:'總覽' },
+        { key:'students', icon:'👥', label:'學生名單' },
+        { key:'attendance', icon:'✅', label:'出席管理' },
+        { key:'matrix', icon:'🪑', label:'座位矩陣' },
+        { key:'qr', icon:'📱', label:'QR Code 簽到' },
+        { key:'leave', icon:'📆', label:'請假管理' },
+        { key:'messages', icon:'💬', label:'訊息' }
+      ]},
+      teaching: { label:'教學', items: [
+        { key:'assignments', icon:'📋', label:'作業管理' },
+        { key:'submissions', icon:'📥', label:'繳交記錄' },
+        { key:'grades', icon:'🎯', label:'學期成績' },
+        { key:'evals', icon:'💬', label:'課程評價' },
+        { key:'feedback', icon:'🗳️', label:'學生回饋' },
+        { key:'peer', icon:'⭐', label:'學生互評' },
+        { key:'announcements', icon:'📢', label:'公告管理' },
+        { key:'analytics', icon:'📈', label:'分析工具' },
+        { key:'calendar', icon:'📅', label:'行事曆' },
+        { key:'gantt', icon:'📊', label:'作業甘特圖' }
+      ]},
+      tools: { label:'課堂工具', items: [
+        { key:'picker', icon:'🎲', label:'隨機抽籤' },
+        { key:'timer', icon:'⏰', label:'課堂計時器' }
+      ]},
+      system: { label:'系統', items: [
+        { key:'workspace', icon:'🏢', label:'多教室管理' },
+        { key:'notify', icon:'📲', label:'通知設定' },
+        { key:'backup', icon:'💼', label:'備份與還原' },
+        { key:'logs', icon:'📜', label:'操作紀錄' },
+        { key:'storage', icon:'💾', label:'儲存空間' },
+        { key:'settings', icon:'⚙️', label:'設定' },
+        { key:'appearance', icon:'🎨', label:'外觀設定' },
+        { key:'uieditor', icon:'🛠️', label:'介面編輯器' },
+        { key:'firebase', icon:'☁️', label:'跨裝置同步' },
+        { key:'install', icon:'📲', label:'安裝 App' },
+        { key:'help', icon:'📖', label:'使用說明' }
+      ]}
+    };
+  } else {
+    return {
+      s_func: { label:'功能', items: [
+        { key:'checkin', icon:'✋', label:'簽到' },
+        { key:'myatt', icon:'📅', label:'出席紀錄' },
+        { key:'myleave', icon:'📆', label:'請假' },
+        { key:'messages', icon:'💬', label:'訊息' }
+      ]},
+      s_learn: { label:'學習', items: [
+        { key:'sasgn', icon:'📤', label:'作業' },
+        { key:'sgrade', icon:'🎯', label:'我的成績' },
+        { key:'sev', icon:'⭐', label:'課程評價' },
+        { key:'sfeedback', icon:'📝', label:'課程回饋' },
+        { key:'speer', icon:'⭐', label:'我的互評' },
+        { key:'sann', icon:'📢', label:'公告' },
+        { key:'me', icon:'👤', label:'個人' }
+      ]},
+      s_other: { label:'其他', items: [
+        { key:'uieditor', icon:'🛠️', label:'介面編輯器' },
+        { key:'install', icon:'📲', label:'安裝 App' },
+        { key:'help', icon:'📖', label:'使用說明' }
+      ]}
+    };
+  }
+}
+
+/* 取得指定 section 在自訂順序下的 items 陣列（包含已隱藏的） */
+function getOrderedSidebarItems(role, secKey){
+  const all = getSidebarItems(role);
+  const sec = all[secKey];
+  if(!sec) return [];
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  const order = App._uiCustom.order[secKey];
+  if(!order || !order.length) return sec.items.slice();
+  const byKey = {};
+  sec.items.forEach(it => { byKey[it.key] = it; });
+  const result = [];
+  order.forEach(k => { if(byKey[k]){ result.push(byKey[k]); delete byKey[k]; } });
+  // 未在 order 中的新項目附加在後面（向前相容）
+  sec.items.forEach(it => { if(byKey[it.key]) result.push(it); });
+  return result;
+}
+
+/* 是否顯示某 section（依使用者自訂） */
+function isSectionVisible(secKey){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  const cust = App._uiCustom.sections[secKey];
+  return !(cust && cust.hidden);
+}
+
+/* 取得 section 顯示名稱 */
+function getSectionLabel(secKey, fallback){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  const cust = App._uiCustom.sections[secKey];
+  return (cust && cust.label) ? cust.label : fallback;
+}
+
+/* 總覽卡片是否顯示（預設 true） */
+function isOverviewVisible(key){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  return App._uiCustom.overview[key] !== false;
+}
+
+function rUiEditor(content){
+  // breadcrumb
+  try {
+    if(App.session?.role === 'teacher'){
+      content.appendChild(renderBreadcrumb([{label:'⚙️ 設定', go:'settings'},{label:'🛠️ 介面編輯器'}]));
+    }
+  } catch(e){}
+
+  content.appendChild(el('h1', null, '🛠️ 介面編輯器'));
+  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
+    '拖曳 ⋮⋮ 排序 · 取消勾選隱藏 · 點 🎨 改圖示 · 直接編輯改名稱'));
+
+  const isTeacher = App.session?.role === 'teacher';
+
+  // 確保載入
+  App._uiCustom = App._uiCustom || loadUiCustom();
+
+  // 1. 側邊欄項目編排
+  const card1 = el('div', { class:'card' });
+  card1.appendChild(el('h3', null, '📑 側邊欄項目'));
+  card1.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '拖曳 ⋮⋮ 排序 · 取消勾選隱藏 · 點 🎨 改圖示'));
+
+  const allItems = getSidebarItems(isTeacher ? 'teacher' : 'student');
+
+  Object.keys(allItems).forEach(secKey => {
+    const sec = allItems[secKey];
+    const secWrap = el('div', { class:'card', style:{padding:'10px',background:'var(--surface-2)',marginTop:'10px'} });
+
+    // section title （可改名）+ 顯示切換
+    App._uiCustom.sections[secKey] = App._uiCustom.sections[secKey] || {};
+    const sectionCust = App._uiCustom.sections[secKey];
+    const sectionTitleWrap = el('div', { class:'flex', style:{gap:'8px',alignItems:'center',marginBottom:'8px',flexWrap:'wrap'} });
+    sectionTitleWrap.appendChild(el('span', { style:{fontWeight:'700',color:'var(--text-muted)'} }, '分組：'));
+    const sectionInp = el('input', { class:'input', style:{maxWidth:'200px'}, value: sectionCust.label || sec.label });
+    sectionInp.addEventListener('change', ()=> {
+      App._uiCustom.sections[secKey].label = sectionInp.value.trim() || sec.label;
+      saveUiCustom();
+    });
+    sectionTitleWrap.appendChild(sectionInp);
+    const hideChk = el('input', { type:'checkbox' });
+    hideChk.checked = !sectionCust.hidden;
+    hideChk.addEventListener('change', ()=> {
+      App._uiCustom.sections[secKey].hidden = !hideChk.checked;
+      saveUiCustom();
+    });
+    const hideLbl = el('label', { class:'small flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} });
+    hideLbl.appendChild(hideChk);
+    hideLbl.appendChild(el('span', null, '顯示此分組'));
+    sectionTitleWrap.appendChild(hideLbl);
+    secWrap.appendChild(sectionTitleWrap);
+
+    // items 列表（依自訂順序排）
+    const orderedItems = getOrderedSidebarItems(isTeacher ? 'teacher' : 'student', secKey);
+
+    const itemsList = el('div', { class:'sortable-items', style:{display:'flex',flexDirection:'column',gap:'4px'} });
+
+    orderedItems.forEach((it) => {
+      App._uiCustom.items[it.key] = App._uiCustom.items[it.key] || {};
+      const itemCust = App._uiCustom.items[it.key];
+
+      const row = el('div', {
+        class:'sortable-row',
+        draggable:'true',
+        'data-key': it.key,
+        'data-sec': secKey,
+        style:{
+          display:'flex',alignItems:'center',gap:'8px',
+          padding:'8px 10px',background:'var(--surface)',
+          borderRadius:'8px',cursor:'grab',
+          border:'1px solid var(--border)',
+          transition:'border-color .15s, background .15s, opacity .15s',
+          touchAction:'none'
+        }
+      });
+
+      const handle = el('span', { class:'drag-handle', style:{cursor:'grab',color:'var(--text-muted)',fontSize:'18px',padding:'0 4px',userSelect:'none'} }, '⋮⋮');
+      row.appendChild(handle);
+
+      const iconSpan = el('span', { class:'item-icon', style:{fontSize:'20px',minWidth:'24px',textAlign:'center'} }, itemCust.icon || it.icon);
+      row.appendChild(iconSpan);
+
+      // 編輯區
+      const editBox = el('div', { style:{flex:'1',display:'flex',gap:'6px',alignItems:'center',flexWrap:'wrap'} });
+
+      const labelInp = el('input', { class:'input', style:{maxWidth:'240px',flex:'1',minWidth:'120px'}, value: itemCust.label || it.label });
+      labelInp.addEventListener('change', ()=> {
+        App._uiCustom.items[it.key].label = labelInp.value.trim() || it.label;
+        saveUiCustom();
+      });
+      // 阻止拖曳當在輸入框
+      labelInp.addEventListener('mousedown', e => e.stopPropagation());
+      labelInp.addEventListener('touchstart', e => e.stopPropagation(), { passive:true });
+      editBox.appendChild(labelInp);
+
+      const iconBtn = el('button', { class:'btn btn-sm', title:'改圖示', onclick: async ()=> {
+        const cur = itemCust.icon || it.icon;
+        const newIcon = await promptDlg('輸入新圖示（emoji，例如 🎉 ✨ 🚀）', cur, { title:'修改圖示' });
+        if(newIcon === null) return;
+        const v = (newIcon || '').trim();
+        App._uiCustom.items[it.key].icon = v || it.icon;
+        saveUiCustom();
+        iconSpan.textContent = v || it.icon;
+      }}, '🎨');
+      iconBtn.addEventListener('mousedown', e => e.stopPropagation());
+      iconBtn.addEventListener('touchstart', e => e.stopPropagation(), { passive:true });
+      editBox.appendChild(iconBtn);
+
+      // 重置單項
+      const resetBtn = el('button', { class:'btn btn-sm', title:'重置此項', onclick:()=> {
+        App._uiCustom.items[it.key] = {};
+        saveUiCustom();
+        labelInp.value = it.label;
+        iconSpan.textContent = it.icon;
+        visChk.checked = true;
+      }}, '↺');
+      resetBtn.addEventListener('mousedown', e => e.stopPropagation());
+      resetBtn.addEventListener('touchstart', e => e.stopPropagation(), { passive:true });
+      editBox.appendChild(resetBtn);
+
+      // 顯示切換
+      const visChk = el('input', { type:'checkbox' });
+      visChk.checked = !itemCust.hidden;
+      visChk.addEventListener('change', ()=> {
+        App._uiCustom.items[it.key].hidden = !visChk.checked;
+        saveUiCustom();
+      });
+      const visLbl = el('label', { class:'small flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} });
+      visLbl.appendChild(visChk);
+      visLbl.appendChild(el('span', { class:'tiny' }, '顯示'));
+      visLbl.addEventListener('mousedown', e => e.stopPropagation());
+      visLbl.addEventListener('touchstart', e => e.stopPropagation(), { passive:true });
+      editBox.appendChild(visLbl);
+
+      row.appendChild(editBox);
+
+      // ─── HTML5 拖曳（桌面） ─────────────────────────
+      row.addEventListener('dragstart', e => {
+        row.style.opacity = '0.4';
+        try {
+          e.dataTransfer.setData('text/plain', JSON.stringify({sec:secKey, key:it.key}));
+          e.dataTransfer.effectAllowed = 'move';
+        } catch(err){}
+      });
+      row.addEventListener('dragend', ()=> { row.style.opacity = '1'; });
+      row.addEventListener('dragover', e => {
+        e.preventDefault();
+        row.style.borderColor = 'var(--primary)';
+      });
+      row.addEventListener('dragleave', ()=> { row.style.borderColor = 'var(--border)'; });
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        row.style.borderColor = 'var(--border)';
+        try {
+          const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+          if(data.sec !== secKey || data.key === it.key) return;
+          uiEditorReorder(secKey, data.key, it.key, isTeacher);
+        } catch(err){}
+      });
+
+      // ─── 觸控拖曳（手機） ─────────────────────────
+      let touchStartY = 0, touchStartX = 0, touchDragging = false, touchClone = null;
+      handle.addEventListener('touchstart', e => {
+        if(e.touches.length !== 1) return;
+        touchStartY = e.touches[0].clientY;
+        touchStartX = e.touches[0].clientX;
+        touchDragging = false;
+      }, { passive:true });
+
+      handle.addEventListener('touchmove', e => {
+        if(e.touches.length !== 1) return;
+        const dy = Math.abs(e.touches[0].clientY - touchStartY);
+        if(!touchDragging && dy > 6){
+          touchDragging = true;
+          row.style.opacity = '0.5';
+          row.style.background = 'var(--primary-soft)';
+          e.preventDefault();
+        }
+        if(touchDragging){
+          e.preventDefault();
+          const ty = e.touches[0].clientY;
+          // 找出目前游標下的 row
+          const allRows = itemsList.querySelectorAll('.sortable-row');
+          let target = null;
+          allRows.forEach(r => {
+            if(r === row) return;
+            const rect = r.getBoundingClientRect();
+            if(ty >= rect.top && ty <= rect.bottom){
+              target = r;
+            }
+          });
+          // 清除其他 highlight
+          allRows.forEach(r => { if(r !== row) r.style.borderColor = 'var(--border)'; });
+          if(target) target.style.borderColor = 'var(--primary)';
+        }
+      }, { passive:false });
+
+      handle.addEventListener('touchend', e => {
+        row.style.opacity = '1';
+        row.style.background = 'var(--surface)';
+        if(!touchDragging){ return; }
+        touchDragging = false;
+        const ty = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientY : touchStartY;
+        const allRows = itemsList.querySelectorAll('.sortable-row');
+        let targetKey = null;
+        allRows.forEach(r => {
+          r.style.borderColor = 'var(--border)';
+          if(r === row) return;
+          const rect = r.getBoundingClientRect();
+          if(ty >= rect.top && ty <= rect.bottom){
+            targetKey = r.getAttribute('data-key');
+          }
+        });
+        if(targetKey && targetKey !== it.key){
+          uiEditorReorder(secKey, it.key, targetKey, isTeacher);
+        }
+      });
+
+      itemsList.appendChild(row);
+    });
+
+    secWrap.appendChild(itemsList);
+
+    // section 級重置
+    const secReset = el('div', { style:{marginTop:'8px',textAlign:'right'} },
+      el('button', { class:'btn btn-sm', onclick:()=> {
+        App._uiCustom.sections[secKey] = {};
+        sec.items.forEach(it => { App._uiCustom.items[it.key] = {}; });
+        delete App._uiCustom.order[secKey];
+        saveUiCustom();
+        toast('已重置此分組','success');
+        rerender();
+      }}, '↺ 重置此分組')
+    );
+    secWrap.appendChild(secReset);
+
+    card1.appendChild(secWrap);
+  });
+  content.appendChild(card1);
+
+  // 2. 總覽頁卡片編排（僅老師端有意義）
+  if(isTeacher){
+    const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
+    card2.appendChild(el('h3', null, '📊 總覽頁卡片'));
+    card2.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+      '勾選要在「📊 總覽」顯示的統計卡片與區塊'));
+    const ovOpts = [
+      { key:'helloBar', label:'👋 歡迎卡（時間問候）' },
+      { key:'quickstart', label:'🚀 快速開始引導（新老師）' },
+      { key:'journey', label:'🎉 歡迎旅程引導' },
+      { key:'signed', label:'✅ 已簽到 / 未簽到 統計' },
+      { key:'absent', label:'❌ 未簽到 統計' },
+      { key:'leave', label:'📆 請假中 統計' },
+      { key:'late', label:'⏰ 今日遲到 統計' },
+      { key:'pending', label:'📥 待審核項目提醒' },
+      { key:'today', label:'📅 今日班況詳細表' }
+    ];
+    App._uiCustom.overview = App._uiCustom.overview || {};
+    ovOpts.forEach(o => {
+      const chk = el('input', { type:'checkbox' });
+      chk.checked = App._uiCustom.overview[o.key] !== false;
+      chk.addEventListener('change', ()=> {
+        App._uiCustom.overview[o.key] = chk.checked;
+        saveUiCustom();
+      });
+      const lbl = el('label', { class:'flex', style:{padding:'6px 0',gap:'8px',alignItems:'center',cursor:'pointer'} });
+      lbl.appendChild(chk);
+      lbl.appendChild(el('span', null, o.label));
+      card2.appendChild(lbl);
+    });
+    content.appendChild(card2);
+  }
+
+  // 3. 套用變更（重新渲染）
+  const cardApply = el('div', { class:'card', style:{marginTop:'12px',background:'var(--primary-soft)',borderColor:'var(--primary)'} });
+  cardApply.appendChild(el('h3', null, '✅ 套用變更'));
+  cardApply.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '修改後側邊欄會即時更新；如未生效，按下方按鈕強制重繪'));
+  cardApply.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    saveUiCustom();
+    toast('已套用介面編輯','success');
+    rerender();
+  }}, '🔄 立即套用'));
+  content.appendChild(cardApply);
+
+  // 4. 重置
+  const card3 = el('div', { class:'card', style:{marginTop:'12px',background:'var(--danger-soft)',borderColor:'var(--danger)'} });
+  card3.appendChild(el('h3', null, '🔄 重置全部編排'));
+  card3.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '把所有自訂分組、項目、順序與總覽卡片設定還原為預設'));
+  card3.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+    const ok = await confirmDlg('確定重置所有介面編排？此動作無法復原。', { danger:true, okText:'確定重置' });
+    if(!ok) return;
+    App._uiCustom = { sections:{}, items:{}, order:{}, overview:{} };
+    saveUiCustom();
+    toast('已重置介面編排','success');
+    rerender();
+  }}, '🗑 重置全部'));
+  content.appendChild(card3);
+}
+
+/* 將 fromKey 移到 toKey 之前/之後（依目前順序方向） */
+function uiEditorReorder(secKey, fromKey, toKey, isTeacher){
+  const role = isTeacher ? 'teacher' : 'student';
+  const all = getSidebarItems(role);
+  const sec = all[secKey];
+  if(!sec) return;
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  let order = App._uiCustom.order[secKey];
+  if(!order || !order.length){
+    order = sec.items.map(it => it.key);
+  } else {
+    // 補齊任何新項目
+    const set = new Set(order);
+    sec.items.forEach(it => { if(!set.has(it.key)) order.push(it.key); });
+  }
+  const fromIdx = order.indexOf(fromKey);
+  const toIdx = order.indexOf(toKey);
+  if(fromIdx < 0 || toIdx < 0) return;
+  const [moved] = order.splice(fromIdx, 1);
+  // 重新算 toIdx（因 splice 可能位移）
+  const newToIdx = order.indexOf(toKey);
+  order.splice(newToIdx, 0, moved);
+  App._uiCustom.order[secKey] = order;
+  saveUiCustom();
+  rerender();
 }
 
 /* ════════════════════════════════════════════════════════════
