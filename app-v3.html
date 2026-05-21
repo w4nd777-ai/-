@@ -4745,6 +4745,30 @@ function sidebarToggleButton(){
   }, '◀');
 }
 
+function sideSection(key, title, items){
+  // 分組可摺疊
+  App._sideExpanded = App._sideExpanded || {};
+  // 預設展開（true）
+  const isExpanded = App._sideExpanded[key] !== false;
+  const wrap = document.createDocumentFragment();
+  const header = el('div', { class:'side-section-title side-section-collapsible',
+    style:{cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',userSelect:'none'},
+    onclick:()=> {
+      App._sideExpanded[key] = !isExpanded;
+      try { localStorage.setItem('cms_v3_side_expanded', JSON.stringify(App._sideExpanded)); } catch(e){}
+      rerender();
+    }
+  },
+    el('span', null, title),
+    el('span', { style:{fontSize:'10px',transition:'transform .2s',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',opacity:'.6'} }, '▼')
+  );
+  wrap.appendChild(header);
+  if(isExpanded){
+    items.forEach(it => wrap.appendChild(it));
+  }
+  return wrap;
+}
+
 function renderSidebarTeacher(){
   const side = el('aside', { class:'sidebar' + (App.sidebarCollapsed ? ' collapsed' : '') });
   side.appendChild(sidebarToggleButton());
@@ -4752,43 +4776,54 @@ function renderSidebarTeacher(){
     el('div', { class:'brand-logo' }, 'V3'),
     el('div', { class:'brand-title' }, App.db.branding.title || '課程管理')
   ));
-  side.appendChild(el('div', { class:'side-section-title' }, '日常'));
-  side.appendChild(sideItem('overview','📊','總覽'));
-  side.appendChild(sideItem('students','👥','學生名單'));
-  side.appendChild(sideItem('attendance','✅','出席管理'));
-  side.appendChild(sideItem('matrix','🪑','座位矩陣'));
-  side.appendChild(sideItem('qr','📱','QR Code 簽到'));
-  side.appendChild(sideItem('leave','📆','請假管理'));
-  side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
-  side.appendChild(el('div', { class:'side-section-title' }, '教學'));
-  side.appendChild(sideItem('assignments','📋','作業管理'));
-  side.appendChild(sideItem('submissions','📥','繳交記錄', pendingGradeCount() || null));
-  side.appendChild(sideItem('grades','🎯','學期成績'));
-  side.appendChild(sideItem('evals','💬','課程評價'));
-  side.appendChild(sideItem('feedback','🗳️','學生回饋', teacherFeedbackBadge() || null));
-  side.appendChild(sideItem('peer','⭐','學生互評'));
-  side.appendChild(sideItem('announcements','📢','公告管理'));
-  side.appendChild(sideItem('analytics','📈','分析工具'));
-  side.appendChild(sideItem('calendar','📅','行事曆'));
-  side.appendChild(sideItem('gantt','📊','作業甘特圖'));
-  side.appendChild(el('div', { class:'side-section-title' }, '課堂工具'));
-  side.appendChild(sideItem('picker','🎲','隨機抽籤'));
-  side.appendChild(sideItem('timer','⏰','課堂計時器'));
-  side.appendChild(el('div', { class:'side-section-title' }, '系統'));
-  // AI 助教 button (acts like nav)
-  side.appendChild(el('button', { class:'side-item', onclick: openAIAssistant },
-    el('span', { class:'ico' }, '🤖'),
-    el('span', null, 'AI 助教')
-  ));
-  side.appendChild(sideItem('workspace','🏢','多教室管理'));
-  side.appendChild(sideItem('notify','📲','通知設定'));
-  side.appendChild(sideItem('backup','💼','備份與還原'));
-  side.appendChild(sideItem('logs','📜','操作紀錄'));
-  side.appendChild(sideItem('storage','💾','儲存空間'));
-  side.appendChild(sideItem('settings','⚙️','設定'));
-  side.appendChild(sideItem('firebase','☁️','跨裝置同步'));
-  side.appendChild(sideItem('install','📲','安裝 App'));
-  side.appendChild(sideItem('help','📖','使用說明'));
+
+  // 日常
+  side.appendChild(sideSection('daily', '日常', [
+    sideItem('overview','📊','總覽'),
+    sideItem('students','👥','學生名單'),
+    sideItem('attendance','✅','出席管理'),
+    sideItem('matrix','🪑','座位矩陣'),
+    sideItem('qr','📱','QR Code 簽到'),
+    sideItem('leave','📆','請假管理'),
+    sideItem('messages','💬','訊息', unreadMessages() || null),
+  ]));
+
+  // 教學
+  side.appendChild(sideSection('teaching', '教學', [
+    sideItem('assignments','📋','作業管理'),
+    sideItem('submissions','📥','繳交記錄', pendingGradeCount() || null),
+    sideItem('grades','🎯','學期成績'),
+    sideItem('evals','💬','課程評價'),
+    sideItem('feedback','🗳️','學生回饋', teacherFeedbackBadge() || null),
+    sideItem('peer','⭐','學生互評'),
+    sideItem('announcements','📢','公告管理'),
+    sideItem('analytics','📈','分析工具'),
+    sideItem('calendar','📅','行事曆'),
+    sideItem('gantt','📊','作業甘特圖'),
+  ]));
+
+  // 課堂工具
+  side.appendChild(sideSection('tools', '課堂工具', [
+    sideItem('picker','🎲','隨機抽籤'),
+    sideItem('timer','⏰','課堂計時器'),
+  ]));
+
+  // 系統
+  side.appendChild(sideSection('system', '系統', [
+    el('button', { class:'side-item', onclick: openAIAssistant, title:'AI 助教' },
+      el('span', { class:'ico' }, '🤖'),
+      el('span', null, 'AI 助教')
+    ),
+    sideItem('workspace','🏢','多教室管理'),
+    sideItem('notify','📲','通知設定'),
+    sideItem('backup','💼','備份與還原'),
+    sideItem('logs','📜','操作紀錄'),
+    sideItem('storage','💾','儲存空間'),
+    sideItem('settings','⚙️','設定'),
+    sideItem('firebase','☁️','跨裝置同步'),
+    sideItem('install','📲','安裝 App'),
+    sideItem('help','📖','使用說明'),
+  ]));
 
   // bottom: user info + logout
   const spacer = el('div', { style:{flex:'1'} });
@@ -4815,26 +4850,29 @@ function renderSidebarStudent(){
     el('div', { class:'brand-logo' }, 'V3'),
     el('div', { class:'brand-title' }, '我的課程')
   ));
-  side.appendChild(el('div', { class:'side-section-title' }, '功能'));
-  side.appendChild(sideItem('checkin','✋','簽到'));
-  side.appendChild(sideItem('myatt','📅','出席紀錄'));
-  side.appendChild(sideItem('myleave','📆','請假'));
-  side.appendChild(sideItem('messages','💬','訊息', unreadMessages() || null));
-  side.appendChild(el('div', { class:'side-section-title' }, '學習'));
-  side.appendChild(sideItem('sasgn','📤','作業', studentNewAssignmentCount() || null));
-  side.appendChild(sideItem('sgrade','🎯','我的成績'));
-  side.appendChild(sideItem('sev','⭐','課程評價'));
-  side.appendChild(sideItem('sfeedback','📝','課程回饋'));
-  side.appendChild(sideItem('speer','⭐','我的互評', studentPendingPeerCount() || null));
-  side.appendChild(sideItem('sann','📢','公告', studentUnreadAnnouncements() || null));
-  side.appendChild(el('button', { class:'side-item', onclick: openAIAssistant },
-    el('span', { class:'ico' }, '🤖'),
-    el('span', null, 'AI 學習助教')
-  ));
-  side.appendChild(sideItem('me','👤','個人'));
-  side.appendChild(el('div', { class:'side-section-title' }, '其他'));
-  side.appendChild(sideItem('install','📲','安裝 App'));
-  side.appendChild(sideItem('help','📖','使用說明'));
+  side.appendChild(sideSection('s_func', '功能', [
+    sideItem('checkin','✋','簽到'),
+    sideItem('myatt','📅','出席紀錄'),
+    sideItem('myleave','📆','請假'),
+    sideItem('messages','💬','訊息', unreadMessages() || null),
+  ]));
+  side.appendChild(sideSection('s_learn', '學習', [
+    sideItem('sasgn','📤','作業', studentNewAssignmentCount() || null),
+    sideItem('sgrade','🎯','我的成績'),
+    sideItem('sev','⭐','課程評價'),
+    sideItem('sfeedback','📝','課程回饋'),
+    sideItem('speer','⭐','我的互評', studentPendingPeerCount() || null),
+    sideItem('sann','📢','公告', studentUnreadAnnouncements() || null),
+    el('button', { class:'side-item', onclick: openAIAssistant, title:'AI 學習助教' },
+      el('span', { class:'ico' }, '🤖'),
+      el('span', null, 'AI 學習助教')
+    ),
+    sideItem('me','👤','個人'),
+  ]));
+  side.appendChild(sideSection('s_other', '其他', [
+    sideItem('install','📲','安裝 App'),
+    sideItem('help','📖','使用說明'),
+  ]));
 
   side.appendChild(el('div', { style:{flex:'1'} }));
   side.appendChild(el('div', { class:'card', style:{padding:'10px'} },
@@ -10064,6 +10102,7 @@ Object.assign(App, {
 
 // 還原側邊欄收合狀態
 try { App.sidebarCollapsed = localStorage.getItem('cms_v3_sb_collapsed') === '1'; } catch(e){}
+try { App._sideExpanded = JSON.parse(localStorage.getItem('cms_v3_side_expanded') || '{}'); } catch(e){ App._sideExpanded = {}; }
 
 function applySidebarCollapse(){
   const sb = document.querySelector('.sidebar');
