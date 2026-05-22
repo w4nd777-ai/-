@@ -416,6 +416,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
 }
 .toast.t-success{ border-color:var(--success); color:var(--success); }
 .toast.t-warn{ border-color:var(--warn); color:var(--warn); }
+.toast.t-warning{ border-color:var(--warn); color:var(--warn); }  /* batch 3：t-warn 別名 */
 .toast.t-danger{ border-color:var(--danger); color:var(--danger); }
 @keyframes toastIn{
   from{ opacity:0; transform:translateY(-12px); }
@@ -1598,6 +1599,87 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   .stat-pill { font-size: 10px; padding: 1px 5px; }
 }
 
+/* batch 3-stab：手機觸控區補強（Apple HIG / Material 建議 44px 最小觸控目標）
+   桌機保留 .btn-sm 視覺較小（32px 高），但平板/手機把點擊區域撐到 44px。 */
+@media (max-width:768px){
+  .btn-sm{ min-height:44px; min-width:44px; }
+  .btn-icon{ min-height:44px; min-width:44px; }
+  /* 確保 input/select 仍可一指點選 */
+  .input, .select{ min-height:44px; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   BATCH 3 ▒▒ UX 改善：新手引導 / 側邊欄搜尋 / loading helper
+   ──────────────────────────────────────────────────────────── */
+/* ---- 新手引導卡片（右下角） ---- */
+.tour-card{
+  position:fixed; right:24px; bottom:24px; z-index:99;
+  width:min(360px, calc(100vw - 32px));
+  background:var(--surface); color:var(--text);
+  border:1px solid var(--border-strong);
+  border-radius:var(--r-lg);
+  box-shadow:0 12px 32px rgba(0,0,0,.25);
+  padding:16px 18px;
+  animation:tourSlideIn .3s ease-out;
+}
+.tour-card .tour-close{
+  position:absolute; top:8px; right:10px;
+  background:transparent; border:none; cursor:pointer;
+  font-size:18px; color:var(--text-muted);
+  width:28px; height:28px; border-radius:50%;
+}
+.tour-card .tour-close:hover{ background:var(--surface-2); color:var(--text); }
+.tour-card .tour-step{
+  font-size:11px; color:var(--text-muted); margin-bottom:6px;
+  letter-spacing:.5px; text-transform:uppercase;
+}
+.tour-card h4{ margin:0 0 6px; font-size:16px; }
+.tour-card p{ margin:0 0 12px; font-size:13px; color:var(--text-muted); line-height:1.5; }
+.tour-card .tour-actions{ display:flex; justify-content:flex-end; gap:8px; }
+.tour-card .tour-dots{
+  display:flex; gap:4px; align-items:center;
+  margin-bottom:10px;
+}
+.tour-card .tour-dot{
+  width:6px; height:6px; border-radius:50%;
+  background:var(--border-strong);
+}
+.tour-card .tour-dot.active{ background:var(--primary); }
+@keyframes tourSlideIn{
+  from{ opacity:0; transform:translateY(20px); }
+  to  { opacity:1; transform:translateY(0); }
+}
+@media (max-width:520px){
+  .tour-card{ right:12px; left:12px; bottom:12px; width:auto; }
+}
+
+/* ---- 側邊欄頂部搜尋框 ---- */
+.sidebar-search{
+  padding:8px 12px 4px;
+}
+.sidebar-search input{
+  width:100%; height:32px; padding:0 10px;
+  border-radius:6px; border:1px solid var(--border-strong);
+  background:var(--surface-2); color:var(--text);
+  font-size:13px;
+}
+.sidebar-search input:focus{ outline:none; border-color:var(--primary); }
+.side-item.search-hidden{ display:none !important; }
+.side-section-title.search-hidden{ display:none !important; }
+
+/* ---- 局部 loading 遮罩（withLoading helper 使用） ---- */
+.loading-local{
+  position:absolute; inset:0; z-index:5;
+  background:rgba(255,255,255,.55); display:flex;
+  align-items:center; justify-content:center;
+  flex-direction:column; gap:10px;
+  border-radius:inherit;
+  backdrop-filter:blur(1px);
+}
+html[data-theme="dark"] .loading-local{ background:rgba(0,0,0,.5); color:#fff; }
+.loading-local .loading-text{ font-size:13px; color:var(--text-muted); }
+.loading-local-container{ position:relative; }
+
 /* ════════════════════════════════════════════════════════════
    BATCH 2 ▒▒ UI/UX SYSTEM POLISH (groups / self-eval / report)
    ──────────────────────────────────────────────────────────── */
@@ -2089,6 +2171,8 @@ function isPasswordHashed(stored){
    TOAST + MODAL + CONFIRM
    ──────────────────────────────────────────────────────────── */
 function toast(msg, type='', dur=2400){
+  // 統一 warn → warning（避免呼叫端混用造成樣式不一致）
+  if(type === 'warn') type = 'warning';
   const host = $('#toast-host');
   const cls = type ? `toast t-${type}` : 'toast';
   const t = el('div', { class: cls }, msg);
@@ -3932,6 +4016,8 @@ function donutChart(parts, opts={}){
 function go(view, subview=null){
   App.view = view;
   App.subview = subview;
+  // batch 3：記錄「最近使用」頁面（登入後才記）
+  try { if(view && App.session) pushRecentPage(view); } catch(e){}
   const hash = '#' + view + (subview ? '/' + subview : '');
   if(location.hash !== hash) location.hash = hash;
   rerender();
@@ -5128,8 +5214,15 @@ function sideSection(key, title, items){
   // 介面編輯器：自訂分組標題
   const finalTitle = (typeof getSectionLabel === 'function') ? getSectionLabel(key, title) : title;
 
-  // 分組可摺疊
+  // 分組可摺疊（batch 3：同步寫每組獨立 key，相容舊 _sideExpanded）
   App._sideExpanded = App._sideExpanded || {};
+  // 初始化時讀取每組獨立 key（若舊資料已存在 _sideExpanded 則優先用舊值）
+  if(App._sideExpanded[key] === undefined){
+    try {
+      const v = localStorage.getItem('cms_v3_sidebar_group_' + key + '_collapsed');
+      if(v === '1') App._sideExpanded[key] = false;
+    } catch(e){}
+  }
   // 預設展開（true）
   const isExpanded = App._sideExpanded[key] !== false;
   const wrap = document.createDocumentFragment();
@@ -5138,11 +5231,13 @@ function sideSection(key, title, items){
     onclick:()=> {
       App._sideExpanded[key] = !isExpanded;
       try { localStorage.setItem('cms_v3_side_expanded', JSON.stringify(App._sideExpanded)); } catch(e){}
+      // batch 3：每組單獨 key（題目要求格式）
+      try { localStorage.setItem('cms_v3_sidebar_group_' + key + '_collapsed', isExpanded ? '1' : '0'); } catch(e){}
       rerender();
     }
   },
     el('span', null, finalTitle),
-    el('span', { style:{fontSize:'10px',transition:'transform .2s',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',opacity:'.6'} }, '▼')
+    el('span', { style:{fontSize:'10px',transition:'transform .2s',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',opacity:'.6'} }, isExpanded ? '▾' : '▸')
   );
   wrap.appendChild(header);
   if(isExpanded){
@@ -5183,12 +5278,33 @@ function renderSidebarTeacher(){
     el('div', { class:'brand-title' }, App.db.branding.title || '課程管理')
   ));
 
+  // batch 3：頂部即時搜尋框（filter sidebar 項目）
+  const searchWrap = el('div', { class:'sidebar-search' });
+  const searchInp = el('input', { type:'search', placeholder:'搜尋功能...', 'aria-label':'搜尋側邊欄功能' });
+  searchInp.addEventListener('input', e => sidebarSearchFilter(e.target.value));
+  searchWrap.appendChild(searchInp);
+  side.appendChild(searchWrap);
+
   // badges 對應表
   const badges = {
     messages: unreadMessages() || null,
     submissions: pendingGradeCount() || null,
     feedback: teacherFeedbackBadge() || null
   };
+
+  // batch 3：最近使用分組（最近點過的 5 個項目）
+  const recents = getRecentPages();
+  if(recents.length){
+    const itemMap = {};
+    const all = getSidebarItems('teacher');
+    Object.keys(all).forEach(sk => all[sk].items.forEach(it => itemMap[it.key] = it));
+    const recentNodes = recents
+      .map(k => itemMap[k] ? sideItem(itemMap[k].key, itemMap[k].icon, itemMap[k].label, null) : null)
+      .filter(n => n != null);
+    if(recentNodes.length){
+      side.appendChild(sideSection('recent', '最近使用', recentNodes));
+    }
+  }
 
   // 日常 — 依使用者自訂順序輸出
   side.appendChild(sideSection('daily', '日常', buildSidebarItems('teacher', 'daily', badges)));
@@ -5225,7 +5341,9 @@ function renderSidebarTeacher(){
     el('div', { style:{marginTop:'6px',display:'flex',gap:'4px'} },
       el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: toggleTheme, title:'切換暗色' }, App.theme==='dark'?'☀️':'🌙'),
       el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: doLogout, title:'登出' }, '⎋ 登出')
-    )
+    ),
+    // batch 3：重新觀看引導
+    el('button', { class:'btn btn-sm', style:{width:'100%',marginTop:'4px'}, onclick: resetTour, title:'重新觀看新手引導' }, '🧭 重新引導')
   );
   side.appendChild(userBox);
 
@@ -5240,12 +5358,35 @@ function renderSidebarStudent(){
     el('div', { class:'brand-logo' }, 'V3'),
     el('div', { class:'brand-title' }, '我的課程')
   ));
+
+  // batch 3：頂部即時搜尋框
+  const searchWrap = el('div', { class:'sidebar-search' });
+  const searchInp = el('input', { type:'search', placeholder:'搜尋功能...', 'aria-label':'搜尋側邊欄功能' });
+  searchInp.addEventListener('input', e => sidebarSearchFilter(e.target.value));
+  searchWrap.appendChild(searchInp);
+  side.appendChild(searchWrap);
+
   const sBadges = {
     messages: unreadMessages() || null,
     sasgn: studentNewAssignmentCount() || null,
     speer: studentPendingPeerCount() || null,
     sann: studentUnreadAnnouncements() || null
   };
+
+  // batch 3：最近使用分組
+  const recents = getRecentPages();
+  if(recents.length){
+    const itemMap = {};
+    const allS = getSidebarItems('student');
+    Object.keys(allS).forEach(sk => allS[sk].items.forEach(it => itemMap[it.key] = it));
+    const recentNodes = recents
+      .map(k => itemMap[k] ? sideItem(itemMap[k].key, itemMap[k].icon, itemMap[k].label, null) : null)
+      .filter(n => n != null);
+    if(recentNodes.length){
+      side.appendChild(sideSection('recent', '最近使用', recentNodes));
+    }
+  }
+
   side.appendChild(sideSection('s_func', '功能', buildSidebarItems('student', 's_func', sBadges)));
 
   // 學習 — AI 學習助教為特殊按鈕（插在最後一項之前）
@@ -5269,7 +5410,9 @@ function renderSidebarStudent(){
     el('div', { style:{marginTop:'6px',display:'flex',gap:'4px'} },
       el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: toggleTheme }, App.theme==='dark'?'☀️':'🌙'),
       el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: doLogout }, '⎋')
-    )
+    ),
+    // batch 3：重新觀看引導
+    el('button', { class:'btn btn-sm', style:{width:'100%',marginTop:'4px'}, onclick: resetTour, title:'重新觀看新手引導' }, '🧭 重新引導')
   ));
   return side;
 }
@@ -5291,6 +5434,7 @@ function renderTopbar(role){
     picker:'🎲 隨機抽籤', timer:'⏰ 課堂計時器',
     appearance:'🎨 外觀設定',
     uieditor:'🛠️ 介面編輯器',
+    exportcenter:'📦 匯出中心',
     help:'📖 使用說明', install:'📲 安裝 App'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
@@ -8249,7 +8393,12 @@ function rFirebase(content){
       toast('已停用同步','warn');
       rerender();
     } }, '⏏ 停用'),
-    el('button', { class:'btn', onclick:()=> Sync.init() }, '🔄 重連')
+    el('button', { class:'btn', onclick: async (e)=> {
+      // batch 3：用 withLoading 顯示重連狀態
+      const card = e.target.closest('.card') || document.querySelector('.content');
+      try { await withLoading(card, ()=> Promise.resolve(Sync.init()), 'Firebase 連線中...'); }
+      catch(err){ toast('重連失敗：' + (err.message||err), 'warn'); }
+    }}, '🔄 重連')
   ));
   content.appendChild(card);
 
@@ -11314,7 +11463,8 @@ function openAIAssistant(){
     const ph = el('div', { class:'ai-msg assistant' }, el('span', { class:'ai-thinking' }, el('span'), el('span'), el('span')));
     chatEl.appendChild(ph);
     chatEl.scrollTop = chatEl.scrollHeight;
-    const ans = await askClaude(q, sys);
+    // batch 3：以 withLoading 包住整個 AI 等待（含 loading 遮罩）
+    const ans = await withLoading(chatEl, ()=> askClaude(q, sys), 'AI 思考中...');
     ph.innerHTML = '';
     ph.textContent = ans || '（無回應）';
     chatEl.scrollTop = chatEl.scrollHeight;
@@ -14517,6 +14667,7 @@ function rerender(){
       else if(v === 'timer') rTimer(content);          // batch 4
       else if(v === 'appearance') rAppearance(content);// 外觀設定
       else if(v === 'uieditor') rUiEditor(content);   // 介面編輯器
+      else if(v === 'exportcenter') rExportCenter(content); // batch 3：匯出中心
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else { App.view = 'overview'; rOv(content); }
@@ -14549,6 +14700,9 @@ function rerender(){
       el('button', { class:'btn', style:{marginTop:'8px'}, onclick:()=> { App.view = App.session.role==='teacher'?'overview':'checkin'; rerender(); } }, '回首頁')
     ));
   }
+
+  // batch 3：登入後首次顯示新手引導（已完成過或 tour 仍開著時自動跳過）
+  try { maybeShowTour(); } catch(e){}
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -17162,6 +17316,7 @@ function getSidebarItems(role){
         { key:'workspace', icon:'🏢', label:'多教室管理' },
         { key:'notify', icon:'📲', label:'通知設定' },
         { key:'backup', icon:'💼', label:'備份與還原' },
+        { key:'exportcenter', icon:'📦', label:'匯出中心' },
         { key:'logs', icon:'📜', label:'操作紀錄' },
         { key:'storage', icon:'💾', label:'儲存空間' },
         { key:'settings', icon:'⚙️', label:'設定' },
@@ -18138,6 +18293,363 @@ function rInstall(content){
   content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
     '把系統加到主畫面 → 隨時一鍵打開，跨網路也能用'));
   content.appendChild(renderInstallCard());
+}
+
+/* ════════════════════════════════════════════════════════════
+   BATCH 3 ▒▒ 新手引導 tour / loading helper / 匯出中心 / 最近使用
+   ──────────────────────────────────────────────────────────── */
+
+/* ---- 第 17 項：新手引導精靈 ---- */
+const TOUR_STEPS = {
+  teacher: [
+    { title:'歡迎使用！',     body:'這是一份簡短的快速導覽（約 30 秒）。隨時點右上 ✕ 關閉。' },
+    { title:'今日狀況一目了然', body:'「總覽」可看到今日出席率、待批改作業、訊息等關鍵指標。' },
+    { title:'學生名單管理',     body:'到「學生名單」可新增 / 編輯學生、批次匯入名單、設定座號。' },
+    { title:'出席管理 & 簽到',   body:'「出席管理」一鍵全簽到 / 簽退；學生也可掃 QR Code 自助簽到。' },
+    { title:'自訂介面',         body:'透過「介面編輯器」可調整側邊欄、登入頁、頁面文字，打造專屬風格！' }
+  ],
+  student: [
+    { title:'歡迎！',           body:'30 秒帶你熟悉介面，點右上 ✕ 可隨時關閉。' },
+    { title:'簽到很簡單',       body:'點側邊欄「簽到」，按下大按鈕即可完成今日簽到。' },
+    { title:'查看成績與作業',   body:'「我的成績」可看到所有作業成績與教師評語；「個人」可調整密碼等設定。' }
+  ]
+};
+function tourKey(role){
+  const uid = (App.session && (App.session.id || App.session.username)) || 'anon';
+  return 'cms_v3_tour_done_' + role + '_' + uid;
+}
+function showTour(role, opts){
+  role = role || (App.session && App.session.role) || 'teacher';
+  const steps = TOUR_STEPS[role];
+  if(!steps || !steps.length) return;
+  // 若已存在則先移除
+  closeTour();
+  App._tourIdx = (opts && typeof opts.startIdx === 'number') ? opts.startIdx : 0;
+  App._tourRole = role;
+  tourStep(role, App._tourIdx);
+}
+function tourStep(role, idx){
+  const steps = TOUR_STEPS[role];
+  if(!steps) return;
+  if(idx < 0 || idx >= steps.length){ closeTour(true); return; }
+  // 先移除舊卡片
+  const prev = document.getElementById('tour-card');
+  if(prev) prev.remove();
+  const step = steps[idx];
+  const isLast = (idx === steps.length - 1);
+  const card = el('div', { class:'tour-card', id:'tour-card', role:'dialog', 'aria-label':'新手引導' });
+  card.appendChild(el('button', { class:'tour-close', onclick: ()=> closeTour(true), title:'關閉引導', 'aria-label':'關閉' }, '✕'));
+  card.appendChild(el('div', { class:'tour-step' }, '第 ' + (idx+1) + ' 步 / 共 ' + steps.length + ' 步'));
+  // dots
+  const dots = el('div', { class:'tour-dots' });
+  steps.forEach((_, i) => dots.appendChild(el('span', { class:'tour-dot' + (i===idx?' active':'') })));
+  card.appendChild(dots);
+  card.appendChild(el('h4', null, step.title));
+  card.appendChild(el('p', null, step.body));
+  const actions = el('div', { class:'tour-actions' });
+  if(idx > 0){
+    actions.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> { App._tourIdx = idx-1; tourStep(role, idx-1); } }, '上一步'));
+  }
+  actions.appendChild(el('button', {
+    class:'btn btn-sm btn-primary',
+    onclick: ()=> {
+      if(isLast){ closeTour(true); return; }
+      App._tourIdx = idx+1; tourStep(role, idx+1);
+    }
+  }, isLast ? '開始使用' : '下一步 →'));
+  card.appendChild(actions);
+  document.body.appendChild(card);
+}
+function closeTour(markDone){
+  const card = document.getElementById('tour-card');
+  if(card) card.remove();
+  if(markDone){
+    try {
+      const role = App._tourRole || (App.session && App.session.role);
+      if(role) localStorage.setItem(tourKey(role), '1');
+    } catch(e){}
+  }
+  App._tourIdx = null;
+  App._tourRole = null;
+}
+function maybeShowTour(){
+  // 登入後檢查；若尚未完成過，自動顯示
+  try {
+    if(!App.session) return;
+    const role = App.session.role;
+    if(!role) return;
+    if(localStorage.getItem(tourKey(role))) return;
+    // 避免每次 rerender 都重複塞
+    if(document.getElementById('tour-card')) return;
+    setTimeout(()=> showTour(role), 600);  // 略延後，讓畫面先穩定
+  } catch(e){}
+}
+// 對外暴露給「重新引導」按鈕使用
+function resetTour(){
+  try {
+    const role = App.session && App.session.role;
+    if(role) localStorage.removeItem(tourKey(role));
+    toast('已重置引導，將重新顯示','success');
+    showTour(role);
+  } catch(e){ toast('重置失敗：' + (e.message||e), 'warn'); }
+}
+
+/* ---- 第 18 項-3：最近使用頁面追蹤 ---- */
+const RECENT_PAGES_KEY = 'cms_v3_recent_pages';
+const RECENT_PAGES_MAX = 5;
+function pushRecentPage(view){
+  if(!view) return;
+  // 不追蹤這些「中繼/系統」頁面
+  if(['exportcenter'].indexOf(view) >= 0) { /* 仍可記 */ }
+  try {
+    const cur = JSON.parse(localStorage.getItem(RECENT_PAGES_KEY) || '[]');
+    const next = [view].concat(cur.filter(v => v !== view)).slice(0, RECENT_PAGES_MAX);
+    localStorage.setItem(RECENT_PAGES_KEY, JSON.stringify(next));
+  } catch(e){}
+}
+function getRecentPages(){
+  try { return JSON.parse(localStorage.getItem(RECENT_PAGES_KEY) || '[]'); }
+  catch(e){ return []; }
+}
+
+/* ---- 第 18 項-4：側邊欄即時搜尋 ---- */
+function sidebarSearchFilter(q){
+  q = (q || '').trim().toLowerCase();
+  const sb = document.querySelector('.sidebar');
+  if(!sb) return;
+  const items = sb.querySelectorAll('.side-item');
+  const sections = sb.querySelectorAll('.side-section-title');
+  if(!q){
+    items.forEach(it => it.classList.remove('search-hidden'));
+    sections.forEach(s => s.classList.remove('search-hidden'));
+    return;
+  }
+  items.forEach(it => {
+    const txt = (it.textContent || '').toLowerCase();
+    if(txt.indexOf(q) >= 0) it.classList.remove('search-hidden');
+    else it.classList.add('search-hidden');
+  });
+  // 隱藏無任何可見項目的分組標題（簡單做法：永遠顯示，避免群組計算過於複雜）
+  sections.forEach(s => s.classList.remove('search-hidden'));
+}
+
+/* ---- 第 20 項：loading state 通用元件 ---- */
+function showLoading(target, text){
+  if(typeof target === 'string') target = document.querySelector(target);
+  if(!target) return null;
+  // 若已有 loading 直接返回
+  let ex = target.querySelector(':scope > .loading-local');
+  if(ex) return ex;
+  // 確保父元素 position 不是 static（這樣 absolute 才會貼齊）
+  const cs = getComputedStyle(target);
+  if(cs.position === 'static') target.classList.add('loading-local-container');
+  const ov = el('div', { class:'loading-local' },
+    el('div', { class:'spinner big' }),
+    el('div', { class:'loading-text' }, text || '載入中...')
+  );
+  target.appendChild(ov);
+  return ov;
+}
+function hideLoading(target){
+  if(typeof target === 'string') target = document.querySelector(target);
+  if(!target) return;
+  const ov = target.querySelector(':scope > .loading-local');
+  if(ov) ov.remove();
+  target.classList.remove('loading-local-container');
+}
+async function withLoading(target, asyncFn, text){
+  showLoading(target, text);
+  try {
+    return await asyncFn();
+  } finally {
+    hideLoading(target);
+  }
+}
+
+/* ---- 第 19 項：匯出中心 ---- */
+function downloadJSON(obj, filename){
+  // 與 downloadCSV 一致風格，但輸出 JSON
+  const json = JSON.stringify(obj, null, 2);
+  const blob = new Blob([json], { type:'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  downloadDataUrl(url, filename || ('export_' + td() + '.json'));
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+}
+function buildExportCSV(category){
+  // 回傳 [headers, ...rows] 二維陣列
+  const db = App.db || {};
+  const stuById = {};
+  (db.students || []).forEach(s => stuById[s.id] = s);
+  switch(category){
+    case 'students':
+      return [['ID','姓名','班級','座號','使用者名稱','Email']].concat(
+        (db.students||[]).map(s => [s.id, s.name||'', s.cls||'', s.seat||'', s.username||'', s.email||''])
+      );
+    case 'attendance':
+      return [['日期','學生','狀態','時間','備註']].concat(
+        (db.attendance||[]).map(a => {
+          const s = stuById[a.studentId] || {};
+          return [a.date||'', s.name||a.studentId||'', a.status||'', a.time||'', a.note||''];
+        })
+      );
+    case 'grades': {
+      const rows = [['學生','作業','分數','評語']];
+      (db.submissions||[]).forEach(sub => {
+        const s = stuById[sub.studentId] || {};
+        const asg = (db.assignments||[]).find(a => a.id === sub.assignmentId);
+        if(sub.score != null) rows.push([s.name||sub.studentId||'', asg?asg.title:sub.assignmentId, sub.score, sub.comment||'']);
+      });
+      return rows;
+    }
+    case 'submissions':
+      return [['學生','作業','繳交時間','分數','評語','狀態']].concat(
+        (db.submissions||[]).map(sub => {
+          const s = stuById[sub.studentId] || {};
+          const asg = (db.assignments||[]).find(a => a.id === sub.assignmentId);
+          return [s.name||sub.studentId||'', asg?asg.title:sub.assignmentId, sub.submittedAt?new Date(sub.submittedAt).toLocaleString():'', sub.score==null?'':sub.score, sub.comment||'', sub.status||''];
+        })
+      );
+    case 'evals':
+      return [['學生','課程','評分','留言','時間']].concat(
+        (db.evaluations||[]).map(ev => {
+          const s = stuById[ev.studentId] || {};
+          return [s.name||ev.studentId||'', ev.courseId||'', ev.score==null?'':ev.score, ev.comment||'', ev.at?new Date(ev.at).toLocaleString():''];
+        })
+      );
+    case 'feedback':
+      return [['學生','類別','內容','時間']].concat(
+        (db.feedback||[]).map(fb => {
+          const s = stuById[fb.studentId] || {};
+          return [s.name||fb.studentId||'', fb.category||'', fb.text||fb.content||'', fb.at?new Date(fb.at).toLocaleString():''];
+        })
+      );
+    case 'peer':
+      return [['評分者','受評者','分數','留言','時間']].concat(
+        (db.peerEvals||[]).map(pe => {
+          const a = stuById[pe.fromId] || {};
+          const b = stuById[pe.toId] || {};
+          return [a.name||pe.fromId||'', b.name||pe.toId||'', pe.score==null?'':pe.score, pe.comment||'', pe.at?new Date(pe.at).toLocaleString():''];
+        })
+      );
+    case 'leave':
+      return [['學生','日期','原因','狀態','申請時間']].concat(
+        (db.leaves||[]).map(lv => {
+          const s = stuById[lv.studentId] || {};
+          return [s.name||lv.studentId||'', lv.date||'', lv.reason||'', lv.status||'', lv.at?new Date(lv.at).toLocaleString():''];
+        })
+      );
+    case 'settings':
+      // 整個 DB 直接序列化（向後相容；JSON 是完整備份）
+      return null;
+    default:
+      return [];
+  }
+}
+function getExportCategoryLabel(cat){
+  return ({
+    students:'學生名單', attendance:'出席紀錄', grades:'成績',
+    submissions:'繳交紀錄', evals:'評價回饋', feedback:'學生回饋',
+    peer:'學生互評', leave:'請假紀錄', settings:'系統設定 (完整備份)'
+  })[cat] || cat;
+}
+function exportCategoryDo(cat, fmt){
+  const label = getExportCategoryLabel(cat);
+  if(cat === 'settings'){
+    // 強制使用 JSON
+    downloadJSON(App.db || {}, 'cms_full_backup_' + td() + '.json');
+    toast(label + ' 已下載 (JSON)','success');
+    return;
+  }
+  const rows = buildExportCSV(cat) || [];
+  if(fmt === 'json'){
+    // 把陣列轉成物件陣列
+    if(rows.length <= 1){ toast('沒有資料可匯出','warn'); return; }
+    const headers = rows[0];
+    const data = rows.slice(1).map(r => {
+      const o = {};
+      headers.forEach((h, i) => o[h] = r[i]);
+      return o;
+    });
+    downloadJSON(data, 'cms_' + cat + '_' + td() + '.json');
+  } else {
+    // CSV / xlsx 走相同實作（Excel 可直接開 CSV）
+    if(rows.length <= 1){ toast('沒有資料可匯出','warn'); return; }
+    const ext = (fmt === 'xlsx') ? 'csv' : 'csv'; // 兩者本質同 CSV（已加 BOM）
+    downloadCSV(rows, 'cms_' + cat + '_' + td() + '.' + ext);
+  }
+  toast(label + ' 已下載 (' + fmt.toUpperCase() + ')','success');
+}
+function rExportCenter(content){
+  content.appendChild(el('h1', null, '📦 匯出中心'));
+  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
+    '集中所有資料的匯出入口；既有頁面內的匯出按鈕仍可使用。'));
+
+  const categories = [
+    'students','attendance','grades','submissions',
+    'evals','feedback','peer','leave','settings'
+  ];
+
+  // 一鍵下載全部
+  const cardAll = el('div', { class:'card', style:{marginBottom:'14px'} });
+  cardAll.appendChild(el('h3', null, '⬇ 一鍵備份'));
+  cardAll.appendChild(el('p', { class:'small muted', style:{marginBottom:'8px'} },
+    '把所有資料類別合併為單一 JSON 檔下載（建議定期備份）'));
+  cardAll.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    // batch 3：以 withLoading 包裹（大型班級時序列化可能略慢）
+    await withLoading(cardAll, async ()=> {
+      const bundle = {};
+      categories.forEach(cat => {
+        if(cat === 'settings'){
+          bundle.settings_full = App.db || {};
+        } else {
+          const rows = buildExportCSV(cat) || [];
+          if(rows.length > 1){
+            const headers = rows[0];
+            bundle[cat] = rows.slice(1).map(r => {
+              const o = {};
+              headers.forEach((h, i) => o[h] = r[i]);
+              return o;
+            });
+          } else {
+            bundle[cat] = [];
+          }
+        }
+      });
+      bundle._exportedAt = new Date().toISOString();
+      // 讓 spinner 至少閃一下，使用者才看得到
+      await new Promise(r => setTimeout(r, 250));
+      downloadJSON(bundle, 'cms_all_backup_' + td() + '.json');
+    }, '產生備份中...');
+    toast('已下載全部備份 (JSON)','success');
+  }}, '⬇ 全部下載 (合併 JSON)'));
+  content.appendChild(cardAll);
+
+  // 各類別卡片
+  const grid = el('div', { class:'card' });
+  grid.appendChild(el('h3', null, '📂 分類匯出'));
+  grid.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '每個類別可選 CSV / JSON / Excel(.xlsx) 三種格式'));
+  categories.forEach(cat => {
+    const row = el('div', {
+      style:{
+        display:'flex', alignItems:'center', justifyContent:'space-between',
+        gap:'8px', flexWrap:'wrap',
+        padding:'10px 0', borderTop:'1px solid var(--border)'
+      }
+    });
+    row.appendChild(el('div', { style:{fontWeight:'600',flex:'1',minWidth:'140px'} }, getExportCategoryLabel(cat)));
+    const btnGroup = el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap'} });
+    if(cat === 'settings'){
+      btnGroup.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> exportCategoryDo(cat, 'json') }, 'JSON'));
+    } else {
+      btnGroup.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> exportCategoryDo(cat, 'csv') }, 'CSV'));
+      btnGroup.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> exportCategoryDo(cat, 'json') }, 'JSON'));
+      btnGroup.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> exportCategoryDo(cat, 'xlsx') }, 'Excel'));
+    }
+    row.appendChild(btnGroup);
+    grid.appendChild(row);
+  });
+  content.appendChild(grid);
 }
 
 // batch 1 安全強化：只在 ?debug=1 時暴露完整 App / Sync；
