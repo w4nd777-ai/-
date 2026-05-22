@@ -553,7 +553,11 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
 .flex-between{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .flex-col{ display:flex; flex-direction:column; gap:8px; }
 .space{ height:12px; }
-.scroll-x{ overflow-x:auto; }
+.scroll-x{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+
+/* batch 2-stab: safety net — 任何 .card 內的 table 都允許橫向捲動，
+   即使外層忘了包 .scroll-x，也不會在窄螢幕被擠壞版面 */
+.card > table{ display:block; max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
 .empty{
   padding:48px 16px; text-align:center; color:var(--text-muted);
 }
@@ -1568,6 +1572,32 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   .cls-group-body{ grid-template-columns:repeat(auto-fill,minmax(80px,1fr)); }
 }
 
+/* batch 2-stab: 窄螢幕 (< 360px) ─ 小手機 / 折疊機關屏狀態
+   把所有元件等比例縮一階，避免按鈕重疊、文字溢出 */
+@media (max-width: 360px) {
+  body { font-size: 13px; }
+  .login-card { padding: 14px; }
+  .login-hero { padding: 14px 10px; }
+  .login-hero h1 { font-size: 18px; }
+  .login-hero .logo-img { max-width: 64px; max-height: 64px; }
+  .card { padding: 10px 12px; }
+  h1 { font-size: 17px; }
+  h2 { font-size: 15px; }
+  h3 { font-size: 14px; }
+  .btn { padding: 8px 10px; font-size: 13px; }
+  .btn-sm { padding: 6px 8px; font-size: 12px; }
+  .stat .num { font-size: 22px; }
+  .stu-card { padding: 8px; }
+  .role-choice-card { padding: 14px 10px; }
+  .role-choice-card .rc-ico, .role-choice-card .rc-icon { font-size: 32px; }
+  .role-choice-card .rc-label { font-size: 14px; }
+  .modal { padding: 14px 12px !important; max-width: 96vw !important; }
+  .field input, .field select, .field textarea { font-size: 14px; }
+  .checkin-btn { width: 200px !important; height: 200px !important; font-size: 24px !important; }
+  .qr-box img { max-width: 80vmin; height: auto; }
+  .stat-pill { font-size: 10px; padding: 1px 5px; }
+}
+
 /* ════════════════════════════════════════════════════════════
    BATCH 2 ▒▒ UI/UX SYSTEM POLISH (groups / self-eval / report)
    ──────────────────────────────────────────────────────────── */
@@ -1874,7 +1904,42 @@ const App = {
   _syncEchoes: {},     // batch 3: Firebase echo-suppression { 'node::id' : ts }
   _syncRerTimer: null, // batch 3: debounced rerender from sync events
   _notify: null,       // batch 3: notifications module state
+  _timers: [],         // batch 2-stab: 集中追蹤所有 setInterval / setTimeout id（登出 / 切教室時統一清掉）
+  _echoSet: null,      // batch 2-stab: Sync echo-suppression（用過即丟，取代 2.5 秒時間窗）
 };
+
+/* ════════════════════════════════════════════════════════════
+   TIMER 集中管理 — 避免登出 / 切教室後殘留的 interval/timeout
+   ──────────────────────────────────────────────────────────── */
+function registerTimer(id){
+  if(!App._timers) App._timers = [];
+  App._timers.push(id);
+  return id;
+}
+function clearAllTimers(){
+  const arr = App._timers || [];
+  arr.forEach(id => {
+    // id 同時 clearInterval + clearTimeout 都安全（瀏覽器 ID 共用一個池）
+    try { clearInterval(id); } catch(_){}
+    try { clearTimeout(id); } catch(_){}
+  });
+  App._timers = [];
+}
+function setIntervalManaged(fn, ms){
+  return registerTimer(setInterval(fn, ms));
+}
+function setTimeoutManaged(fn, ms){
+  return registerTimer(setTimeout(fn, ms));
+}
+function clearManagedTimer(id){
+  if(id == null) return;
+  try { clearInterval(id); } catch(_){}
+  try { clearTimeout(id); } catch(_){}
+  if(App._timers){
+    const i = App._timers.indexOf(id);
+    if(i >= 0) App._timers.splice(i, 1);
+  }
+}
 
 /* ════════════════════════════════════════════════════════════
    TINY UTILITIES
@@ -2625,19 +2690,35 @@ const Sync = (() => {
     // 只寫 localStorage，不會推回 Firebase（避免 listener 觸發 -> push -> listener 迴圈）
     try { saveDB(); } catch(e){}
   }
+  // batch 2-stab: echo-suppression 改為「set + 用過即丟」
+  // 原本用 2.5 秒時間窗：在 push 寫完到 listener 觸發中間 race 不一致；超過 2.5 秒會誤判
+  // 新版：自己 push 時把 key 加入 set，listener 看到 key 後立即 delete（一次性）
+  // 60 秒後保險 clear 整個 set，避免 listener 沒被觸發時殘留
+  function _ensureEchoSet(){
+    if(!App._echoSet){
+      App._echoSet = new Set();
+      // 1 分鐘清空（保險）— 用 managed timer，登出/切教室會被清掉
+      try {
+        setIntervalManaged(()=> {
+          if(App._echoSet && App._echoSet.size > 0) App._echoSet.clear();
+        }, 60000);
+      } catch(e){}
+    }
+    return App._echoSet;
+  }
   function _shouldIgnoreEcho(node, id){
-    // 自己 push 後 2 秒內忽略相同 id 的 echo
-    if(!App._syncEchoes) return false;
+    const s = App._echoSet;
+    if(!s) return false;
     const key = node + '::' + id;
-    const ts = App._syncEchoes[key];
-    if(!ts) return false;
-    if(Date.now() - ts < 2500) return true;
-    delete App._syncEchoes[key];
+    if(s.has(key)){
+      s.delete(key); // 用過即丟
+      return true;
+    }
     return false;
   }
   function _markEcho(node, id){
-    App._syncEchoes = App._syncEchoes || {};
-    App._syncEchoes[node + '::' + id] = Date.now();
+    const s = _ensureEchoSet();
+    s.add(node + '::' + id);
   }
   function _scheduleRerender(){
     // debounce 避免大量 child_added 時暴衝
@@ -2960,8 +3041,9 @@ function scheduleDueReminders(){
       });
     } catch(e){ console.warn('[dueReminder]', e); }
   }
-  App._dueReminderTimer = setInterval(check, 3600 * 1000); // 1 hr
-  setTimeout(check, 5000); // 啟動 5 秒後跑一次
+  // batch 2-stab: managed timer 版本（登出 / 切教室時被一起回收）
+  App._dueReminderTimer = setIntervalManaged(check, 3600 * 1000); // 1 hr
+  setTimeoutManaged(check, 5000); // 啟動 5 秒後跑一次
 }
 
 /* ---- BroadcastChannel for same-domain multi-tab ---- */
@@ -3016,6 +3098,45 @@ function studentSignedToday(studentId){
 function studentOnLeaveToday(studentId){
   const today = td();
   return App.db.leaves.find(l => l.studentId === studentId && l.date === today && l.status === 'approved') || null;
+}
+
+// batch 2-stab: 一次 build 當日簽到 / 請假 map，給大循環用以避免 O(n²)
+//
+// 原本：rOv / rAtt / rMatrix 對每位學生呼叫 studentSignedToday(id) → 每次都 .find(...)
+//        N 位學生 × N 筆紀錄 = O(N²)。N = 200 已經明顯卡頓。
+//
+// 新版：呼叫一次 buildTodayMaps()，迴圈內用 signedMap.get(id) 即可 → O(N)
+//
+// 用法範例：
+//   const M = buildTodayMaps();
+//   students.forEach(s => {
+//     const att   = M.signedMap.get(s.id);          // === studentSignedToday(s.id)
+//     const leave = M.leaveMap.get(s.id);           // === studentOnLeaveToday(s.id)
+//   });
+function buildTodayMaps(today){
+  today = today || td();
+  const signedMap = new Map();
+  const leaveMap  = new Map();
+  const att = App.db && App.db.attendance;
+  if(Array.isArray(att)){
+    for(let i = 0; i < att.length; i++){
+      const a = att[i];
+      if(a && a.date === today && a.studentId != null){
+        // 同一 studentId 若有多筆（極端情況），保留最早一筆即可
+        if(!signedMap.has(a.studentId)) signedMap.set(a.studentId, a);
+      }
+    }
+  }
+  const leaves = App.db && App.db.leaves;
+  if(Array.isArray(leaves)){
+    for(let i = 0; i < leaves.length; i++){
+      const l = leaves[i];
+      if(l && l.date === today && l.status === 'approved' && l.studentId != null){
+        if(!leaveMap.has(l.studentId)) leaveMap.set(l.studentId, l);
+      }
+    }
+  }
+  return { today, signedMap, leaveMap };
 }
 
 function computeTodayStats(){
@@ -5373,6 +5494,14 @@ function doLogout(){
     saveSession();
     App._loginStage = 'choose';
     App._loginPrefill = null;
+    // batch 2-stab: 清掉所有 managed timer（QR 倒數、due reminder、notification、計時器…）
+    // 並重置 App.qrTimer / App._dueReminderTimer / App._notifyTimer / App._timerTick
+    try { clearAllTimers(); } catch(e){}
+    App.qrTimer = null;
+    App._dueReminderTimer = null;
+    App._notifyTimer = null;
+    App._timerTick = null;
+    App._syncRerTimer = null;
     rerender();
   });
 }
@@ -5498,6 +5627,9 @@ function rOv(content){
     App._ovExpandedCls = App._ovExpandedCls || {};
     const classes = [...new Set(App.db.students.map(s => s.cls || '未分班'))].sort();
 
+    // batch 2-stab: O(n) — 預先 build 當日簽到 / 請假 map，下方雙重 forEach 都用 .get(id)
+    const _todayMaps = buildTodayMaps(today);
+
     // 全展開 / 全收合按鈕
     const toolbar = el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
       el('h3', { style:{margin:'0'} }, '今日班況 · 依班級'),
@@ -5523,8 +5655,9 @@ function rOv(content){
         signed: 0, leave: 0, late: 0, absent: 0
       };
       stuInCls.forEach(s => {
-        const att = studentSignedToday(s.id);
-        const lv = studentOnLeaveToday(s.id);
+        // batch 2-stab: 用預先 build 的 map 取代 O(n) find
+        const att = _todayMaps.signedMap.get(s.id);
+        const lv = _todayMaps.leaveMap.get(s.id);
         if(lv) stats_cls.leave++;
         else if(att) {
           if(att.status === 'late') stats_cls.late++;
@@ -5572,8 +5705,9 @@ function rOv(content){
         const body = el('div', { style:{padding:'14px 16px'} });
         const sgrid = el('div', { class:'stu-grid' });
         stuInCls.forEach(s => {
-          const att = studentSignedToday(s.id);
-          const leave = studentOnLeaveToday(s.id);
+          // batch 2-stab: 用預先 build 的 map（同上）
+          const att = _todayMaps.signedMap.get(s.id);
+          const leave = _todayMaps.leaveMap.get(s.id);
           let scls = 'stu-card';
           if(leave) scls += ' leave';
           else if(att) scls += ' signed';
@@ -5608,19 +5742,33 @@ function rOv(content){
 function markPresent(studentId, options={}){
   const s = findStudent(studentId);
   if(!s) return toast('找不到學生','danger');
-  const existing = studentSignedToday(studentId);
+  const today = td();
+  // batch 2-stab: race-condition 防護 ─ 用 studentId+date 為唯一 key，避免兩台裝置同時 push 雙筆
+  const recordKey = 'att_' + studentId + '_' + today;
+  // 1) 先檢查 LocalDB 是否已有當天紀錄（任何 id）
+  const existing = (App.db.attendance || []).find(a => a.studentId === studentId && a.date === today);
   if(existing){
-    toast(s.name + ' 已簽到於 ' + existing.time, 'warn');
+    toast(s.name + ' 已簽到於 ' + (existing.time || '?'), 'warn');
+    return;
+  }
+  // 2) 再檢查同 key 是否已存在（Firebase 同步可能剛把另一端的寫入推到本機）
+  if((App.db.attendance || []).some(a => a && a.id === recordKey)){
+    toast('該紀錄已存在（其他裝置剛同步）', 'info');
     return;
   }
   const rec = {
-    id: nid(), studentId, studentName: s.name, cls: s.cls || '',
-    date: td(), time: nt(), ts: Date.now(),
+    id: recordKey,                              // 用組合 key 而非 nid()，雙端 push 同一 key → set 會合併不會重複
+    studentId, studentName: s.name, cls: s.cls || '',
+    date: today, time: nt(), ts: Date.now(),
     status: 'present', method: options.method || 'teacher-mark'
   };
   App.db.attendance.push(rec);
   saveDB();
-  Sync.push('attendance', rec);
+  // Sync.push 內部用 data.id 作為 Firebase child key，
+  // 因此「兩台裝置同時 push 同一 recordKey」會 set 到同一節點而非雙筆（idempotent）
+  if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
+    Sync.push('attendance', rec);
+  }
   bcNotify();
   toast('已標記 ' + s.name + ' 出席','success');
   rerender();
@@ -8370,6 +8518,7 @@ function rCheckIn(content){
 function doStudentCheckIn(){
   const me = currentStudent();
   if(!me) return;
+  const today = td();
   if(studentSignedToday(me.id)){
     toast('你今天已經簽到過了','warn');
     return;
@@ -8378,17 +8527,27 @@ function doStudentCheckIn(){
     toast('你今天有請假，不需簽到','warn');
     return;
   }
+  // batch 2-stab: race-condition 防護（同 markPresent）
+  const recordKey = 'att_' + me.id + '_' + today;
+  if((App.db.attendance || []).some(a => a && a.id === recordKey)){
+    toast('紀錄已存在（其他裝置剛同步）', 'info');
+    rerender();
+    return;
+  }
   const btn = document.querySelector('.checkin-btn');
   if(btn){ btn.classList.remove('pulse'); btn.classList.add('done'); btn.disabled = true; }
 
   const rec = {
-    id: nid(), studentId: me.id, studentName: me.name, cls: me.cls||'',
-    date: td(), time: nt(), ts: Date.now(),
+    id: recordKey, studentId: me.id, studentName: me.name, cls: me.cls||'',
+    date: today, time: nt(), ts: Date.now(),
     status:'present', method:'student-self'
   };
   App.db.attendance.push(rec);
   saveDB();
-  Sync.push('attendance', rec);
+  // Sync.push 用 data.id 作為 Firebase child key → 同 key 雙端寫入會 set 同一節點（不會雙筆）
+  if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
+    Sync.push('attendance', rec);
+  }
   bcNotify();
 
   // success animation
@@ -10333,135 +10492,16 @@ function rSAsgn(content){
   });
 }
 
+// batch 2-stab: rSAsgnDetail (legacy V1) 已被 rSAsgnDetailV2 取代且 router 未引用，整段移除
+// 路由：rSAsgn → rSAsgnDetailV2（請參考 line 13000+）
+//
+// 以下 placeholder 函式僅保留簽名作為「曾經存在」的歷史記號，
+// 若有外掛 / 自訂程式碼依然呼叫舊名稱，仍可 forward 到 V2，避免崩潰。
+// batch 2-stab: 舊版 rSAsgnDetail (V1) 整段刪除（router 只呼叫 V2，這版完全沒被引用）
+// 上方 forward 已能 cover 任何殘留呼叫
 function rSAsgnDetail(content, asg, me){
-  content.appendChild(el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',marginBottom:'8px'}, onclick:()=> go('sasgn') }, '← 返回'));
-  content.appendChild(el('h1', null, asg.title || ''));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
-    '截止：' + (asg.dueAt ? new Date(asg.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無') + ' · 滿分 ' + (asg.points||100)
-  ));
-
-  const soon = isAssignmentDueSoon(asg);
-  const overdue = isAssignmentOverdue(asg);
-  if(soon){
-    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--danger)',background:'var(--danger-soft)',marginBottom:'10px'} },
-      el('div', { style:{color:'var(--danger)',fontWeight:'700'} }, '⚠ 24 小時內到期！請盡快繳交')
-    ));
-  }
-
-  if(asg.desc){
-    content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
-      el('h3', null, '📝 作業說明'),
-      el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'4px'} }, asg.desc)
-    ));
-  }
-  if(asg.attach){
-    content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
-      el('h3', null, '📎 老師附件'),
-      el('div', { class:'flex', style:{marginTop:'4px',gap:'6px',flexWrap:'wrap'} },
-        el('button', { class:'btn btn-sm', onclick:()=> attachDownload(asg.attach) }, '⬇ ' + asg.attach.name),
-        el('button', { class:'btn btn-sm', onclick:()=> attachPreview(asg.attach) }, '👁 預覽')
-      )
-    ));
-  }
-
-  const existing = App.db.submissions.find(s => s.studentId === me.id && s.assignmentId === asg.id);
-
-  if(existing && typeof existing.score === 'number'){
-    // graded view
-    const card = el('div', { class:'card', style:{borderColor:'var(--success)',background:'var(--success-soft)'} });
-    card.appendChild(el('h3', null, '✅ 已批改'));
-    card.appendChild(el('div', { class:'huge', style:{color:'var(--success)',textAlign:'center',marginTop:'4px'} }, existing.score + ' / ' + (asg.points||100)));
-    if(existing.comment){
-      card.appendChild(el('div', { style:{marginTop:'8px',padding:'8px',background:'var(--surface)',borderRadius:'8px'} },
-        el('div', { class:'small', style:{fontWeight:'600',marginBottom:'4px'} }, '💬 老師評語'),
-        el('div', { class:'small', style:{whiteSpace:'pre-wrap'} }, existing.comment)
-      ));
-    }
-    card.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'8px'}, onclick: ()=> markSubmissionRead(existing) }, '✓ 標記已讀'));
-    content.appendChild(card);
-    return;
-  }
-
-  if(existing){
-    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'10px'} },
-      el('h3', null, '⌛ 已繳交，等待批改'),
-      el('div', { class:'small muted', style:{marginTop:'4px'} }, '繳交於 ' + relTime(existing.ts||0))
-    ));
-    content.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
-      const ok = await confirmDlg('要撤回這次繳交以重新提交嗎？', { danger:true });
-      if(!ok) return;
-      App.db.submissions = App.db.submissions.filter(x => x.id !== existing.id);
-      saveDB(); Sync.setMap('submissions', App.db.submissions); bcNotify();
-      toast('已撤回','warn'); rerender();
-    }}, '🔄 撤回繳交'));
-    return;
-  }
-
-  // submission form
-  const card = el('div', { class:'card' });
-  card.appendChild(el('h3', null, '📤 ' + (overdue?'(已逾期) ':'') + '繳交作業'));
-
-  const fT = el('div', { class:'field' });
-  fT.appendChild(el('label', { class:'label' }, '文字內容（可選）'));
-  const iT = el('textarea', { class:'textarea', placeholder:'寫下你的回答...' });
-  fT.appendChild(iT); card.appendChild(fT);
-
-  const fL = el('div', { class:'field' });
-  fL.appendChild(el('label', { class:'label' }, '連結（可選）'));
-  const iL = el('input', { class:'input', placeholder:'https://...' });
-  fL.appendChild(iL); card.appendChild(fL);
-
-  // file
-  const fF = el('div', { class:'field' });
-  fF.appendChild(el('label', { class:'label' }, '檔案（單檔 ≤ 50MB，可選）'));
-  let attached = null;
-  const upBox = el('div', { class:'upload-area' });
-  const fInp = el('input', { type:'file' });
-  function refresh(){
-    upBox.innerHTML = '';
-    if(attached){
-      upBox.classList.add('has-file');
-      const chip = el('div', { class:'file-chip' },
-        el('span', null, '📎 ' + attached.name),
-        el('span', { class:'x', onclick: e => { e.stopPropagation(); attachDelete(attached); attached = null; upBox.classList.remove('has-file'); refresh(); }}, '✗')
-      );
-      upBox.appendChild(chip);
-    } else {
-      upBox.appendChild(el('div', null, '點此選擇檔案'));
-      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 50MB（PDF / Word / 圖片等）'));
-    }
-  }
-  fInp.addEventListener('change', async e => {
-    try {
-      const file = e.target.files[0];
-      if(!file) return;
-      const data = await attachUpload(file);
-      if(data){ attached = data; refresh(); }
-    } catch(err){ toast(err.message,'danger'); }
-  });
-  upBox.appendChild(fInp);
-  upBox.addEventListener('click', ()=> fInp.click());
-  fF.appendChild(upBox); card.appendChild(fF);
-  refresh();
-
-  card.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick:()=> {
-    const txt = iT.value.trim();
-    const lnk = iL.value.trim();
-    if(!txt && !lnk && !attached) return toast('至少填一項內容','danger');
-    const rec = {
-      id: nid(), assignmentId: asg.id,
-      studentId: me.id, studentName: me.name,
-      text: txt, link: lnk, attach: attached,
-      ts: Date.now()
-    };
-    App.db.submissions.push(rec);
-    saveDB();
-    Sync.push('submissions', rec);
-    bcNotify();
-    toast('已繳交！','success');
-    rerender();
-  }}, '✅ 送出繳交'));
-  content.appendChild(card);
+  if(typeof rSAsgnDetailV2 === 'function') return rSAsgnDetailV2(content, asg, me);
+  content.appendChild(el('div', { class:'card' }, 'rSAsgnDetail not available'));
 }
 
 function markSubmissionRead(sub){
@@ -10759,6 +10799,12 @@ function wsRegisterCurrent(){
 function wsSwitchTo(roomCode){
   // detach firebase, swap cfg, reload db
   try { Sync.detachAll(); } catch(e){}
+  // batch 2-stab: 切教室時把舊教室的 interval / timeout 全部清掉，避免殘留更新到新 db
+  try { clearAllTimers(); } catch(e){}
+  App.qrTimer = null;
+  App._dueReminderTimer = null;
+  App._notifyTimer = null;
+  App._syncRerTimer = null;
   App.cfg = Object.assign({}, App.cfg||{}, { roomCode });
   saveCfg();
   loadDB();
@@ -11018,10 +11064,11 @@ function rQR(content){
   content.appendChild(wrap);
 
   // countdown timer
-  if(App.qrTimer) clearInterval(App.qrTimer);
-  App.qrTimer = setInterval(()=>{
+  // batch 2-stab: 用 managed timer，登出 / 切教室時 clearAllTimers 會自動回收
+  if(App.qrTimer){ clearManagedTimer(App.qrTimer); App.qrTimer = null; }
+  App.qrTimer = setIntervalManaged(()=>{
     const elc = document.getElementById('qr-cd');
-    if(!elc){ clearInterval(App.qrTimer); App.qrTimer = null; return; }
+    if(!elc){ clearManagedTimer(App.qrTimer); App.qrTimer = null; return; }
     const remain = Math.max(0, App.qrAttExpires - Date.now());
     const mm = Math.floor(remain/60000);
     const ss = Math.floor((remain%60000)/1000);
@@ -11105,15 +11152,25 @@ function tryAutoCheckin(){
     return;
   }
 
+  // batch 2-stab: race-condition 防護
+  const today = td();
+  const recordKey = 'att_' + me.id + '_' + today;
+  if((App.db.attendance || []).some(a => a && a.id === recordKey)){
+    toast('紀錄已存在（其他裝置剛同步）', 'info', 3000);
+    return;
+  }
   const rec = {
-    id: nid(), studentId: me.id, studentName: me.name, cls: me.cls||'',
-    date: td(), time: nt(), ts: Date.now(),
+    id: recordKey, studentId: me.id, studentName: me.name, cls: me.cls||'',
+    date: today, time: nt(), ts: Date.now(),
     status:'present', method:'qr', code
   };
   App.db.attendance.push(rec);
   markQrUsed(code, me.id);
   saveDB();
-  Sync.push('attendance', rec);
+  // batch 2-stab: 用 Sync.push（會 mark echo + 用 recordKey 作 child key），多裝置同碼 = 同節點 set
+  if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
+    Sync.push('attendance', rec);
+  }
   bcNotify();
 
   // success animation
@@ -13950,8 +14007,10 @@ function rSPeerDetail(content, pe, me){
    today's attendance status. Tap to cycle status.
    ──────────────────────────────────────────────────────────── */
 
-function matrixCurrentStatus(stuId){
-  const att = studentSignedToday(stuId);
+// batch 2-stab: 可接受預先 build 好的 maps（從 rMatrix 大循環 buildTodayMaps 一次傳進來），
+// 不傳則 fallback 用 studentSignedToday / studentOnLeaveToday（保留原行為相容）
+function matrixCurrentStatus(stuId, maps){
+  const att = maps ? maps.signedMap.get(stuId) : studentSignedToday(stuId);
   if(att){
     // try detect 'late' via lateMinutes
     const lateMin = App.db.settings.lateMinutes || 10;
@@ -13965,7 +14024,8 @@ function matrixCurrentStatus(stuId){
     if(att.status === 'late') return 'late';
     return 'present';
   }
-  if(studentOnLeaveToday(stuId)) return 'leave';
+  const lv = maps ? maps.leaveMap.get(stuId) : studentOnLeaveToday(stuId);
+  if(lv) return 'leave';
   return 'absent';
 }
 
@@ -14045,6 +14105,9 @@ function rMatrix(content){
     .filter(s => (s.cls||'') === cls)
     .sort((a,b)=> (a.seat||999)-(b.seat||999) || (a.name||'').localeCompare(b.name||''));
 
+  // batch 2-stab: 預先 build 當日 maps，下面 matrixCurrentStatus 一次傳進去（避免 O(n²)）
+  const _matrixMaps = buildTodayMaps();
+
   // Toolbar
   const cols = layout.cols || 6;
   let rows = layout.rows || Math.max(1, Math.ceil(students.length / cols));
@@ -14116,7 +14179,7 @@ function rMatrix(content){
       grid.appendChild(empty);
       return;
     }
-    const status = matrixCurrentStatus(s.id);
+    const status = matrixCurrentStatus(s.id, _matrixMaps);
     const cell = el('div', { class:'matrix-seat s-' + status, draggable:'true' });
     cell.appendChild(el('span', { class:'seat-no' }, '#' + (s.seat || idx+1)));
     cell.appendChild(el('div', { class:'seat-nm' }, s.name));
@@ -14168,7 +14231,7 @@ function rMatrix(content){
 
   // Today summary
   const counts = { present:0, late:0, leave:0, absent:0 };
-  students.forEach(s => { counts[matrixCurrentStatus(s.id)]++; });
+  students.forEach(s => { counts[matrixCurrentStatus(s.id, _matrixMaps)]++; });
   content.appendChild(el('div', { class:'card', style:{padding:'12px',marginTop:'12px'} },
     el('div', { class:'flex', style:{justifyContent:'space-around',flexWrap:'wrap',gap:'10px'} },
       el('div', { style:{textAlign:'center'} }, el('div', { style:{fontSize:'20px',fontWeight:'700',color:'var(--success)'}}, counts.present), el('div', { class:'tiny muted' }, '出席')),
@@ -14811,8 +14874,9 @@ function schedulePeriodicNotifications(){
       try { localStorage.setItem(LS_KEY + '_notif_due', String(Date.now())); } catch(e){}
     }
   }
-  App._notifyTimer = setInterval(check, 3600*1000);
-  setTimeout(check, 8000);
+  // batch 2-stab: managed timer 版本
+  App._notifyTimer = setIntervalManaged(check, 3600*1000);
+  setTimeoutManaged(check, 8000);
 }
 
 document.addEventListener('DOMContentLoaded', boot);
@@ -16837,21 +16901,22 @@ function startTimer(){
   if(App._timerRunning) return;
   App._timerRunning = true;
   App._timerStart = Date.now();
-  if(App._timerTick){ clearInterval(App._timerTick); }
-  App._timerTick = setInterval(updateTimerDisplay, 200);
+  // batch 2-stab: managed timer
+  if(App._timerTick){ clearManagedTimer(App._timerTick); }
+  App._timerTick = setIntervalManaged(updateTimerDisplay, 200);
   updateTimerDisplay();
 }
 function pauseTimer(){
   if(!App._timerRunning) return;
   App._timerElapsed = (App._timerElapsed || 0) + (Date.now() - App._timerStart) / 1000;
   App._timerRunning = false;
-  if(App._timerTick){ clearInterval(App._timerTick); App._timerTick = null; }
+  if(App._timerTick){ clearManagedTimer(App._timerTick); App._timerTick = null; }
   updateTimerDisplay();
 }
 function resetTimer(){
   App._timerElapsed = 0;
   App._timerRunning = false;
-  if(App._timerTick){ clearInterval(App._timerTick); App._timerTick = null; }
+  if(App._timerTick){ clearManagedTimer(App._timerTick); App._timerTick = null; }
 }
 
 /* ════════════════════════════════════════════════════════════
