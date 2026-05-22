@@ -2287,6 +2287,17 @@ function defaultDB(){
     selfEvals: [],         // batch 2: 學生自評
     attendanceNotes: [],   // batch 2: 老師對學生的出席評語 {id, studentId, text, ts, by}
     feedbacks: [],         // batch 2: 匿名課程回饋（學生看匿名、老師看實名）{id, studentId, studentName, cls, ratings, text, ts, term}
+    parents: [],           // batch 4-21: 家長帳號 {id,name,email,password,children:[studentId,...],mustChangePw,avatar}
+    behavior: [],          // batch 4-23: 行為記錄 {id, studentId, date, category, type, points, note, teacherId, ts}
+    quizzes: [],           // batch 4-25: 線上小考 {id, title, ...}
+    quizSubmissions: [],   // batch 4-25: 學生小考作答 {id, quizId, studentId, ...}
+    teachers: [],          // batch 4-24: 副老師（主老師仍在 accounts；此處只放 sub 老師資料）{id,name,email,password,role:'sub',perms:{},active:true,mustChangePw}
+    semester: {            // batch 4-22: 學期週次系統
+      startDate: '',       // YYYY-MM-DD
+      endDate: '',
+      weekDays: [1,2,3,4,5],   // 一~五（0=日, 6=六）
+      holidays: []         // [{date:'YYYY-MM-DD', name:''}, ...]
+    },
     settings: {
       schoolName: '我的課程',
       teacherName: '老師',
@@ -2371,10 +2382,20 @@ function loadDB(){
     const parsed = JSON.parse(raw);
     App.db = Object.assign(defaultDB(), parsed);
     // ensure all arrays exist
-    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks'];
+    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','parents','behavior','quizzes','quizSubmissions','teachers'];
     arrFields.forEach(f => { if(!Array.isArray(App.db[f])) App.db[f] = []; });
     if(!App.db.settings || typeof App.db.settings !== 'object') App.db.settings = defaultDB().settings;
     if(!App.db.branding || typeof App.db.branding !== 'object') App.db.branding = defaultDB().branding;
+    // batch 4-22：學期設定
+    if(!App.db.semester || typeof App.db.semester !== 'object'){
+      App.db.semester = defaultDB().semester;
+    } else {
+      const ds = defaultDB().semester;
+      if(typeof App.db.semester.startDate !== 'string') App.db.semester.startDate = ds.startDate;
+      if(typeof App.db.semester.endDate !== 'string') App.db.semester.endDate = ds.endDate;
+      if(!Array.isArray(App.db.semester.weekDays)) App.db.semester.weekDays = ds.weekDays.slice();
+      if(!Array.isArray(App.db.semester.holidays)) App.db.semester.holidays = [];
+    }
     if(!App.db.grades || typeof App.db.grades !== 'object') App.db.grades = {};
     // batch 1：補上自訂出席狀態
     if(!Array.isArray(App.db.settings.attendanceStatuses) || !App.db.settings.attendanceStatuses.length){
@@ -4438,6 +4459,18 @@ function renderLogin(root){
       );
       grid.appendChild(studentCard);
     }
+    // batch 4-21：家長登入入口
+    if(lc.showParentBtn !== false){
+      const parentCard = el('button', { class:'role-choice-card', onclick: e => {
+        e.currentTarget.classList.add('tapped');
+        setTimeout(()=> { App._loginStage = 'parent'; rerender(); }, 220);
+      }},
+        el('span', { class:'rc-ico' }, lc.parentIcon || '👨‍👩‍👧'),
+        el('div', { class:'rc-title' }, lc.parentLabel || '我是家長'),
+        el('div', { class:'rc-sub' }, lc.parentSub || '查看子女學習狀況')
+      );
+      grid.appendChild(parentCard);
+    }
     stage.appendChild(grid);
     card.appendChild(stage);
   }
@@ -4446,6 +4479,9 @@ function renderLogin(root){
   }
   else if(App._loginStage === 'student'){
     card.appendChild(renderLoginStudentStage());
+  }
+  else if(App._loginStage === 'parent'){
+    card.appendChild(renderLoginParentStage());
   }
 
   // 自訂歡迎訊息
@@ -5164,6 +5200,8 @@ function renderChrome(root, role){
   // sidebar (desktop)
   if(role === 'teacher'){
     app.appendChild(renderSidebarTeacher());
+  } else if(role === 'parent'){
+    app.appendChild(renderSidebarParent());
   } else {
     app.appendChild(renderSidebarStudent());
   }
@@ -5174,6 +5212,7 @@ function renderChrome(root, role){
   const content = el('div', { class:'content', id:'main-content' });
   main.appendChild(content);
   if(role === 'teacher') main.appendChild(renderBottomNavTeacher());
+  else if(role === 'parent') main.appendChild(renderBottomNavParent());
   else main.appendChild(renderBottomNavStudent());
 
   app.appendChild(main);
@@ -5435,12 +5474,20 @@ function renderTopbar(role){
     appearance:'🎨 外觀設定',
     uieditor:'🛠️ 介面編輯器',
     exportcenter:'📦 匯出中心',
+    parents:'👨‍👩‍👧 家長帳號', teachers:'🧑‍🏫 老師管理',
+    behavior:'⭐ 行為點數', quiz:'📝 線上小考',
     help:'📖 使用說明', install:'📲 安裝 App'
+  } : role === 'parent' ? {
+    pchildren:'👨‍👩‍👧 我的子女', patt:'📅 出席紀錄',
+    pgrade:'🎯 學期成績', psub:'📥 繳交紀錄',
+    pfeedback:'💬 評價回饋', pmsg:'💬 訊息',
+    pset:'⚙️ 個人設定', help:'📖 使用說明'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
     speer:'⭐ 我的互評', sgroups:'👥 我的小組', selfeval:'✍️ 學期自評',
     sfeedback:'📝 課程回饋',
+    sbehavior:'⭐ 我的點數', squiz:'📝 線上小考',
     uieditor:'🛠️ 介面編輯器',
     help:'📖 使用說明', install:'📲 安裝 App'
   };
@@ -5733,6 +5780,68 @@ function rOv(content){
     ));
   }
   if(grid.childNodes.length) content.appendChild(grid);
+
+  // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考
+  try {
+    const sideRow = el('div', { class:'grid grid-2', style:{marginBottom:'12px'} });
+    // 今日加扣分排行
+    const top = getTopBehaviorStudents(5);
+    if(top.length){
+      const c = el('div', { class:'card' });
+      c.appendChild(el('div', { class:'flex-between' },
+        el('h3', null, '⭐ 今日加扣分排行'),
+        el('button', { class:'btn btn-sm', onclick:()=> go('behavior') }, '更多 →')
+      ));
+      top.forEach(it => {
+        const s = (App.db.students||[]).find(x => x.id === it.studentId);
+        c.appendChild(el('div', { class:'list-row' },
+          el('div', { class:'info' },
+            el('div', { class:'name' }, s?.name || '?'),
+            el('div', { class:'sub' }, s?.cls || '')
+          ),
+          el('div', { style:{fontWeight:'700',color: it.points>=0?'var(--success)':'var(--danger)'} },
+            (it.points>=0?'+':'') + it.points)
+        ));
+      });
+      sideRow.appendChild(c);
+    }
+    // 進行中小考
+    const nowT = Date.now();
+    const ongoing = (App.db.quizzes || []).filter(q => q.status === 'published' && (!q.dueAt || new Date(q.dueAt).getTime() > nowT));
+    if(ongoing.length){
+      const c2 = el('div', { class:'card' });
+      c2.appendChild(el('div', { class:'flex-between' },
+        el('h3', null, '📝 進行中小考'),
+        el('button', { class:'btn btn-sm', onclick:()=> go('quiz') }, '更多 →')
+      ));
+      ongoing.slice(0,5).forEach(q => {
+        const subs = (App.db.quizSubmissions || []).filter(s => s.quizId === q.id && s.submittedAt).length;
+        const targets = quizTargetStudents(q).length;
+        c2.appendChild(el('div', { class:'list-row' },
+          el('div', { class:'info' },
+            el('div', { class:'name' }, q.title),
+            el('div', { class:'sub' }, '已完成 ' + subs + ' / ' + targets + (q.dueAt ? ' · 截止 ' + q.dueAt : ''))
+          )
+        ));
+      });
+      sideRow.appendChild(c2);
+    }
+    if(sideRow.childNodes.length) content.appendChild(sideRow);
+
+    // 學期週次資訊
+    const sem = getSemester();
+    if(sem.startDate){
+      const cw = getCurrentWeek();
+      const tw = getTotalWeeks();
+      if(cw > 0){
+        const range = getWeekRange(cw);
+        content.appendChild(el('div', { class:'card', style:{padding:'8px 12px',marginBottom:'10px',background:'var(--primary-soft)',borderColor:'var(--primary)'} },
+          el('div', { class:'small' }, '📅 目前是 第 ' + cw + ' 週 / 共 ' + tw + ' 週'
+            + (range ? '（' + range.start + ' ~ ' + range.end + '）' : ''))
+        ));
+      }
+    }
+  } catch(e){ console.warn('[overview batch4 cards]', e); }
 
   // pending registrations
   if(isOverviewVisible('pending') && App.db.pending && App.db.pending.length){
@@ -6488,10 +6597,12 @@ function rAtt(content){
   const signedIds = new Set(att.map(a => a.studentId));
   const leaveIds = new Set(App.db.leaves.filter(l => l.date === date && l.status === 'approved').map(l => l.studentId));
 
+  // batch 4-22：學期週次標籤
+  const _wkTag = (typeof fmtWeekTag === 'function') ? fmtWeekTag(date) : '';
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '出席管理'),
-      el('div', { class:'muted small' }, '逐一替學生補簽、處理請假或標記遲到 · ' + date)
+      el('div', { class:'muted small' }, '逐一替學生補簽、處理請假或標記遲到 · ' + date + (_wkTag ? ' · ' + _wkTag : ''))
     ),
     el('div', { class:'flex' },
       el('input', { class:'input', type:'date', value:date, style:{width:'150px'}, title:'選擇日期', onchange: e => { App._attDate = e.target.value; rerender(); } }),
@@ -6499,6 +6610,31 @@ function rAtt(content){
       el('button', { class:'btn btn-sm btn-danger', onclick: clearTodayAttendance, title:'清空今天所有簽到紀錄' }, '🗑 清空')
     )
   ));
+
+  // batch 4-22：依週次快速跳轉
+  try {
+    const sem = getSemester();
+    if(sem.startDate){
+      const cw = getCurrentWeek();
+      const tw = getTotalWeeks();
+      const weekBar = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'4px',marginBottom:'10px',alignItems:'center'} });
+      weekBar.appendChild(el('span', { class:'small muted', style:{marginRight:'4px'} }, '📅 跳至週次：'));
+      const selW = el('select', { class:'input', style:{width:'auto'} });
+      selW.appendChild(el('option', { value:'' }, '全部'));
+      for(let i=1;i<=tw;i++){
+        const r = getWeekRange(i);
+        selW.appendChild(el('option', { value:String(i), selected: (App._attDate && getWeekNo(App._attDate) === i) }, '第 ' + i + ' 週 (' + (r?r.start:'') + ')'));
+      }
+      selW.addEventListener('change', e => {
+        if(!e.target.value) return;
+        const r = getWeekRange(parseInt(e.target.value,10));
+        if(r){ App._attDate = r.start; rerender(); }
+      });
+      weekBar.appendChild(selW);
+      if(cw > 0) weekBar.appendChild(el('span', { class:'tag s-success' }, '本週 第 ' + cw + ' 週'));
+      content.appendChild(weekBar);
+    }
+  } catch(e){}
 
   // filter tabs
   const tabs = el('div', { class:'tab-bar', style:{maxWidth:'500px',marginBottom:'12px'} });
@@ -8178,6 +8314,9 @@ function rSettings(content){
   } }, '💾 儲存課程資訊'));
   content.appendChild(card);
 
+  // batch 4-22：學期設定
+  try { content.appendChild(renderSemesterCard()); } catch(e){ console.warn('[semester card]', e); }
+
   // ─── 出席狀態管理（batch 1）─────────────────────────────────
   content.appendChild(renderAttendanceStatusesCard());
 
@@ -9546,6 +9685,25 @@ function rSub(content){
   });
   content.appendChild(tabs);
 
+  // batch 4-22：依週次篩選
+  try {
+    const sem = getSemester();
+    if(sem.startDate){
+      const tw = getTotalWeeks();
+      const wf = el('div', { class:'flex', style:{margin:'10px 0',alignItems:'center',gap:'6px'} });
+      wf.appendChild(el('span', { class:'small muted' }, '📅 依週次：'));
+      const sel = el('select', { class:'input', style:{width:'auto'} });
+      sel.appendChild(el('option', { value:'' }, '全部'));
+      sel.appendChild(el('option', { value:'cur', selected: App._subWeekFilter === 'cur' }, '本週'));
+      for(let i=1;i<=tw;i++){
+        sel.appendChild(el('option', { value:String(i), selected: App._subWeekFilter === String(i) }, '第 ' + i + ' 週'));
+      }
+      sel.addEventListener('change', e => { App._subWeekFilter = e.target.value || null; renderList(); });
+      wf.appendChild(sel);
+      content.appendChild(wf);
+    }
+  } catch(e){}
+
   const sBox = el('div', { class:'search-box' });
   const sInp = el('input', { class:'input', placeholder:'搜尋學生 / 作業', oninput: e => {
     App._subSearch = e.target.value.toLowerCase();
@@ -9568,6 +9726,14 @@ function rSub(content){
       return asg && isSubmissionLate(asg, s);
     });
     list.sort((a,b) => (b.ts||0)-(a.ts||0));
+    // batch 4-22：依週次過濾
+    if(App._subWeekFilter){
+      const wantWeek = App._subWeekFilter === 'cur' ? getCurrentWeek() : parseInt(App._subWeekFilter,10);
+      list = list.filter(s => {
+        const dateStr = s.ts ? new Date(s.ts).toISOString().slice(0,10) : '';
+        return getWeekNo(dateStr) === wantWeek;
+      });
+    }
     const q = App._subSearch || '';
     if(q){
       list = list.filter(s => {
@@ -9591,10 +9757,12 @@ function rSub(content){
       const late = asg && isSubmissionLate(asg, s);
       const row = el('div', { class:'list-row' });
       row.appendChild(el('div', { class:'avatar' }, initials(stu?.name||'?')));
+      const _wkS = s.ts ? fmtWeekTag(new Date(s.ts).toISOString().slice(0,10)) : '';
       row.appendChild(el('div', { class:'info' },
         el('div', { class:'name' }, (stu?.name||'?') + ' · ' + (asg?.title||'?')),
         el('div', { class:'sub' },
           '繳交於 ' + relTime(s.ts||0) +
+          (_wkS ? ' · ' + _wkS : '') +
           (late?' · ⚠遲交':'') +
           (typeof s.score === 'number' ? ' · 分數 ' + s.score + '/' + (asg?.points||100) : '')
         )
@@ -10719,9 +10887,10 @@ function rSGrade(content){
     subs.forEach(s => {
       const asg = App.db.assignments.find(x => x.id === s.assignmentId);
       const row = el('div', { class:'list-row' });
+      const _wkG = s.ts ? fmtWeekTag(new Date(s.ts).toISOString().slice(0,10)) : '';
       row.appendChild(el('div', { class:'info' },
         el('div', { class:'name' }, asg?.title || '?'),
-        el('div', { class:'sub' }, relTime(s.gradedAt||s.ts||0))
+        el('div', { class:'sub' }, relTime(s.gradedAt||s.ts||0) + (_wkG ? ' · ' + _wkG : ''))
       ));
       row.appendChild(el('span', { class:'tag t-success' }, s.score + ' / ' + (asg?.points||100)));
       card.appendChild(row);
@@ -14632,6 +14801,19 @@ function rerender(){
 
   const content = renderChrome(root, App.session.role);
 
+  // batch 4-24：副老師權限攔截（admin / student / parent 都直接放行）
+  try {
+    if(App.session.role === 'teacher' && !hasPermission(App.session, App.view)){
+      content.innerHTML = '';
+      content.appendChild(el('div', { class:'card', style:{borderColor:'var(--danger)',background:'var(--danger-soft)'} },
+        el('h3', null, '🔒 您沒有權限查看此頁面'),
+        el('div', { class:'small muted' }, '請聯絡主老師授予權限。'),
+        el('button', { class:'btn', style:{marginTop:'10px'}, onclick:()=> go('overview') }, '← 回總覽')
+      ));
+      return;
+    }
+  } catch(e){}
+
   // route
   try {
     if(App.session.role === 'teacher'){
@@ -14668,9 +14850,26 @@ function rerender(){
       else if(v === 'appearance') rAppearance(content);// 外觀設定
       else if(v === 'uieditor') rUiEditor(content);   // 介面編輯器
       else if(v === 'exportcenter') rExportCenter(content); // batch 3：匯出中心
+      // batch 4 新增頁面
+      else if(v === 'parents') rParents(content);     // batch 4-21
+      else if(v === 'behavior') rBehavior(content);   // batch 4-23
+      else if(v === 'teachers') rTeachers(content);   // batch 4-24
+      else if(v === 'quiz') rQuiz(content);           // batch 4-25
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else { App.view = 'overview'; rOv(content); }
+    } else if(App.session.role === 'parent'){
+      // batch 4-21：家長端
+      const v = App.view;
+      if(v === 'pchildren' || !v) rParentChildren(content);
+      else if(v === 'patt') rParentAttendance(content);
+      else if(v === 'pgrade') rParentGrades(content);
+      else if(v === 'psub') rParentSubmissions(content);
+      else if(v === 'pfeedback') rParentFeedback(content);
+      else if(v === 'pmsg') rParentMessages(content);
+      else if(v === 'pset') rParentSettings(content);
+      else if(v === 'help') rHelp(content);
+      else { App.view = 'pchildren'; rParentChildren(content); }
     } else {
       const v = App.view;
       if(v === 'checkin' || !v) rCheckIn(content);
@@ -14686,6 +14885,9 @@ function rerender(){
       else if(v === 'sgroups') rSGroups(content);
       else if(v === 'selfeval') rSelfEval(content);
       else if(v === 'sfeedback') rSFeedback(content); // batch 2
+      // batch 4 新增學生端頁面
+      else if(v === 'sbehavior') rMyBehavior(content); // batch 4-23
+      else if(v === 'squiz') rStuQuiz(content);        // batch 4-25
       // 學生端不顯示介面編輯器
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
@@ -17294,12 +17496,14 @@ function getSidebarItems(role){
         { key:'matrix', icon:'🪑', label:'座位矩陣' },
         { key:'qr', icon:'📱', label:'QR Code 簽到' },
         { key:'leave', icon:'📆', label:'請假管理' },
-        { key:'messages', icon:'💬', label:'訊息' }
+        { key:'messages', icon:'💬', label:'訊息' },
+        { key:'behavior', icon:'⭐', label:'行為點數' }
       ]},
       teaching: { label:'教學', items: [
         { key:'assignments', icon:'📋', label:'作業管理' },
         { key:'submissions', icon:'📥', label:'繳交記錄' },
         { key:'grades', icon:'🎯', label:'學期成績' },
+        { key:'quiz', icon:'📝', label:'線上小考' },
         { key:'evals', icon:'💬', label:'課程評價' },
         { key:'feedback', icon:'🗳️', label:'學生回饋' },
         { key:'peer', icon:'⭐', label:'學生互評' },
@@ -17311,6 +17515,10 @@ function getSidebarItems(role){
       tools: { label:'課堂工具', items: [
         { key:'picker', icon:'🎲', label:'隨機抽籤' },
         { key:'timer', icon:'⏰', label:'課堂計時器' }
+      ]},
+      manage: { label:'管理', items: [
+        { key:'parents', icon:'👨‍👩‍👧', label:'家長帳號' },
+        { key:'teachers', icon:'🧑‍🏫', label:'老師管理' }
       ]},
       system: { label:'系統', items: [
         { key:'workspace', icon:'🏢', label:'多教室管理' },
@@ -17327,6 +17535,22 @@ function getSidebarItems(role){
         { key:'help', icon:'📖', label:'使用說明' }
       ]}
     };
+  } else if(role === 'parent'){
+    // batch 4-21：家長端 sidebar
+    return {
+      p_func: { label:'功能', items: [
+        { key:'pchildren', icon:'👨‍👩‍👧', label:'我的子女' },
+        { key:'patt', icon:'📅', label:'出席紀錄' },
+        { key:'pgrade', icon:'🎯', label:'學期成績' },
+        { key:'psub', icon:'📥', label:'繳交紀錄' },
+        { key:'pfeedback', icon:'💬', label:'評價回饋' },
+        { key:'pmsg', icon:'💬', label:'訊息' }
+      ]},
+      p_other: { label:'設定', items: [
+        { key:'pset', icon:'⚙️', label:'個人設定' },
+        { key:'help', icon:'📖', label:'使用說明' }
+      ]}
+    };
   } else {
     return {
       s_func: { label:'功能', items: [
@@ -17338,6 +17562,8 @@ function getSidebarItems(role){
       s_learn: { label:'學習', items: [
         { key:'sasgn', icon:'📤', label:'作業' },
         { key:'sgrade', icon:'🎯', label:'我的成績' },
+        { key:'squiz', icon:'📝', label:'線上小考' },
+        { key:'sbehavior', icon:'⭐', label:'我的點數' },
         { key:'sev', icon:'⭐', label:'課程評價' },
         { key:'sfeedback', icon:'📝', label:'課程回饋' },
         { key:'speer', icon:'⭐', label:'我的互評' },
@@ -18652,6 +18878,1931 @@ function rExportCenter(content){
   content.appendChild(grid);
 }
 
+/* ════════════════════════════════════════════════════════════
+   批次 4 — 老師端新功能（5 項）
+   21. 家長帳號 (parent role)
+   22. 學期週次系統
+   23. 行為記錄
+   24. 多老師權限管理
+   25. 線上小考
+   ──────────────────────────────────────────────────────────── */
+
+/* ─── batch 4-22：學期週次系統 helpers ─── */
+function getSemester(){
+  if(!App.db.semester) App.db.semester = { startDate:'', endDate:'', weekDays:[1,2,3,4,5], holidays:[] };
+  return App.db.semester;
+}
+function isHoliday(dateStr){
+  const sem = getSemester();
+  if(!Array.isArray(sem.holidays)) return false;
+  return sem.holidays.some(h => (h && (h.date === dateStr || h === dateStr)));
+}
+function isClassDay(dateStr){
+  const sem = getSemester();
+  const d = new Date(dateStr + 'T00:00:00');
+  if(isNaN(d.getTime())) return false;
+  if(isHoliday(dateStr)) return false;
+  const wd = d.getDay();   // 0=日, 1=一 ... 6=六
+  const wds = sem.weekDays || [1,2,3,4,5];
+  return wds.indexOf(wd) >= 0;
+}
+function getWeekNo(date){
+  // 回傳 date 落在學期第幾週（從 1 開始）；若無設定或日期超出範圍，回 0
+  const sem = getSemester();
+  if(!sem.startDate) return 0;
+  const target = (typeof date === 'string') ? new Date(date + 'T00:00:00') : new Date(date);
+  if(isNaN(target.getTime())) return 0;
+  const start = new Date(sem.startDate + 'T00:00:00');
+  if(target < start) return 0;
+  if(sem.endDate){
+    const end = new Date(sem.endDate + 'T00:00:00');
+    if(target > end) return 0;
+  }
+  // 用「每 7 天為一週」簡化計算（從 startDate 同一個 weekday 起算）
+  const ms = target - start;
+  const days = Math.floor(ms / (24*3600*1000));
+  return Math.floor(days / 7) + 1;
+}
+function getWeekRange(weekNo){
+  const sem = getSemester();
+  if(!sem.startDate || weekNo < 1) return null;
+  const start = new Date(sem.startDate + 'T00:00:00');
+  const s = new Date(start.getTime() + (weekNo - 1) * 7 * 24*3600*1000);
+  const e = new Date(s.getTime() + 6 * 24*3600*1000);
+  const fmt = d => {
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    return d.getFullYear() + '-' + m + '-' + dd;
+  };
+  return { start: fmt(s), end: fmt(e) };
+}
+function getCurrentWeek(){
+  return getWeekNo(td());
+}
+function getTotalWeeks(){
+  const sem = getSemester();
+  if(!sem.startDate || !sem.endDate) return 0;
+  return getWeekNo(sem.endDate) || 0;
+}
+function fmtWeekTag(dateStr){
+  const w = getWeekNo(dateStr);
+  return w > 0 ? ('第 ' + w + ' 週') : '';
+}
+
+/* ─── batch 4-24：權限檢查 ─── */
+function getTeacherPerms(session){
+  // session: App.session (role:'teacher')
+  // 回傳 perms 物件；admin 全部 true
+  if(!session || session.role !== 'teacher') return null;
+  // accounts 內的 admin 視為主老師（無 sub flag 即為 admin）
+  const sub = (App.db.teachers || []).find(t => t.id === session.id);
+  if(!sub){
+    // 主老師 / accounts 內的老師
+    return { _admin:true, classes:'*',
+      canEditStudents:true, canEditGrades:true, canEditAttendance:true,
+      canExport:true, canManageTeachers:true, canEditSettings:true };
+  }
+  // 副老師
+  const p = sub.perms || {};
+  return {
+    _admin: false,
+    classes: Array.isArray(p.classes) ? p.classes : [],
+    canEditStudents: !!p.canEditStudents,
+    canEditGrades: !!p.canEditGrades,
+    canEditAttendance: !!p.canEditAttendance,
+    canExport: !!p.canExport,
+    canManageTeachers: false,
+    canEditSettings: !!p.canEditSettings
+  };
+}
+function isAdmin(){
+  const p = getTeacherPerms(App.session);
+  return !!(p && p._admin);
+}
+function hasPermission(session, view){
+  // 老師：依 view 與 perms 判斷；admin 永遠 true
+  if(!session) return true;
+  if(session.role !== 'teacher') return true;
+  const p = getTeacherPerms(session);
+  if(!p) return false;
+  if(p._admin) return true;
+  // 副老師可看的 views（基本檢視一律允許，特殊頁面才擋）
+  const blocked = {
+    teachers: true,             // 老師管理只有 admin
+    workspace: true,
+    backup: !p.canExport,
+    exportcenter: !p.canExport,
+    settings: !p.canEditSettings,
+    appearance: !p.canEditSettings,
+    uieditor: !p.canEditSettings,
+    firebase: !p.canEditSettings,
+    logs: !p.canEditSettings,
+    storage: !p.canEditSettings
+  };
+  return !blocked[view];
+}
+function filterStudentsByPerms(students){
+  // 副老師：只看可見班級
+  const p = getTeacherPerms(App.session);
+  if(!p || p._admin) return students;
+  if(p.classes === '*') return students;
+  const allow = new Set(p.classes || []);
+  return (students || []).filter(s => allow.has(s.cls));
+}
+
+/* ════════════════════════════════════════════════════════════
+   batch 4-21：家長帳號（parent role）
+   ──────────────────────────────────────────────────────────── */
+function currentParent(){
+  if(!App.session || App.session.role !== 'parent') return null;
+  return (App.db.parents || []).find(p => p.id === App.session.id) || null;
+}
+function parentChildren(){
+  const me = currentParent();
+  if(!me) return [];
+  const ids = new Set(me.children || []);
+  return (App.db.students || []).filter(s => ids.has(s.id));
+}
+
+/* ─ 家長 sidebar / bottom nav ─ */
+function renderSidebarParent(){
+  const side = el('aside', { class:'sidebar' + (App.sidebarCollapsed ? ' collapsed' : '') });
+  side.appendChild(sidebarToggleButton());
+  const me = currentParent();
+  side.appendChild(el('div', { class:'brand' },
+    el('div', { class:'brand-logo' }, 'V3'),
+    el('div', { class:'brand-title' }, '家長後台')
+  ));
+  side.appendChild(sideSection('p_func', '功能', buildSidebarItems('parent', 'p_func', {})));
+  side.appendChild(sideSection('p_other', '設定', buildSidebarItems('parent', 'p_other', {})));
+  side.appendChild(el('div', { style:{flex:'1'} }));
+  side.appendChild(el('div', { class:'card', style:{padding:'10px'} },
+    el('div', { class:'small', style:{fontWeight:'600'} }, me?.name || '家長'),
+    el('div', { class:'tiny muted' }, (me?.children || []).length + ' 位子女'),
+    el('div', { style:{marginTop:'6px',display:'flex',gap:'4px'} },
+      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: toggleTheme }, App.theme==='dark'?'☀️':'🌙'),
+      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: doLogout }, '⎋')
+    )
+  ));
+  return side;
+}
+function renderBottomNavParent(){
+  const nav = el('nav', { class:'bottom-nav' });
+  const items = [
+    { v:'pchildren', i:'👨‍👩‍👧', t:'子女' },
+    { v:'patt', i:'📅', t:'出席' },
+    { v:'pgrade', i:'🎯', t:'成績' },
+    { v:'pmsg', i:'💬', t:'訊息' },
+    { v:'pset', i:'⚙️', t:'設定' }
+  ];
+  items.forEach(it => {
+    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''),
+      onclick: ()=> go(it.v) },
+      el('span', { class:'ico' }, it.i),
+      el('span', null, it.t)
+    );
+    nav.appendChild(b);
+  });
+  return nav;
+}
+
+/* ─ 家長登入頁 ─ */
+function renderLoginParentStage(){
+  const stage = el('div', { class:'login-stage' });
+  stage.appendChild(el('h3', { style:{marginBottom:'14px'} }, '👨‍👩‍👧 家長登入'));
+
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, 'Email'));
+  const i1 = el('input', { class:'input', type:'email', placeholder:'parent@example.com', autocomplete:'username' });
+  f1.appendChild(i1);
+  stage.appendChild(f1);
+
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '密碼'));
+  const pwWrap = el('div', { class:'pw-input-wrap' });
+  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
+  const togglePw = el('button', { type:'button', class:'pw-toggle', onclick: e => {
+    e.preventDefault();
+    if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
+    else { i2.type = 'password'; togglePw.textContent = '👁'; }
+  }}, '👁');
+  pwWrap.appendChild(i2); pwWrap.appendChild(togglePw);
+  f2.appendChild(pwWrap);
+  stage.appendChild(f2);
+
+  const submit = async ()=>{
+    const em = i1.value.trim().toLowerCase();
+    const pw = i2.value;
+    if(!em || !pw){ toast('請輸入 Email 與密碼','danger'); return; }
+    const cand = (App.db.parents || []).find(p => (p.email||'').toLowerCase() === em);
+    if(!cand){ toast('Email 或密碼錯誤','danger'); return; }
+    const ok = await verifyPassword(pw, cand.password);
+    if(!ok){ toast('Email 或密碼錯誤','danger'); return; }
+    if(!isPasswordHashed(cand.password)){
+      try { cand.password = await hashPassword(pw); saveDB(); } catch(e){}
+    }
+    App.session = { role:'parent', id:cand.id, name:cand.name, email:cand.email };
+    saveSession();
+    saveLastUser({ role:'parent', id:cand.id, name:cand.name, ts:Date.now() });
+    App._loginStage = null;
+    toast('歡迎，' + cand.name + '！','success');
+    go('pchildren');
+    // 首次登入強制改密碼
+    try {
+      if(cand.mustChangePw){
+        setTimeout(()=> forceChangeParentPassword(cand.id), 500);
+      }
+    } catch(_){}
+  };
+
+  const btnRow = el('div', { class:'flex', style:{marginTop:'10px'} },
+    el('button', { class:'btn', style:{flex:'0 0 auto'}, onclick: ()=> { App._loginStage = 'choose'; rerender(); } }, '← 返回'),
+    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: submit }, '登入 →')
+  );
+  stage.appendChild(btnRow);
+
+  i1.addEventListener('keydown', e => { if(e.key==='Enter') i2.focus(); });
+  i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+  setTimeout(()=> i1.focus(), 80);
+
+  return stage;
+}
+
+function forceChangeParentPassword(parentId){
+  const p = (App.db.parents || []).find(x => x.id === parentId);
+  if(!p) return;
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '🔐 請設定新密碼'));
+  m.root.appendChild(el('p', { style:{fontSize:'14px',lineHeight:'1.6'} },
+    '為了帳號安全，首次登入請設定新密碼。'));
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '新密碼（至少 6 字元）'));
+  const i1 = el('input', { class:'input', type:'password' });
+  f1.appendChild(i1);
+  m.root.appendChild(f1);
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '確認密碼'));
+  const i2 = el('input', { class:'input', type:'password' });
+  f2.appendChild(i2);
+  m.root.appendChild(f2);
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none'} });
+  m.root.appendChild(err);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: async ()=> {
+    if(!i1.value || i1.value.length < 6){ err.textContent='密碼至少 6 字元'; err.style.display='block'; return; }
+    if(i1.value !== i2.value){ err.textContent='兩次密碼不一致'; err.style.display='block'; return; }
+    const hashed = await hashPasswordSafe(i1.value);
+    if(!hashed.ok){ err.textContent='密碼雜湊失敗'; err.style.display='block'; return; }
+    p.password = hashed.value;
+    p.mustChangePw = false;
+    p.passwordChangedAt = Date.now();
+    saveDB();
+    m.close();
+    toast('✅ 密碼設定成功','success');
+  }}, '設定密碼'));
+  m.root.appendChild(actions);
+  setTimeout(()=> i1.focus(), 100);
+}
+
+/* ─ 老師後台：家長帳號管理 ─ */
+function rParents(content){
+  content.appendChild(el('h1', null, '👨‍👩‍👧 家長帳號管理'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '為家長建立帳號並綁定子女，家長登入後僅能查看綁定子女的資料'));
+
+  const card = el('div', { class:'card' });
+  card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+    el('h3', null, '所有家長（' + (App.db.parents || []).length + ' 位）'),
+    el('button', { class:'btn btn-primary btn-sm', onclick: ()=> openParentEdit(null) }, '＋ 新增家長')
+  ));
+
+  if(!(App.db.parents || []).length){
+    card.appendChild(el('div', { class:'empty' },
+      el('div', { class:'ico' }, '👨‍👩‍👧'),
+      el('div', null, '尚無家長帳號'),
+      el('button', { class:'btn btn-primary', style:{marginTop:'12px'}, onclick: ()=> openParentEdit(null) }, '＋ 新增第一位家長')
+    ));
+  } else {
+    // 依「子女所屬班級」摺疊分組
+    const groups = {};
+    (App.db.parents || []).forEach(p => {
+      const kids = (p.children || []).map(id => (App.db.students||[]).find(s => s.id === id)).filter(Boolean);
+      const clsList = [...new Set(kids.map(s => s.cls || '未分班'))];
+      const key = clsList.length ? clsList.join(' / ') : '（未綁定）';
+      groups[key] = groups[key] || [];
+      groups[key].push(p);
+    });
+    Object.keys(groups).sort().forEach(k => {
+      const grp = el('details', { open:'true', style:{marginTop:'10px',border:'1px solid var(--border)',borderRadius:'10px',padding:'8px 12px'} });
+      grp.appendChild(el('summary', { style:{cursor:'pointer',fontWeight:'600'} }, '🏫 ' + k + '（' + groups[k].length + '）'));
+      groups[k].forEach(p => {
+        const kids = (p.children || []).map(id => (App.db.students||[]).find(s => s.id === id)).filter(Boolean);
+        const row = el('div', { class:'list-row' });
+        row.appendChild(el('div', { class:'avatar' }, initials(p.name)));
+        row.appendChild(el('div', { class:'info' },
+          el('div', { class:'name' }, p.name + (p.mustChangePw ? ' ⚠️' : '')),
+          el('div', { class:'sub' }, '📧 ' + (p.email||'') + ' · 子女：' + (kids.map(s => s.name + (s.cls?'(' + s.cls + ')':'')).join('、') || '（尚未綁定）'))
+        ));
+        const acts = el('div', { class:'flex' },
+          el('button', { class:'btn btn-sm', onclick: ()=> openParentEdit(p) }, '✏️ 編輯'),
+          el('button', { class:'btn btn-sm', onclick: ()=> resetParentPassword(p.id) }, '🔑 重設密碼'),
+          el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+            const ok = await confirmDlg('確定刪除家長「' + p.name + '」？', { danger:true });
+            if(!ok) return;
+            App.db.parents = App.db.parents.filter(x => x.id !== p.id);
+            saveDB();
+            toast('已刪除','success');
+            rerender();
+          }}, '🗑')
+        );
+        row.appendChild(acts);
+        grp.appendChild(row);
+      });
+      card.appendChild(grp);
+    });
+  }
+  content.appendChild(card);
+}
+
+function openParentEdit(parent){
+  const isNew = !parent;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew ? '➕ 新增家長' : '✏️ 編輯家長'));
+
+  const fName = el('div', { class:'field' });
+  fName.appendChild(el('label', { class:'label' }, '家長姓名 *'));
+  const iName = el('input', { class:'input', value: parent?.name || '' });
+  fName.appendChild(iName);
+  m.root.appendChild(fName);
+
+  const fEmail = el('div', { class:'field' });
+  fEmail.appendChild(el('label', { class:'label' }, 'Email（登入用）*'));
+  const iEmail = el('input', { class:'input', type:'email', value: parent?.email || '' });
+  fEmail.appendChild(iEmail);
+  m.root.appendChild(fEmail);
+
+  let initialPw = '';
+  if(isNew){
+    const fPw = el('div', { class:'field' });
+    fPw.appendChild(el('label', { class:'label' }, '初始密碼（將要求首次登入更改）'));
+    initialPw = 'p' + Math.random().toString(36).slice(2,8);
+    const iPw = el('input', { class:'input', value: initialPw });
+    iPw.addEventListener('input', e => { initialPw = e.target.value; });
+    fPw.appendChild(iPw);
+    m.root.appendChild(fPw);
+  }
+
+  // 綁定學生
+  m.root.appendChild(el('div', { class:'label', style:{marginTop:'10px'} }, '綁定子女（可複選）'));
+  const stuBox = el('div', { style:{maxHeight:'260px',overflowY:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
+  const selected = new Set(parent?.children || []);
+  const byCls = {};
+  (App.db.students || []).forEach(s => {
+    const c = s.cls || '未分班';
+    byCls[c] = byCls[c] || [];
+    byCls[c].push(s);
+  });
+  Object.keys(byCls).sort().forEach(c => {
+    stuBox.appendChild(el('div', { class:'small muted', style:{marginTop:'6px',fontWeight:'600'} }, '🏫 ' + c));
+    byCls[c].forEach(s => {
+      const lab = el('label', { style:{display:'block',padding:'4px 6px',cursor:'pointer'} });
+      const chk = el('input', { type:'checkbox' });
+      if(selected.has(s.id)) chk.checked = true;
+      chk.addEventListener('change', e => {
+        if(e.target.checked) selected.add(s.id); else selected.delete(s.id);
+      });
+      lab.appendChild(chk);
+      lab.appendChild(document.createTextNode(' ' + s.name + (s.sid ? ' (' + s.sid + ')' : '')));
+      stuBox.appendChild(lab);
+    });
+  });
+  if(!Object.keys(byCls).length){
+    stuBox.appendChild(el('div', { class:'small muted' }, '（尚無學生）'));
+  }
+  m.root.appendChild(stuBox);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    const name = iName.value.trim();
+    const email = iEmail.value.trim().toLowerCase();
+    if(!name){ toast('請輸入姓名','danger'); return; }
+    if(!email || !/.+@.+\..+/.test(email)){ toast('Email 格式錯誤','danger'); return; }
+    // 檢查 email 唯一
+    const dup = (App.db.parents || []).find(p => (p.email||'').toLowerCase() === email && p.id !== parent?.id);
+    if(dup){ toast('此 Email 已被使用','danger'); return; }
+    if(isNew){
+      const hashed = await hashPasswordSafe(initialPw);
+      const np = {
+        id: nid(),
+        name: name,
+        email: email,
+        password: hashed.ok ? hashed.value : initialPw,
+        children: [...selected],
+        mustChangePw: true,
+        avatar: '',
+        createdAt: Date.now()
+      };
+      App.db.parents = App.db.parents || [];
+      App.db.parents.push(np);
+      saveDB();
+      m.close();
+      toast('已新增家長，初始密碼：' + initialPw,'success', 6000);
+    } else {
+      parent.name = name;
+      parent.email = email;
+      parent.children = [...selected];
+      saveDB();
+      m.close();
+      toast('已更新','success');
+    }
+    rerender();
+  }}, isNew ? '➕ 新增' : '💾 儲存'));
+  m.root.appendChild(actions);
+}
+
+async function resetParentPassword(parentId){
+  const p = (App.db.parents || []).find(x => x.id === parentId);
+  if(!p) return;
+  const ok = await confirmDlg('要重設「' + p.name + '」的密碼嗎？');
+  if(!ok) return;
+  const newPw = 'p' + Math.random().toString(36).slice(2,8);
+  const hashed = await hashPasswordSafe(newPw);
+  p.password = hashed.ok ? hashed.value : newPw;
+  p.mustChangePw = true;
+  saveDB();
+  toast('新密碼：' + newPw + '（請通知家長首次登入需改密碼）','success', 8000);
+}
+
+/* ─ 家長端頁面 ─ */
+function rParentChildren(content){
+  const me = currentParent();
+  if(!me){ content.appendChild(el('div',{class:'card'},'尚未綁定資料')); return; }
+  content.appendChild(el('h1', null, '👨‍👩‍👧 我的子女'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '歡迎，' + me.name + '！您可查看下列子女的學習狀況'));
+
+  const kids = parentChildren();
+  if(!kids.length){
+    content.appendChild(el('div', { class:'card' },
+      el('div', { class:'empty' },
+        el('div', { class:'ico' }, '🧑‍🎓'),
+        el('div', null, '尚未綁定子女'),
+        el('div', { class:'small muted' }, '請聯絡老師為您綁定學生資料')
+      )
+    ));
+    return;
+  }
+
+  const grid = el('div', { class:'grid grid-2' });
+  const today = td();
+  kids.forEach(s => {
+    const todayAtt = (App.db.attendance || []).find(a => a.studentId === s.id && a.date === today);
+    const points = computeBehaviorPoints(s.id);
+    const card = el('div', { class:'card card-hover' });
+    card.appendChild(el('div', { class:'flex', style:{alignItems:'center',gap:'12px'} },
+      el('div', { class:'avatar', style:{width:'56px',height:'56px',fontSize:'20px'} }, initials(s.name)),
+      el('div', null,
+        el('div', { style:{fontSize:'18px',fontWeight:'700'} }, s.name),
+        el('div', { class:'small muted' }, (s.cls||'') + (s.sid ? ' · 學號 ' + s.sid : ''))
+      )
+    ));
+    card.appendChild(el('div', { class:'small', style:{marginTop:'10px',padding:'8px',background:'var(--surface-2)',borderRadius:'6px'} },
+      '📅 今日：' + (todayAtt ? (todayAtt.status || '已到') : '尚未簽到')
+    ));
+    card.appendChild(el('div', { class:'small', style:{marginTop:'6px',display:'flex',justifyContent:'space-between'} },
+      el('span', null, '⭐ 累積點數'),
+      el('span', { style:{fontWeight:'700',color: points.total>=0?'var(--success)':'var(--danger)'} }, (points.total>=0?'+':'') + points.total)
+    ));
+    card.appendChild(el('div', { class:'flex', style:{marginTop:'10px',flexWrap:'wrap'} },
+      el('button', { class:'btn btn-sm', onclick: ()=> { App._parentFilterStu = s.id; go('patt'); } }, '📅 出席'),
+      el('button', { class:'btn btn-sm', onclick: ()=> { App._parentFilterStu = s.id; go('pgrade'); } }, '🎯 成績'),
+      el('button', { class:'btn btn-sm', onclick: ()=> { App._parentFilterStu = s.id; go('psub'); } }, '📥 繳交')
+    ));
+    grid.appendChild(card);
+  });
+  content.appendChild(grid);
+}
+
+function parentChildSelector(){
+  const kids = parentChildren();
+  if(kids.length <= 1){
+    return { selector:null, ids: kids.map(k => k.id) };
+  }
+  const wrap = el('div', { class:'card', style:{marginBottom:'10px',padding:'8px 10px'} });
+  wrap.appendChild(el('span', { class:'small muted', style:{marginRight:'6px'} }, '檢視子女：'));
+  const sel = el('select', { class:'input', style:{display:'inline-block',width:'auto'} });
+  sel.appendChild(el('option', { value:'' }, '全部'));
+  kids.forEach(k => sel.appendChild(el('option', { value:k.id, selected: App._parentFilterStu===k.id }, k.name + (k.cls ? '（' + k.cls + '）' : ''))));
+  sel.addEventListener('change', e => { App._parentFilterStu = e.target.value || null; rerender(); });
+  wrap.appendChild(sel);
+  const ids = App._parentFilterStu ? [App._parentFilterStu] : kids.map(k => k.id);
+  return { selector: wrap, ids };
+}
+
+function rParentAttendance(content){
+  content.appendChild(el('h1', null, '📅 出席紀錄'));
+  const sel = parentChildSelector();
+  if(sel.selector) content.appendChild(sel.selector);
+  const idSet = new Set(sel.ids);
+  const recs = (App.db.attendance || []).filter(a => idSet.has(a.studentId))
+    .sort((a,b) => (b.date||'').localeCompare(a.date||'') || (b.ts||0) - (a.ts||0));
+  if(!recs.length){
+    content.appendChild(el('div', { class:'card empty' }, '尚無出席紀錄'));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  recs.slice(0, 200).forEach(r => {
+    const stu = (App.db.students||[]).find(s => s.id === r.studentId);
+    const w = fmtWeekTag(r.date);
+    card.appendChild(el('div', { class:'list-row' },
+      el('div', { class:'info' },
+        el('div', { class:'name' }, (stu?.name || '?') + ' · ' + r.date + (w ? ' （' + w + '）' : '')),
+        el('div', { class:'sub' }, (r.time || '') + ' · ' + (r.status || '已到') + (r.method ? ' · ' + r.method : ''))
+      )
+    ));
+  });
+  content.appendChild(card);
+}
+
+function rParentGrades(content){
+  content.appendChild(el('h1', null, '🎯 學期成績'));
+  const sel = parentChildSelector();
+  if(sel.selector) content.appendChild(sel.selector);
+  const ids = sel.ids;
+  if(!ids.length){ content.appendChild(el('div',{class:'card empty'},'無資料')); return; }
+  const grades = App.db.grades || {};
+  ids.forEach(sid => {
+    const stu = (App.db.students||[]).find(s => s.id === sid);
+    if(!stu) return;
+    const card = el('div', { class:'card', style:{marginBottom:'10px'} });
+    card.appendChild(el('h3', null, '🧑‍🎓 ' + stu.name + (stu.cls ? '（' + stu.cls + '）' : '')));
+    const g = grades[sid] || {};
+    const rows = [
+      ['出席分數', g.att],
+      ['作業分數', g.asgn],
+      ['期中考', g.mid],
+      ['期末考', g.fin || g.final],
+      ['總分', g.total]
+    ];
+    rows.forEach(([k,v]) => {
+      card.appendChild(el('div', { class:'list-row' },
+        el('div', { class:'info' }, el('div', { class:'name' }, k)),
+        el('div', { style:{fontWeight:'700'} }, (v != null) ? String(v) : '—')
+      ));
+    });
+    // 小考成績（quizzes via DB.grades records）
+    const scores = (App.db.scores || []).filter(x => x.studentId === sid);
+    if(scores.length){
+      card.appendChild(el('div', { class:'small muted', style:{marginTop:'8px',fontWeight:'600'} }, '📝 各項成績'));
+      scores.forEach(sc => {
+        const w = fmtWeekTag(sc.date || td());
+        card.appendChild(el('div', { class:'list-row' },
+          el('div', { class:'info' },
+            el('div', { class:'name' }, sc.title || sc.type || '成績'),
+            el('div', { class:'sub' }, (sc.date || '') + (w ? ' · ' + w : ''))
+          ),
+          el('div', { style:{fontWeight:'700'} }, String(sc.score != null ? sc.score : '—'))
+        ));
+      });
+    }
+    content.appendChild(card);
+  });
+}
+
+function rParentSubmissions(content){
+  content.appendChild(el('h1', null, '📥 繳交紀錄'));
+  const sel = parentChildSelector();
+  if(sel.selector) content.appendChild(sel.selector);
+  const idSet = new Set(sel.ids);
+  const subs = (App.db.submissions || []).filter(x => idSet.has(x.studentId))
+    .sort((a,b) => (b.ts||0) - (a.ts||0));
+  if(!subs.length){
+    content.appendChild(el('div', { class:'card empty' }, '尚無繳交紀錄'));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  subs.slice(0, 200).forEach(s => {
+    const stu = (App.db.students||[]).find(x => x.id === s.studentId);
+    const asgn = (App.db.assignments||[]).find(a => a.id === s.assignmentId);
+    const date = s.ts ? new Date(s.ts).toLocaleDateString('zh-TW') : '';
+    const w = fmtWeekTag(date.replace(/\//g,'-'));
+    card.appendChild(el('div', { class:'list-row' },
+      el('div', { class:'info' },
+        el('div', { class:'name' }, (asgn?.title || '作業') + ' — ' + (stu?.name || '')),
+        el('div', { class:'sub' }, date + (w ? ' · ' + w : '') + (s.score != null ? ' · 分數 ' + s.score : ' · 未批改'))
+      )
+    ));
+  });
+  content.appendChild(card);
+}
+
+function rParentFeedback(content){
+  content.appendChild(el('h1', null, '💬 評價回饋'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '查看老師對子女的評語'));
+  const sel = parentChildSelector();
+  if(sel.selector) content.appendChild(sel.selector);
+  const idSet = new Set(sel.ids);
+  const notes = (App.db.attendanceNotes || []).filter(n => idSet.has(n.studentId))
+    .sort((a,b) => (b.ts||0) - (a.ts||0));
+  if(!notes.length){
+    content.appendChild(el('div', { class:'card empty' }, '尚無評語'));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  notes.forEach(n => {
+    const stu = (App.db.students||[]).find(x => x.id === n.studentId);
+    card.appendChild(el('div', { class:'list-row' },
+      el('div', { class:'info' },
+        el('div', { class:'name' }, (stu?.name || '?') + (n.by ? ' · ' + n.by : '')),
+        el('div', { class:'sub' }, n.text),
+        el('div', { class:'tiny muted' }, fmtDateTime(n.ts || Date.now()))
+      )
+    ));
+  });
+  content.appendChild(card);
+}
+
+function rParentMessages(content){
+  content.appendChild(el('h1', null, '💬 訊息'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '老師發送給您的訊息'));
+  const me = currentParent();
+  // 收件對象：toParentId === me.id 或 toStudentId in children（broadcast）
+  const childIds = new Set(me?.children || []);
+  const msgs = (App.db.messages || []).filter(m =>
+    m.toParentId === me?.id ||
+    (m.toStudentId && childIds.has(m.toStudentId)) ||
+    (m.broadcastParents === true)
+  ).sort((a,b) => (b.ts||0) - (a.ts||0));
+  if(!msgs.length){
+    content.appendChild(el('div', { class:'card empty' }, '尚無訊息'));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  msgs.slice(0, 200).forEach(m => {
+    card.appendChild(el('div', { class:'list-row' },
+      el('div', { class:'info' },
+        el('div', { class:'name' }, m.from || '老師'),
+        el('div', { class:'sub' }, m.text || ''),
+        el('div', { class:'tiny muted' }, fmtDateTime(m.ts || Date.now()))
+      )
+    ));
+  });
+  content.appendChild(card);
+}
+
+function rParentSettings(content){
+  const me = currentParent();
+  if(!me){ content.appendChild(el('div',{class:'card'},'未登入')); return; }
+  content.appendChild(el('h1', null, '⚙️ 個人設定'));
+
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '👤 個人資料'));
+  card.appendChild(el('div', { class:'list-row' },
+    el('div', { class:'avatar' }, initials(me.name)),
+    el('div', { class:'info' },
+      el('div', { class:'name' }, me.name),
+      el('div', { class:'sub' }, '📧 ' + (me.email || '')),
+      el('div', { class:'tiny muted' }, '子女 ' + (me.children||[]).length + ' 位')
+    )
+  ));
+  content.appendChild(card);
+
+  const card2 = el('div', { class:'card', style:{marginTop:'10px'} });
+  card2.appendChild(el('h3', null, '🔐 變更密碼'));
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '舊密碼'));
+  const i1 = el('input', { class:'input', type:'password' });
+  f1.appendChild(i1);
+  card2.appendChild(f1);
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '新密碼（至少 6 字元）'));
+  const i2 = el('input', { class:'input', type:'password' });
+  f2.appendChild(i2);
+  card2.appendChild(f2);
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '確認新密碼'));
+  const i3 = el('input', { class:'input', type:'password' });
+  f3.appendChild(i3);
+  card2.appendChild(f3);
+  card2.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    const okOld = await verifyPassword(i1.value, me.password);
+    if(!okOld){ toast('舊密碼錯誤','danger'); return; }
+    if(!i2.value || i2.value.length < 6){ toast('新密碼至少 6 字元','danger'); return; }
+    if(i2.value !== i3.value){ toast('兩次新密碼不一致','danger'); return; }
+    const hashed = await hashPasswordSafe(i2.value);
+    if(!hashed.ok){ toast('密碼雜湊失敗','danger'); return; }
+    me.password = hashed.value;
+    me.passwordChangedAt = Date.now();
+    saveDB();
+    i1.value=''; i2.value=''; i3.value='';
+    toast('密碼已變更','success');
+  }}, '💾 變更密碼'));
+  content.appendChild(card2);
+}
+
+/* ════════════════════════════════════════════════════════════
+   batch 4-23：行為記錄
+   ──────────────────────────────────────────────────────────── */
+function computeBehaviorPoints(studentId, scope){
+  // scope: 'all' | 'month' | 'week' | undefined（all）
+  const records = (App.db.behavior || []).filter(b => b.studentId === studentId);
+  let filt = records;
+  if(scope === 'week'){
+    const todayD = new Date(td() + 'T00:00:00');
+    const wd = todayD.getDay();
+    const monday = new Date(todayD.getTime() - ((wd + 6) % 7) * 24*3600*1000);
+    filt = records.filter(b => new Date(b.date + 'T00:00:00') >= monday);
+  } else if(scope === 'month'){
+    const ym = td().slice(0,7);
+    filt = records.filter(b => (b.date||'').startsWith(ym));
+  }
+  let total = 0, pos = 0, neg = 0;
+  filt.forEach(b => {
+    const pts = (b.type === 'neg' ? -1 : 1) * Math.abs(b.points || 0);
+    total += pts;
+    if(pts >= 0) pos += pts; else neg += pts;
+  });
+  return { total, pos, neg, count: filt.length };
+}
+function getTopBehaviorStudents(limit){
+  // 今日加扣分排行
+  const today = td();
+  const dayRecs = (App.db.behavior || []).filter(b => b.date === today);
+  const sum = {};
+  dayRecs.forEach(b => {
+    const pts = (b.type === 'neg' ? -1 : 1) * Math.abs(b.points || 0);
+    sum[b.studentId] = (sum[b.studentId] || 0) + pts;
+  });
+  return Object.keys(sum)
+    .map(sid => ({ studentId: sid, points: sum[sid] }))
+    .sort((a,b) => Math.abs(b.points) - Math.abs(a.points))
+    .slice(0, limit || 5);
+}
+
+function rBehavior(content){
+  content.appendChild(el('h1', null, '⭐ 行為點數'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '記錄學生的上課表現、作業態度、秩序等，可加分或扣分'));
+
+  // 快速加扣分
+  const quick = el('div', { class:'card' });
+  quick.appendChild(el('h3', null, '⚡ 快速加扣分'));
+  quick.appendChild(el('button', { class:'btn btn-primary', onclick: openBehaviorQuickAdd }, '＋ 開始記錄'));
+  content.appendChild(quick);
+
+  // 篩選
+  App._behFilter = App._behFilter || { cls:'', stu:'', from:'', to:'' };
+  const filt = el('div', { class:'card', style:{marginTop:'10px'} });
+  filt.appendChild(el('h3', null, '🔍 篩選'));
+  const fRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px'} });
+  const allCls = [...new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))].sort();
+  const selCls = el('select', { class:'input', style:{width:'auto'} });
+  selCls.appendChild(el('option', { value:'' }, '所有班級'));
+  allCls.forEach(c => selCls.appendChild(el('option', { value:c, selected: App._behFilter.cls===c }, c)));
+  selCls.addEventListener('change', e => { App._behFilter.cls = e.target.value; rerender(); });
+  fRow.appendChild(selCls);
+  const stuOpts = filterStudentsByPerms((App.db.students||[]).filter(s => !App._behFilter.cls || s.cls === App._behFilter.cls));
+  const selStu = el('select', { class:'input', style:{width:'auto'} });
+  selStu.appendChild(el('option', { value:'' }, '所有學生'));
+  stuOpts.forEach(s => selStu.appendChild(el('option', { value:s.id, selected: App._behFilter.stu===s.id }, s.name + (s.cls?'(' + s.cls + ')':''))));
+  selStu.addEventListener('change', e => { App._behFilter.stu = e.target.value; rerender(); });
+  fRow.appendChild(selStu);
+  filt.appendChild(fRow);
+  content.appendChild(filt);
+
+  // 列表
+  let recs = (App.db.behavior || []).slice().sort((a,b) => (b.ts||0) - (a.ts||0));
+  if(App._behFilter.cls){
+    const ids = new Set(filterStudentsByPerms((App.db.students||[]).filter(s => s.cls === App._behFilter.cls)).map(s => s.id));
+    recs = recs.filter(r => ids.has(r.studentId));
+  }
+  if(App._behFilter.stu) recs = recs.filter(r => r.studentId === App._behFilter.stu);
+
+  const list = el('div', { class:'card', style:{marginTop:'10px'} });
+  list.appendChild(el('h3', null, '📋 行為記錄（' + recs.length + ' 筆）'));
+  if(!recs.length){
+    list.appendChild(el('div', { class:'empty' }, '尚無記錄'));
+  } else {
+    recs.slice(0, 300).forEach(r => {
+      const s = (App.db.students||[]).find(x => x.id === r.studentId);
+      const sign = r.type === 'neg' ? '-' : '+';
+      const color = r.type === 'neg' ? 'var(--danger)' : 'var(--success)';
+      const w = fmtWeekTag(r.date);
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, (s?.name || '?') + ' · ' + (r.category || '其他')),
+        el('div', { class:'sub' }, r.date + (w ? '（' + w + '）' : '') + (r.note ? ' · ' + r.note : ''))
+      ));
+      row.appendChild(el('div', { style:{fontWeight:'700',fontSize:'18px',color:color,minWidth:'70px',textAlign:'right'} },
+        sign + Math.abs(r.points || 0)));
+      row.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        const ok = await confirmDlg('刪除此記錄？', { danger:true });
+        if(!ok) return;
+        App.db.behavior = App.db.behavior.filter(x => x.id !== r.id);
+        saveDB();
+        rerender();
+      }}, '🗑'));
+      list.appendChild(row);
+    });
+  }
+  content.appendChild(list);
+
+  // 累計統計
+  if(App._behFilter.stu){
+    const stat = computeBehaviorPoints(App._behFilter.stu, 'all');
+    const wk = computeBehaviorPoints(App._behFilter.stu, 'week');
+    const mn = computeBehaviorPoints(App._behFilter.stu, 'month');
+    const card = el('div', { class:'card', style:{marginTop:'10px'} });
+    card.appendChild(el('h3', null, '📊 該生累積'));
+    const g = el('div', { class:'grid grid-3' },
+      el('div', { class:'stat' }, el('div', { class:'num' }, (stat.total>=0?'+':'') + stat.total), el('div', { class:'lbl' }, '本學期')),
+      el('div', { class:'stat' }, el('div', { class:'num' }, (mn.total>=0?'+':'') + mn.total), el('div', { class:'lbl' }, '本月')),
+      el('div', { class:'stat' }, el('div', { class:'num' }, (wk.total>=0?'+':'') + wk.total), el('div', { class:'lbl' }, '本週'))
+    );
+    card.appendChild(g);
+    content.appendChild(card);
+  }
+}
+
+function openBehaviorQuickAdd(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '⚡ 行為快速加扣分'));
+
+  // 學生選擇
+  const stuOpts = filterStudentsByPerms(App.db.students || []);
+  const fStu = el('div', { class:'field' });
+  fStu.appendChild(el('label', { class:'label' }, '學生 *'));
+  const sStu = el('select', { class:'input' });
+  sStu.appendChild(el('option', { value:'' }, '請選擇...'));
+  stuOpts.forEach(s => sStu.appendChild(el('option', { value:s.id }, s.name + (s.cls ? '（' + s.cls + '）' : ''))));
+  fStu.appendChild(sStu);
+  m.root.appendChild(fStu);
+
+  // 類別
+  const fCat = el('div', { class:'field' });
+  fCat.appendChild(el('label', { class:'label' }, '類別'));
+  const sCat = el('select', { class:'input' });
+  ['上課表現','作業態度','秩序','服務','其他'].forEach(c => sCat.appendChild(el('option', { value:c }, c)));
+  fCat.appendChild(sCat);
+  m.root.appendChild(fCat);
+
+  // 點數按鈕
+  m.root.appendChild(el('div', { class:'label' }, '點數'));
+  let selPts = 5;
+  let selType = 'pos';
+  const ptsBox = el('div', { class:'flex', style:{flexWrap:'wrap'} });
+  const presets = [['+5','pos',5],['+3','pos',3],['+1','pos',1],['-1','neg',1],['-3','neg',3],['-5','neg',5]];
+  const allBtns = [];
+  presets.forEach(([lab, ty, pt]) => {
+    const b = el('button', { class:'btn ' + (ty===selType && pt===selPts ? 'btn-primary' : ''),
+      style:{minWidth:'56px'},
+      onclick:()=> {
+        selType = ty; selPts = pt;
+        allBtns.forEach(x => x.classList.remove('btn-primary'));
+        b.classList.add('btn-primary');
+      }
+    }, lab);
+    allBtns.push(b);
+    ptsBox.appendChild(b);
+  });
+  m.root.appendChild(ptsBox);
+
+  // 備註
+  const fNote = el('div', { class:'field', style:{marginTop:'10px'} });
+  fNote.appendChild(el('label', { class:'label' }, '備註（可選）'));
+  const iNote = el('input', { class:'input', placeholder:'例：主動幫忙打掃' });
+  fNote.appendChild(iNote);
+  m.root.appendChild(fNote);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    if(!sStu.value){ toast('請選擇學生','danger'); return; }
+    const rec = {
+      id: nid(),
+      studentId: sStu.value,
+      date: td(),
+      category: sCat.value,
+      type: selType,
+      points: selPts,
+      note: iNote.value.trim(),
+      teacherId: App.session?.id || '',
+      ts: Date.now()
+    };
+    App.db.behavior = App.db.behavior || [];
+    App.db.behavior.push(rec);
+    saveDB();
+    m.close();
+    toast('已記錄','success');
+    rerender();
+  }}, '✅ 確認'));
+  m.root.appendChild(actions);
+}
+
+/* 學生端：我的點數 */
+function rMyBehavior(content){
+  const me = currentStudent();
+  if(!me){ content.appendChild(el('div',{class:'card'},'未登入')); return; }
+  content.appendChild(el('h1', null, '⭐ 我的點數'));
+
+  const all = computeBehaviorPoints(me.id, 'all');
+  const wk = computeBehaviorPoints(me.id, 'week');
+  const mn = computeBehaviorPoints(me.id, 'month');
+
+  const stats = el('div', { class:'grid grid-3', style:{marginBottom:'12px'} },
+    el('div', { class:'stat s-success' },
+      el('div', { class:'num', style:{color: all.total>=0?'var(--success)':'var(--danger)'} }, (all.total>=0?'+':'') + all.total),
+      el('div', { class:'lbl' }, '本學期')
+    ),
+    el('div', { class:'stat s-accent' }, el('div', { class:'num' }, (mn.total>=0?'+':'') + mn.total), el('div', { class:'lbl' }, '本月')),
+    el('div', { class:'stat s-warn' }, el('div', { class:'num' }, (wk.total>=0?'+':'') + wk.total), el('div', { class:'lbl' }, '本週'))
+  );
+  content.appendChild(stats);
+
+  const recs = (App.db.behavior || []).filter(b => b.studentId === me.id)
+    .sort((a,b) => (b.ts||0) - (a.ts||0));
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, '📋 最近 10 筆記錄'));
+  if(!recs.length){
+    card.appendChild(el('div', { class:'empty' }, '尚無記錄'));
+  } else {
+    recs.slice(0, 10).forEach(r => {
+      const sign = r.type === 'neg' ? '-' : '+';
+      const color = r.type === 'neg' ? 'var(--danger)' : 'var(--success)';
+      card.appendChild(el('div', { class:'list-row' },
+        el('div', { class:'info' },
+          el('div', { class:'name' }, r.category || '其他'),
+          el('div', { class:'sub' }, r.date + (r.note ? ' · ' + r.note : ''))
+        ),
+        el('div', { style:{fontWeight:'700',fontSize:'18px',color:color} }, sign + Math.abs(r.points || 0))
+      ));
+    });
+  }
+  content.appendChild(card);
+}
+
+/* ════════════════════════════════════════════════════════════
+   batch 4-24：多老師權限管理
+   ──────────────────────────────────────────────────────────── */
+function rTeachers(content){
+  if(!isAdmin()){
+    content.appendChild(el('div', { class:'card' }, '⚠️ 僅主老師可進入此頁'));
+    return;
+  }
+  content.appendChild(el('h1', null, '🧑‍🏫 老師管理'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '主老師 (admin) 擁有全部權限；副老師 (sub) 依授權檢視 / 編輯'));
+
+  // 主老師
+  const c0 = el('div', { class:'card' });
+  c0.appendChild(el('h3', null, '👑 主老師 (admin)'));
+  (App.db.accounts || []).forEach(a => {
+    c0.appendChild(el('div', { class:'list-row' },
+      el('div', { class:'avatar' }, initials(a.name)),
+      el('div', { class:'info' },
+        el('div', { class:'name' }, a.name + '  @' + a.username),
+        el('div', { class:'sub' }, '主老師（所有班級、所有權限）')
+      )
+    ));
+  });
+  content.appendChild(c0);
+
+  // 副老師
+  const card = el('div', { class:'card', style:{marginTop:'10px'} });
+  card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'8px'} },
+    el('h3', null, '🧑‍🏫 副老師（' + (App.db.teachers || []).length + ' 位）'),
+    el('button', { class:'btn btn-primary btn-sm', onclick: ()=> openTeacherEdit(null) }, '＋ 新增副老師')
+  ));
+  if(!(App.db.teachers || []).length){
+    card.appendChild(el('div', { class:'empty' }, '尚無副老師'));
+  } else {
+    (App.db.teachers || []).forEach(t => {
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'avatar' }, initials(t.name)));
+      const perms = t.perms || {};
+      const clsStr = (Array.isArray(perms.classes) && perms.classes.length) ? perms.classes.join('、') : '（未指定）';
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, t.name + ' ' + (t.active === false ? '🚫' : '') + (t.mustChangePw ? '⚠️' : '')),
+        el('div', { class:'sub' }, '📧 ' + (t.email || '') + ' · 班級：' + clsStr)
+      ));
+      row.appendChild(el('div', { class:'flex' },
+        el('button', { class:'btn btn-sm', onclick: ()=> openTeacherEdit(t) }, '✏️ 編輯'),
+        el('button', { class:'btn btn-sm', onclick: ()=> resetSubTeacherPassword(t.id) }, '🔑 重設'),
+        el('button', { class:'btn btn-sm', onclick: ()=> {
+          t.active = !(t.active !== false);
+          saveDB(); rerender();
+        }}, t.active === false ? '✅ 啟用' : '🚫 停用'),
+        el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+          const ok = await confirmDlg('確定刪除「' + t.name + '」？', { danger:true });
+          if(!ok) return;
+          App.db.teachers = App.db.teachers.filter(x => x.id !== t.id);
+          saveDB(); rerender();
+        }}, '🗑')
+      ));
+      card.appendChild(row);
+    });
+  }
+  content.appendChild(card);
+}
+
+function openTeacherEdit(t){
+  const isNew = !t;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew ? '➕ 新增副老師' : '✏️ 編輯副老師'));
+
+  const fName = el('div', { class:'field' });
+  fName.appendChild(el('label', { class:'label' }, '姓名 *'));
+  const iName = el('input', { class:'input', value: t?.name || '' });
+  fName.appendChild(iName);
+  m.root.appendChild(fName);
+
+  const fEmail = el('div', { class:'field' });
+  fEmail.appendChild(el('label', { class:'label' }, 'Email *'));
+  const iEmail = el('input', { class:'input', type:'email', value: t?.email || '' });
+  fEmail.appendChild(iEmail);
+  m.root.appendChild(fEmail);
+
+  let initialPw = '';
+  if(isNew){
+    initialPw = 't' + Math.random().toString(36).slice(2,8);
+    const fp = el('div', { class:'field' });
+    fp.appendChild(el('label', { class:'label' }, '初始密碼（將要求首次登入更改）'));
+    const ipw = el('input', { class:'input', value: initialPw });
+    ipw.addEventListener('input', e => { initialPw = e.target.value; });
+    fp.appendChild(ipw);
+    m.root.appendChild(fp);
+  }
+
+  // 班級權限
+  m.root.appendChild(el('div', { class:'label', style:{marginTop:'10px'} }, '可查看的班級'));
+  const allCls = [...new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))].sort();
+  const clsSet = new Set((t?.perms?.classes) || []);
+  const clsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px'} });
+  if(!allCls.length) clsBox.appendChild(el('div', { class:'small muted' }, '（尚無班級）'));
+  allCls.forEach(c => {
+    const lab = el('label', { style:{padding:'4px 8px',border:'1px solid var(--border)',borderRadius:'6px',cursor:'pointer'} });
+    const chk = el('input', { type:'checkbox' });
+    if(clsSet.has(c)) chk.checked = true;
+    chk.addEventListener('change', e => {
+      if(e.target.checked) clsSet.add(c); else clsSet.delete(c);
+    });
+    lab.appendChild(chk);
+    lab.appendChild(document.createTextNode(' ' + c));
+    clsBox.appendChild(lab);
+  });
+  m.root.appendChild(clsBox);
+
+  // 功能權限
+  m.root.appendChild(el('div', { class:'label', style:{marginTop:'10px'} }, '功能權限'));
+  const permList = [
+    ['canEditStudents', '編輯學生'],
+    ['canEditGrades', '編輯成績'],
+    ['canEditAttendance', '編輯出席'],
+    ['canExport', '匯出資料'],
+    ['canEditSettings', '系統設定']
+  ];
+  const permVals = Object.assign({}, t?.perms || {});
+  const permBox = el('div', { style:{display:'flex',flexDirection:'column',gap:'4px'} });
+  permList.forEach(([k, lab]) => {
+    const row = el('label', { style:{display:'flex',alignItems:'center',gap:'6px',padding:'4px 0'} });
+    const chk = el('input', { type:'checkbox' });
+    if(permVals[k]) chk.checked = true;
+    chk.addEventListener('change', e => { permVals[k] = e.target.checked; });
+    row.appendChild(chk);
+    row.appendChild(document.createTextNode(lab));
+    permBox.appendChild(row);
+  });
+  m.root.appendChild(permBox);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    const name = iName.value.trim();
+    const email = iEmail.value.trim().toLowerCase();
+    if(!name || !email){ toast('請填寫姓名與 Email','danger'); return; }
+    const dup = (App.db.teachers||[]).find(x => (x.email||'').toLowerCase() === email && x.id !== t?.id);
+    if(dup){ toast('此 Email 已被使用','danger'); return; }
+    const perms = {
+      classes: [...clsSet],
+      canEditStudents: !!permVals.canEditStudents,
+      canEditGrades: !!permVals.canEditGrades,
+      canEditAttendance: !!permVals.canEditAttendance,
+      canExport: !!permVals.canExport,
+      canEditSettings: !!permVals.canEditSettings,
+      canManageTeachers: false
+    };
+    if(isNew){
+      const hashed = await hashPasswordSafe(initialPw);
+      const nt = {
+        id: nid(),
+        name, email,
+        password: hashed.ok ? hashed.value : initialPw,
+        role: 'sub',
+        perms,
+        active: true,
+        mustChangePw: true,
+        createdAt: Date.now()
+      };
+      App.db.teachers = App.db.teachers || [];
+      App.db.teachers.push(nt);
+      // 同時加到 accounts，讓老師端登入流程能找到
+      App.db.accounts = App.db.accounts || [];
+      App.db.accounts.push({
+        id: nt.id, username: email, password: nt.password, name,
+        role:'teacher', subRole:'sub', mustChangePw:true, createdAt: Date.now()
+      });
+      saveDB();
+      m.close();
+      toast('已新增副老師，初始密碼：' + initialPw,'success', 6000);
+    } else {
+      t.name = name; t.email = email; t.perms = perms;
+      // 同步 accounts 對應的 username
+      const acc = (App.db.accounts||[]).find(a => a.id === t.id);
+      if(acc){ acc.name = name; acc.username = email; }
+      saveDB();
+      m.close();
+      toast('已更新','success');
+    }
+    rerender();
+  }}, isNew ? '➕ 新增' : '💾 儲存'));
+  m.root.appendChild(actions);
+}
+
+async function resetSubTeacherPassword(tid){
+  const t = (App.db.teachers||[]).find(x => x.id === tid);
+  if(!t) return;
+  const ok = await confirmDlg('要重設「' + t.name + '」的密碼嗎？');
+  if(!ok) return;
+  const newPw = 't' + Math.random().toString(36).slice(2,8);
+  const hashed = await hashPasswordSafe(newPw);
+  t.password = hashed.ok ? hashed.value : newPw;
+  t.mustChangePw = true;
+  const acc = (App.db.accounts||[]).find(a => a.id === t.id);
+  if(acc){ acc.password = t.password; acc.mustChangePw = true; }
+  saveDB();
+  toast('新密碼：' + newPw,'success', 8000);
+}
+
+/* ════════════════════════════════════════════════════════════
+   batch 4-25：線上小考
+   ──────────────────────────────────────────────────────────── */
+function rQuiz(content){
+  content.appendChild(el('h1', null, '📝 線上小考'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
+    '建立 / 發布 / 批改線上小考'));
+
+  App._quizTab = App._quizTab || 'list';
+  const tabs = [
+    ['list','📚 我的題庫'],
+    ['new','➕ 建立小考'],
+    ['published','📢 已發布'],
+    ['grade','✏️ 批改結果']
+  ];
+  const tabBar = el('div', { class:'tabs-line' });
+  tabs.forEach(([k, lab]) => {
+    tabBar.appendChild(el('button', {
+      class: (App._quizTab === k ? 'active' : ''),
+      onclick:()=> { App._quizTab = k; rerender(); }
+    }, lab));
+  });
+  content.appendChild(tabBar);
+
+  const wrap = el('div', { style:{marginTop:'10px'} });
+  if(App._quizTab === 'list') quizRenderList(wrap);
+  else if(App._quizTab === 'new') quizRenderEditor(wrap);
+  else if(App._quizTab === 'published') quizRenderPublished(wrap);
+  else if(App._quizTab === 'grade') quizRenderGrade(wrap);
+  content.appendChild(wrap);
+}
+
+function quizRenderList(c){
+  const all = App.db.quizzes || [];
+  if(!all.length){
+    c.appendChild(el('div', { class:'card empty' },
+      el('div', { class:'ico' }, '📝'),
+      el('div', null, '尚無小考'),
+      el('button', { class:'btn btn-primary', style:{marginTop:'10px'}, onclick:()=> { App._quizTab='new'; rerender(); } }, '建立第一份')
+    ));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  all.slice().sort((a,b) => (b.createdAt||0) - (a.createdAt||0)).forEach(q => {
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, q.title + ' [' + (q.status||'draft') + ']'),
+      el('div', { class:'sub' }, (q.questions||[]).length + ' 題 · ' + (q.description || ''))
+    ));
+    row.appendChild(el('div', { class:'flex' },
+      el('button', { class:'btn btn-sm', onclick: ()=> { App._quizEditId = q.id; App._quizTab='new'; rerender(); } }, '✏️'),
+      el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        const ok = await confirmDlg('刪除「' + q.title + '」？', { danger:true });
+        if(!ok) return;
+        App.db.quizzes = App.db.quizzes.filter(x => x.id !== q.id);
+        App.db.quizSubmissions = (App.db.quizSubmissions || []).filter(x => x.quizId !== q.id);
+        saveDB(); rerender();
+      }}, '🗑')
+    ));
+    card.appendChild(row);
+  });
+  c.appendChild(card);
+}
+
+function quizRenderEditor(c){
+  const editId = App._quizEditId;
+  let q = editId ? (App.db.quizzes || []).find(x => x.id === editId) : null;
+  if(!q){
+    q = {
+      id: nid(),
+      title:'', description:'',
+      creatorId: App.session?.id || '',
+      classIds:[], targetStudentIds:[],
+      questions:[],
+      timeLimit:0, shuffleQuestions:false, shuffleOptions:false,
+      publishAt:'', dueAt:'', status:'draft', allowRetry:false,
+      createdAt: Date.now()
+    };
+  }
+
+  const card = el('div', { class:'card' });
+  card.appendChild(el('h3', null, editId ? '✏️ 編輯小考' : '➕ 建立小考'));
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '標題 *'));
+  const iT = el('input', { class:'input', value: q.title });
+  iT.addEventListener('input', e => { q.title = e.target.value; });
+  fT.appendChild(iT);
+  card.appendChild(fT);
+
+  const fD = el('div', { class:'field' });
+  fD.appendChild(el('label', { class:'label' }, '描述'));
+  const iD = el('textarea', { class:'input', rows:'2' }, q.description || '');
+  iD.addEventListener('input', e => { q.description = e.target.value; });
+  fD.appendChild(iD);
+  card.appendChild(fD);
+
+  // 設定區
+  const fSet = el('div', { class:'grid grid-2' });
+  const fTL = el('div', { class:'field' });
+  fTL.appendChild(el('label', { class:'label' }, '限時（秒，0=不限）'));
+  const iTL = el('input', { class:'input', type:'number', min:'0', value: q.timeLimit || 0 });
+  iTL.addEventListener('input', e => { q.timeLimit = parseInt(e.target.value,10) || 0; });
+  fTL.appendChild(iTL);
+  fSet.appendChild(fTL);
+
+  const fDue = el('div', { class:'field' });
+  fDue.appendChild(el('label', { class:'label' }, '截止時間'));
+  const iDue = el('input', { class:'input', type:'datetime-local', value: q.dueAt || '' });
+  iDue.addEventListener('input', e => { q.dueAt = e.target.value; });
+  fDue.appendChild(iDue);
+  fSet.appendChild(fDue);
+  card.appendChild(fSet);
+
+  // 開關
+  const optBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'10px',padding:'8px 0'} });
+  const chkSQ = el('input', { type:'checkbox' });
+  if(q.shuffleQuestions) chkSQ.checked = true;
+  chkSQ.addEventListener('change', e => { q.shuffleQuestions = e.target.checked; });
+  optBox.appendChild(el('label', null, chkSQ, ' 題目亂序'));
+  const chkSO = el('input', { type:'checkbox' });
+  if(q.shuffleOptions) chkSO.checked = true;
+  chkSO.addEventListener('change', e => { q.shuffleOptions = e.target.checked; });
+  optBox.appendChild(el('label', null, chkSO, ' 選項亂序'));
+  const chkR = el('input', { type:'checkbox' });
+  if(q.allowRetry) chkR.checked = true;
+  chkR.addEventListener('change', e => { q.allowRetry = e.target.checked; });
+  optBox.appendChild(el('label', null, chkR, ' 允許重做'));
+  card.appendChild(optBox);
+
+  // 班級對象
+  card.appendChild(el('div', { class:'label' }, '發給班級（不勾＝全班）'));
+  const allCls = [...new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))].sort();
+  const clsSet = new Set(q.classIds || []);
+  const clsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'10px'} });
+  allCls.forEach(c2 => {
+    const lab = el('label', { style:{padding:'4px 8px',border:'1px solid var(--border)',borderRadius:'6px'} });
+    const chk = el('input', { type:'checkbox' });
+    if(clsSet.has(c2)) chk.checked = true;
+    chk.addEventListener('change', e => {
+      if(e.target.checked) clsSet.add(c2); else clsSet.delete(c2);
+      q.classIds = [...clsSet];
+    });
+    lab.appendChild(chk);
+    lab.appendChild(document.createTextNode(' ' + c2));
+    clsBox.appendChild(lab);
+  });
+  card.appendChild(clsBox);
+
+  // 題目區
+  card.appendChild(el('h4', { style:{marginTop:'12px'} }, '📋 題目（' + (q.questions||[]).length + '）'));
+  const qBox = el('div');
+  function renderQuestions(){
+    qBox.innerHTML = '';
+    (q.questions || []).forEach((qq, idx) => {
+      const qc = el('div', { class:'card', style:{padding:'10px',marginBottom:'8px',background:'var(--surface-2)'} });
+      qc.appendChild(el('div', { class:'flex-between' },
+        el('strong', null, '第 ' + (idx+1) + ' 題（' + quizQTypeLabel(qq.type) + '，' + (qq.points||0) + ' 分）'),
+        el('button', { class:'btn btn-sm btn-danger', onclick: ()=> {
+          q.questions.splice(idx,1); renderQuestions();
+        }}, '🗑')
+      ));
+      qc.appendChild(el('div', { class:'small', style:{marginTop:'4px'} }, qq.text));
+      if(qq.type === 'single' || qq.type === 'multi'){
+        (qq.options || []).forEach((op, oi) => {
+          const isAns = Array.isArray(qq.answer) ? qq.answer.indexOf(oi) >= 0 : qq.answer === oi;
+          qc.appendChild(el('div', { class:'tiny ' + (isAns?'':'muted'), style:{padding:'2px 0'} },
+            (isAns ? '✓ ' : '· ') + op));
+        });
+      } else if(qq.type === 'tf'){
+        qc.appendChild(el('div', { class:'tiny' }, '答案：' + (qq.answer ? '對 ✓' : '錯 ✗')));
+      } else if(qq.type === 'fill'){
+        qc.appendChild(el('div', { class:'tiny' }, '答案：' + qq.answer));
+      }
+      qBox.appendChild(qc);
+    });
+  }
+  renderQuestions();
+  card.appendChild(qBox);
+
+  // 加題按鈕
+  const addRow = el('div', { class:'flex', style:{flexWrap:'wrap',marginTop:'8px'} },
+    el('button', { class:'btn btn-sm', onclick: ()=> openQuestionEditor(q, 'single', renderQuestions) }, '＋ 單選'),
+    el('button', { class:'btn btn-sm', onclick: ()=> openQuestionEditor(q, 'multi', renderQuestions) }, '＋ 多選'),
+    el('button', { class:'btn btn-sm', onclick: ()=> openQuestionEditor(q, 'tf', renderQuestions) }, '＋ 是非'),
+    el('button', { class:'btn btn-sm', onclick: ()=> openQuestionEditor(q, 'fill', renderQuestions) }, '＋ 填空')
+  );
+  card.appendChild(addRow);
+
+  // 儲存按鈕
+  card.appendChild(el('div', { class:'flex', style:{marginTop:'14px',gap:'8px',flexWrap:'wrap'} },
+    el('button', { class:'btn', onclick: ()=> saveQuiz(q, 'draft') }, '💾 存草稿'),
+    el('button', { class:'btn btn-primary', onclick: ()=> saveQuiz(q, 'published') }, '📢 發布'),
+    el('button', { class:'btn', onclick: ()=> { App._quizEditId = null; App._quizTab='list'; rerender(); } }, '取消')
+  ));
+  c.appendChild(card);
+}
+
+function quizQTypeLabel(t){
+  return ({single:'單選',multi:'多選',tf:'是非',fill:'填空'})[t] || t;
+}
+
+function openQuestionEditor(quiz, type, refresh){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '＋ 新增題目（' + quizQTypeLabel(type) + '）'));
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '題目 *'));
+  const iT = el('textarea', { class:'input', rows:'3' });
+  fT.appendChild(iT);
+  m.root.appendChild(fT);
+
+  const fP = el('div', { class:'field' });
+  fP.appendChild(el('label', { class:'label' }, '配分'));
+  const iP = el('input', { class:'input', type:'number', min:'1', value:'5' });
+  fP.appendChild(iP);
+  m.root.appendChild(fP);
+
+  let opts = [];
+  let ansVal = null;
+  if(type === 'single' || type === 'multi'){
+    m.root.appendChild(el('div', { class:'label' }, '選項'));
+    const optBox = el('div');
+    const ansSet = new Set();
+    function addOpt(text){
+      const idx = opts.length;
+      opts.push(text || '');
+      const row = el('div', { class:'flex', style:{marginBottom:'4px'} });
+      const chk = el('input', { type: type==='single'?'radio':'checkbox', name:'qopt' });
+      chk.addEventListener('change', e => {
+        if(type === 'single'){
+          ansVal = idx;
+        } else {
+          if(e.target.checked) ansSet.add(idx); else ansSet.delete(idx);
+          ansVal = [...ansSet];
+        }
+      });
+      const inp = el('input', { class:'input', value: text||'', style:{flex:'1'} });
+      inp.addEventListener('input', e => { opts[idx] = e.target.value; });
+      row.appendChild(chk);
+      row.appendChild(inp);
+      optBox.appendChild(row);
+    }
+    m.root.appendChild(optBox);
+    m.root.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> addOpt('') }, '＋ 加選項'));
+    addOpt(''); addOpt('');
+  } else if(type === 'tf'){
+    m.root.appendChild(el('div', { class:'label' }, '正確答案'));
+    const sb = el('div', { class:'flex' });
+    let cur = true; ansVal = true;
+    const bT = el('button', { class:'btn btn-primary', onclick:()=> { cur=true; ansVal=true; bT.classList.add('btn-primary'); bF.classList.remove('btn-primary'); } }, '對 ✓');
+    const bF = el('button', { class:'btn', onclick:()=> { cur=false; ansVal=false; bF.classList.add('btn-primary'); bT.classList.remove('btn-primary'); } }, '錯 ✗');
+    sb.appendChild(bT); sb.appendChild(bF);
+    m.root.appendChild(sb);
+  } else if(type === 'fill'){
+    m.root.appendChild(el('div', { class:'label' }, '答案'));
+    const iA = el('input', { class:'input' });
+    iA.addEventListener('input', e => { ansVal = e.target.value; });
+    m.root.appendChild(iA);
+  }
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+    if(!iT.value.trim()){ toast('請填寫題目','danger'); return; }
+    const qq = {
+      id: nid(),
+      type,
+      text: iT.value.trim(),
+      points: parseInt(iP.value,10) || 5
+    };
+    if(type === 'single' || type === 'multi'){
+      qq.options = opts.slice();
+      qq.answer = ansVal;
+      if(ansVal == null){ toast('請選擇正確答案','danger'); return; }
+    } else if(type === 'tf' || type === 'fill'){
+      qq.answer = ansVal;
+      if(type === 'fill' && !ansVal){ toast('請填寫答案','danger'); return; }
+    }
+    quiz.questions = quiz.questions || [];
+    quiz.questions.push(qq);
+    m.close();
+    refresh();
+  }}, '✅ 加入'));
+  m.root.appendChild(actions);
+}
+
+function saveQuiz(q, status){
+  if(!q.title.trim()){ toast('請輸入標題','danger'); return; }
+  if(status === 'published' && !(q.questions||[]).length){ toast('題目至少 1 題','danger'); return; }
+  q.status = status;
+  q.updatedAt = Date.now();
+  App.db.quizzes = App.db.quizzes || [];
+  const idx = App.db.quizzes.findIndex(x => x.id === q.id);
+  if(idx >= 0) App.db.quizzes[idx] = q;
+  else App.db.quizzes.push(q);
+  saveDB();
+  App._quizEditId = null;
+  App._quizTab = status === 'published' ? 'published' : 'list';
+  toast(status === 'published' ? '已發布' : '已存為草稿','success');
+  rerender();
+}
+
+function quizRenderPublished(c){
+  const list = (App.db.quizzes || []).filter(q => q.status === 'published');
+  if(!list.length){
+    c.appendChild(el('div', { class:'card empty' }, '尚無已發布小考'));
+    return;
+  }
+  list.forEach(q => {
+    const targets = quizTargetStudents(q);
+    const subs = (App.db.quizSubmissions || []).filter(s => s.quizId === q.id && s.submittedAt);
+    const avg = subs.length ? (subs.reduce((sum,s) => sum + (s.score||0), 0) / subs.length).toFixed(1) : '—';
+    const card = el('div', { class:'card', style:{marginBottom:'8px'} });
+    card.appendChild(el('div', { class:'flex-between' },
+      el('div', null,
+        el('h3', null, q.title),
+        el('div', { class:'small muted' }, '應作答 ' + targets.length + ' · 已完成 ' + subs.length + ' · 平均 ' + avg + (q.dueAt ? ' · 截止 ' + q.dueAt : ''))
+      ),
+      el('button', { class:'btn btn-sm', onclick: ()=> {
+        q.status = 'closed'; saveDB(); rerender();
+      }}, '🔒 關閉')
+    ));
+    c.appendChild(card);
+  });
+}
+
+function quizTargetStudents(q){
+  const all = filterStudentsByPerms(App.db.students || []);
+  if(!(q.classIds||[]).length) return all;
+  const cs = new Set(q.classIds);
+  return all.filter(s => cs.has(s.cls));
+}
+
+function quizRenderGrade(c){
+  const subs = (App.db.quizSubmissions || []).filter(s => s.submittedAt)
+    .sort((a,b) => (b.submittedAt||0) - (a.submittedAt||0));
+  if(!subs.length){
+    c.appendChild(el('div', { class:'card empty' }, '尚無作答'));
+    return;
+  }
+  const card = el('div', { class:'card' });
+  subs.forEach(s => {
+    const stu = (App.db.students||[]).find(x => x.id === s.studentId);
+    const quiz = (App.db.quizzes||[]).find(q => q.id === s.quizId);
+    if(!stu || !quiz) return;
+    const row = el('div', { class:'list-row' });
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, stu.name + ' · ' + quiz.title),
+      el('div', { class:'sub' }, '分數 ' + (s.score != null ? s.score : '—') + ' · ' + fmtDateTime(s.submittedAt))
+    ));
+    row.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> openQuizGradeDetail(s) }, '查看 / 改分'));
+    card.appendChild(row);
+  });
+  c.appendChild(card);
+}
+
+function openQuizGradeDetail(sub){
+  const quiz = (App.db.quizzes||[]).find(q => q.id === sub.quizId);
+  const stu = (App.db.students||[]).find(s => s.id === sub.studentId);
+  if(!quiz || !stu) return;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '✏️ ' + stu.name + ' — ' + quiz.title));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '總分：' + (sub.score || 0)));
+  const detail = el('div');
+  let totalNew = 0;
+  (quiz.questions || []).forEach((qq, idx) => {
+    const ans = sub.answers ? sub.answers[qq.id] : null;
+    const isCorrect = quizCheckAnswer(qq, ans);
+    const earned = sub.questionScores?.[qq.id] != null ? sub.questionScores[qq.id] : (isCorrect ? (qq.points||0) : 0);
+    totalNew += earned;
+    const qc = el('div', { class:'card', style:{padding:'10px',marginBottom:'6px',background:'var(--surface-2)'} });
+    qc.appendChild(el('div', null,
+      el('strong', null, '第' + (idx+1) + '題（' + qq.points + ' 分）' + (isCorrect ? '✅' : '❌'))
+    ));
+    qc.appendChild(el('div', { class:'small' }, qq.text));
+    qc.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '學生回答：' + quizFormatAns(qq, ans)));
+    qc.appendChild(el('div', { class:'tiny', style:{marginTop:'4px'} }, '正解：' + quizFormatAns(qq, qq.answer)));
+    const fS = el('div', { class:'flex', style:{marginTop:'6px',alignItems:'center'} },
+      el('span', { class:'small' }, '得分：'),
+      el('input', { class:'input', type:'number', min:'0', max:String(qq.points), value: earned, style:{width:'80px'},
+        oninput: e => {
+          sub.questionScores = sub.questionScores || {};
+          sub.questionScores[qq.id] = parseInt(e.target.value,10) || 0;
+        }
+      })
+    );
+    qc.appendChild(fS);
+    detail.appendChild(qc);
+  });
+  m.root.appendChild(detail);
+
+  const fb = el('div', { class:'field' });
+  fb.appendChild(el('label', { class:'label' }, '老師評語'));
+  const ifb = el('textarea', { class:'input', rows:'2' }, sub.feedback || '');
+  fb.appendChild(ifb);
+  m.root.appendChild(fb);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+    let sum = 0;
+    (quiz.questions||[]).forEach(qq => {
+      sum += (sub.questionScores?.[qq.id] != null) ? sub.questionScores[qq.id] : (quizCheckAnswer(qq, sub.answers?.[qq.id]) ? (qq.points||0) : 0);
+    });
+    sub.score = sum;
+    sub.feedback = ifb.value;
+    sub.autoGraded = false;
+    // 同步寫到 scores
+    syncQuizScore(sub, quiz);
+    saveDB();
+    m.close();
+    toast('已儲存','success');
+    rerender();
+  }}, '💾 儲存'));
+  m.root.appendChild(actions);
+}
+
+function quizCheckAnswer(qq, ans){
+  if(ans == null) return false;
+  if(qq.type === 'single') return ans === qq.answer;
+  if(qq.type === 'multi'){
+    const a = Array.isArray(ans) ? ans.slice().sort() : [];
+    const b = Array.isArray(qq.answer) ? qq.answer.slice().sort() : [];
+    return a.length === b.length && a.every((v,i) => v === b[i]);
+  }
+  if(qq.type === 'tf') return !!ans === !!qq.answer;
+  if(qq.type === 'fill') return String(ans).trim() === String(qq.answer).trim();
+  return false;
+}
+function quizFormatAns(qq, ans){
+  if(ans == null) return '（未作答）';
+  if(qq.type === 'single') return (qq.options||[])[ans] || String(ans);
+  if(qq.type === 'multi'){
+    const arr = Array.isArray(ans) ? ans : [ans];
+    return arr.map(i => (qq.options||[])[i]).filter(Boolean).join('、') || '（無）';
+  }
+  if(qq.type === 'tf') return ans ? '對 ✓' : '錯 ✗';
+  return String(ans);
+}
+function syncQuizScore(sub, quiz){
+  App.db.scores = App.db.scores || [];
+  const exist = App.db.scores.find(x => x.quizSubmissionId === sub.id);
+  const ent = {
+    id: exist?.id || nid(),
+    quizSubmissionId: sub.id,
+    studentId: sub.studentId,
+    type: 'quiz',
+    title: quiz.title,
+    score: sub.score,
+    maxScore: (quiz.questions||[]).reduce((s,q) => s + (q.points||0), 0),
+    date: (new Date(sub.submittedAt || Date.now())).toISOString().slice(0,10)
+  };
+  if(exist) Object.assign(exist, ent);
+  else App.db.scores.push(ent);
+}
+
+/* 學生端：線上小考 */
+function rStuQuiz(content){
+  const me = currentStudent();
+  if(!me){ content.appendChild(el('div',{class:'card'},'未登入')); return; }
+  content.appendChild(el('h1', null, '📝 線上小考'));
+
+  // 進行中作答 view
+  if(App._quizTaking){
+    quizRenderTaking(content);
+    return;
+  }
+
+  const now = Date.now();
+  const avail = (App.db.quizzes || []).filter(q => {
+    if(q.status !== 'published') return false;
+    if(q.dueAt && new Date(q.dueAt).getTime() < now) return false;
+    if((q.classIds||[]).length && q.classIds.indexOf(me.cls) < 0) return false;
+    return true;
+  });
+  // 已截止 / 已關閉 / 已作答
+  const done = (App.db.quizSubmissions || []).filter(s => s.studentId === me.id && s.submittedAt);
+
+  const cardA = el('div', { class:'card' });
+  cardA.appendChild(el('h3', null, '📝 可作答（' + avail.length + '）'));
+  if(!avail.length){
+    cardA.appendChild(el('div', { class:'empty small' }, '目前沒有小考'));
+  } else {
+    avail.forEach(q => {
+      const submitted = done.find(s => s.quizId === q.id);
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, q.title),
+        el('div', { class:'sub' }, (q.questions||[]).length + ' 題 · '
+          + (q.timeLimit ? '限時 ' + Math.floor(q.timeLimit/60) + ' 分 · ' : '不限時 · ')
+          + (q.dueAt ? '截止 ' + q.dueAt : ''))
+      ));
+      if(submitted){
+        row.appendChild(el('div', { class:'tag s-success' }, '已完成 ' + submitted.score + ' 分'));
+        if(q.allowRetry){
+          row.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> startQuiz(q) }, '重做'));
+        }
+      } else {
+        row.appendChild(el('button', { class:'btn btn-primary btn-sm', onclick: ()=> startQuiz(q) }, '開始 →'));
+      }
+      cardA.appendChild(row);
+    });
+  }
+  content.appendChild(cardA);
+
+  if(done.length){
+    const cardD = el('div', { class:'card', style:{marginTop:'10px'} });
+    cardD.appendChild(el('h3', null, '✅ 已完成（' + done.length + '）'));
+    done.forEach(s => {
+      const q = (App.db.quizzes||[]).find(x => x.id === s.quizId);
+      if(!q) return;
+      cardD.appendChild(el('div', { class:'list-row' },
+        el('div', { class:'info' },
+          el('div', { class:'name' }, q.title),
+          el('div', { class:'sub' }, '分數 ' + s.score + ' / ' + (q.questions||[]).reduce((sum,qq)=>sum+(qq.points||0),0) + ' · ' + fmtDateTime(s.submittedAt))
+        )
+      ));
+    });
+    content.appendChild(cardD);
+  }
+}
+
+function startQuiz(quiz){
+  const me = currentStudent();
+  if(!me) return;
+  // 建立 taking state
+  let qList = (quiz.questions || []).slice();
+  if(quiz.shuffleQuestions){
+    qList = qList.slice().sort(()=> Math.random() - 0.5);
+  }
+  App._quizTaking = {
+    quizId: quiz.id,
+    questions: qList,
+    answers: {},
+    cur: 0,
+    startedAt: Date.now(),
+    deadline: quiz.timeLimit ? (Date.now() + quiz.timeLimit * 1000) : 0
+  };
+  rerender();
+}
+
+function quizRenderTaking(content){
+  const t = App._quizTaking;
+  const q = (App.db.quizzes || []).find(x => x.id === t.quizId);
+  if(!q){ App._quizTaking = null; rerender(); return; }
+  const me = currentStudent();
+
+  // 倒數計時器（簡單 — 不持續刷新；每次點 prev/next 會更新顯示）
+  const remain = t.deadline ? Math.max(0, Math.floor((t.deadline - Date.now())/1000)) : -1;
+  if(t.deadline && remain <= 0){
+    // 自動交卷
+    return finishQuiz(t, q, me, true, content);
+  }
+
+  const card = el('div', { class:'card' });
+  card.appendChild(el('div', { class:'flex-between' },
+    el('h3', null, q.title),
+    el('div', { class:'tag' }, (t.cur+1) + ' / ' + t.questions.length + (remain >= 0 ? ' · ⏰ ' + Math.floor(remain/60) + ':' + String(remain%60).padStart(2,'0') : ''))
+  ));
+
+  const qq = t.questions[t.cur];
+  card.appendChild(el('div', { style:{fontSize:'16px',margin:'14px 0',whiteSpace:'pre-wrap'} }, (t.cur+1) + '. ' + qq.text + '（' + qq.points + ' 分）'));
+
+  const answerBox = el('div');
+  const cur = t.answers[qq.id];
+  if(qq.type === 'single'){
+    let opts = (qq.options||[]).map((o,i) => ({o,i}));
+    if(q.shuffleOptions) opts = opts.slice().sort(()=> Math.random() - 0.5);
+    opts.forEach(({o,i}) => {
+      const lab = el('label', { style:{display:'block',padding:'8px',margin:'4px 0',border:'1px solid var(--border)',borderRadius:'6px',cursor:'pointer'} });
+      const r = el('input', { type:'radio', name:'qopt' });
+      if(cur === i) r.checked = true;
+      r.addEventListener('change', ()=> { t.answers[qq.id] = i; });
+      lab.appendChild(r);
+      lab.appendChild(document.createTextNode(' ' + o));
+      answerBox.appendChild(lab);
+    });
+  } else if(qq.type === 'multi'){
+    let opts = (qq.options||[]).map((o,i) => ({o,i}));
+    if(q.shuffleOptions) opts = opts.slice().sort(()=> Math.random() - 0.5);
+    const set = new Set(Array.isArray(cur) ? cur : []);
+    opts.forEach(({o,i}) => {
+      const lab = el('label', { style:{display:'block',padding:'8px',margin:'4px 0',border:'1px solid var(--border)',borderRadius:'6px',cursor:'pointer'} });
+      const c = el('input', { type:'checkbox' });
+      if(set.has(i)) c.checked = true;
+      c.addEventListener('change', e => {
+        if(e.target.checked) set.add(i); else set.delete(i);
+        t.answers[qq.id] = [...set];
+      });
+      lab.appendChild(c);
+      lab.appendChild(document.createTextNode(' ' + o));
+      answerBox.appendChild(lab);
+    });
+  } else if(qq.type === 'tf'){
+    const sb = el('div', { class:'flex' });
+    const bT = el('button', { class:'btn ' + (cur===true?'btn-primary':''), onclick:()=> { t.answers[qq.id] = true; rerender(); }}, '對 ✓');
+    const bF = el('button', { class:'btn ' + (cur===false?'btn-primary':''), onclick:()=> { t.answers[qq.id] = false; rerender(); }}, '錯 ✗');
+    sb.appendChild(bT); sb.appendChild(bF);
+    answerBox.appendChild(sb);
+  } else if(qq.type === 'fill'){
+    const iA = el('input', { class:'input', value: cur || '' });
+    iA.addEventListener('input', e => { t.answers[qq.id] = e.target.value; });
+    answerBox.appendChild(iA);
+  }
+  card.appendChild(answerBox);
+
+  // 跳題列
+  const jump = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'12px'} });
+  t.questions.forEach((_, i) => {
+    jump.appendChild(el('button', {
+      class: 'btn btn-sm ' + (i === t.cur ? 'btn-primary' : (t.answers[t.questions[i].id] != null ? '' : 'btn-ghost')),
+      onclick: ()=> { t.cur = i; rerender(); }
+    }, String(i+1)));
+  });
+  card.appendChild(jump);
+
+  // 動作
+  const btnRow = el('div', { class:'flex', style:{marginTop:'12px'} },
+    el('button', { class:'btn', disabled: t.cur === 0 ? true : null, onclick:()=> { if(t.cur>0){ t.cur--; rerender(); } } }, '← 上一題'),
+    el('button', { class:'btn', disabled: t.cur === t.questions.length-1 ? true : null, onclick:()=> { if(t.cur<t.questions.length-1){ t.cur++; rerender(); } } }, '下一題 →'),
+    el('button', { class:'btn btn-primary', onclick: async ()=> {
+      const ok = await confirmDlg('確定提交？');
+      if(!ok) return;
+      finishQuiz(t, q, me, false, content);
+    }}, '✅ 提交')
+  );
+  card.appendChild(btnRow);
+
+  content.appendChild(card);
+}
+
+function finishQuiz(t, quiz, me, timeout, content){
+  // 計分（自動題）
+  let score = 0, autoAll = true;
+  (quiz.questions || []).forEach(qq => {
+    if(quizCheckAnswer(qq, t.answers[qq.id])) score += (qq.points || 0);
+    // 所有題型目前都自動判斷
+  });
+  const sub = {
+    id: nid(),
+    quizId: quiz.id,
+    studentId: me.id,
+    startedAt: t.startedAt,
+    submittedAt: Date.now(),
+    answers: t.answers,
+    score,
+    autoGraded: autoAll
+  };
+  App.db.quizSubmissions = App.db.quizSubmissions || [];
+  // 若允許重做：保留歷史；否則覆寫
+  const existIdx = App.db.quizSubmissions.findIndex(x => x.quizId === quiz.id && x.studentId === me.id);
+  if(existIdx >= 0 && !quiz.allowRetry){
+    App.db.quizSubmissions[existIdx] = sub;
+  } else {
+    App.db.quizSubmissions.push(sub);
+  }
+  syncQuizScore(sub, quiz);
+  saveDB();
+  App._quizTaking = null;
+  if(timeout) toast('⏰ 時間到，自動交卷！','warn');
+  else toast('✅ 已提交，得分 ' + score + ' 分','success', 5000);
+  if(content){
+    content.innerHTML = '';
+    content.appendChild(el('div', { class:'card', style:{textAlign:'center'} },
+      el('h2', null, '✅ 提交完成'),
+      el('div', { class:'huge' }, String(score) + ' 分'),
+      el('button', { class:'btn btn-primary', style:{marginTop:'14px'}, onclick:()=> rerender() }, '返回小考列表')
+    ));
+  } else {
+    rerender();
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   batch 4-22：學期設定（介面） — 加在 rSettings 之後（覆寫）
+   ──────────────────────────────────────────────────────────── */
+function renderSemesterCard(){
+  const sem = getSemester();
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('h3', null, '📅 學期設定'));
+  card.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+    '設定學期起訖日與上課日，系統會自動標示「第幾週」'));
+
+  const fS = el('div', { class:'field' });
+  fS.appendChild(el('label', { class:'label' }, '學期起始日'));
+  const iS = el('input', { class:'input', type:'date', value: sem.startDate || '' });
+  fS.appendChild(iS);
+  card.appendChild(fS);
+
+  const fE = el('div', { class:'field' });
+  fE.appendChild(el('label', { class:'label' }, '學期結束日'));
+  const iE = el('input', { class:'input', type:'date', value: sem.endDate || '' });
+  fE.appendChild(iE);
+  card.appendChild(fE);
+
+  card.appendChild(el('div', { class:'label' }, '每週上課日'));
+  const wdBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px'} });
+  const wdLabels = ['日','一','二','三','四','五','六'];
+  const wdSet = new Set(sem.weekDays || [1,2,3,4,5]);
+  wdLabels.forEach((lab, i) => {
+    const b = el('button', { class:'btn btn-sm ' + (wdSet.has(i) ? 'btn-primary' : ''), onclick: ()=> {
+      if(wdSet.has(i)) wdSet.delete(i); else wdSet.add(i);
+      b.className = 'btn btn-sm ' + (wdSet.has(i) ? 'btn-primary' : '');
+    }}, lab);
+    wdBox.appendChild(b);
+  });
+  card.appendChild(wdBox);
+
+  // 國定假日清單
+  card.appendChild(el('div', { class:'label', style:{marginTop:'10px'} }, '國定假日 / 不上課日'));
+  const holBox = el('div', { style:{marginBottom:'6px'} });
+  function renderHols(){
+    holBox.innerHTML = '';
+    (sem.holidays || []).forEach((h, idx) => {
+      const date = (typeof h === 'string') ? h : h.date;
+      const name = (typeof h === 'string') ? '' : (h.name || '');
+      holBox.appendChild(el('div', { class:'flex', style:{padding:'4px 0'} },
+        el('span', { class:'tag' }, date + (name ? '：' + name : '')),
+        el('button', { class:'btn btn-sm btn-danger', onclick:()=> {
+          sem.holidays.splice(idx, 1); renderHols();
+        }}, '🗑')
+      ));
+    });
+    if(!(sem.holidays||[]).length) holBox.appendChild(el('div', { class:'small muted' }, '（無）'));
+  }
+  renderHols();
+  card.appendChild(holBox);
+  const addRow = el('div', { class:'flex' });
+  const iHD = el('input', { class:'input', type:'date', style:{maxWidth:'160px'} });
+  const iHN = el('input', { class:'input', placeholder:'名稱（可選）', style:{maxWidth:'180px'} });
+  const bHA = el('button', { class:'btn btn-sm', onclick:()=> {
+    if(!iHD.value) return;
+    sem.holidays = sem.holidays || [];
+    sem.holidays.push({ date: iHD.value, name: iHN.value });
+    iHD.value=''; iHN.value='';
+    renderHols();
+  }}, '＋');
+  addRow.appendChild(iHD); addRow.appendChild(iHN); addRow.appendChild(bHA);
+  card.appendChild(addRow);
+
+  card.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'10px'}, onclick:()=> {
+    sem.startDate = iS.value;
+    sem.endDate = iE.value;
+    sem.weekDays = [...wdSet].sort((a,b) => a-b);
+    App.db.semester = sem;
+    saveDB();
+    toast('已儲存學期設定','success');
+    if(sem.startDate && sem.endDate){
+      const tw = getTotalWeeks();
+      const cw = getCurrentWeek();
+      toast('全學期共 ' + tw + ' 週，目前第 ' + cw + ' 週','info');
+    }
+  }}, '💾 儲存學期設定'));
+  return card;
+}
+
 // batch 1 安全強化：只在 ?debug=1 時暴露完整 App / Sync；
 // 否則學生 session 拿到的只有非敏感欄位（避免 console 一行抓全班密碼）
 (function exposeDebug(){
@@ -18669,8 +20820,8 @@ function rExportCenter(content){
     Object.defineProperty(window, '__App', {
       configurable: true,
       get(){
-        if(App && App.session && App.session.role === 'student'){
-          // 學生端：不暴露 db / accounts 等敏感資料
+        if(App && App.session && (App.session.role === 'student' || App.session.role === 'parent')){
+          // 學生 / 家長端：不暴露 db / accounts 等敏感資料
           return {
             session: App.session,
             view: App.view,
@@ -18686,8 +20837,8 @@ function rExportCenter(content){
     Object.defineProperty(window, '__Sync', {
       configurable: true,
       get(){
-        if(App && App.session && App.session.role === 'student'){
-          // 學生端不暴露 Sync（含 firebase token 等）
+        if(App && App.session && (App.session.role === 'student' || App.session.role === 'parent')){
+          // 學生 / 家長端不暴露 Sync（含 firebase token 等）
           return { _restricted: true };
         }
         return Sync;
