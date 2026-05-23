@@ -4609,6 +4609,9 @@ function renderLoginTeacherStage(){
       const isDefaultPair = (a.username === 'admin' && pw === 'admin123');
       if(isDefaultPair || a.mustChangePw){
         setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){} }, 500);
+      } else if(!a.email || !a.securityQ || !a.securityA || !a.recoveryCode){
+        // 批次 6：若缺 recovery 欄位（email/安全問題/恢復碼）→ 強制設定
+        setTimeout(()=> { try { forceSetupRecovery(a.id); } catch(_){} }, 800);
       }
     } catch(_){}
   };
@@ -4619,13 +4622,17 @@ function renderLoginTeacherStage(){
   );
   stage.appendChild(btnRow);
 
-  // 🔑 忘記密碼連結
+  // 🔑 忘記密碼連結（批次 6：明示需要 Email + 安全問題雙重驗證）
   if(!_lcT.hideForgot){
-    stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'14px'} },
+    const forgotWrap = el('div', { style:{textAlign:'center',marginTop:'14px'} });
+    forgotWrap.appendChild(el('div', { class:'small' },
       el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword,
         style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
         '🔑 忘記密碼？')
     ));
+    forgotWrap.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} },
+      '🛡️ 需 Email 驗證碼 + 安全問題（防止他人未授權重設）'));
+    stage.appendChild(forgotWrap);
   }
 
   i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
@@ -4635,98 +4642,955 @@ function renderLoginTeacherStage(){
   return stage;
 }
 
-// 老師忘記密碼 - 提供多種選項
-function showTeacherForgotPassword(){
-  const m = modal('', { dismissable:true });
-  m.root.appendChild(el('h2', null, '🔑 找回老師密碼'));
-  m.root.appendChild(el('p', { style:{lineHeight:'1.8',fontSize:'14px',color:'var(--text)'} },
-    '選擇一種方式重設老師密碼：'));
+/* ════════════════════════════════════════════════════════════
+   忘記密碼 — 資安強化（批次 6）
+   ──────────────────────────────────────────────────────────────
+   原有實作允許任何人「一鍵重設為 admin/admin123」或任意改密碼，
+   完全沒有驗證。重寫為多步驗證流程：
+     帳號 → Email → 6 位數 OTP（mailto:）→ 安全問題 → 新密碼
+   並提供「恢復碼」替代路徑、3 次失敗 60 分鐘鎖定機制。
+   ──────────────────────────────────────────────────────────── */
 
-  // 選項 1: 一鍵重設為 admin/admin123
-  const opt1 = el('div', { style:{background:'var(--surface-2)',padding:'14px',borderRadius:'10px',marginTop:'12px'} },
-    el('div', { style:{fontWeight:'700',marginBottom:'4px',fontSize:'14px'} }, '🚀 一鍵重設為預設'),
-    el('div', { class:'small muted', style:{marginBottom:'10px'} },
-      '帳號：admin　密碼：admin123' + '\n所有學生 / 出席 / 作業資料完全保留'),
-    el('button', { class:'btn btn-primary btn-block', onclick: async ()=> {
-      const ok = await confirmDlg(
-        '確定重設老師密碼為預設值？\n\n帳號 admin\n密碼 admin123\n\n（學生資料、出席紀錄都會保留）',
-        { title:'確認重設' }
-      );
-      if(!ok) return;
-      // 重設第一個老師帳號或建立新的（密碼存雜湊）
-      App.db.accounts = App.db.accounts || [];
-      let acc = App.db.accounts.find(a => a.username === 'admin');
-      if(!acc) acc = App.db.accounts[0];
-      const hashedDefault = await hashPassword('admin123');
-      if(acc){
-        acc.username = 'admin';
-        acc.password = hashedDefault;
-        acc.role = 'teacher';
-      } else {
-        App.db.accounts.push({
-          id: nid(), username:'admin', password:hashedDefault,
-          name:'管理員', role:'teacher', createdAt: Date.now()
-        });
+// ── 忘記密碼鎖定 helper（共用：老師、學生、恢復碼皆計入同一帳號計數）
+const FORGOT_LOCK_KEY_PREFIX = 'cms_v3_forgot_lock_';
+const FORGOT_LOCK_MAX = 3;                    // 最多失敗次數
+const FORGOT_LOCK_DURATION = 60 * 60 * 1000;  // 60 分鐘
+const FORGOT_OTP_KEY = 'cms_v3_otp';
+const FORGOT_OTP_TTL = 10 * 60 * 1000;        // 驗證碼 10 分鐘有效
+const FORGOT_OTP_RESEND_COOLDOWN = 60 * 1000; // 60 秒才能重新寄送
+
+function getForgotLock(username){
+  try {
+    const raw = localStorage.getItem(FORGOT_LOCK_KEY_PREFIX + String(username||'').toLowerCase());
+    if(!raw) return { count:0, lastTry:0, lockedUntil:0 };
+    const o = JSON.parse(raw);
+    return {
+      count: o.count || 0,
+      lastTry: o.lastTry || 0,
+      lockedUntil: o.lockedUntil || 0
+    };
+  } catch(e){ return { count:0, lastTry:0, lockedUntil:0 }; }
+}
+
+function isForgotLocked(username){
+  const l = getForgotLock(username);
+  return l.lockedUntil > Date.now();
+}
+
+function incForgotLock(username){
+  const key = FORGOT_LOCK_KEY_PREFIX + String(username||'').toLowerCase();
+  const l = getForgotLock(username);
+  l.count = (l.count || 0) + 1;
+  l.lastTry = Date.now();
+  if(l.count >= FORGOT_LOCK_MAX){
+    l.lockedUntil = Date.now() + FORGOT_LOCK_DURATION;
+  }
+  try { localStorage.setItem(key, JSON.stringify(l)); } catch(e){}
+  return l;
+}
+
+function clearForgotLock(username){
+  try { localStorage.removeItem(FORGOT_LOCK_KEY_PREFIX + String(username||'').toLowerCase()); } catch(e){}
+}
+
+// 把分鐘數轉成「X 分鐘」/「X 小時 Y 分」字串
+function fmtLockRemain(ms){
+  if(ms <= 0) return '0 分鐘';
+  const min = Math.ceil(ms / 60000);
+  if(min < 60) return min + ' 分鐘';
+  const h = Math.floor(min/60), m = min%60;
+  return h + ' 小時' + (m ? ' ' + m + ' 分' : '');
+}
+
+// Email mask: 顯示首字 + *** + @domain
+function maskEmail(email){
+  if(!email) return '(未設定)';
+  const idx = email.indexOf('@');
+  if(idx <= 0) return email;
+  const local = email.slice(0, idx);
+  const domain = email.slice(idx);
+  const shown = local.length <= 1 ? local : local.charAt(0);
+  return shown + '***' + domain;
+}
+
+// 產生 6 位數 OTP
+function genOTP6(){
+  return String(Math.floor(100000 + Math.random()*900000));
+}
+
+// 產生 8 碼恢復碼（英數字，4-4 分組，例：ABCD-1234）
+function genRecoveryCode(){
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // 去掉易混淆 I/L/O/1/0
+  let s = '';
+  const buf = new Uint8Array(8);
+  if(typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(buf);
+  else for(let i=0;i<8;i++) buf[i] = Math.floor(Math.random()*256);
+  for(let i=0;i<8;i++) s += chars.charAt(buf[i] % chars.length);
+  return s.slice(0,4) + '-' + s.slice(4);
+}
+
+// 簡單字串雜湊（給安全問題答案 / 恢復碼用，sha-256 + salt）
+async function hashAnswer(plain){
+  if(plain == null) return '';
+  // 把答案統一轉小寫、去前後空白後雜湊（安全問題答案不分大小寫）
+  return hashPassword('cms-v3-ans-' + String(plain).trim().toLowerCase());
+}
+
+// 開預設信箱 client（mailto:）寄出 OTP
+function sendOtpMailto(toEmail, code){
+  const subject = encodeURIComponent('[課程管理系統] 您的密碼重設驗證碼');
+  const body = encodeURIComponent(
+    '您好，\n\n' +
+    '您的密碼重設驗證碼為：' + code + '\n\n' +
+    '此驗證碼 ' + Math.floor(FORGOT_OTP_TTL/60000) + ' 分鐘內有效。\n' +
+    '如非您本人請求，請忽略此信。\n\n' +
+    '— 課程管理系統'
+  );
+  try {
+    window.location.href = 'mailto:' + encodeURIComponent(toEmail) +
+      '?subject=' + subject + '&body=' + body;
+  } catch(e){
+    toast('無法開啟郵件 client，請手動將驗證碼寄送', 'warning', 4000);
+  }
+}
+
+// ── 老師忘記密碼：多步驗證流程
+function showTeacherForgotPassword(){
+  // 若 accounts 完全為空，視為 first-time setup，跳建立預設管理員流程
+  if(!App.db.accounts || !App.db.accounts.length){
+    const m0 = modal('', { dismissable:true });
+    m0.root.appendChild(el('h2', null, '🔑 尚未有任何老師帳號'));
+    m0.root.appendChild(el('p', { style:{lineHeight:'1.7',fontSize:'14px'} },
+      '系統目前沒有任何老師帳號，請建立預設管理員以開始使用。'));
+    m0.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+      '預設帳號：admin　預設密碼：admin123（登入後請立即修改）'));
+    const a0 = el('div', { class:'modal-actions' },
+      el('button', { class:'btn', onclick:()=> m0.close() }, '取消'),
+      el('button', { class:'btn btn-primary', onclick: async ()=> {
+        try {
+          const hashed = await hashPassword('admin123');
+          App.db.accounts.push({
+            id: nid(), username:'admin', password: hashed,
+            name:'管理員', role:'teacher', mustChangePw:true, createdAt: Date.now()
+          });
+          saveDB();
+          try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+          if(typeof logOp === 'function') logOp('teacherInit', '建立預設管理員 admin');
+          m0.close();
+          toast('✅ 已建立預設管理員，請以 admin / admin123 登入','success', 5000);
+        } catch(err){
+          toast('建立失敗：' + (err && err.message || err), 'danger', 5000);
+        }
+      }}, '建立預設管理員 admin')
+    );
+    m0.root.appendChild(a0);
+    return;
+  }
+  // 正常流程：多步驗證
+  _runForgotFlow({ role:'teacher' });
+}
+
+// 共用流程引擎（teacher / student / recovery 都走這個）
+function _runForgotFlow(opts){
+  const m = modal('', { dismissable:true });
+  // state 在整個流程共用
+  const st = {
+    role: opts.role,         // 'teacher' | 'student'
+    step: 1,                  // 當前步驟
+    username: '',             // 老師：username；學生：用 sid+cls 組合
+    studentId: null,          // 學生流程用
+    account: null,            // 老師：accounts 內 obj；學生：students 內 obj
+    useRecovery: false,       // 是否走恢復碼替代流程
+    lastSent: 0               // 上次寄信時間（OTP cooldown）
+  };
+
+  const stage = el('div');
+  m.root.appendChild(stage);
+
+  function render(){
+    stage.innerHTML = '';
+    if(st.useRecovery) return renderRecoveryFlow();
+    if(st.role === 'teacher'){
+      if(st.step === 1) return renderTeacherStep1();
+      if(st.step === 2) return renderTeacherStep2();
+      if(st.step === 3) return renderTeacherStep3();
+      if(st.step === 4) return renderTeacherStep4();
+      if(st.step === 5) return renderTeacherStep5();
+      if(st.step === 6) return renderStep6NewPassword();
+    } else {
+      // student
+      if(st.step === 1) return renderStudentStep1();
+      if(st.step === 2) return renderStudentStep2();
+      if(st.step === 3) return renderStudentStep3();
+      if(st.step === 4) return renderStudentStep4();
+      if(st.step === 5) return renderStudentStep5MessageThenSubmit();
+    }
+  }
+
+  function header(title, sub){
+    stage.appendChild(el('h2', null, title));
+    if(sub) stage.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.6'} }, sub));
+  }
+
+  function lockBanner(username){
+    if(!isForgotLocked(username)) return null;
+    const l = getForgotLock(username);
+    return el('div', { style:{
+      background:'var(--danger-soft)',color:'var(--danger)',
+      padding:'10px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',fontWeight:'600'
+    }}, '🔒 嘗試次數過多，請 ' + fmtLockRemain(l.lockedUntil - Date.now()) + '後再試');
+  }
+
+  function actions(...btns){
+    const a = el('div', { class:'modal-actions' });
+    btns.forEach(b => a.appendChild(b));
+    return a;
+  }
+
+  // 通用：失敗時的計入鎖定 + 訊息提示（避免暴露帳號是否存在）
+  function failGeneric(username, customMsg){
+    const l = incForgotLock(username || 'unknown');
+    const left = Math.max(0, FORGOT_LOCK_MAX - l.count);
+    if(l.lockedUntil > Date.now()){
+      toast('🔒 嘗試次數過多，請 ' + fmtLockRemain(l.lockedUntil - Date.now()) + '後再試','danger', 4500);
+      render();
+      return;
+    }
+    toast((customMsg || '驗證失敗') + '（剩餘 ' + left + ' 次嘗試）','danger', 3500);
+  }
+
+  /* ── Step 1：輸入帳號（老師） */
+  function renderTeacherStep1(){
+    header('🔑 找回老師密碼 — 第 1 / 6 步',
+      '請輸入您的老師帳號。為避免暴露帳號資訊，系統不會直接顯示帳號是否存在。');
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, '老師帳號（username）'));
+    const inp = el('input', { class:'input', placeholder:'例：admin', autocomplete:'username' });
+    f.appendChild(inp);
+    stage.appendChild(f);
+    stage.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} },
+      '🛡️ 安全機制：3 次失敗將鎖定 60 分鐘'));
+
+    const next = ()=> {
+      const u = inp.value.trim();
+      if(!u){ toast('請輸入帳號', 'warning'); return; }
+      if(isForgotLocked(u)){
+        const l = getForgotLock(u);
+        toast('🔒 此帳號已鎖定，請 ' + fmtLockRemain(l.lockedUntil - Date.now()) + '後再試','danger', 4500);
+        return;
       }
+      const acc = (App.db.accounts || []).find(a => a.username === u);
+      if(!acc){
+        // 計入鎖定，但訊息不暴露帳號是否存在
+        const l = incForgotLock(u);
+        const left = Math.max(0, FORGOT_LOCK_MAX - l.count);
+        toast('若帳號存在，將進入下一步驗證（剩餘 ' + left + ' 次嘗試）','info', 4000);
+        return;
+      }
+      // 帳號存在但缺 recovery 欄位 → 提示先登入完成設定
+      if(!acc.email || !acc.securityQ || !acc.securityA){
+        toast('此帳號尚未設定 Email 與安全問題，請先用原密碼登入完成設定','warning', 5500);
+        return;
+      }
+      st.account = acc;
+      st.username = u;
+      st.step = 2;
+      render();
+    };
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
+    setTimeout(()=> inp.focus(), 80);
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> m.close() }, '取消'),
+      el('button', { class:'btn btn-primary', onclick: next }, '下一步 →')
+    ));
+  }
+
+  /* ── Step 2：Email 驗證 */
+  function renderTeacherStep2(){
+    header('📧 Email 驗證 — 第 2 / 6 步',
+      '請輸入帳號註冊時填寫的 Email，必須完全相符（不分大小寫）。');
+    const banner = lockBanner(st.username);
+    if(banner) stage.appendChild(banner);
+    stage.appendChild(el('div', { style:{
+      background:'var(--surface-2)',padding:'10px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px'
+    }}, '提示：此帳號 Email 為 ', el('code', null, maskEmail(st.account.email))));
+
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, '完整 Email'));
+    const inp = el('input', { class:'input', type:'email', placeholder:'name@example.com', autocomplete:'email' });
+    f.appendChild(inp);
+    stage.appendChild(f);
+
+    stage.appendChild(el('div', { class:'small', style:{marginTop:'8px'} },
+      el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'underline'},
+        onclick:()=> { st.useRecovery = true; render(); } }, '🔐 我有恢復碼（跳過 Email 驗證）')
+    ));
+
+    const next = ()=> {
+      if(isForgotLocked(st.username)){
+        render();
+        return;
+      }
+      const v = inp.value.trim().toLowerCase();
+      if(!v){ toast('請輸入 Email','warning'); return; }
+      if(v !== String(st.account.email||'').toLowerCase()){
+        failGeneric(st.username, 'Email 與帳號註冊資料不符');
+        return;
+      }
+      st.step = 3;
+      render();
+    };
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
+    setTimeout(()=> inp.focus(), 80);
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 1; render(); } }, '← 上一步'),
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證 Email →')
+    ));
+  }
+
+  /* ── Step 3：寄送 OTP */
+  function renderTeacherStep3(){
+    header('📨 寄送驗證碼 — 第 3 / 6 步',
+      '系統會產生 6 位數驗證碼，並透過您的預設郵件 client 寄送到註冊信箱。');
+
+    stage.appendChild(el('div', { style:{
+      background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
+    }},
+      el('div', null, '收件人：', el('strong', null, st.account.email)),
+      el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+        '若沒收到請檢查垃圾信件夾，或點下方「重新寄送」（60 秒冷卻）')
+    ));
+
+    // 顯示已寄出的提示（若 sessionStorage 內已有 OTP）
+    let existingOtp = null;
+    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+    const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
+
+    const sendBtn = el('button', { class:'btn btn-primary btn-block',
+      onclick: ()=> {
+        const now = Date.now();
+        if(st.lastSent && now - st.lastSent < FORGOT_OTP_RESEND_COOLDOWN){
+          const sec = Math.ceil((FORGOT_OTP_RESEND_COOLDOWN - (now - st.lastSent))/1000);
+          toast('請 ' + sec + ' 秒後再重新寄送','warning', 3000);
+          return;
+        }
+        const code = genOTP6();
+        const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: st.role };
+        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){}
+        st.lastSent = now;
+        sendOtpMailto(st.account.email, code);
+        toast('已開啟郵件 client，請寄出後查看信箱','info', 4000);
+        if(typeof logOp === 'function') logOp('forgotOtpSent', '老師 ' + st.username + ' 申請 OTP');
+        // 重新 render 讓「我已收到」按鈕可用
+        setTimeout(render, 300);
+      }
+    }, validExists ? '🔁 重新寄送驗證碼' : '📤 寄出驗證信');
+    stage.appendChild(sendBtn);
+
+    if(validExists){
+      stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
+        '✓ 已寄出驗證碼，' + Math.ceil((existingOtp.exp - Date.now())/60000) + ' 分鐘內有效'));
+    }
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 2; render(); } }, '← 上一步'),
+      el('button', { class:'btn btn-primary', disabled: !validExists,
+        onclick:()=> { st.step = 4; render(); } }, '我已收到驗證碼 →')
+    ));
+  }
+
+  /* ── Step 4：輸入 OTP */
+  function renderTeacherStep4(){
+    header('🔢 輸入驗證碼 — 第 4 / 6 步',
+      '請輸入您收到的 6 位數驗證碼。');
+    const banner = lockBanner(st.username);
+    if(banner) stage.appendChild(banner);
+
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, '6 位數驗證碼'));
+    const inp = el('input', { class:'input', inputmode:'numeric', maxlength:'6',
+      placeholder:'例：123456', style:{letterSpacing:'4px',fontSize:'20px',textAlign:'center'} });
+    f.appendChild(inp);
+    stage.appendChild(f);
+
+    const next = ()=> {
+      if(isForgotLocked(st.username)){ render(); return; }
+      const v = inp.value.trim();
+      let saved = null;
+      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+      if(!saved || saved.username !== st.username || saved.exp <= Date.now()){
+        toast('驗證碼已過期，請重新寄送','warning', 4000);
+        st.step = 3;
+        render();
+        return;
+      }
+      if(v !== saved.code){
+        failGeneric(st.username, '驗證碼錯誤');
+        return;
+      }
+      // 通過 → 進入安全問題
+      st.step = 5;
+      render();
+    };
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
+    setTimeout(()=> inp.focus(), 80);
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 3; render(); } }, '← 重新寄送'),
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證 →')
+    ));
+  }
+
+  /* ── Step 5：安全問題 */
+  function renderTeacherStep5(){
+    header('❓ 安全問題 — 第 5 / 6 步',
+      '請回答您設定的安全問題（答案不分大小寫）。');
+    const banner = lockBanner(st.username);
+    if(banner) stage.appendChild(banner);
+
+    stage.appendChild(el('div', { style:{
+      background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'14px',fontWeight:'600'
+    }}, st.account.securityQ || '(未設定問題)'));
+
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, '答案'));
+    const inp = el('input', { class:'input', placeholder:'輸入您的答案' });
+    f.appendChild(inp);
+    stage.appendChild(f);
+
+    const next = async ()=> {
+      if(isForgotLocked(st.username)){ render(); return; }
+      const v = inp.value.trim();
+      if(!v){ toast('請輸入答案','warning'); return; }
+      const hashed = await hashAnswer(v);
+      if(hashed !== st.account.securityA){
+        failGeneric(st.username, '答案錯誤');
+        return;
+      }
+      st.step = 6;
+      render();
+    };
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
+    setTimeout(()=> inp.focus(), 80);
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 4; render(); } }, '← 上一步'),
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證答案 →')
+    ));
+  }
+
+  /* ── Step 6：設定新密碼（老師 / 恢復碼路徑共用） */
+  function renderStep6NewPassword(){
+    header('🔐 設定新密碼 — 最後一步',
+      '密碼至少 6 字元，且不可與舊密碼相同。');
+
+    const f1 = el('div', { class:'field' });
+    f1.appendChild(el('label', { class:'label' }, '新密碼'));
+    const i1 = el('input', { class:'input', type:'password', placeholder:'至少 6 字元', autocomplete:'new-password' });
+    f1.appendChild(i1);
+    stage.appendChild(f1);
+
+    const f2 = el('div', { class:'field' });
+    f2.appendChild(el('label', { class:'label' }, '再次輸入確認'));
+    const i2 = el('input', { class:'input', type:'password', placeholder:'重複輸入', autocomplete:'new-password' });
+    f2.appendChild(i2);
+    stage.appendChild(f2);
+
+    const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
+    stage.appendChild(err);
+
+    const submit = async ()=> {
+      err.style.display = 'none';
+      const p1 = i1.value, p2 = i2.value;
+      if(!p1 || p1.length < 6){ err.textContent = '密碼至少 6 字元'; err.style.display='block'; return; }
+      if(p1 !== p2){ err.textContent = '兩次密碼不一致'; err.style.display='block'; return; }
+      // 不可與舊密碼相同
+      try {
+        const sameAsOld = await verifyPassword(p1, st.account.password);
+        if(sameAsOld){ err.textContent='新密碼不可與舊密碼相同'; err.style.display='block'; return; }
+      } catch(_){}
+      const hashed = await hashPasswordSafe(p1);
+      if(!hashed.ok){ err.textContent='密碼雜湊失敗，請改用 HTTPS'; err.style.display='block'; return; }
+      st.account.password = hashed.value;
+      st.account.passwordChangedAt = Date.now();
+      st.account.mustChangePw = false;
       saveDB();
       try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
-      try { saveRemember(null); localStorage.removeItem('cms_v3_session'); } catch(e){}
-      if(typeof logOp === 'function') logOp('teacherPwReset', '老師密碼重設為預設值');
+      try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){}
+      clearForgotLock(st.username);
+      if(typeof logOp === 'function')
+        logOp('teacherPwReset', '老師 ' + st.username + ' 透過忘記密碼流程重設密碼' + (st.useRecovery ? '（恢復碼）':''));
       m.close();
-      toast('✅ 已重設！請用 admin / admin123 登入','success', 5000);
-      setTimeout(() => location.reload(), 1500);
-    }}, '✅ 立即重設為 admin / admin123')
-  );
-  m.root.appendChild(opt1);
+      toast('✅ 密碼已重設成功，請以新密碼登入','success', 5000);
+    };
 
-  // 選項 2: 自訂新密碼（保留原帳號）
-  const opt2 = el('div', { style:{background:'var(--surface-2)',padding:'14px',borderRadius:'10px',marginTop:'10px'} },
-    el('div', { style:{fontWeight:'700',marginBottom:'8px',fontSize:'14px'} }, '✏️ 自訂新密碼'),
-    el('div', { class:'small muted', style:{marginBottom:'10px'} }, '保留原本的老師帳號，只改密碼')
-  );
-  const accSel = el('select', { class:'input select', style:{marginBottom:'8px'} });
-  (App.db.accounts || []).forEach(a => {
-    accSel.appendChild(el('option', { value:a.id }, a.username + '（' + (a.name||'老師') + '）'));
-  });
-  if(!App.db.accounts || !App.db.accounts.length){
-    accSel.appendChild(el('option', { value:'' }, '尚無帳號'));
-    accSel.disabled = true;
+    i1.addEventListener('keydown', e => { if(e.key==='Enter') i2.focus(); });
+    i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+    setTimeout(()=> i1.focus(), 80);
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> m.close() }, '取消'),
+      el('button', { class:'btn btn-primary', onclick: submit }, '✓ 重設密碼')
+    ));
   }
-  opt2.appendChild(accSel);
-  const newPw = el('input', { class:'input', type:'text', placeholder:'新密碼（至少 4 字元）', style:{marginBottom:'8px'} });
-  opt2.appendChild(newPw);
-  opt2.appendChild(el('button', { class:'btn btn-block', onclick: async ()=> {
-    const accId = accSel.value;
-    const pw = newPw.value.trim();
-    if(!accId){ toast('請選擇帳號','warning'); return; }
-    if(!pw || pw.length < 4){ toast('密碼至少 4 字元','warning'); return; }
-    const ok = await confirmDlg('確定更改此帳號的密碼？', { title:'確認' });
-    if(!ok) return;
-    const acc = App.db.accounts.find(a => String(a.id) === String(accId));
-    if(!acc){ toast('帳號不存在','danger'); return; }
-    acc.password = await hashPassword(pw);
-    saveDB();
-    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
-    if(typeof logOp === 'function') logOp('teacherPwChange', '老師 ' + acc.username + ' 改密碼');
-    m.close();
-    toast('✅ 密碼已更新！請用新密碼登入','success', 5000);
-  }}, '✓ 更新密碼'));
-  m.root.appendChild(opt2);
 
-  // 選項 3: 全部重設
-  const opt3 = el('div', { style:{background:'var(--danger-soft)',padding:'14px',borderRadius:'10px',marginTop:'10px'} },
-    el('div', { style:{fontWeight:'700',marginBottom:'4px',fontSize:'14px',color:'var(--danger)'} }, '⚠️ 全部清除重新開始'),
-    el('div', { class:'small muted', style:{marginBottom:'10px'} }, '清空所有資料（學生、紀錄全消失）'),
-    el('button', { class:'btn btn-danger btn-block', onclick: ()=> {
+  /* ── 恢復碼替代流程 */
+  function renderRecoveryFlow(){
+    header('🔐 使用恢復碼重設密碼',
+      '請輸入您先前妥善保存的 8 碼恢復碼，通過驗證後可直接設定新密碼。');
+    const banner = lockBanner(st.username);
+    if(banner) stage.appendChild(banner);
+
+    // 若還沒填過帳號，回 step1 帶帳號
+    if(!st.account){
+      const f0 = el('div', { class:'field' });
+      f0.appendChild(el('label', { class:'label' }, '老師帳號'));
+      const i0 = el('input', { class:'input', placeholder:'username' });
+      f0.appendChild(i0);
+      stage.appendChild(f0);
+
+      const f1 = el('div', { class:'field' });
+      f1.appendChild(el('label', { class:'label' }, '恢復碼（格式 ABCD-1234）'));
+      const i1 = el('input', { class:'input', placeholder:'ABCD-1234',
+        style:{letterSpacing:'2px',textTransform:'uppercase'} });
+      f1.appendChild(i1);
+      stage.appendChild(f1);
+
+      const verify = async ()=> {
+        const u = i0.value.trim();
+        const code = i1.value.trim().toUpperCase();
+        if(!u || !code){ toast('請填寫帳號與恢復碼','warning'); return; }
+        if(isForgotLocked(u)){
+          const l = getForgotLock(u);
+          toast('🔒 已鎖定，請 ' + fmtLockRemain(l.lockedUntil - Date.now()) + '後再試','danger', 4500);
+          return;
+        }
+        const acc = (App.db.accounts || []).find(a => a.username === u);
+        if(!acc || !acc.recoveryCode){
+          const l = incForgotLock(u);
+          const left = Math.max(0, FORGOT_LOCK_MAX - l.count);
+          toast('帳號或恢復碼錯誤（剩餘 ' + left + ' 次嘗試）','danger', 3500);
+          return;
+        }
+        const hashed = await hashAnswer(code);
+        if(hashed !== acc.recoveryCode){
+          const l = incForgotLock(u);
+          const left = Math.max(0, FORGOT_LOCK_MAX - l.count);
+          toast('帳號或恢復碼錯誤（剩餘 ' + left + ' 次嘗試）','danger', 3500);
+          return;
+        }
+        // 通過 → 進入 step 6
+        st.account = acc;
+        st.username = u;
+        st.step = 6;
+        render();
+      };
+      stage.appendChild(actions(
+        el('button', { class:'btn', onclick:()=> { st.useRecovery = false; st.step = 1; render(); } }, '← 改用 Email 驗證'),
+        el('button', { class:'btn btn-primary', onclick: verify }, '驗證恢復碼 →')
+      ));
+    }
+  }
+
+  /* ── 學生 Step 1：學號 + 班級 */
+  function renderStudentStep1(){
+    header('🔑 找回學生密碼 — 第 1 / 5 步',
+      '請輸入學號並選擇班級。為保護隱私不直接列出學生姓名。');
+    const f1 = el('div', { class:'field' });
+    f1.appendChild(el('label', { class:'label' }, '學號'));
+    const iSid = el('input', { class:'input', placeholder:'例：1095001', inputmode:'numeric' });
+    f1.appendChild(iSid);
+    stage.appendChild(f1);
+
+    const f2 = el('div', { class:'field' });
+    f2.appendChild(el('label', { class:'label' }, '班級'));
+    const classes = [...new Set((App.db.students||[]).map(s => s.cls || '未分班'))].sort((a,b)=> a.localeCompare(b));
+    const sel = el('select', { class:'input select' });
+    sel.appendChild(el('option', { value:'' }, '── 請選擇 ──'));
+    classes.forEach(c => sel.appendChild(el('option', { value:c }, c)));
+    f2.appendChild(sel);
+    stage.appendChild(f2);
+
+    stage.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} },
+      '🛡️ 安全機制：3 次失敗將鎖定 60 分鐘'));
+
+    const next = ()=> {
+      const sid = iSid.value.trim();
+      const cls = sel.value;
+      if(!sid || !cls){ toast('請填寫學號與班級','warning'); return; }
+      const key = 'stu:' + cls + ':' + sid;
+      if(isForgotLocked(key)){
+        const l = getForgotLock(key);
+        toast('🔒 已鎖定，請 ' + fmtLockRemain(l.lockedUntil - Date.now()) + '後再試','danger', 4500);
+        return;
+      }
+      const s = (App.db.students||[]).find(x =>
+        String(x.sid||'') === sid && (x.cls||'未分班') === cls);
+      if(!s){
+        const l = incForgotLock(key);
+        const left = Math.max(0, FORGOT_LOCK_MAX - l.count);
+        toast('若學號與班級正確，將進入下一步（剩餘 ' + left + ' 次嘗試）','info', 4000);
+        return;
+      }
+      if(!s.email){
+        toast('此學生未設定 Email，請直接聯絡老師重設','warning', 5500);
+        return;
+      }
+      st.account = s;
+      st.studentId = s.id;
+      st.username = key;
+      st.step = 2;
+      render();
+    };
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> m.close() }, '取消'),
+      el('button', { class:'btn btn-primary', onclick: next }, '下一步 →')
+    ));
+  }
+
+  /* ── 學生 Step 2：Email */
+  function renderStudentStep2(){
+    header('📧 Email 驗證 — 第 2 / 5 步',
+      '請輸入註冊時填寫的 Email，必須完全相符。');
+    const banner = lockBanner(st.username);
+    if(banner) stage.appendChild(banner);
+    stage.appendChild(el('div', { style:{
+      background:'var(--surface-2)',padding:'10px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px'
+    }}, '提示：此學生 Email 為 ', el('code', null, maskEmail(st.account.email))));
+
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, '完整 Email'));
+    const inp = el('input', { class:'input', type:'email', placeholder:'name@example.com' });
+    f.appendChild(inp);
+    stage.appendChild(f);
+
+    const next = ()=> {
+      if(isForgotLocked(st.username)){ render(); return; }
+      const v = inp.value.trim().toLowerCase();
+      if(v !== String(st.account.email||'').toLowerCase()){
+        failGeneric(st.username, 'Email 不符');
+        return;
+      }
+      st.step = 3;
+      render();
+    };
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
+    setTimeout(()=> inp.focus(), 80);
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 1; render(); } }, '← 上一步'),
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證 →')
+    ));
+  }
+
+  /* ── 學生 Step 3：寄送 OTP */
+  function renderStudentStep3(){
+    header('📨 寄送驗證碼 — 第 3 / 5 步',
+      '系統會產生 6 位數驗證碼，並透過您的預設郵件 client 寄送。');
+    stage.appendChild(el('div', { style:{
+      background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
+    }}, el('div', null, '收件人：', el('strong', null, st.account.email))));
+
+    let existingOtp = null;
+    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+    const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
+
+    stage.appendChild(el('button', { class:'btn btn-primary btn-block',
+      onclick: ()=> {
+        const now = Date.now();
+        if(st.lastSent && now - st.lastSent < FORGOT_OTP_RESEND_COOLDOWN){
+          const sec = Math.ceil((FORGOT_OTP_RESEND_COOLDOWN - (now - st.lastSent))/1000);
+          toast('請 ' + sec + ' 秒後再重新寄送','warning', 3000);
+          return;
+        }
+        const code = genOTP6();
+        const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: 'student' };
+        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){}
+        st.lastSent = now;
+        sendOtpMailto(st.account.email, code);
+        toast('已開啟郵件 client','info', 4000);
+        setTimeout(render, 300);
+      }
+    }, validExists ? '🔁 重新寄送' : '📤 寄出驗證信'));
+
+    if(validExists){
+      stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
+        '✓ 已寄出，' + Math.ceil((existingOtp.exp - Date.now())/60000) + ' 分鐘內有效'));
+    }
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 2; render(); } }, '← 上一步'),
+      el('button', { class:'btn btn-primary', disabled: !validExists,
+        onclick:()=> { st.step = 4; render(); } }, '我已收到驗證碼 →')
+    ));
+  }
+
+  /* ── 學生 Step 4：輸入 OTP */
+  function renderStudentStep4(){
+    header('🔢 輸入驗證碼 — 第 4 / 5 步', '請輸入收到的 6 位數驗證碼。');
+    const banner = lockBanner(st.username);
+    if(banner) stage.appendChild(banner);
+
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, '6 位數驗證碼'));
+    const inp = el('input', { class:'input', inputmode:'numeric', maxlength:'6',
+      placeholder:'123456', style:{letterSpacing:'4px',fontSize:'20px',textAlign:'center'} });
+    f.appendChild(inp);
+    stage.appendChild(f);
+
+    const next = ()=> {
+      if(isForgotLocked(st.username)){ render(); return; }
+      const v = inp.value.trim();
+      let saved = null;
+      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+      if(!saved || saved.username !== st.username || saved.exp <= Date.now()){
+        toast('驗證碼已過期','warning', 4000);
+        st.step = 3;
+        render();
+        return;
+      }
+      if(v !== saved.code){
+        failGeneric(st.username, '驗證碼錯誤');
+        return;
+      }
+      st.step = 5;
+      render();
+    };
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
+    setTimeout(()=> inp.focus(), 80);
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 3; render(); } }, '← 重新寄送'),
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證 →')
+    ));
+  }
+
+  /* ── 學生 Step 5：留言給老師並送出申請（保留審核機制） */
+  function renderStudentStep5MessageThenSubmit(){
+    header('📝 留言給老師 — 第 5 / 5 步',
+      '驗證已通過，最後請寫一段訊息給老師（選填），點下方按鈕送出重設申請。' +
+      '老師核准後您才能用新密碼登入（學號末 4 碼）。');
+
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, '訊息（選填）'));
+    const ta = el('textarea', { class:'textarea', placeholder:'例：手機遺失，麻煩老師幫我重設密碼。',
+      style:{minHeight:'80px'} });
+    f.appendChild(ta);
+    stage.appendChild(f);
+
+    const submit = ()=> {
+      const msg = (ta.value||'').trim().slice(0, 200);
+      // 建立 reset request（沿用既有審核機制，並標記為已 OTP 驗證）
+      App.db.passwordResets = App.db.passwordResets || [];
+      App.db.passwordResets = App.db.passwordResets.filter(r => r.studentId !== st.account.id);
+      App.db.passwordResets.push({
+        id: nid(),
+        studentId: st.account.id,
+        studentName: st.account.name,
+        cls: st.account.cls,
+        sid: st.account.sid,
+        email: st.account.email,
+        message: msg,
+        verified: true,           // 已通過 Email + OTP 驗證
+        status: 'pending',
+        ts: Date.now()
+      });
+      saveDB();
+      try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
+      try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){}
+      clearForgotLock(st.username);
+      if(typeof logOp === 'function') logOp('pwResetRequest', st.account.name + ' 申請重設密碼（已 OTP 驗證）');
       m.close();
-      location.href = location.pathname + '?reset=1';
-    }}, '🗑️ 全部清除')
-  );
-  m.root.appendChild(opt3);
+
+      const m2 = modal('', { dismissable:true });
+      m2.root.appendChild(el('h2', { style:{color:'var(--success)'} }, '✅ 申請已送出'));
+      m2.root.appendChild(el('p', { style:{lineHeight:'1.8'} },
+        '請求已送達老師，並標記為「已通過 Email 驗證」。老師核准後，' +
+        '請用「學號末 4 碼」（' + String(st.account.sid||'').slice(-4) + '）登入，並立即修改密碼。'));
+      m2.root.appendChild(el('div', { class:'modal-actions' },
+        el('button', { class:'btn btn-primary', onclick:()=> m2.close() }, '我知道了')
+      ));
+    };
+
+    stage.appendChild(actions(
+      el('button', { class:'btn', onclick:()=> { st.step = 4; render(); } }, '← 上一步'),
+      el('button', { class:'btn btn-primary', onclick: submit }, '📨 送出申請給老師')
+    ));
+  }
+
+  render();
+}
+
+/* ════════════════════════════════════════════════════════════
+   forceSetupRecovery — 老師首次登入若缺 recovery 欄位則強制設定
+   ──────────────────────────────────────────────────────────── */
+function forceSetupRecovery(accountId){
+  const a = (App.db.accounts || []).find(x => x.id === accountId);
+  if(!a) return;
+  // 已完整設定 → 跳過
+  if(a.email && a.securityQ && a.securityA && a.recoveryCode) return;
+
+  const SECURITY_QUESTIONS = [
+    '你媽媽的名字？',
+    '你就讀的小學名稱？',
+    '你的第一隻寵物名字？',
+    '你最喜歡的食物？',
+    '你出生的城市？',
+    '你最好的童年朋友姓名？'
+  ];
+
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '🛡️ 設定帳號復原資訊（首次必填）'));
+  m.root.appendChild(el('p', { style:{lineHeight:'1.7',fontSize:'14px',color:'var(--text-muted)'} },
+    '為了讓您日後忘記密碼時能安全地自助重設，請設定 Email、安全問題與恢復碼。' +
+    '完成後請務必妥善保存「恢復碼」，這是您忘記 Email 或安全問題時的最後備援。'));
+
+  // Email
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '📧 復原 Email'));
+  const iEmail = el('input', { class:'input', type:'email',
+    placeholder:'name@example.com', value: a.email || '' });
+  f1.appendChild(iEmail);
+  m.root.appendChild(f1);
+
+  // 安全問題
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '❓ 安全問題'));
+  const sel = el('select', { class:'input select' });
+  SECURITY_QUESTIONS.forEach(q => sel.appendChild(el('option', { value:q }, q)));
+  if(a.securityQ && SECURITY_QUESTIONS.indexOf(a.securityQ) < 0){
+    sel.appendChild(el('option', { value:a.securityQ }, a.securityQ));
+  }
+  if(a.securityQ) sel.value = a.securityQ;
+  f2.appendChild(sel);
+  m.root.appendChild(f2);
+
+  // 答案
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '答案（不分大小寫，僅雜湊存放）'));
+  const iAns = el('input', { class:'input', placeholder:'輸入您的答案' });
+  f3.appendChild(iAns);
+  m.root.appendChild(f3);
+
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
+  m.root.appendChild(err);
+
+  // 第二階段：顯示恢復碼
+  const codeStage = el('div', { style:{display:'none',marginTop:'14px'} });
+  m.root.appendChild(codeStage);
+
+  function showRecoveryCodeStage(plainCode){
+    // 把表單藏起來、改顯示恢復碼
+    [f1,f2,f3,err].forEach(x => x.style.display='none');
+    codeStage.style.display='block';
+    codeStage.innerHTML = '';
+    codeStage.appendChild(el('div', { style:{
+      background:'var(--warn-soft,var(--surface-2))',color:'var(--text)',
+      padding:'14px',borderRadius:'10px',marginBottom:'10px',fontSize:'14px',lineHeight:'1.7',
+      border:'2px solid var(--warn,var(--primary))'
+    }},
+      el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '⚠️ 請務必妥善保存以下恢復碼'),
+      el('div', null, '這是您忘記 Email 或安全問題時的最後備援，遺失將無法找回密碼。'),
+      el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+        '建議：截圖、列印或存到密碼管理器（1Password / Bitwarden 等）')
+    ));
+    const codeBox = el('div', { style:{
+      fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace',
+      fontSize:'28px',letterSpacing:'4px',fontWeight:'700',
+      background:'var(--surface-2)',padding:'18px',borderRadius:'10px',
+      textAlign:'center',marginBottom:'10px',userSelect:'all'
+    }}, plainCode);
+    codeStage.appendChild(codeBox);
+
+    // 複製按鈕
+    const btnRow = el('div', { class:'flex', style:{gap:'8px',marginBottom:'10px'} });
+    btnRow.appendChild(el('button', { class:'btn', style:{flex:'1'},
+      onclick: async ()=> {
+        try {
+          if(navigator.clipboard && navigator.clipboard.writeText){
+            await navigator.clipboard.writeText(plainCode);
+            toast('✓ 已複製到剪貼簿','success');
+          } else {
+            const r = document.createRange();
+            r.selectNode(codeBox);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(r);
+            document.execCommand('copy');
+            toast('✓ 已複製','success');
+          }
+        } catch(e){ toast('複製失敗','danger'); }
+      }
+    }, '📋 複製'));
+    btnRow.appendChild(el('button', { class:'btn', style:{flex:'1'},
+      onclick: ()=> {
+        try {
+          const content = '課程管理系統 — 恢復碼\n' +
+            '帳號：' + a.username + '\n' +
+            '恢復碼：' + plainCode + '\n' +
+            '產生時間：' + new Date().toLocaleString() + '\n\n' +
+            '請妥善保存。忘記密碼時可使用此碼跳過 Email 驗證直接重設。';
+          const blob = new Blob([content], { type:'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a2 = document.createElement('a');
+          a2.href = url;
+          a2.download = 'recovery-code-' + a.username + '.txt';
+          a2.click();
+          setTimeout(()=> URL.revokeObjectURL(url), 1000);
+          toast('✓ 已下載','success');
+        } catch(e){ toast('下載失敗','danger'); }
+      }
+    }, '⬇️ 下載 .txt'));
+    codeStage.appendChild(btnRow);
+
+    // 必勾選 checkbox 才能關閉
+    const chkLabel = el('label', { class:'remember-row', style:{marginTop:'10px'} });
+    const chk = el('input', { type:'checkbox' });
+    chkLabel.appendChild(chk);
+    chkLabel.appendChild(document.createTextNode(' 我已妥善保存恢復碼（截圖、抄寫或下載）'));
+    codeStage.appendChild(chkLabel);
+
+    const closeBtn = el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'},
+      disabled:true,
+      onclick:()=> m.close()
+    }, '✓ 完成設定');
+    chk.addEventListener('change', ()=> { closeBtn.disabled = !chk.checked; });
+    codeStage.appendChild(closeBtn);
+  }
+
+  const submit = async ()=> {
+    err.style.display='none';
+    const email = iEmail.value.trim();
+    const q = sel.value;
+    const ans = iAns.value.trim();
+    if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+      err.textContent='請輸入有效的 Email'; err.style.display='block'; return;
+    }
+    if(!q){ err.textContent='請選擇安全問題'; err.style.display='block'; return; }
+    if(!ans || ans.length < 2){ err.textContent='請輸入答案（至少 2 字元）'; err.style.display='block'; return; }
+    try {
+      const plainCode = genRecoveryCode();
+      a.email = email;
+      a.securityQ = q;
+      a.securityA = await hashAnswer(ans);
+      a.recoveryCode = await hashAnswer(plainCode);
+      a.recoveryCodeSetAt = Date.now();
+      saveDB();
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+      if(typeof logOp === 'function') logOp('recoverySetup', '老師 ' + a.username + ' 完成復原資訊設定');
+      showRecoveryCodeStage(plainCode);
+    } catch(e){
+      err.textContent='儲存失敗：' + (e && e.message || e);
+      err.style.display='block';
+    }
+  };
 
   const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn', onclick: ()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '產生並儲存恢復碼'));
   m.root.appendChild(actions);
+  setTimeout(()=> iEmail.focus(), 100);
 }
 
 function renderLoginStudentStage(){
@@ -4889,13 +5753,17 @@ function renderLoginStudentStage(){
   // 登入按鈕
   stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'8px'}, onclick: attemptLogin }, '登入'));
 
-  // 忘記密碼
+  // 忘記密碼（批次 6：明示需 Email 驗證碼，老師審核才生效）
   if(!_lcS.hideForgot){
-    stage.appendChild(el('div', { class:'small', style:{textAlign:'center',marginTop:'10px'} },
+    const fWrap = el('div', { style:{textAlign:'center',marginTop:'10px'} });
+    fWrap.appendChild(el('div', { class:'small' },
       el('a', { href:'javascript:void(0)', onclick: showForgotPassword,
         style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
         '🔑 忘記密碼？')
     ));
+    fWrap.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} },
+      '🛡️ 需 Email 驗證碼，老師審核後才生效'));
+    stage.appendChild(fWrap);
   }
 
   stage.appendChild(el('hr', { class:'sep' }));
@@ -4909,88 +5777,9 @@ function renderLoginStudentStage(){
   return stage;
 }
 
-// 忘記密碼說明
+// 學生忘記密碼 — 多步驗證流程（OTP + Email），完成後送出申請給老師審核
 function showForgotPassword(){
-  const m = modal('', { dismissable:true });
-  m.root.appendChild(el('h2', null, '🔑 忘記密碼'));
-  m.root.appendChild(el('p', { style:{lineHeight:'1.6',fontSize:'14px',color:'var(--text)',marginBottom:'12px'} },
-    '輸入註冊時填的 Email，即可發送重設密碼請求給老師：'));
-
-  // 學號
-  const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, '學號'));
-  const iSid = el('input', { class:'input', placeholder:'例：1095001', inputmode:'numeric' });
-  f1.appendChild(iSid);
-  m.root.appendChild(f1);
-
-  // Email
-  const f2 = el('div', { class:'field' });
-  f2.appendChild(el('label', { class:'label' }, '📧 註冊 Email'));
-  const iEmail = el('input', { class:'input', type:'email', placeholder:'your@example.com' });
-  f2.appendChild(iEmail);
-  m.root.appendChild(f2);
-
-  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',padding:'8px 12px',background:'var(--danger-soft)',borderRadius:'8px',marginBottom:'8px'} });
-  m.root.appendChild(err);
-
-  // 說明
-  m.root.appendChild(el('div', { style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginTop:'10px',fontSize:'13px',lineHeight:'1.7'} },
-    el('div', { style:{fontWeight:'600',marginBottom:'4px'} }, '💡 找回方式：'),
-    el('div', null, '1. 老師會在後台收到通知 → 一鍵重設'),
-    el('div', null, '2. 也可請老師直接幫你重設'),
-    el('div', { class:'small muted', style:{marginTop:'4px'} }, '預設密碼為學號末 4 碼')
-  ));
-
-  const submit = ()=> {
-    const sid = iSid.value.trim();
-    const email = iEmail.value.trim();
-    err.style.display = 'none';
-    if(!sid) { err.textContent='請輸入學號'; err.style.display='block'; return; }
-    if(!email) { err.textContent='請輸入 Email'; err.style.display='block'; return; }
-
-    // 找對應學生
-    const s = App.db.students.find(x => String(x.sid||'') === sid && (x.email||'').toLowerCase() === email.toLowerCase());
-    if(!s){
-      err.textContent='學號與 Email 不符，請確認後重試（或聯絡老師）';
-      err.style.display='block';
-      return;
-    }
-
-    // 建立重設請求
-    App.db.passwordResets = App.db.passwordResets || [];
-    // 移除舊的請求
-    App.db.passwordResets = App.db.passwordResets.filter(r => r.studentId !== s.id);
-    App.db.passwordResets.push({
-      id: nid(),
-      studentId: s.id,
-      studentName: s.name,
-      cls: s.cls,
-      sid: s.sid,
-      email: s.email,
-      status: 'pending',
-      ts: Date.now()
-    });
-    saveDB();
-    try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
-    if(typeof logOp === 'function') logOp('pwResetRequest', s.name + ' 申請重設密碼');
-
-    m.close();
-    // 成功 modal
-    const m2 = modal('', { dismissable:true });
-    m2.root.appendChild(el('h2', { style:{color:'var(--success)'} }, '✅ 申請已送出'));
-    m2.root.appendChild(el('p', { style:{lineHeight:'1.8'} },
-      '已通知老師重設你的密碼。老師核准後，請用「學號末 4 碼」（' + String(s.sid||'').slice(-4) + '）登入，並立即修改密碼。'));
-    const a2 = el('div', { class:'modal-actions' });
-    a2.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m2.close() }, '我知道了'));
-    m2.root.appendChild(a2);
-  };
-
-  iEmail.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
-
-  const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick: submit }, '📨 送出申請'));
-  m.root.appendChild(actions);
+  _runForgotFlow({ role:'student' });
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -15227,30 +16016,23 @@ function boot(){
       return;
     }
     if(location.search.indexOf('reset=1') >= 0){
-      // 清除所有 v3 相關的 localStorage
-      const keysToDelete = [];
-      for(let i = 0; i < localStorage.length; i++){
-        const k = localStorage.key(i);
-        if(k && (k.indexOf('cms_v3') === 0 || k.indexOf('cms-v3') === 0)){
-          keysToDelete.push(k);
-        }
-      }
-      keysToDelete.forEach(k => localStorage.removeItem(k));
-      // 解除 Service Worker
-      if('serviceWorker' in navigator){
-        navigator.serviceWorker.getRegistrations().then(regs => {
-          regs.forEach(r => r.unregister());
-        });
-      }
-      // 清除 CacheStorage
-      if('caches' in window){
-        caches.keys().then(names => names.forEach(n => caches.delete(n)));
-      }
-      // 重新導向到乾淨網址
-      setTimeout(() => {
-        location.replace(location.pathname);
-      }, 500);
-      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;font-size:18px;color:#666">🔄 重設中，請稍候...</div>';
+      // 批次 6 資安修補：原本的 ?reset=1 完全沒有驗證，任何人開啟此 URL 就能清空所有資料。
+      // 現在改為「拒絕直接執行」，引導使用者改走需要主老師密碼的 ?adminreset=1 流程。
+      document.body.innerHTML =
+        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;'+
+        'min-height:100vh;font-family:system-ui;padding:20px;text-align:center;background:#f9fafb;color:#111">'+
+        '<div style="font-size:48px;margin-bottom:12px">🚫</div>'+
+        '<h2 style="margin:0 0 8px">此入口已停用</h2>'+
+        '<p style="max-width:480px;line-height:1.7;color:#555;font-size:14px">'+
+        '出於資料安全考量，<code>?reset=1</code> 已不再允許直接清空所有資料。'+
+        '若您確實需要重設整個系統，請改用需要主老師密碼驗證的入口：'+
+        '</p>'+
+        '<a href="'+location.pathname+'?adminreset=1" '+
+        'style="background:#dc2626;color:#fff;padding:12px 24px;border-radius:10px;'+
+        'text-decoration:none;font-weight:600;margin-top:16px">改用驗證入口</a>'+
+        '<a href="'+location.pathname+'" '+
+        'style="color:#2563eb;text-decoration:underline;margin-top:14px;font-size:13px">返回首頁</a>'+
+        '</div>';
       return;
     }
   } catch(e){ console.warn('[reset]', e); }
