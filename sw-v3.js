@@ -103,9 +103,15 @@ self.addEventListener('notificationclick', e => {
   const url = (e.notification.data && e.notification.data.url) || './';
   e.waitUntil(
     self.clients.matchAll({ type:'window', includeUncontrolled:true }).then(list => {
+      // 優先 focus 屬於本 app 的 client
       for(const c of list){
-        if('focus' in c){ try { c.focus(); } catch(_){} return; }
+        if(c.url.includes(self.location.origin) && 'focus' in c){
+          try { c.focus(); } catch(_){}
+          if('navigate' in c){ try { c.navigate(url); } catch(_){} }
+          return;
+        }
       }
+      // 沒有就開新視窗
       if(self.clients.openWindow) return self.clients.openWindow(url);
     })
   );

@@ -1964,6 +1964,31 @@ const LS_LAST_USER  = LS_KEY + '_last_user';
 const LS_REMEMBER   = LS_KEY + '_remember';
 const LS_LOGIN_STEP = LS_KEY + '_login_step';
 
+// ── 常數區 ─────────────────────────────────
+// 注意：FORGOT_LOCK_MAX / FORGOT_LOCK_DURATION / FORGOT_OTP_TTL 等
+// 已於忘記密碼模組宣告（line 4959 附近），避免重複定義。
+const MSG_HARD_CAP = 500;             // messages 陣列上限
+const FEED_HARD_CAP = 100;            // feeds 陣列上限
+const REMEMBER_DAYS = 7;              // 記住我天數
+const REMEMBER_DAYS_MS = REMEMBER_DAYS * 24 * 3600 * 1000;
+const LOGIN_TOKEN_DAYS = 7;           // session token 有效期
+const LOGIN_TOKEN_MS = LOGIN_TOKEN_DAYS * 24 * 3600 * 1000;
+
+// L4: structuredClone 深複製（含 fallback）
+const _clone = (typeof structuredClone === 'function')
+  ? structuredClone
+  : (x) => JSON.parse(JSON.stringify(x));
+
+// L7: debug helper — 預設 off，?debug=1 或 localStorage cms_v3_debug=1 開
+const __DEBUG = (function(){
+  try {
+    return location.search.includes('debug=1') ||
+           localStorage.getItem('cms_v3_debug') === '1';
+  } catch(_){ return false; }
+})();
+function dbg(...args){ if(__DEBUG) console.log('[cms]', ...args); }
+function dbgWarn(...args){ if(__DEBUG) console.warn('[cms]', ...args); }
+
 const App = {
   cfg: null,           // workspace config: {roomCode, role, ...}
   session: null,       // {role:'teacher'|'student', id, name, ...}
@@ -2506,7 +2531,7 @@ function _saveDBNow(){
     const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 ||
       e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 1014);
     if(isQuota){
-      console.warn('[saveDB] localStorage 容量已滿', e);
+      dbgWarn('[saveDB] localStorage 容量已滿', e);
       let size = 0;
       try { size = JSON.stringify(App.db).length; } catch(_){_swallow('auto',_)}
       const mb = (size/1024/1024).toFixed(2);
@@ -2516,12 +2541,12 @@ function _saveDBNow(){
       }
       // 降級嘗試：只把附件 metadata 留下，並截斷較舊資料，但記下警告
       try {
-        const lite = JSON.parse(JSON.stringify(App.db));
-        if(Array.isArray(lite.messages) && lite.messages.length > 500){
-          lite.messages = lite.messages.slice(-500);
+        const lite = _clone(App.db);
+        if(Array.isArray(lite.messages) && lite.messages.length > MSG_HARD_CAP){
+          lite.messages = lite.messages.slice(-MSG_HARD_CAP);
         }
-        if(Array.isArray(lite.feeds) && lite.feeds.length > 100){
-          lite.feeds = lite.feeds.slice(-100);
+        if(Array.isArray(lite.feeds) && lite.feeds.length > FEED_HARD_CAP){
+          lite.feeds = lite.feeds.slice(-FEED_HARD_CAP);
         }
         lite._truncWarning = '⚠️ 儲存空間曾達上限，部分舊資料已暫時隱藏。請盡快匯出備份後清理舊資料。';
         lite._truncAt = Date.now();
@@ -2574,7 +2599,7 @@ function loadDB(){
     }
     if(!Array.isArray(App.db._qrCodes)) App.db._qrCodes = [];
   } catch(e){
-    console.warn('loadDB failed', e);
+    dbgWarn('loadDB failed', e);
     App.db = defaultDB();
   }
 }
@@ -2600,7 +2625,7 @@ function detectV1Students(){
       settings: v1.settings || null
     };
   } catch(e){
-    console.warn('[v1-detect] failed', e);
+    dbgWarn('[v1-detect] failed', e);
     return null;
   }
 }
@@ -2696,7 +2721,7 @@ function autoImportV1(){
 
   saveDB();
   try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){_swallow('auto',e)}
-  console.log('[v3] auto-imported ' + cleanStudents.length + ' students from V1');
+  dbg('[v3] auto-imported ' + cleanStudents.length + ' students from V1');
   // toast comes later (after rerender) so it actually shows
   App._v1ImportedCount = cleanStudents.length;
   return true;
@@ -2719,7 +2744,7 @@ function loadSession(){
 // 4) 沒有課程 → 預設一個
 function ensureDefaultsAndDemo(){
   // V1 自動匯入 (一次性)
-  try { autoImportV1(); } catch(e){ console.warn('[ensureDefaults v1]', e); }
+  try { autoImportV1(); } catch(e){ dbgWarn('[ensureDefaults v1]', e); }
 
   let changed = false;
 
@@ -2734,7 +2759,7 @@ function ensureDefaultsAndDemo(){
       createdAt: Date.now()
     }];
     changed = true;
-    console.log('[v3] 建立預設管理員帳號 admin / admin123');
+    dbg('[v3] 建立預設管理員帳號 admin / admin123');
   }
 
   // 預設課程
@@ -2780,7 +2805,7 @@ function ensureDefaultsAndDemo(){
       };
     });
     changed = true;
-    console.log('[v3] 建立 20 位示範學生');
+    dbg('[v3] 建立 20 位示範學生');
   }
 
   if(changed) saveDB();
@@ -3029,7 +3054,7 @@ const Sync = (() => {
         _scheduleRerender();
         // batch 3: 收到其它裝置 push 來的新項 → 觸發桌面通知
         if(isNew){
-          try { dispatchInboundNotify(node, v); } catch(e){ console.warn('[notify dispatch]', e); }
+          try { dispatchInboundNotify(node, v); } catch(e){ dbgWarn('[notify dispatch]', e); }
         }
       });
 
@@ -3281,7 +3306,7 @@ function notify(title, body, options){
     }
     return n;
   } catch(e){
-    console.warn('[notify]', e);
+    dbgWarn('[notify]', e);
     return null;
   }
 }
@@ -3366,7 +3391,7 @@ function scheduleDueReminders(){
           { type:'dueReminder', tag:'due-' + asg.id, url:'sasgn/' + asg.id });
         try { localStorage.setItem(key, '1'); } catch(e){_swallow('auto',e)}
       });
-    } catch(e){ console.warn('[dueReminder]', e); }
+    } catch(e){ dbgWarn('[dueReminder]', e); }
   }
   // batch 2-stab: managed timer 版本（登出 / 切教室時被一起回收）
   App._dueReminderTimer = setIntervalManaged(check, 3600 * 1000); // 1 hr
@@ -3866,7 +3891,7 @@ async function gdUpload(file, folderId){
       headers: { Authorization: 'Bearer ' + _gdToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: 'reader', type: 'anyone' })
     });
-  } catch(e){ console.warn('[gdUpload permission]', e); }
+  } catch(e){ dbgWarn('[gdUpload permission]', e); }
 
   return data;
 }
@@ -3950,7 +3975,7 @@ async function attachUpload(file){
         storedAt: Date.now()
       };
     } catch(e){
-      console.warn('[Drive upload failed, fallback to IDB]', e);
+      dbgWarn('[Drive upload failed, fallback to IDB]', e);
       if(file.size > ATTACH_MAX_SIZE){
         throw new Error('Drive 上傳失敗且本機容量不足：' + e.message);
       }
@@ -4037,7 +4062,7 @@ async function attachPreview(meta){
 async function attachDelete(meta){
   if(!meta) return;
   if((meta.storage === 'drive' || meta.driveFileId) && meta.driveFileId){
-    try { await gdDelete(meta.driveFileId); } catch(e){ console.warn('[gdDelete]', e); }
+    try { await gdDelete(meta.driveFileId); } catch(e){ dbgWarn('[gdDelete]', e); }
     return;
   }
   if(meta.key){
@@ -4064,7 +4089,7 @@ async function migrateAttachIfNeeded(meta){
         migrated: true
       };
     } catch(e){
-      console.warn('[migrate attach]', e);
+      dbgWarn('[migrate attach]', e);
       return meta;
     }
   }
@@ -4132,7 +4157,7 @@ function requestPersistentStorage(){
   navigator.storage.persisted().then(p => {
     if(p) return;
     navigator.storage.persist().then(g => {
-      if(g) console.log('[storage] 已取得持久化權限');
+      if(g) dbg('[storage] 已取得持久化權限');
     }).catch(() => {});
   }).catch(() => {});
 }
@@ -4163,6 +4188,14 @@ function downloadPDF(title, htmlContent){
 /* ════════════════════════════════════════════════════════════
    PHASE 2: SVG CHART HELPERS
    ──────────────────────────────────────────────────────────── */
+// L2: 把 HTML 字串轉為 DOM 節點後 appendChild，避免 innerHTML += 重建整個子樹（會破壞已綁定事件）
+function _appendHTML(parent, html){
+  if(!parent || !html) return;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html);
+  // 用 template.content 取得 fragment 一次插入
+  parent.appendChild(tpl.content);
+}
 function lineChart(data, opts={}){
   // data: array of {label, value} or numbers
   if(!data || !data.length) return '<div class="empty"><div class="ico">📊</div><div>無資料</div></div>';
@@ -4556,7 +4589,7 @@ async function _hashLoginToken(tok){
   try { return await _hashLegacy(tok); } catch(e){ _swallow('hashLoginToken', e); return ''; }
 }
 
-const LOGIN_TOKEN_TTL_MS = 7 * 24 * 3600 * 1000;
+const LOGIN_TOKEN_TTL_MS = LOGIN_TOKEN_MS;  // L3: 使用常數區 LOGIN_TOKEN_MS
 
 // 移除過期的 loginTokens（純函式，呼叫端決定何時 saveDB）
 function _cleanExpiredTokens(arr){
@@ -4851,10 +4884,35 @@ function renderLoginTeacherStage(){
   const submit = async ()=>{
     const u = i1.value.trim(); const pw = i2.value;
     if(!u || !pw){ toast('請輸入帳號和密碼','danger'); return; }
+    // L1: 登入前先檢查鎖定狀態（與忘記密碼共用同一個帳號計數器）
+    if(isForgotLocked(u)){
+      const l = getForgotLock(u);
+      const left = Math.max(0, l.lockedUntil - Date.now());
+      toast('嘗試次數過多，請於 ' + fmtLockRemain(left) + ' 後再試', 'danger');
+      return;
+    }
     const candidate = App.db.accounts.find(x => x.username === u);
-    if(!candidate){ toast('帳號或密碼錯誤','danger'); return; }
+    if(!candidate){
+      // L1: 帳號不存在也計入鎖定（避免暴力枚舉帳號）
+      const l = incForgotLock(u);
+      const remain = Math.max(0, FORGOT_LOCK_MAX - l.count);
+      toast('帳號或密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
+      return;
+    }
     const ok = await verifyPassword(pw, candidate.password);
-    if(!ok){ toast('帳號或密碼錯誤','danger'); return; }
+    if(!ok){
+      // L1: 密碼錯誤計入鎖定
+      const l = incForgotLock(u);
+      const remain = Math.max(0, FORGOT_LOCK_MAX - l.count);
+      if(remain === 0){
+        toast('嘗試次數過多，帳號已鎖定 60 分鐘','danger');
+      } else {
+        toast('帳號或密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
+      }
+      return;
+    }
+    // L1: 登入成功 → 清除鎖定計數
+    clearForgotLock(u);
     // 自動升級：若非 v2$ 新格式（明文 / 'plain:' / 舊 64 hex 共用 salt）→ 升級到 per-account salt
     if(!isPasswordV2(candidate.password)){
       try {
@@ -4990,10 +5048,17 @@ function maskEmail(email){
   return shown + '***' + domain;
 }
 
-// 產生 6 位數 OTP
-function genOTP6(){
+// 產生 6 位數 OTP（L5: 改用 crypto.getRandomValues，避免 Math.random 可預測性）
+function genCode6(){
+  if(typeof crypto !== 'undefined' && crypto.getRandomValues){
+    const buf = new Uint8Array(3);
+    crypto.getRandomValues(buf);
+    return String((buf[0]<<16 | buf[1]<<8 | buf[2]) % 1000000).padStart(6, '0');
+  }
+  // fallback：舊環境
   return String(Math.floor(100000 + Math.random()*900000));
 }
+function genOTP6(){ return genCode6(); }
 
 // 產生 8 碼恢復碼（英數字，4-4 分組，例：ABCD-1234）
 function genRecoveryCode(){
@@ -6012,16 +6077,36 @@ function renderLoginStudentStage(){
     if(!sid) return toast('請選擇你的姓名', 'warning');
     const pw = iPw.value;
     if(!pw) return toast('請輸入密碼', 'warning');
+    // L1: 學生 lockout key 用 'stu:' + cls + ':' + sid（避免和老師帳號互相干擾）
+    const lockKey = 'stu:' + selCls.value + ':' + sid;
+    if(isForgotLocked(lockKey)){
+      const l = getForgotLock(lockKey);
+      const left = Math.max(0, l.lockedUntil - Date.now());
+      toast('嘗試次數過多，請於 ' + fmtLockRemain(left) + ' 後再試', 'danger');
+      return;
+    }
     const s = App.db.students.find(x => x.id === sid);
-    if(!s) return toast('學生不存在','danger');
+    if(!s){
+      incForgotLock(lockKey);
+      return toast('學生不存在','danger');
+    }
     const stored = s.password || s.pass || (String(s.sid||'0000').slice(-4));
     const ok = await verifyPassword(pw, stored);
     if(!ok){
-      toast('密碼錯誤','danger');
+      // L1: 密碼錯誤計入鎖定
+      const l = incForgotLock(lockKey);
+      const remain = Math.max(0, FORGOT_LOCK_MAX - l.count);
+      if(remain === 0){
+        toast('嘗試次數過多，帳號已鎖定 60 分鐘','danger');
+      } else {
+        toast('密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
+      }
       iPw.value = '';
       iPw.focus();
       return;
     }
+    // L1: 登入成功 → 清除鎖定計數
+    clearForgotLock(lockKey);
     // 自動升級為 v2$ per-account salt 雜湊
     // Round 2 M10：先算新 hash 並驗證格式正確才覆蓋，避免 hashPassword 失敗時把舊明文當 hash 存回 DB
     if(!isPasswordV2(s.password)){
@@ -6948,7 +7033,7 @@ function rOv(content){
         '已簽到 ' + todayAtt.length + ' 人 · 上課中 ' + stillIn + ' · 已簽退 ' + signedOut));
       content.appendChild(detailCard);
     }
-  } catch(e){ console.warn('[overview today detail]', e); }
+  } catch(e){ dbgWarn('[overview today detail]', e); }
 
   // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考
   try {
@@ -7010,7 +7095,7 @@ function rOv(content){
         ));
       }
     }
-  } catch(e){ console.warn('[overview batch4 cards]', e); }
+  } catch(e){ dbgWarn('[overview batch4 cards]', e); }
 
   // pending registrations
   if(isOverviewVisible('pending') && App.db.pending && App.db.pending.length){
@@ -9603,7 +9688,7 @@ function rSettings(content){
   content.appendChild(card);
 
   // batch 4-22：學期設定
-  try { content.appendChild(renderSemesterCard()); } catch(e){ console.warn('[semester card]', e); }
+  try { content.appendChild(renderSemesterCard()); } catch(e){ dbgWarn('[semester card]', e); }
 
   // ─── 出席狀態管理（batch 1）─────────────────────────────────
   content.appendChild(renderAttendanceStatusesCard());
@@ -9775,7 +9860,7 @@ function rSettings(content){
     const installWrap = el('div', { style:{marginTop:'12px'} });
     installWrap.appendChild(renderInstallCard());
     content.appendChild(installWrap);
-  } catch(e){ console.warn('[install card]', e); }
+  } catch(e){ dbgWarn('[install card]', e); }
 
   // danger zone
   const card4 = el('div', { class:'card', style:{marginTop:'12px',borderColor:'var(--danger)'} });
@@ -11952,12 +12037,12 @@ function rAnalyticsHealth(content){
   const stats = computeTodayStats();
   const donutCard = el('div', { class:'chart-card', style:{marginTop:'12px'} });
   donutCard.appendChild(el('h3', null, '🎯 今日班況分布'));
-  donutCard.innerHTML += donutChart([
+  _appendHTML(donutCard, donutChart([
     { label:'已簽', value: stats.signed, color:'var(--success)' },
     { label:'未簽', value: stats.absent, color:'var(--danger)' },
     { label:'請假', value: stats.leave, color:'var(--accent)' }
-  ], { label:'今日' });
-  donutCard.innerHTML += '<div class="chart-legend"><span class="lg"><span class="sw" style="background:var(--success)"></span>已簽 '+stats.signed+'</span><span class="lg"><span class="sw" style="background:var(--danger)"></span>未簽 '+stats.absent+'</span><span class="lg"><span class="sw" style="background:var(--accent)"></span>請假 '+stats.leave+'</span></div>';
+  ], { label:'今日' }));
+  _appendHTML(donutCard, '<div class="chart-legend"><span class="lg"><span class="sw" style="background:var(--success)"></span>已簽 '+stats.signed+'</span><span class="lg"><span class="sw" style="background:var(--danger)"></span>未簽 '+stats.absent+'</span><span class="lg"><span class="sw" style="background:var(--accent)"></span>請假 '+stats.leave+'</span></div>');
   content.appendChild(donutCard);
 }
 
@@ -12025,13 +12110,13 @@ function rAnalyticsDist(content){
   });
   content.appendChild(el('h2', null, '📊 成績分布'));
   const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
-  card.innerHTML += barChart([
+  _appendHTML(card, barChart([
     { label:'0-59', value: buckets[0] },
     { label:'60-69', value: buckets[1] },
     { label:'70-79', value: buckets[2] },
     { label:'80-89', value: buckets[3] },
     { label:'90-100', value: buckets[4] }
-  ], { colors:['var(--danger)','var(--warn)','#facc15','var(--success)','var(--primary)'] });
+  ], { colors:['var(--danger)','var(--warn)','#facc15','var(--success)','var(--primary)'] }));
   content.appendChild(card);
 }
 
@@ -12051,7 +12136,7 @@ function rAnalyticsTrend(content){
   });
   content.appendChild(el('h2', null, '📈 14 日出席率趨勢'));
   const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
-  card.innerHTML += lineChart(data, { max:100, min:0 });
+  _appendHTML(card, lineChart(data, { max:100, min:0 }));
   content.appendChild(card);
 }
 
@@ -12075,17 +12160,17 @@ function rAnalyticsCompare(content){
 
   const card1 = el('div', { class:'chart-card', style:{marginTop:'10px'} });
   card1.appendChild(el('h3', null, '出席率比較'));
-  card1.innerHTML += barChart(data.map(d => ({ label:d.label, value:d.att })), { max:100 });
+  _appendHTML(card1, barChart(data.map(d => ({ label:d.label, value:d.att })), { max:100 }));
   content.appendChild(card1);
 
   const card2 = el('div', { class:'chart-card', style:{marginTop:'10px'} });
   card2.appendChild(el('h3', null, '繳交率比較'));
-  card2.innerHTML += barChart(data.map(d => ({ label:d.label, value:d.sub })), { max:100, colors: data.map(()=>'var(--accent)') });
+  _appendHTML(card2, barChart(data.map(d => ({ label:d.label, value:d.sub })), { max:100, colors: data.map(()=>'var(--accent)') }));
   content.appendChild(card2);
 
   const card3 = el('div', { class:'chart-card', style:{marginTop:'10px'} });
   card3.appendChild(el('h3', null, '平均成績比較'));
-  card3.innerHTML += barChart(data.map(d => ({ label:d.label, value:d.grade })), { max:100, colors: data.map(()=>'var(--success)') });
+  _appendHTML(card3, barChart(data.map(d => ({ label:d.label, value:d.grade })), { max:100, colors: data.map(()=>'var(--success)') }));
   content.appendChild(card3);
 }
 
@@ -12600,9 +12685,16 @@ async function wsCreateNew(){
    ──────────────────────────────────────────────────────────── */
 function genAttCode(){
   // 6-char base32 token, valid for 5 min
+  // L5: 改用 crypto.getRandomValues（避免 Math.random 可預測造成簽到碼被猜）
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let s = '';
-  for(let i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  if(typeof crypto !== 'undefined' && crypto.getRandomValues){
+    const buf = new Uint8Array(6);
+    crypto.getRandomValues(buf);
+    for(let i=0;i<6;i++) s += chars[buf[i] % chars.length];
+  } else {
+    for(let i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  }
   return s;
 }
 
@@ -13511,7 +13603,7 @@ function backupCreate(label){
     try { localStorage.setItem(LS_BACKUP_LAST, today); } catch(e){_swallow('auto',e)}
     return key;
   } catch(e){
-    console.warn('backup failed', e);
+    dbgWarn('backup failed', e);
     return null;
   }
 }
@@ -14217,7 +14309,7 @@ function rAnTrend(content){
   });
   const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
   card.appendChild(el('h3', null, '每日平均分數'));
-  card.innerHTML += lineChart(data, { max:100, min:0 });
+  _appendHTML(card, lineChart(data, { max:100, min:0 }));
   content.appendChild(card);
 
   // per-assignment avg
@@ -14229,7 +14321,7 @@ function rAnTrend(content){
     return { label: (a.title||'').slice(0,8), value: avg };
   });
   if(asgData.length){
-    card2.innerHTML += barChart(asgData, { max:100 });
+    _appendHTML(card2, barChart(asgData, { max:100 }));
   } else {
     card2.appendChild(emptyState({icon:'📋',title:'尚無已批改作業'}));
   }
@@ -14399,8 +14491,8 @@ function rAnPattern(content){
   }));
   const card = el('div', { class:'chart-card', style:{marginTop:'10px'} });
   card.appendChild(el('h3', null, '各週天出席率'));
-  card.innerHTML += barChart(data, { max:100,
-    colors: data.map(d => d.value < 60 ? 'var(--danger)' : d.value < 80 ? 'var(--warn)' : 'var(--success)') });
+  _appendHTML(card, barChart(data, { max:100,
+    colors: data.map(d => d.value < 60 ? 'var(--danger)' : d.value < 80 ? 'var(--warn)' : 'var(--success)') }));
   content.appendChild(card);
 
   // most-absent date list
@@ -16136,6 +16228,17 @@ function showPwaInstallChip(){
 function rerender(){
   const root = $('#root');
 
+  // L9: 若上次 saveDB 因容量不足做了截斷 → 提示使用者匯出備份
+  try {
+    if(App.db && App.db._truncWarning && !App._truncShown){
+      App._truncShown = true;
+      setTimeout(()=> {
+        try { toast('⚠️ 儲存空間不足，部分資料已自動清理。建議匯出備份後手動清理舊資料', 'warning', 8000); }
+        catch(_){_swallow('truncToast', _)}
+      }, 1000);
+    }
+  } catch(e){ _swallow('truncWarning', e); }
+
   // 自動初始化：不再跳設定精靈，直接進登入頁
   if(!App.cfg){
     // 固定教室代碼 DEMO01，不會每次變
@@ -16281,199 +16384,208 @@ function rerender(){
 /* ════════════════════════════════════════════════════════════
    BOOT
    ──────────────────────────────────────────────────────────── */
-function boot(){
+// L8: 從 boot() 抽出的 adminreset 處理流程（原為 ~185 行 inline 區塊）
+// 回傳 true 表示 boot 應該中止（已接管 document.body）
+function handleAdminResetUrl(){
+  if(location.search.indexOf('adminreset=1') < 0) return false;
   // ═══ 老師密碼重設專用 URL（batch 1 強化：身分驗證 + 失敗鎖定）═══
   // 訪問 ?adminreset=1 →
   //   ・首次使用（無非預設帳號）：直接重設（救急用）
   //   ・否則：必須提供任一現有老師帳號密碼 或 Firebase 同步代碼
   //   ・連續 3 次失敗 → 鎖定 5 分鐘
-  try {
-    if(location.search.indexOf('adminreset=1') >= 0){
-      (async function(){
-        // 1) 先判斷是否已有「非預設」帳號（不是 admin/admin123 明文 或 admin 雜湊）
-        let hasNonDefault = false;
-        const defaultAdminHashes = new Set(); // 預設密碼的雜湊（若 crypto 可用，計算一次）
+  (async function(){
+    // 1) 先判斷是否已有「非預設」帳號（不是 admin/admin123 明文 或 admin 雜湊）
+    let hasNonDefault = false;
+    const defaultAdminHashes = new Set(); // 預設密碼的雜湊（若 crypto 可用，計算一次）
+    try {
+      if(crypto && crypto.subtle){
+        const enc = new TextEncoder();
+        const buf = await crypto.subtle.digest('SHA-256', enc.encode('cms-v3-salt-admin123'));
+        const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+        defaultAdminHashes.add(hex);
+      }
+    } catch(e){_swallow('auto',e)}
+    try {
+      for(let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if(k && k.indexOf('cms_v3_db_') === 0){
+          const db = JSON.parse(localStorage.getItem(k) || 'null');
+          if(db && Array.isArray(db.accounts)){
+            for(const a of db.accounts){
+              if(!a) continue;
+              const isDefaultUser = (a.username === 'admin');
+              const stored = String(a.password || '');
+              const isPlainDefault = stored === 'admin123';
+              const isHashedDefault = defaultAdminHashes.has(stored.toLowerCase());
+              if(!(isDefaultUser && (isPlainDefault || isHashedDefault))){
+                hasNonDefault = true; break;
+              }
+            }
+          }
+          if(hasNonDefault) break;
+        }
+      }
+    } catch(e){_swallow('auto',e)}
+
+    if(hasNonDefault){
+      // 2) 鎖定檢查
+      const lockUntil = parseInt(localStorage.getItem('cms_v3_adminreset_lock') || '0', 10);
+      if(Date.now() < lockUntil){
+        const mins = Math.ceil((lockUntil - Date.now())/60000);
+        document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
+          + '<div style="font-size:64px;margin-bottom:20px">⛔</div>'
+          + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">已鎖定</h1>'
+          + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">因連續驗證失敗，請於 <b>' + mins + ' 分鐘</b> 後再試。</div>'
+          + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">← 返回登入</a>'
+          + '</div>';
+        return;
+      }
+
+      // 3) 要求驗證：老師帳密 或 Firebase 同步代碼（教室代碼）
+      const u = prompt(
+        '🔒 安全驗證\n\n' +
+        '請輸入任一「現有老師帳號」以證明你是合法管理員：\n\n' +
+        '帳號（或留空後按「確定」改用 Firebase 同步代碼驗證）：'
+      );
+      if(u === null){ location.replace(location.pathname); return; }
+      let verified = false;
+      const trimmedU = (u || '').trim();
+      if(trimmedU === ''){
+        // 改用 Firebase 同步代碼
+        const code = prompt('請輸入 Firebase 同步代碼（roomCode）：');
+        if(code === null){ location.replace(location.pathname); return; }
         try {
-          if(crypto && crypto.subtle){
-            const enc = new TextEncoder();
-            const buf = await crypto.subtle.digest('SHA-256', enc.encode('cms-v3-salt-admin123'));
-            const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-            defaultAdminHashes.add(hex);
+          const cfgRaw = localStorage.getItem('cms_v3_cfg');
+          if(cfgRaw){
+            const cfg = JSON.parse(cfgRaw);
+            if(cfg && cfg.roomCode && String(cfg.roomCode) === String(code).trim()){
+              verified = true;
+            }
+          }
+          // 也允許比對任一 db key 中的 room
+          if(!verified){
+            for(let i=0; i<localStorage.length; i++){
+              const k = localStorage.key(i);
+              if(k && k.indexOf('cms_v3_db_') === 0){
+                const room = k.substring('cms_v3_db_'.length);
+                if(room && room === String(code).trim()){ verified = true; break; }
+              }
+            }
           }
         } catch(e){_swallow('auto',e)}
+      } else {
+        const p = prompt('密碼：');
+        if(p === null){ location.replace(location.pathname); return; }
         try {
-          for(let i=0; i<localStorage.length; i++){
+          for(let i=0; i<localStorage.length && !verified; i++){
             const k = localStorage.key(i);
             if(k && k.indexOf('cms_v3_db_') === 0){
               const db = JSON.parse(localStorage.getItem(k) || 'null');
-              if(db && Array.isArray(db.accounts)){
-                for(const a of db.accounts){
-                  if(!a) continue;
-                  const isDefaultUser = (a.username === 'admin');
-                  const stored = String(a.password || '');
-                  const isPlainDefault = stored === 'admin123';
-                  const isHashedDefault = defaultAdminHashes.has(stored.toLowerCase());
-                  if(!(isDefaultUser && (isPlainDefault || isHashedDefault))){
-                    hasNonDefault = true; break;
-                  }
+              if(!db || !Array.isArray(db.accounts)) continue;
+              const acc = db.accounts.find(a => a && a.username === trimmedU);
+              if(!acc) continue;
+              const stored = String(acc.password || '');
+              let match = false;
+              if(/^[0-9a-f]{64}$/i.test(stored)){
+                if(crypto && crypto.subtle){
+                  const enc = new TextEncoder();
+                  const buf = await crypto.subtle.digest('SHA-256', enc.encode('cms-v3-salt-' + p));
+                  const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+                  match = hex === stored.toLowerCase();
                 }
-              }
-              if(hasNonDefault) break;
-            }
-          }
-        } catch(e){_swallow('auto',e)}
-
-        if(hasNonDefault){
-          // 2) 鎖定檢查
-          const lockUntil = parseInt(localStorage.getItem('cms_v3_adminreset_lock') || '0', 10);
-          if(Date.now() < lockUntil){
-            const mins = Math.ceil((lockUntil - Date.now())/60000);
-            document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
-              + '<div style="font-size:64px;margin-bottom:20px">⛔</div>'
-              + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">已鎖定</h1>'
-              + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">因連續驗證失敗，請於 <b>' + mins + ' 分鐘</b> 後再試。</div>'
-              + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">← 返回登入</a>'
-              + '</div>';
-            return;
-          }
-
-          // 3) 要求驗證：老師帳密 或 Firebase 同步代碼（教室代碼）
-          const u = prompt(
-            '🔒 安全驗證\n\n' +
-            '請輸入任一「現有老師帳號」以證明你是合法管理員：\n\n' +
-            '帳號（或留空後按「確定」改用 Firebase 同步代碼驗證）：'
-          );
-          if(u === null){ location.replace(location.pathname); return; }
-          let verified = false;
-          const trimmedU = (u || '').trim();
-          if(trimmedU === ''){
-            // 改用 Firebase 同步代碼
-            const code = prompt('請輸入 Firebase 同步代碼（roomCode）：');
-            if(code === null){ location.replace(location.pathname); return; }
-            try {
-              const cfgRaw = localStorage.getItem('cms_v3_cfg');
-              if(cfgRaw){
-                const cfg = JSON.parse(cfgRaw);
-                if(cfg && cfg.roomCode && String(cfg.roomCode) === String(code).trim()){
-                  verified = true;
-                }
-              }
-              // 也允許比對任一 db key 中的 room
-              if(!verified){
-                for(let i=0; i<localStorage.length; i++){
-                  const k = localStorage.key(i);
-                  if(k && k.indexOf('cms_v3_db_') === 0){
-                    const room = k.substring('cms_v3_db_'.length);
-                    if(room && room === String(code).trim()){ verified = true; break; }
-                  }
-                }
-              }
-            } catch(e){_swallow('auto',e)}
-          } else {
-            const p = prompt('密碼：');
-            if(p === null){ location.replace(location.pathname); return; }
-            try {
-              for(let i=0; i<localStorage.length && !verified; i++){
-                const k = localStorage.key(i);
-                if(k && k.indexOf('cms_v3_db_') === 0){
-                  const db = JSON.parse(localStorage.getItem(k) || 'null');
-                  if(!db || !Array.isArray(db.accounts)) continue;
-                  const acc = db.accounts.find(a => a && a.username === trimmedU);
-                  if(!acc) continue;
-                  const stored = String(acc.password || '');
-                  let match = false;
-                  if(/^[0-9a-f]{64}$/i.test(stored)){
-                    if(crypto && crypto.subtle){
-                      const enc = new TextEncoder();
-                      const buf = await crypto.subtle.digest('SHA-256', enc.encode('cms-v3-salt-' + p));
-                      const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-                      match = hex === stored.toLowerCase();
-                    }
-                  } else if(stored.indexOf('plain:') === 0){
-                    match = stored.slice(6) === p;
-                  } else {
-                    match = stored === p;
-                  }
-                  if(match){ verified = true; break; }
-                }
-              }
-            } catch(e){_swallow('auto',e)}
-          }
-
-          if(!verified){
-            const fails = parseInt(localStorage.getItem('cms_v3_adminreset_fails') || '0', 10) + 1;
-            try { localStorage.setItem('cms_v3_adminreset_fails', String(fails)); } catch(e){_swallow('auto',e)}
-            if(fails >= 3){
-              try {
-                localStorage.setItem('cms_v3_adminreset_lock', String(Date.now() + 5*60*1000));
-                localStorage.removeItem('cms_v3_adminreset_fails');
-              } catch(e){_swallow('auto',e)}
-            }
-            const remain = Math.max(0, 3 - fails);
-            document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
-              + '<div style="font-size:64px;margin-bottom:20px">❌</div>'
-              + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">驗證失敗</h1>'
-              + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">剩餘嘗試 <b>' + remain + '</b> 次<br>連續 3 次失敗將鎖定 5 分鐘</div>'
-              + '<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">'
-              + '<a href="' + location.pathname + '?adminreset=1" style="background:#dc2626;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600">重試</a>'
-              + '<a href="' + location.pathname + '" style="background:#6b7280;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600">返回</a>'
-              + '</div></div>';
-            return;
-          }
-          try { localStorage.removeItem('cms_v3_adminreset_fails'); } catch(e){_swallow('auto',e)}
-        }
-
-        // 4) 通過驗證（或無非預設帳號）→ 執行重設
-        if('serviceWorker' in navigator){
-          navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
-        }
-        if('caches' in window){
-          caches.keys().then(names => names.forEach(n => caches.delete(n)));
-        }
-        let resetCount = 0;
-        for(let i = 0; i < localStorage.length; i++){
-          const k = localStorage.key(i);
-          if(k && k.indexOf('cms_v3_db_') === 0){
-            try {
-              const db = JSON.parse(localStorage.getItem(k));
-              db.accounts = db.accounts || [];
-              let acc = db.accounts.find(a => a.username === 'admin');
-              if(!acc) acc = db.accounts[0];
-              if(acc){
-                acc.username = 'admin';
-                acc.password = 'admin123';  // 登入時自動升級為 hash
-                acc.role = 'teacher';
-                acc.mustChangePw = true;    // batch 1：登入後強制改密碼
-                if(!acc.name) acc.name = '管理員';
+              } else if(stored.indexOf('plain:') === 0){
+                match = stored.slice(6) === p;
               } else {
-                db.accounts.push({
-                  id: Date.now(),
-                  username: 'admin', password: 'admin123',
-                  name: '管理員', role: 'teacher',
-                  mustChangePw: true,       // batch 1：登入後強制改密碼
-                  createdAt: Date.now()
-                });
+                match = stored === p;
               }
-              localStorage.setItem(k, JSON.stringify(db));
-              resetCount++;
-            } catch(e){_swallow('auto',e)}
+              if(match){ verified = true; break; }
+            }
           }
-        }
-        try {
-          localStorage.removeItem('cms_v3_session');
-          localStorage.removeItem('cms_v3_remember');
         } catch(e){_swallow('auto',e)}
+      }
+
+      if(!verified){
+        const fails = parseInt(localStorage.getItem('cms_v3_adminreset_fails') || '0', 10) + 1;
+        try { localStorage.setItem('cms_v3_adminreset_fails', String(fails)); } catch(e){_swallow('auto',e)}
+        if(fails >= 3){
+          try {
+            localStorage.setItem('cms_v3_adminreset_lock', String(Date.now() + 5*60*1000));
+            localStorage.removeItem('cms_v3_adminreset_fails');
+          } catch(e){_swallow('auto',e)}
+        }
+        const remain = Math.max(0, 3 - fails);
         document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
-          + '<div style="font-size:64px;margin-bottom:20px">✅</div>'
-          + '<h1 style="font-size:24px;margin:0 0 10px;color:#16a34a">老師密碼已重設！</h1>'
-          + '<div style="font-size:16px;color:#666;margin-bottom:20px;line-height:1.8">已重設 ' + resetCount + ' 個工作區的老師密碼<br><br>'
-          + '<span style="background:#dbeafe;color:#1e40af;padding:8px 16px;border-radius:8px;font-weight:600">帳號：admin<br>密碼：admin123</span></div>'
-          + '<div style="font-size:14px;color:#999;margin-bottom:30px">所有學生資料、出席紀錄都已保留<br>建議登入後立即修改密碼</div>'
-          + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 前往登入頁</a>'
-          + '</div>';
-      })();
-      return;
+          + '<div style="font-size:64px;margin-bottom:20px">❌</div>'
+          + '<h1 style="font-size:24px;margin:0 0 10px;color:#dc2626">驗證失敗</h1>'
+          + '<div style="font-size:16px;color:#666;margin-bottom:30px;line-height:1.8">剩餘嘗試 <b>' + remain + '</b> 次<br>連續 3 次失敗將鎖定 5 分鐘</div>'
+          + '<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">'
+          + '<a href="' + location.pathname + '?adminreset=1" style="background:#dc2626;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600">重試</a>'
+          + '<a href="' + location.pathname + '" style="background:#6b7280;color:#fff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:600">返回</a>'
+          + '</div></div>';
+        return;
+      }
+      try { localStorage.removeItem('cms_v3_adminreset_fails'); } catch(e){_swallow('auto',e)}
     }
+
+    // 4) 通過驗證（或無非預設帳號）→ 執行重設
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+    }
+    if('caches' in window){
+      caches.keys().then(names => names.forEach(n => caches.delete(n)));
+    }
+    let resetCount = 0;
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.indexOf('cms_v3_db_') === 0){
+        try {
+          const db = JSON.parse(localStorage.getItem(k));
+          db.accounts = db.accounts || [];
+          let acc = db.accounts.find(a => a.username === 'admin');
+          if(!acc) acc = db.accounts[0];
+          if(acc){
+            acc.username = 'admin';
+            acc.password = 'admin123';  // 登入時自動升級為 hash
+            acc.role = 'teacher';
+            acc.mustChangePw = true;    // batch 1：登入後強制改密碼
+            if(!acc.name) acc.name = '管理員';
+          } else {
+            db.accounts.push({
+              id: Date.now(),
+              username: 'admin', password: 'admin123',
+              name: '管理員', role: 'teacher',
+              mustChangePw: true,       // batch 1：登入後強制改密碼
+              createdAt: Date.now()
+            });
+          }
+          localStorage.setItem(k, JSON.stringify(db));
+          resetCount++;
+        } catch(e){_swallow('auto',e)}
+      }
+    }
+    try {
+      localStorage.removeItem('cms_v3_session');
+      localStorage.removeItem('cms_v3_remember');
+    } catch(e){_swallow('auto',e)}
+    document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
+      + '<div style="font-size:64px;margin-bottom:20px">✅</div>'
+      + '<h1 style="font-size:24px;margin:0 0 10px;color:#16a34a">老師密碼已重設！</h1>'
+      + '<div style="font-size:16px;color:#666;margin-bottom:20px;line-height:1.8">已重設 ' + resetCount + ' 個工作區的老師密碼<br><br>'
+      + '<span style="background:#dbeafe;color:#1e40af;padding:8px 16px;border-radius:8px;font-weight:600">帳號：admin<br>密碼：admin123</span></div>'
+      + '<div style="font-size:14px;color:#999;margin-bottom:30px">所有學生資料、出席紀錄都已保留<br>建議登入後立即修改密碼</div>'
+      + '<a href="' + location.pathname + '" style="background:#2563eb;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:600;font-size:16px;display:inline-block">→ 前往登入頁</a>'
+      + '</div>';
+  })();
+  return true;
+}
+
+function boot(){
+  // L10: 防雙觸發（DOMContentLoaded + readyState 兩個入口同時觸發）
+  if(App._booted) return;
+  App._booted = true;
+  try {
+    // L8: adminreset 邏輯已抽到 handleAdminResetUrl()
+    if(handleAdminResetUrl()) return;
     if(location.search.indexOf('reset=1') >= 0){
       // 批次 6 資安修補：原本的 ?reset=1 完全沒有驗證，任何人開啟此 URL 就能清空所有資料。
       // 現在改為「拒絕直接執行」，引導使用者改走需要主老師密碼的 ?adminreset=1 流程。
@@ -16494,7 +16606,7 @@ function boot(){
         '</div>';
       return;
     }
-  } catch(e){ console.warn('[reset]', e); }
+  } catch(e){ dbgWarn('[reset]', e); }
 
   // theme + appearance
   loadAppearance();
@@ -16524,7 +16636,7 @@ function boot(){
   wsRegisterCurrent();
 
   // 確保有管理員帳號 + 學生資料
-  try { ensureDefaultsAndDemo(); } catch(e){ console.warn('[v3 defaults]', e); }
+  try { ensureDefaultsAndDemo(); } catch(e){ dbgWarn('[v3 defaults]', e); }
 
   // route from hash if present (and not a join hash we already consumed)
   if(!handled){
@@ -16547,7 +16659,7 @@ function boot(){
   rerender();
 
   // batch 4: 套用背景設定（圖片、顏色、透明度）
-  try { applyBranding(); } catch(e){ console.warn('[applyBranding]', e); }
+  try { applyBranding(); } catch(e){ dbgWarn('[applyBranding]', e); }
 
   // V1 import toast (after first render so the user actually sees it)
   if(App._v1ImportedCount){
@@ -16567,15 +16679,15 @@ function boot(){
   schedulePeriodicNotifications();
 
   // batch 3: 啟動學生端「作業到期」桌面通知排程
-  try { scheduleDueReminders(); } catch(e){ console.warn('[scheduleDueReminders]', e); }
+  try { scheduleDueReminders(); } catch(e){ dbgWarn('[scheduleDueReminders]', e); }
 
   // ═══ IndexedDB 持久化 + 舊版 attach 自動遷移 ═══
   try { requestPersistentStorage(); } catch(e){_swallow('auto',e)}
   setTimeout(async () => {
     try {
       const n = await migrateAllAttachments();
-      if(n > 0) console.log('[v3] 已移轉 ' + n + ' 個附件到 IndexedDB');
-    } catch(e){ console.warn('[migrate]', e); }
+      if(n > 0) dbg('[v3] 已移轉 ' + n + ' 個附件到 IndexedDB');
+    } catch(e){ dbgWarn('[migrate]', e); }
   }, 2500);
 
   // Round 2 M1：一次性清掉「最近使用」舊 localStorage key
@@ -17962,7 +18074,7 @@ function exportAttReportCSV(){
     a2.href = url2;
     a2.download = '出席明細_簽到簽退_' + (App._attRange.from||'all') + '_' + (App._attRange.to||'all') + '.csv';
     setTimeout(()=> { a2.click(); setTimeout(()=> URL.revokeObjectURL(url2), 1000); }, 500);
-  } catch(e){ console.warn('[exportAttReportCSV detail]', e); }
+  } catch(e){ dbgWarn('[exportAttReportCSV detail]', e); }
 
   toast('已匯出 CSV (彙總 + 簽到簽退明細)','success');
 }
@@ -18253,7 +18365,7 @@ function rAppearance(content){
   content.appendChild(c6);
 
   // ── 7：背景設定（沿用既有卡片）──────────────────────────
-  try { content.appendChild(renderBrandingCard()); } catch(e){ console.warn('[brandingCard]', e); }
+  try { content.appendChild(renderBrandingCard()); } catch(e){ dbgWarn('[brandingCard]', e); }
 
   // ── 8：重置 ──────────────────────────────────────────────
   const cR = el('div', { class:'card', style:{marginTop:'12px',borderColor:'var(--danger-soft)'} });
@@ -18418,7 +18530,7 @@ async function applyBranding(){
         body.style.backgroundRepeat = 'no-repeat';
         return;
       }
-    } catch(e){ console.warn('[applyBranding]', e); }
+    } catch(e){ dbgWarn('[applyBranding]', e); }
   }
   // 沒背景圖
   body.style.backgroundImage = '';
@@ -18883,7 +18995,7 @@ function saveUiCustom(){
     App._uiCustom.pageTexts = App._uiCustom.pageTexts || {};
     App._uiCustom.customBlocks = Array.isArray(App._uiCustom.customBlocks) ? App._uiCustom.customBlocks : [];
     localStorage.setItem(UI_CUSTOM_LS_KEY, JSON.stringify(App._uiCustom));
-  } catch(e){ console.warn('[saveUiCustom]', e); }
+  } catch(e){ dbgWarn('[saveUiCustom]', e); }
 }
 
 /* 取得頁面標題（自訂優先） */
@@ -18931,7 +19043,7 @@ function renderCustomBlocks(position){
       }
       frag.appendChild(card);
     });
-  } catch(e){ console.warn('[renderCustomBlocks]', e); }
+  } catch(e){ dbgWarn('[renderCustomBlocks]', e); }
   return frag;
 }
 
@@ -19103,7 +19215,7 @@ function rUiEditor(content){
   if(active){
     try { active.render(tabContent); }
     catch(err){
-      console.warn('[uiEditor tab render]', err);
+      dbgWarn('[uiEditor tab render]', err);
       tabContent.appendChild(el('div', { class:'card', style:{background:'var(--danger-soft)',borderColor:'var(--danger)'} },
         el('h3', null, '⚠️ 渲染失敗'),
         el('div', { class:'small' }, String(err.message || err))
