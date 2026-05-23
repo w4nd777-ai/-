@@ -2292,6 +2292,11 @@ function defaultDB(){
     quizzes: [],           // batch 4-25: 線上小考 {id, title, ...}
     quizSubmissions: [],   // batch 4-25: 學生小考作答 {id, quizId, studentId, ...}
     teachers: [],          // batch 4-24: 副老師（主老師仍在 accounts；此處只放 sub 老師資料）{id,name,email,password,role:'sub',perms:{},active:true,mustChangePw}
+    // batch 5：學生端進階功能
+    badges: [],            // batch 5-27: 點數徽章 {id, studentId, type, level, earnedAt, points}
+    notes: [],             // batch 5-28: 學生私人筆記 {id, studentId, title, content, tags:[], category, createdAt, updatedAt, pinned}
+    todos: [],             // batch 5-29: 待辦事項 {id, studentId, title, dueDate, priority, done, source, sourceId, note, createdAt}
+    notifications: [],     // batch 5-27: 系統通知 {id, studentId, type, text, ts, read}
     semester: {            // batch 4-22: 學期週次系統
       startDate: '',       // YYYY-MM-DD
       endDate: '',
@@ -2382,7 +2387,7 @@ function loadDB(){
     const parsed = JSON.parse(raw);
     App.db = Object.assign(defaultDB(), parsed);
     // ensure all arrays exist
-    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','parents','behavior','quizzes','quizSubmissions','teachers'];
+    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','parents','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications'];
     arrFields.forEach(f => { if(!Array.isArray(App.db[f])) App.db[f] = []; });
     if(!App.db.settings || typeof App.db.settings !== 'object') App.db.settings = defaultDB().settings;
     if(!App.db.branding || typeof App.db.branding !== 'object') App.db.branding = defaultDB().branding;
@@ -5409,7 +5414,9 @@ function renderSidebarStudent(){
     messages: unreadMessages() || null,
     sasgn: studentNewAssignmentCount() || null,
     speer: studentPendingPeerCount() || null,
-    sann: studentUnreadAnnouncements() || null
+    sann: studentUnreadAnnouncements() || null,
+    // batch 5-29：今日 / 逾期待辦數
+    mytodos: (typeof getStudentTodoBadge === 'function' ? getStudentTodoBadge() : 0) || null
   };
 
   // batch 3：最近使用分組
@@ -5488,6 +5495,8 @@ function renderTopbar(role){
     speer:'⭐ 我的互評', sgroups:'👥 我的小組', selfeval:'✍️ 學期自評',
     sfeedback:'📝 課程回饋',
     sbehavior:'⭐ 我的點數', squiz:'📝 線上小考',
+    mybadges:'🏅 我的徽章', mynotes:'📒 我的筆記',
+    mytodos:'✅ 待辦事項', mytrend:'📈 成績趨勢',
     uieditor:'🛠️ 介面編輯器',
     help:'📖 使用說明', install:'📲 安裝 App'
   };
@@ -6024,6 +6033,7 @@ function markPresent(studentId, options={}){
   }
   bcNotify();
   toast('已標記 ' + s.name + ' 出席','success');
+  try { checkAndAwardBadges(studentId); } catch(_) {} // batch 5-27：徽章
   rerender();
 }
 
@@ -6195,6 +6205,8 @@ function rStu(content){
         toast('✅ 已重設 ' + s.name + ' 的密碼為 ' + defPw,'success');
         rerender();
       } }, '🔑'));
+      acts.appendChild(el('button', { class:'btn btn-sm', title:'代下載成績單', onclick:()=> exportStudentReport(s.id) }, '📄'));
+      acts.appendChild(el('button', { class:'btn btn-sm', title:'查看徽章', onclick:()=> openStudentBadgesView(s.id) }, '🏅'));
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openStudentEdit(s) }, '✏️'));
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         const ok = await confirmDlg('確定刪除 ' + s.name + '？相關出席紀錄會保留', { danger:true });
@@ -8666,6 +8678,18 @@ function rCheckIn(content){
     ));
     return;
   }
+  // batch 5-29：每天首次進入提醒待辦
+  try {
+    if(typeof syncTodosFromAssignmentsQuizzes === 'function') syncTodosFromAssignmentsQuizzes(me.id);
+    const todayKey = '_b5_todo_remind_' + me.id + '_' + new Date().toISOString().slice(0,10);
+    if(!sessionStorage.getItem(todayKey)){
+      const due = (App.db.todos || []).filter(t => t.studentId === me.id && !t.done && t.dueDate === new Date().toISOString().slice(0,10));
+      if(due.length){
+        toast('📌 您有 ' + due.length + ' 項待辦今天到期', 'info', 5000);
+      }
+      sessionStorage.setItem(todayKey, '1');
+    }
+  } catch(_) {}
   const already = studentSignedToday(me.id);
   const onLeave = studentOnLeaveToday(me.id);
 
@@ -9004,6 +9028,11 @@ function rMyLeave(content){
 function rMe(content){
   const me = currentStudent(); if(!me) return;
   content.appendChild(el('h1', null, '個人'));
+  // batch 5-27：最近徽章
+  try {
+    const bc = renderRecentBadgesForMe();
+    if(bc) content.appendChild(bc);
+  } catch(_) {}
 
   // ─── 個人資料卡 ───
   const card = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
@@ -10846,6 +10875,12 @@ function rSGrade(content){
   const sgSub = getPageSub('sgrade', sgSubDefault);
   content.appendChild(el('h1', null, sgTitle));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, sgSub));
+
+  // batch 5：成績單匯出 + 趨勢圖快捷
+  content.appendChild(el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap',marginBottom:'12px'} },
+    el('button', { class:'btn btn-sm', onclick:()=> exportStudentReport(me.id) }, '📄 下載學期成績單'),
+    el('button', { class:'btn btn-sm', onclick:()=> go('mytrend') }, '📈 看趨勢圖')
+  ));
 
   const big = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
   big.appendChild(el('div', { class:'muted' }, '學期總分'));
@@ -13699,7 +13734,10 @@ function buildSubmissionForm(asg, me, existing){
       App.db.submissions.push(rec);
       logOp('submit','繳交：' + asg.title);
       saveDB(); Sync.push('submissions', rec); bcNotify();
-      toast('已繳交！','success'); rerender();
+      toast('已繳交！','success');
+      try { checkAndAwardBadges(rec.studentId); } catch(_) {} // batch 5-27
+      try { autoFinishAsgnTodo(rec.studentId, rec.assignmentId); } catch(_) {} // batch 5-29
+      rerender();
     }}, existing?'💾 儲存修改':'✅ 送出繳交'),
     existing ? el('button', { class:'btn', onclick:()=> { App._editSub = null; rerender(); } }, '取消') : null
   ));
@@ -14888,6 +14926,11 @@ function rerender(){
       // batch 4 新增學生端頁面
       else if(v === 'sbehavior') rMyBehavior(content); // batch 4-23
       else if(v === 'squiz') rStuQuiz(content);        // batch 4-25
+      // batch 5 新增學生端頁面
+      else if(v === 'mybadges') rMyBadges(content);    // batch 5-27
+      else if(v === 'mynotes') rMyNotes(content);      // batch 5-28
+      else if(v === 'mytodos') rMyTodos(content);      // batch 5-29
+      else if(v === 'mytrend') rMyTrend(content);      // batch 5-30
       // 學生端不顯示介面編輯器
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
@@ -17557,13 +17600,17 @@ function getSidebarItems(role){
         { key:'checkin', icon:'✋', label:'簽到' },
         { key:'myatt', icon:'📅', label:'出席紀錄' },
         { key:'myleave', icon:'📆', label:'請假' },
+        { key:'mytodos', icon:'✅', label:'待辦事項' },
         { key:'messages', icon:'💬', label:'訊息' }
       ]},
       s_learn: { label:'學習', items: [
         { key:'sasgn', icon:'📤', label:'作業' },
         { key:'sgrade', icon:'🎯', label:'我的成績' },
+        { key:'mytrend', icon:'📈', label:'成績趨勢' },
         { key:'squiz', icon:'📝', label:'線上小考' },
         { key:'sbehavior', icon:'⭐', label:'我的點數' },
+        { key:'mybadges', icon:'🏅', label:'我的徽章' },
+        { key:'mynotes', icon:'📒', label:'我的筆記' },
         { key:'sev', icon:'⭐', label:'課程評價' },
         { key:'sfeedback', icon:'📝', label:'課程回饋' },
         { key:'speer', icon:'⭐', label:'我的互評' },
@@ -19797,6 +19844,7 @@ function openBehaviorQuickAdd(){
     saveDB();
     m.close();
     toast('已記錄','success');
+    try { checkAndAwardBadges(rec.studentId); } catch(_) {} // batch 5-27
     rerender();
   }}, '✅ 確認'));
   m.root.appendChild(actions);
@@ -20705,6 +20753,7 @@ function finishQuiz(t, quiz, me, timeout, content){
   }
   syncQuizScore(sub, quiz);
   saveDB();
+  try { checkAndAwardBadges(me.id); } catch(_) {} // batch 5-27
   App._quizTaking = null;
   if(timeout) toast('⏰ 時間到，自動交卷！','warn');
   else toast('✅ 已提交，得分 ' + score + ' 分','success', 5000);
@@ -20802,6 +20851,1162 @@ function renderSemesterCard(){
   }}, '💾 儲存學期設定'));
   return card;
 }
+
+/* ════════════════════════════════════════════════════════════
+   BATCH 5 — 學生端進階功能
+   5-26 PDF 成績單匯出 (window.print + 列印 CSS)
+   5-27 點數徽章系統
+   5-28 學生筆記 (private notes)
+   5-29 待辦事項 (todo)
+   5-30 個人成績趨勢圖 (SVG 手刻)
+   ──────────────────────────────────────────────────────────── */
+
+/* ───────── 共用工具 ───────── */
+function _b5EscapeHtml(s){
+  if(s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ════════════════════════════════════════════════════════════
+   5-26：PDF 成績單匯出（用 window.print() + 列印樣式）
+   ──────────────────────────────────────────────────────────── */
+function exportStudentReport(studentId){
+  const s = (App.db.students || []).find(x => x.id === studentId);
+  if(!s){ toast('找不到學生','danger'); return; }
+  const g = calcGrade(s.id);
+  const rk = studentRank(s.id);
+  const school = (App.db.settings && App.db.settings.schoolName) || '課程管理系統';
+  const teacherName = (App.db.settings && App.db.settings.teacherName) || '老師';
+  const semLabel = (App.db.semester && App.db.semester.label) ||
+    ((App.db.semester && App.db.semester.startDate) ?
+      (App.db.semester.startDate + ' ~ ' + (App.db.semester.endDate || '?'))
+      : '本學期');
+
+  // 出席統計
+  const myAtt = (App.db.attendance || []).filter(a => a.studentId === s.id);
+  const allDates = Array.from(new Set((App.db.attendance || []).map(a => a.date)));
+  const present = myAtt.filter(a => a.status === 'present').length;
+  const late = myAtt.filter(a => a.status === 'late').length;
+  const early = myAtt.filter(a => a.status === 'early').length;
+  const absent = Math.max(0, allDates.length - myAtt.length - (App.db.leaves || []).filter(l => l.studentId === s.id && l.status === 'approved').length);
+  const leaveCnt = (App.db.leaves || []).filter(l => l.studentId === s.id && l.status === 'approved').length;
+  const attRate = attendanceRate(s.id);
+
+  // 作業 / 分數明細
+  const subs = (App.db.submissions || [])
+    .filter(x => x.studentId === s.id && typeof x.score === 'number')
+    .sort((a,b)=> (a.ts||0)-(b.ts||0));
+  let subRows = '';
+  subs.forEach(sb => {
+    const asg = (App.db.assignments || []).find(a => a.id === sb.assignmentId);
+    const dateStr = sb.ts ? new Date(sb.ts).toISOString().slice(0,10) : '';
+    const wkTag = (typeof fmtWeekTag === 'function' && dateStr) ? fmtWeekTag(dateStr) : '';
+    subRows += '<tr>'
+      + '<td>' + _b5EscapeHtml(asg ? asg.title : '?') + '</td>'
+      + '<td>' + _b5EscapeHtml(String(sb.score)) + '</td>'
+      + '<td>' + _b5EscapeHtml(String((asg && asg.points) || 100)) + '</td>'
+      + '<td>' + _b5EscapeHtml(String((asg && asg.weight) || 1)) + '</td>'
+      + '<td>' + _b5EscapeHtml(wkTag || dateStr) + '</td>'
+      + '</tr>';
+  });
+  if(!subRows) subRows = '<tr><td colspan="5" style="text-align:center;color:#888">（無作業成績）</td></tr>';
+
+  // 行為點數
+  const bhs = (App.db.behavior || []).filter(b => b.studentId === s.id);
+  const bhTotal = bhs.reduce((t,b)=> t + (Number(b.points) || 0) * (b.type === 'neg' ? -1 : 1), 0);
+  const bhPos = bhs.filter(b => b.type !== 'neg').length;
+  const bhNeg = bhs.filter(b => b.type === 'neg').length;
+  const bhPts = bhs.map(b => (Number(b.points) || 0) * (b.type === 'neg' ? -1 : 1));
+  const bhMax = bhPts.length ? Math.max(...bhPts) : 0;
+  const bhMin = bhPts.length ? Math.min(...bhPts) : 0;
+
+  // 小考
+  const qsubs = (App.db.quizSubmissions || []).filter(q => q.studentId === s.id).sort((a,b)=> (a.submittedAt||0)-(b.submittedAt||0));
+  let qRows = '';
+  qsubs.forEach(q => {
+    const quiz = (App.db.quizzes || []).find(x => x.id === q.quizId);
+    const dateStr = q.submittedAt ? new Date(q.submittedAt).toISOString().slice(0,10) : '';
+    qRows += '<tr>'
+      + '<td>' + _b5EscapeHtml(quiz ? quiz.title : '?') + '</td>'
+      + '<td>' + _b5EscapeHtml(String(q.score)) + '</td>'
+      + '<td>' + _b5EscapeHtml(dateStr) + '</td>'
+      + '</tr>';
+  });
+  if(!qRows) qRows = '<tr><td colspan="3" style="text-align:center;color:#888">（無小考紀錄）</td></tr>';
+
+  // 評語
+  const fbs = (App.db.feedbacks || []).filter(f => f.studentId === s.id && f.text)
+    .sort((a,b)=> (b.ts||0)-(a.ts||0)).slice(0,5);
+  let fbHtml = '';
+  fbs.forEach(f => {
+    fbHtml += '<div class="fb-item">「' + _b5EscapeHtml(f.text) + '」<span class="fb-meta">— ' + _b5EscapeHtml(new Date(f.ts||0).toISOString().slice(0,10)) + '</span></div>';
+  });
+  // 老師評語（學期成績）
+  const tComment = (App.db.grades && App.db.grades[s.id] && App.db.grades[s.id].comment) || '';
+  if(tComment) fbHtml = '<div class="fb-item"><strong>班導評語：</strong>' + _b5EscapeHtml(tComment) + '</div>' + fbHtml;
+  if(!fbHtml) fbHtml = '<div class="fb-empty">（無評語）</div>';
+
+  // 完整 HTML
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    + '<title>' + _b5EscapeHtml(s.name) + ' 成績單</title>'
+    + '<style>'
+    + 'body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;color:#222;padding:24px;max-width:780px;margin:0 auto;line-height:1.55;}'
+    + 'h1{font-size:22px;text-align:center;margin:6px 0 2px;}'
+    + '.subtitle{text-align:center;color:#666;margin-bottom:18px;font-size:13px;}'
+    + 'h2{font-size:16px;margin:18px 0 6px;border-bottom:2px solid #333;padding-bottom:4px;}'
+    + '.meta{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 18px;font-size:13px;margin-bottom:6px;}'
+    + '.meta div span{color:#666;display:inline-block;min-width:60px;}'
+    + 'table{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;}'
+    + 'th,td{border:1px solid #999;padding:5px 8px;text-align:left;}'
+    + 'th{background:#f0f0f0;font-weight:600;}'
+    + '.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0;}'
+    + '.stat{border:1px solid #999;padding:8px;text-align:center;border-radius:4px;}'
+    + '.stat .num{font-size:18px;font-weight:700;color:#000;}'
+    + '.stat .lbl{font-size:11px;color:#666;}'
+    + '.big{text-align:center;padding:16px;border:2px solid #333;border-radius:6px;margin:10px 0;}'
+    + '.big .num{font-size:36px;font-weight:700;}'
+    + '.fb-item{padding:6px 10px;border-left:3px solid #999;background:#fafafa;margin:4px 0;font-size:12px;}'
+    + '.fb-meta{color:#888;font-size:11px;margin-left:6px;}'
+    + '.fb-empty{font-size:12px;color:#888;font-style:italic;}'
+    + '.sig{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:30px;font-size:12px;}'
+    + '.sig .box{border-top:1px solid #333;padding-top:6px;text-align:center;}'
+    + '@media print {'
+    + '  body{padding:0;}'
+    + '  h2{page-break-after:avoid;}'
+    + '  table{page-break-inside:auto;}'
+    + '  tr{page-break-inside:avoid;}'
+    + '  .no-print{display:none !important;}'
+    + '}'
+    + '.no-print{text-align:center;margin:14px 0;}'
+    + '.no-print button{padding:8px 20px;font-size:14px;cursor:pointer;margin:0 4px;}'
+    + '</style></head><body>'
+    + '<div class="no-print">'
+    + '<button onclick="window.print()">🖨️ 列印 / 另存 PDF</button>'
+    + '<button onclick="window.close()">關閉</button>'
+    + '</div>'
+    + '<h1>' + _b5EscapeHtml(school) + ' — 學期成績單</h1>'
+    + '<div class="subtitle">' + _b5EscapeHtml(semLabel) + '　·　產出日期：' + new Date().toISOString().slice(0,10) + '</div>'
+    + '<h2>👤 學生資訊</h2>'
+    + '<div class="meta">'
+    + '<div><span>姓名</span>' + _b5EscapeHtml(s.name) + '</div>'
+    + '<div><span>班級</span>' + _b5EscapeHtml(s.cls || '-') + '</div>'
+    + '<div><span>學號</span>' + _b5EscapeHtml(s.sid || '-') + '</div>'
+    + '<div><span>座號</span>' + _b5EscapeHtml(s.seat ? String(s.seat) : '-') + '</div>'
+    + '</div>'
+    + '<h2>🎯 學期總分</h2>'
+    + '<div class="big"><div class="num">' + g.total + '</div>'
+    + '<div>加權公式：出席 ' + g.w.att + '% + 作業 ' + g.w.asgn + '% + 期中 ' + g.w.mid + '% + 期末 ' + g.w.final + '%</div>'
+    + (rk.rank ? '<div>班級排名：第 ' + rk.rank + ' / ' + rk.of + ' 名</div>' : '')
+    + '</div>'
+    + '<h2>📅 出席統計</h2>'
+    + '<div class="grid">'
+    + '<div class="stat"><div class="num">' + allDates.length + '</div><div class="lbl">總天數</div></div>'
+    + '<div class="stat"><div class="num">' + present + '</div><div class="lbl">出席</div></div>'
+    + '<div class="stat"><div class="num">' + late + '</div><div class="lbl">遲到</div></div>'
+    + '<div class="stat"><div class="num">' + early + '</div><div class="lbl">早退</div></div>'
+    + '</div>'
+    + '<div class="grid">'
+    + '<div class="stat"><div class="num">' + absent + '</div><div class="lbl">缺席</div></div>'
+    + '<div class="stat"><div class="num">' + leaveCnt + '</div><div class="lbl">請假</div></div>'
+    + '<div class="stat"><div class="num">' + attRate + '%</div><div class="lbl">出席率</div></div>'
+    + '<div class="stat"><div class="num">' + g.asgn + '</div><div class="lbl">作業平均</div></div>'
+    + '</div>'
+    + '<h2>📋 作業成績明細</h2>'
+    + '<table><thead><tr><th>項目</th><th>分數</th><th>滿分</th><th>加權</th><th>第幾週</th></tr></thead>'
+    + '<tbody>' + subRows + '</tbody></table>'
+    + '<h2>⭐ 行為點數</h2>'
+    + '<div class="grid">'
+    + '<div class="stat"><div class="num">' + (bhTotal>=0?'+':'') + bhTotal + '</div><div class="lbl">累積</div></div>'
+    + '<div class="stat"><div class="num">' + bhPos + '</div><div class="lbl">加分次數</div></div>'
+    + '<div class="stat"><div class="num">' + bhNeg + '</div><div class="lbl">扣分次數</div></div>'
+    + '<div class="stat"><div class="num">' + bhMax + ' / ' + bhMin + '</div><div class="lbl">最高 / 最低</div></div>'
+    + '</div>'
+    + '<h2>📝 小考成績</h2>'
+    + '<table><thead><tr><th>題目</th><th>分數</th><th>日期</th></tr></thead>'
+    + '<tbody>' + qRows + '</tbody></table>'
+    + '<h2>💬 老師評語</h2>'
+    + fbHtml
+    + '<div class="sig">'
+    + '<div class="box">班導：' + _b5EscapeHtml(teacherName) + '</div>'
+    + '<div class="box">家長簽名：</div>'
+    + '</div>'
+    + '</body></html>';
+
+  // 開新視窗（避免被擋住時退回 iframe）
+  let win = null;
+  try { win = window.open('', '_blank', 'width=820,height=900'); } catch(_) {}
+  if(win){
+    win.document.open(); win.document.write(html); win.document.close();
+    // 等渲染後自動觸發列印
+    setTimeout(()=> { try { win.focus(); win.print(); } catch(_){} }, 600);
+    toast('已開啟成績單視窗','success');
+  } else {
+    // 退回隱藏 iframe
+    let ifr = document.getElementById('_b5_report_iframe');
+    if(ifr) ifr.remove();
+    ifr = document.createElement('iframe');
+    ifr.id = '_b5_report_iframe';
+    ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(ifr);
+    ifr.contentDocument.open();
+    ifr.contentDocument.write(html);
+    ifr.contentDocument.close();
+    setTimeout(()=> { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch(_){} }, 600);
+    toast('已產生成績單（彈窗被擋，已用隱藏 iframe）','info');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   5-27：點數徽章系統
+   ──────────────────────────────────────────────────────────── */
+const BADGE_DEFS = {
+  behavior_total: {
+    label: '累積點數', icon: '⭐',
+    levels: { bronze:50, silver:150, gold:300, diamond:600 },
+    desc: '累積行為加減分淨值'
+  },
+  attendance_perfect: {
+    label: '出席全勤', icon: '🎯',
+    levels: { bronze:4, silver:8, gold:16, diamond:24 },
+    desc: '連續全勤週數'
+  },
+  assignment_complete: {
+    label: '作業繳交', icon: '📋',
+    levels: { bronze:10, silver:30, gold:60, diamond:100 },
+    desc: '已繳交作業總數'
+  },
+  quiz_high_score: {
+    label: '小考優異', icon: '📝',
+    levels: { bronze:3, silver:10, gold:20, diamond:40 },
+    desc: '小考 90 分以上次數'
+  },
+  helpful: {
+    label: '熱心服務', icon: '🤝',
+    levels: { bronze:10, silver:30, gold:60, diamond:100 },
+    desc: '服務類加分累積'
+  }
+};
+const BADGE_LEVELS = ['bronze','silver','gold','diamond'];
+const BADGE_LEVEL_LABEL = { bronze:'銅', silver:'銀', gold:'金', diamond:'鑽石' };
+const BADGE_LEVEL_COLOR = { bronze:'#a16207', silver:'#71717a', gold:'#ca8a04', diamond:'#0891b2' };
+
+function getStudentBadges(studentId){
+  return (App.db.badges || []).filter(b => b.studentId === studentId);
+}
+
+/* 計算學生在某 type 的「當前進度值」 */
+function _b5BadgeProgress(studentId, type){
+  if(type === 'behavior_total'){
+    const recs = (App.db.behavior || []).filter(b => b.studentId === studentId);
+    return recs.reduce((t,r)=> t + (Number(r.points)||0) * (r.type==='neg'?-1:1), 0);
+  }
+  if(type === 'attendance_perfect'){
+    // 計算到目前為止「連續無缺席週數」近似值：用本學期週數內，學生簽到（或請假）覆蓋
+    // 簡化：抓所有 attendance 日期 → 依週分組 → 若該週內有出席/請假就算
+    const all = (App.db.attendance || []).filter(a => a.studentId === studentId);
+    const leaves = (App.db.leaves || []).filter(l => l.studentId === studentId && l.status === 'approved');
+    const wkSet = new Set();
+    all.forEach(a => { if(typeof getWeekNo === 'function' && a.date) wkSet.add(getWeekNo(a.date)); });
+    leaves.forEach(l => { if(typeof getWeekNo === 'function' && l.date) wkSet.add(getWeekNo(l.date)); });
+    return wkSet.size;
+  }
+  if(type === 'assignment_complete'){
+    return (App.db.submissions || []).filter(s => s.studentId === studentId).length;
+  }
+  if(type === 'quiz_high_score'){
+    return (App.db.quizSubmissions || []).filter(q => {
+      if(q.studentId !== studentId) return false;
+      const quiz = (App.db.quizzes || []).find(x => x.id === q.quizId);
+      const maxPts = quiz ? (quiz.questions || []).reduce((t,qq)=> t + (qq.points||0), 0) : 100;
+      if(maxPts <= 0) return false;
+      return (q.score / maxPts) * 100 >= 90;
+    }).length;
+  }
+  if(type === 'helpful'){
+    const recs = (App.db.behavior || []).filter(b => b.studentId === studentId && b.type !== 'neg'
+      && (String(b.category||'').includes('服務') || String(b.category||'').includes('幫')));
+    return recs.reduce((t,r)=> t + (Number(r.points)||0), 0);
+  }
+  return 0;
+}
+
+function checkAndAwardBadges(studentId){
+  if(!studentId) return;
+  if(!Array.isArray(App.db.badges)) App.db.badges = [];
+  if(!Array.isArray(App.db.notifications)) App.db.notifications = [];
+  const existing = new Set(
+    App.db.badges.filter(b => b.studentId === studentId).map(b => b.type + '_' + b.level)
+  );
+  let awarded = 0;
+  Object.keys(BADGE_DEFS).forEach(type => {
+    const def = BADGE_DEFS[type];
+    const prog = _b5BadgeProgress(studentId, type);
+    BADGE_LEVELS.forEach(lv => {
+      const thr = def.levels[lv];
+      if(prog >= thr && !existing.has(type + '_' + lv)){
+        const rec = {
+          id: nid(),
+          studentId,
+          type,
+          level: lv,
+          earnedAt: Date.now(),
+          points: prog
+        };
+        App.db.badges.push(rec);
+        existing.add(type + '_' + lv);
+        awarded++;
+        // toast
+        try {
+          toast('🎉 恭喜獲得 [' + BADGE_LEVEL_LABEL[lv] + '] ' + def.label + '徽章！', 'success', 5000);
+        } catch(_) {}
+        // notification
+        App.db.notifications.push({
+          id: nid(),
+          studentId,
+          type: 'badge',
+          text: '獲得 ' + BADGE_LEVEL_LABEL[lv] + ' 級「' + def.label + '」徽章',
+          ts: Date.now(),
+          read: false
+        });
+      }
+    });
+  });
+  if(awarded > 0){
+    try { saveDB(); } catch(_) {}
+  }
+  return awarded;
+}
+
+function renderBadgeCard(badge){
+  const def = BADGE_DEFS[badge.type] || { label:badge.type, icon:'🏅' };
+  const color = BADGE_LEVEL_COLOR[badge.level] || '#666';
+  return el('div', { class:'card', style:{textAlign:'center',padding:'12px',background:'var(--surface)',borderColor:color} },
+    el('div', { style:{fontSize:'32px'} }, def.icon),
+    el('div', { style:{fontWeight:'700',color:color,fontSize:'13px'} }, BADGE_LEVEL_LABEL[badge.level] + ' ' + def.label),
+    el('div', { class:'tiny muted' }, badge.earnedAt ? new Date(badge.earnedAt).toISOString().slice(0,10) : '')
+  );
+}
+
+/* 學生端：我的徽章 */
+function rMyBadges(content){
+  const me = currentStudent(); if(!me) return;
+  // 進頁時也順手檢查一次
+  try { checkAndAwardBadges(me.id); } catch(_) {}
+
+  const badges = getStudentBadges(me.id);
+  const total = Object.keys(BADGE_DEFS).length * BADGE_LEVELS.length;
+  content.appendChild(el('h1', null, '🏅 我的徽章'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '已獲得 ' + badges.length + ' / ' + total + ' 個徽章'));
+
+  Object.keys(BADGE_DEFS).forEach(type => {
+    const def = BADGE_DEFS[type];
+    const prog = _b5BadgeProgress(me.id, type);
+    const card = el('div', { class:'card', style:{marginBottom:'12px'} });
+    card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+      el('div', null,
+        el('div', { style:{fontWeight:'700',fontSize:'15px'} }, def.icon + ' ' + def.label),
+        el('div', { class:'tiny muted' }, def.desc + '（目前 ' + prog + '）')
+      )
+    ));
+    const row = el('div', { class:'grid grid-4', style:{gap:'8px'} });
+    BADGE_LEVELS.forEach(lv => {
+      const thr = def.levels[lv];
+      const has = badges.find(b => b.type === type && b.level === lv);
+      const color = BADGE_LEVEL_COLOR[lv];
+      if(has){
+        row.appendChild(el('div', { style:{textAlign:'center',padding:'10px',borderRadius:'8px',background:'var(--surface-2)',border:'2px solid '+color} },
+          el('div', { style:{fontSize:'28px'} }, def.icon),
+          el('div', { style:{fontWeight:'700',color:color,fontSize:'12px'} }, BADGE_LEVEL_LABEL[lv]),
+          el('div', { class:'tiny', style:{color:color} }, '✅ 已獲得')
+        ));
+      } else {
+        const pct = thr > 0 ? Math.min(100, Math.round(prog / thr * 100)) : 0;
+        row.appendChild(el('div', { style:{textAlign:'center',padding:'10px',borderRadius:'8px',background:'var(--surface-2)',border:'2px dashed var(--border)',opacity:'0.65'} },
+          el('div', { style:{fontSize:'28px',filter:'grayscale(1)'} }, def.icon),
+          el('div', { style:{fontWeight:'700',fontSize:'12px',color:'var(--text-muted)'} }, BADGE_LEVEL_LABEL[lv] + ' (' + thr + ')'),
+          el('div', { style:{height:'4px',borderRadius:'2px',background:'var(--border)',marginTop:'4px',overflow:'hidden'} },
+            el('div', { style:{height:'100%',width:pct+'%',background:color} })
+          ),
+          el('div', { class:'tiny muted' }, '還差 ' + Math.max(0, thr - prog))
+        ));
+      }
+    });
+    card.appendChild(row);
+    content.appendChild(card);
+  });
+}
+
+/* 老師端：查看某學生徽章（modal） */
+function openStudentBadgesView(studentId){
+  const s = (App.db.students || []).find(x => x.id === studentId);
+  if(!s) return;
+  try { checkAndAwardBadges(studentId); } catch(_) {}
+  const badges = getStudentBadges(studentId);
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '🏅 ' + s.name + ' 的徽章'));
+  m.root.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} }, '共 ' + badges.length + ' 個'));
+  if(!badges.length){
+    m.root.appendChild(el('div', { class:'empty' }, '尚未獲得任何徽章'));
+  } else {
+    const grid = el('div', { class:'grid grid-4', style:{gap:'8px'} });
+    badges.forEach(b => grid.appendChild(renderBadgeCard(b)));
+    m.root.appendChild(grid);
+  }
+  const acts = el('div', { class:'modal-actions' });
+  acts.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(acts);
+}
+
+/* ════════════════════════════════════════════════════════════
+   5-28：學生私人筆記
+   ──────────────────────────────────────────────────────────── */
+function _b5NotesForStudent(studentId){
+  return (App.db.notes || []).filter(n => n.studentId === studentId);
+}
+
+function rMyNotes(content){
+  const me = currentStudent(); if(!me) return;
+  if(!Array.isArray(App.db.notes)) App.db.notes = [];
+
+  content.appendChild(el('h1', null, '📒 我的筆記'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '此筆記僅你本人可見（老師看不到）'));
+
+  App._notesState = App._notesState || { search:'', cat:'', tag:'', editingId:null };
+  const st = App._notesState;
+
+  // 工具列
+  const tool = el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',marginBottom:'10px'} });
+  const iSearch = el('input', { class:'input', placeholder:'🔍 搜尋筆記...', style:{flex:'1',minWidth:'140px'} });
+  iSearch.value = st.search;
+  iSearch.addEventListener('input', e => { st.search = e.target.value; renderList(); });
+  tool.appendChild(iSearch);
+  const sCat = el('select', { class:'select', style:{maxWidth:'140px'} });
+  const cats = ['', '上課筆記', '生詞單字', '心得反思', '作業構想', '其他'];
+  cats.forEach(c => sCat.appendChild(el('option', { value:c, selected: c===st.cat }, c || '全部分類')));
+  sCat.addEventListener('change', ()=> { st.cat = sCat.value; renderList(); });
+  tool.appendChild(sCat);
+  tool.appendChild(el('button', { class:'btn btn-primary', onclick:()=> openNoteEditor(null) }, '＋ 新增筆記'));
+  content.appendChild(tool);
+
+  const wrap = el('div');
+  content.appendChild(wrap);
+
+  function renderList(){
+    wrap.innerHTML = '';
+    let arr = _b5NotesForStudent(me.id);
+    if(st.search){
+      const q = st.search.toLowerCase();
+      arr = arr.filter(n => (n.title||'').toLowerCase().includes(q) || (n.content||'').toLowerCase().includes(q));
+    }
+    if(st.cat) arr = arr.filter(n => n.category === st.cat);
+    if(st.tag) arr = arr.filter(n => (n.tags||[]).includes(st.tag));
+    arr.sort((a,b) => {
+      if(!!a.pinned !== !!b.pinned) return b.pinned - a.pinned;
+      return (b.updatedAt||0) - (a.updatedAt||0);
+    });
+    if(!arr.length){
+      wrap.appendChild(el('div', { class:'card empty' }, '尚無筆記，點右上「＋ 新增筆記」開始'));
+      return;
+    }
+    arr.forEach(n => {
+      const card = el('div', { class:'card', style:{marginBottom:'8px',cursor:'pointer'}, onclick:()=> openNoteEditor(n) });
+      const head = el('div', { class:'flex-between' },
+        el('div', { style:{fontWeight:'700',fontSize:'15px'} },
+          (n.pinned ? '📌 ' : '') + (n.title || '（無標題）')
+        ),
+        el('span', { class:'tiny muted' }, n.updatedAt ? new Date(n.updatedAt).toISOString().slice(0,10) : '')
+      );
+      card.appendChild(head);
+      if(n.category) card.appendChild(el('div', { class:'tiny', style:{marginTop:'2px'} }, '🏷️ ' + n.category));
+      const preview = (n.content || '').slice(0, 120);
+      if(preview) card.appendChild(el('div', { class:'small muted', style:{marginTop:'6px',whiteSpace:'pre-wrap'} }, preview + (n.content.length > 120 ? '...' : '')));
+      if((n.tags||[]).length){
+        const tagBox = el('div', { style:{marginTop:'6px',display:'flex',gap:'4px',flexWrap:'wrap'} });
+        (n.tags||[]).forEach(t => tagBox.appendChild(el('span', { class:'pill', style:{fontSize:'10px',background:'var(--accent-soft)'} }, '#' + t)));
+        card.appendChild(tagBox);
+      }
+      wrap.appendChild(card);
+    });
+  }
+  renderList();
+}
+
+function openNoteEditor(note){
+  const me = currentStudent(); if(!me) return;
+  const isNew = !note;
+  const data = note ? Object.assign({}, note) : {
+    id: nid(),
+    studentId: me.id,
+    title: '',
+    content: '',
+    tags: [],
+    category: '',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    pinned: false
+  };
+
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew ? '📝 新增筆記' : '📝 編輯筆記'));
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '標題'));
+  const iT = el('input', { class:'input', value: data.title || '' });
+  iT.value = data.title || '';
+  fT.appendChild(iT);
+  m.root.appendChild(fT);
+
+  const fC = el('div', { class:'field' });
+  fC.appendChild(el('label', { class:'label' }, '分類'));
+  const sC = el('select', { class:'select' });
+  ['', '上課筆記', '生詞單字', '心得反思', '作業構想', '其他'].forEach(c =>
+    sC.appendChild(el('option', { value:c, selected:c===data.category }, c || '（無分類）')));
+  fC.appendChild(sC);
+  m.root.appendChild(fC);
+
+  const fCt = el('div', { class:'field' });
+  fCt.appendChild(el('label', { class:'label' }, '內容'));
+  const iCt = el('textarea', { class:'textarea',
+    placeholder:'可寫上課筆記、生詞、心得...',
+    style:{minHeight:'160px',width:'100%'}
+  });
+  iCt.value = data.content || '';
+  fCt.appendChild(iCt);
+  m.root.appendChild(fCt);
+
+  // tags
+  const fTg = el('div', { class:'field' });
+  fTg.appendChild(el('label', { class:'label' }, '標籤'));
+  const tagBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'4px',marginBottom:'4px'} });
+  function renderTags(){
+    tagBox.innerHTML = '';
+    (data.tags || []).forEach((t, i) => {
+      const pill = el('span', { class:'pill', style:{cursor:'pointer',background:'var(--accent-soft)'},
+        onclick:()=> { data.tags.splice(i,1); renderTags(); }
+      }, '#' + t + ' ✕');
+      tagBox.appendChild(pill);
+    });
+  }
+  renderTags();
+  fTg.appendChild(tagBox);
+  const tagRow = el('div', { class:'flex' });
+  const iTg = el('input', { class:'input', placeholder:'新增標籤，按 Enter', style:{flex:'1'} });
+  iTg.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){
+      e.preventDefault();
+      const v = iTg.value.trim();
+      if(v){ data.tags = data.tags || []; if(!data.tags.includes(v)) data.tags.push(v); iTg.value=''; renderTags(); }
+    }
+  });
+  tagRow.appendChild(iTg);
+  fTg.appendChild(tagRow);
+  m.root.appendChild(fTg);
+
+  // 置頂
+  const fP = el('div', { class:'field' });
+  const lblP = el('label', { class:'label', style:{cursor:'pointer'} });
+  const cbP = el('input', { type:'checkbox' });
+  cbP.checked = !!data.pinned;
+  lblP.appendChild(cbP);
+  lblP.appendChild(document.createTextNode(' 📌 置頂'));
+  fP.appendChild(lblP);
+  m.root.appendChild(fP);
+
+  // 自動儲存
+  let autoTimer = null;
+  function doSave(showToast){
+    data.title = iT.value.trim();
+    data.content = iCt.value;
+    data.category = sC.value;
+    data.pinned = cbP.checked;
+    data.updatedAt = Date.now();
+    if(!Array.isArray(App.db.notes)) App.db.notes = [];
+    const idx = App.db.notes.findIndex(n => n.id === data.id);
+    if(idx >= 0) App.db.notes[idx] = data;
+    else App.db.notes.push(data);
+    saveDB();
+    if(showToast) toast('已儲存','success');
+  }
+  iT.addEventListener('blur', ()=> doSave(false));
+  iCt.addEventListener('blur', ()=> doSave(false));
+  iCt.addEventListener('input', ()=> {
+    if(autoTimer) clearTimeout(autoTimer);
+    autoTimer = setTimeout(()=> doSave(false), 3000);
+  });
+
+  const actions = el('div', { class:'modal-actions' });
+  if(!isNew){
+    actions.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+      const ok = await confirmDlg('確定刪除此筆記？', { danger:true });
+      if(!ok) return;
+      App.db.notes = (App.db.notes || []).filter(n => n.id !== data.id);
+      saveDB();
+      m.close();
+      toast('已刪除','success');
+      rerender();
+    } }, '🗑 刪除'));
+  }
+  actions.appendChild(el('button', { class:'btn', onclick:()=> { doSave(false); m.close(); rerender(); } }, '關閉'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    doSave(true);
+    m.close();
+    rerender();
+  } }, '💾 儲存'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   5-29：待辦事項
+   ──────────────────────────────────────────────────────────── */
+function _b5TodoToday(){
+  return new Date().toISOString().slice(0,10);
+}
+function _b5DaysDiff(dateStr){
+  if(!dateStr) return 999;
+  const t = new Date(_b5TodoToday() + 'T00:00:00').getTime();
+  const d = new Date(dateStr + 'T00:00:00').getTime();
+  return Math.round((d - t) / 86400000);
+}
+
+/* 自動同步：作業 / 小考 → todos */
+function syncTodosFromAssignmentsQuizzes(studentId){
+  if(!studentId) return;
+  if(!Array.isArray(App.db.todos)) App.db.todos = [];
+  const now = Date.now();
+  const existing = new Set(App.db.todos.filter(t => t.studentId === studentId)
+    .map(t => t.source + '_' + (t.sourceId||'')));
+  // 作業
+  (App.db.assignments || []).forEach(a => {
+    if(!a || !a.dueAt) return;
+    if(a.dueAt < now) return; // 已過期
+    const targets = (typeof assignmentTargets === 'function') ? assignmentTargets(a) : null;
+    if(targets && !targets.has(studentId)) return;
+    const submitted = (App.db.submissions || []).some(s => s.assignmentId === a.id && s.studentId === studentId);
+    if(submitted) return;
+    const key = 'assignment_' + a.id;
+    if(existing.has(key)) return;
+    App.db.todos.push({
+      id: nid(),
+      studentId,
+      title: '作業：' + (a.title || '未命名'),
+      dueDate: new Date(a.dueAt).toISOString().slice(0,10),
+      priority: 'med',
+      done: false,
+      source: 'assignment',
+      sourceId: a.id,
+      note: '',
+      createdAt: Date.now()
+    });
+    existing.add(key);
+  });
+  // 小考
+  (App.db.quizzes || []).forEach(q => {
+    if(!q) return;
+    const submitted = (App.db.quizSubmissions || []).some(s => s.quizId === q.id && s.studentId === studentId);
+    if(submitted) return;
+    // 若有 dueAt 且已過期則跳過
+    if(q.dueAt && q.dueAt < now) return;
+    const key = 'quiz_' + q.id;
+    if(existing.has(key)) return;
+    App.db.todos.push({
+      id: nid(),
+      studentId,
+      title: '小考：' + (q.title || '未命名'),
+      dueDate: q.dueAt ? new Date(q.dueAt).toISOString().slice(0,10) : '',
+      priority: 'high',
+      done: false,
+      source: 'quiz',
+      sourceId: q.id,
+      note: '',
+      createdAt: Date.now()
+    });
+    existing.add(key);
+  });
+}
+
+/* 學生繳交作業後，自動把對應 todo 標 done */
+function autoFinishAsgnTodo(studentId, assignmentId){
+  if(!Array.isArray(App.db.todos)) return;
+  App.db.todos.forEach(t => {
+    if(t.studentId === studentId && t.source === 'assignment' && t.sourceId === assignmentId && !t.done){
+      t.done = true;
+      t.doneAt = Date.now();
+    }
+  });
+  saveDB();
+}
+
+/* 取得當前學生待辦徽章數（今日到期 + 逾期） */
+function getStudentTodoBadge(){
+  const me = (typeof currentStudent === 'function') ? currentStudent() : null;
+  if(!me) return 0;
+  const todos = (App.db.todos || []).filter(t => t.studentId === me.id && !t.done);
+  let cnt = 0;
+  todos.forEach(t => {
+    if(!t.dueDate) return;
+    if(_b5DaysDiff(t.dueDate) <= 0) cnt++;
+  });
+  return cnt;
+}
+
+function rMyTodos(content){
+  const me = currentStudent(); if(!me) return;
+  if(!Array.isArray(App.db.todos)) App.db.todos = [];
+  // 進頁自動同步
+  try { syncTodosFromAssignmentsQuizzes(me.id); saveDB(); } catch(_) {}
+
+  const todos = (App.db.todos || []).filter(t => t.studentId === me.id);
+  const today = _b5TodoToday();
+  const undone = todos.filter(t => !t.done);
+  const done = todos.filter(t => t.done);
+  const todayCnt = undone.filter(t => t.dueDate === today).length;
+  const weekCnt = undone.filter(t => t.dueDate && _b5DaysDiff(t.dueDate) >= 0 && _b5DaysDiff(t.dueDate) <= 7).length;
+  const overdueCnt = undone.filter(t => t.dueDate && _b5DaysDiff(t.dueDate) < 0).length;
+
+  content.appendChild(el('h1', null, '✅ 待辦事項'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
+    '自動整合作業、小考；也可手動新增'));
+
+  // 三個 stat
+  content.appendChild(el('div', { class:'grid grid-3', style:{marginBottom:'12px'} },
+    el('div', { class:'stat s-warn' }, el('div', { class:'num' }, String(todayCnt)), el('div', { class:'lbl' }, '今日')),
+    el('div', { class:'stat s-primary' }, el('div', { class:'num' }, String(weekCnt)), el('div', { class:'lbl' }, '本週')),
+    el('div', { class:'stat s-danger' }, el('div', { class:'num' }, String(overdueCnt)), el('div', { class:'lbl' }, '逾期'))
+  ));
+
+  // 新增按鈕
+  content.appendChild(el('button', { class:'btn btn-primary', style:{marginBottom:'12px'}, onclick:()=> openTodoEditor(null) }, '＋ 新增待辦'));
+
+  const _grpToday = undone.filter(t => t.dueDate === today || (t.dueDate && _b5DaysDiff(t.dueDate) < 0));
+  const _grpWeek = undone.filter(t => t.dueDate && _b5DaysDiff(t.dueDate) > 0 && _b5DaysDiff(t.dueDate) <= 7);
+  const _grpLater = undone.filter(t => !_grpToday.includes(t) && !_grpWeek.includes(t));
+
+  function priColor(p){ return p==='high'?'var(--danger)':p==='med'?'var(--warn)':'var(--success)'; }
+  function srcIcon(s){ return s==='assignment'?'📋':s==='quiz'?'📝':'✏️'; }
+
+  function renderTodoRow(t){
+    const row = el('div', { class:'list-row', style:{transition:'opacity .3s'} });
+    const cb = el('input', { type:'checkbox' });
+    cb.checked = !!t.done;
+    cb.addEventListener('change', ()=> {
+      t.done = cb.checked;
+      t.doneAt = cb.checked ? Date.now() : null;
+      saveDB();
+      row.style.opacity = '0';
+      setTimeout(()=> rerender(), 300);
+    });
+    row.appendChild(cb);
+    row.appendChild(el('div', { style:{width:'10px',height:'10px',borderRadius:'50%',background:priColor(t.priority),margin:'0 8px'} }));
+    row.appendChild(el('div', { class:'info', style:{cursor: t.source==='manual'?'pointer':'default'},
+      onclick: t.source==='manual' ? ()=> openTodoEditor(t) : null },
+      el('div', { class:'name' }, srcIcon(t.source) + ' ' + t.title),
+      el('div', { class:'sub' }, (t.dueDate ? '📅 ' + t.dueDate : '（無截止日）')
+        + (t.note ? ' · ' + t.note : ''))
+    ));
+    return row;
+  }
+
+  function appendGroup(label, arr){
+    if(!arr.length) return;
+    const card = el('div', { class:'card', style:{marginBottom:'10px'} });
+    card.appendChild(el('h3', null, label + ' (' + arr.length + ')'));
+    arr.sort((a,b)=> (a.dueDate||'').localeCompare(b.dueDate||''))
+      .forEach(t => card.appendChild(renderTodoRow(t)));
+    content.appendChild(card);
+  }
+  appendGroup('🔥 今日 / 逾期', _grpToday);
+  appendGroup('📅 本週', _grpWeek);
+  appendGroup('⏳ 之後', _grpLater);
+
+  if(done.length){
+    App._todoShowDone = App._todoShowDone || false;
+    const card = el('div', { class:'card' });
+    card.appendChild(el('div', { class:'flex-between', style:{cursor:'pointer'}, onclick:()=> { App._todoShowDone = !App._todoShowDone; rerender(); } },
+      el('h3', null, '✅ 已完成 (' + done.length + ')'),
+      el('span', null, App._todoShowDone ? '▼' : '▶')
+    ));
+    if(App._todoShowDone){
+      done.sort((a,b)=> (b.doneAt||0)-(a.doneAt||0)).forEach(t => card.appendChild(renderTodoRow(t)));
+    }
+    content.appendChild(card);
+  }
+}
+
+function openTodoEditor(todo){
+  const me = currentStudent(); if(!me) return;
+  const isNew = !todo;
+  const data = todo ? Object.assign({}, todo) : {
+    id: nid(),
+    studentId: me.id,
+    title: '',
+    dueDate: _b5TodoToday(),
+    priority: 'med',
+    done: false,
+    source: 'manual',
+    sourceId: '',
+    note: '',
+    createdAt: Date.now()
+  };
+
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew ? '＋ 新增待辦' : '✏️ 編輯待辦'));
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '標題 *'));
+  const iT = el('input', { class:'input' });
+  iT.value = data.title || '';
+  fT.appendChild(iT);
+  m.root.appendChild(fT);
+
+  const fD = el('div', { class:'field' });
+  fD.appendChild(el('label', { class:'label' }, '截止日'));
+  const iD = el('input', { class:'input', type:'date' });
+  iD.value = data.dueDate || '';
+  fD.appendChild(iD);
+  m.root.appendChild(fD);
+
+  const fP = el('div', { class:'field' });
+  fP.appendChild(el('label', { class:'label' }, '優先級'));
+  const sP = el('select', { class:'select' });
+  [['low','🟢 低'],['med','🟡 中'],['high','🔴 高']].forEach(([v,l]) =>
+    sP.appendChild(el('option', { value:v, selected:v===data.priority }, l)));
+  fP.appendChild(sP);
+  m.root.appendChild(fP);
+
+  const fN = el('div', { class:'field' });
+  fN.appendChild(el('label', { class:'label' }, '備註'));
+  const iN = el('textarea', { class:'textarea', style:{minHeight:'60px'} });
+  iN.value = data.note || '';
+  fN.appendChild(iN);
+  m.root.appendChild(fN);
+
+  const actions = el('div', { class:'modal-actions' });
+  if(!isNew && data.source === 'manual'){
+    actions.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+      const ok = await confirmDlg('確定刪除此待辦？', { danger:true });
+      if(!ok) return;
+      App.db.todos = (App.db.todos || []).filter(x => x.id !== data.id);
+      saveDB();
+      m.close();
+      rerender();
+    } }, '🗑 刪除'));
+  }
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const title = iT.value.trim();
+    if(!title){ toast('標題必填','danger'); return; }
+    data.title = title;
+    data.dueDate = iD.value;
+    data.priority = sP.value;
+    data.note = iN.value.trim();
+    if(!Array.isArray(App.db.todos)) App.db.todos = [];
+    const idx = App.db.todos.findIndex(x => x.id === data.id);
+    if(idx >= 0) App.db.todos[idx] = data;
+    else App.db.todos.push(data);
+    saveDB();
+    m.close();
+    toast('已儲存','success');
+    rerender();
+  } }, '💾 儲存'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   5-30：個人成績趨勢圖（SVG 手刻）
+   ──────────────────────────────────────────────────────────── */
+function renderLineChart(container, dataSeries, options){
+  const opt = Object.assign({
+    width: 600, height: 300, yMin: 0, yMax: 100,
+    showGrid: true, showLegend: true, padL:40, padR:14, padT:12, padB:36
+  }, options || {});
+  const W = opt.width, H = opt.height;
+  const innerW = W - opt.padL - opt.padR;
+  const innerH = H - opt.padT - opt.padB;
+
+  // 收集所有 x labels（取 union）
+  const xLabels = [];
+  const xSeen = {};
+  (dataSeries || []).forEach(s => (s.points || []).forEach(p => {
+    if(!xSeen[p.x]){ xSeen[p.x] = true; xLabels.push(p.x); }
+  }));
+  const xCount = Math.max(1, xLabels.length);
+  const stepX = xCount > 1 ? innerW / (xCount - 1) : 0;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('width', '100%');
+  svg.style.maxWidth = W + 'px';
+  svg.style.display = 'block';
+  svg.style.background = 'var(--surface)';
+
+  function xPos(i){ return opt.padL + i * stepX; }
+  function yPos(v){
+    const range = opt.yMax - opt.yMin;
+    if(range <= 0) return opt.padT + innerH;
+    return opt.padT + innerH - ((v - opt.yMin) / range) * innerH;
+  }
+
+  // grid
+  if(opt.showGrid){
+    const gridStep = 5;
+    for(let i=0; i<=gridStep; i++){
+      const v = opt.yMin + (opt.yMax - opt.yMin) * (i / gridStep);
+      const yp = yPos(v);
+      const line = document.createElementNS(NS, 'line');
+      line.setAttribute('x1', opt.padL); line.setAttribute('x2', W - opt.padR);
+      line.setAttribute('y1', yp); line.setAttribute('y2', yp);
+      line.setAttribute('stroke', '#e5e7eb'); line.setAttribute('stroke-width', '1');
+      if(i === 0) line.setAttribute('stroke', '#94a3b8');
+      svg.appendChild(line);
+      const txt = document.createElementNS(NS, 'text');
+      txt.setAttribute('x', opt.padL - 6); txt.setAttribute('y', yp + 4);
+      txt.setAttribute('text-anchor', 'end');
+      txt.setAttribute('font-size', '10');
+      txt.setAttribute('fill', '#64748b');
+      txt.textContent = Math.round(v);
+      svg.appendChild(txt);
+    }
+  }
+
+  // x ticks
+  xLabels.forEach((lbl, i) => {
+    const xp = xPos(i);
+    const txt = document.createElementNS(NS, 'text');
+    txt.setAttribute('x', xp); txt.setAttribute('y', H - opt.padB + 14);
+    txt.setAttribute('text-anchor', 'middle');
+    txt.setAttribute('font-size', '10');
+    txt.setAttribute('fill', '#64748b');
+    txt.textContent = lbl;
+    svg.appendChild(txt);
+  });
+
+  // series
+  (dataSeries || []).forEach(s => {
+    const color = s.color || '#3b82f6';
+    const dashed = !!s.dashed;
+    const points = (s.points || []).map(p => {
+      const xi = xLabels.indexOf(p.x);
+      if(xi < 0) return null;
+      return { x: xPos(xi), y: yPos(p.y), v: p.y, lbl: p.x };
+    }).filter(Boolean);
+    if(points.length >= 2){
+      const path = document.createElementNS(NS, 'polyline');
+      path.setAttribute('points', points.map(p => p.x + ',' + p.y).join(' '));
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', color);
+      path.setAttribute('stroke-width', '2');
+      if(dashed) path.setAttribute('stroke-dasharray', '4 4');
+      svg.appendChild(path);
+    }
+    points.forEach(p => {
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); c.setAttribute('r', 3);
+      c.setAttribute('fill', color);
+      const t = document.createElementNS(NS, 'title');
+      t.textContent = (s.label || '') + ' ' + p.lbl + ': ' + p.v;
+      c.appendChild(t);
+      svg.appendChild(c);
+    });
+  });
+
+  // legend
+  if(opt.showLegend && dataSeries && dataSeries.length){
+    let lx = opt.padL + 4, ly = opt.padT + 4;
+    dataSeries.forEach((s, i) => {
+      const dot = document.createElementNS(NS, 'rect');
+      dot.setAttribute('x', lx); dot.setAttribute('y', ly - 8);
+      dot.setAttribute('width', 10); dot.setAttribute('height', 10);
+      dot.setAttribute('fill', s.color || '#3b82f6');
+      if(s.dashed) dot.setAttribute('opacity', '0.5');
+      svg.appendChild(dot);
+      const txt = document.createElementNS(NS, 'text');
+      txt.setAttribute('x', lx + 14); txt.setAttribute('y', ly);
+      txt.setAttribute('font-size', '11');
+      txt.setAttribute('fill', '#334155');
+      txt.textContent = (s.label || ('系列 ' + (i+1))) + (s.dashed ? '（虛線）' : '');
+      svg.appendChild(txt);
+      lx += 110;
+    });
+  }
+
+  container.innerHTML = '';
+  container.appendChild(svg);
+}
+
+/* 收集學生成績資料 → 依週/科目分組 */
+function _b5StudentScoreSeries(studentId, subject, period){
+  // submissions 為主要分數來源；以 assignment.title 推測科目
+  const subs = (App.db.submissions || []).filter(s => s.studentId === studentId && typeof s.score === 'number');
+  const now = Date.now();
+  let cutoffMs = 0;
+  if(period === 'month') cutoffMs = now - 30 * 86400000;
+  else if(period === 'semester' && App.db.semester && App.db.semester.startDate){
+    cutoffMs = new Date(App.db.semester.startDate + 'T00:00:00').getTime();
+  }
+  const rows = subs.filter(s => {
+    if(cutoffMs > 0 && (s.ts || s.gradedAt || 0) < cutoffMs) return false;
+    if(subject && subject !== 'all'){
+      const asg = (App.db.assignments || []).find(a => a.id === s.assignmentId);
+      const t = (asg && asg.title) || '';
+      if(!t.includes(subject)) return false;
+    }
+    return true;
+  }).sort((a,b) => (a.ts||a.gradedAt||0) - (b.ts||b.gradedAt||0));
+  return rows.map(s => {
+    const asg = (App.db.assignments || []).find(a => a.id === s.assignmentId);
+    const dateStr = (s.ts || s.gradedAt) ? new Date(s.ts || s.gradedAt).toISOString().slice(0,10) : '';
+    const wk = (typeof getWeekNo === 'function' && dateStr) ? getWeekNo(dateStr) : 0;
+    const label = wk ? ('W' + wk) : dateStr.slice(5);
+    // 百分制：score / points * 100
+    const max = (asg && asg.points) || 100;
+    const pct = max > 0 ? Math.round(s.score / max * 100) : s.score;
+    return { x: label, y: pct, title: (asg && asg.title) || '', raw: s };
+  });
+}
+
+/* 班級平均（同一作業集合內，所有學生平均） */
+function _b5ClassAvgSeries(subject, period){
+  const subs = (App.db.submissions || []).filter(s => typeof s.score === 'number');
+  const now = Date.now();
+  let cutoffMs = 0;
+  if(period === 'month') cutoffMs = now - 30 * 86400000;
+  else if(period === 'semester' && App.db.semester && App.db.semester.startDate){
+    cutoffMs = new Date(App.db.semester.startDate + 'T00:00:00').getTime();
+  }
+  const byLabel = {};
+  subs.forEach(s => {
+    if(cutoffMs > 0 && (s.ts || s.gradedAt || 0) < cutoffMs) return;
+    const asg = (App.db.assignments || []).find(a => a.id === s.assignmentId);
+    const t = (asg && asg.title) || '';
+    if(subject && subject !== 'all' && !t.includes(subject)) return;
+    const dateStr = (s.ts || s.gradedAt) ? new Date(s.ts || s.gradedAt).toISOString().slice(0,10) : '';
+    const wk = (typeof getWeekNo === 'function' && dateStr) ? getWeekNo(dateStr) : 0;
+    const label = wk ? ('W' + wk) : dateStr.slice(5);
+    const max = (asg && asg.points) || 100;
+    const pct = max > 0 ? s.score / max * 100 : s.score;
+    if(!byLabel[label]) byLabel[label] = { sum:0, n:0 };
+    byLabel[label].sum += pct;
+    byLabel[label].n++;
+  });
+  return Object.keys(byLabel).sort().map(k => ({ x:k, y: Math.round(byLabel[k].sum / byLabel[k].n) }));
+}
+
+function rMyTrend(content){
+  const me = currentStudent(); if(!me) return;
+  App._trendState = App._trendState || { subject:'all', period:'semester' };
+  const st = App._trendState;
+
+  content.appendChild(el('h1', null, '📈 成績趨勢'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '依作業繳交時間順序顯示，分數已換算為百分制'));
+
+  // 蒐集科目候選
+  const subjectSet = new Set(['all']);
+  (App.db.assignments || []).forEach(a => {
+    const t = a.title || '';
+    // 偵測中文科目關鍵詞
+    ['國','數','英','自','社','理','化','生','史','地','音','美','體','資'].forEach(s => {
+      if(t.includes(s)) subjectSet.add(s);
+    });
+  });
+
+  // 工具列
+  const tool = el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap',marginBottom:'12px'} });
+  const sSub = el('select', { class:'select' });
+  Array.from(subjectSet).forEach(s => {
+    sSub.appendChild(el('option', { value:s, selected: s===st.subject }, s==='all'?'全部科目':('🏷️ ' + s)));
+  });
+  sSub.addEventListener('change', ()=> { st.subject = sSub.value; rerender(); });
+  tool.appendChild(sSub);
+  const sPer = el('select', { class:'select' });
+  [['month','本月'],['semester','本學期'],['all','全部']].forEach(([v,l]) =>
+    sPer.appendChild(el('option', { value:v, selected:v===st.period }, l)));
+  sPer.addEventListener('change', ()=> { st.period = sPer.value; rerender(); });
+  tool.appendChild(sPer);
+  content.appendChild(tool);
+
+  const myPoints = _b5StudentScoreSeries(me.id, st.subject, st.period);
+  const avgPoints = _b5ClassAvgSeries(st.subject, st.period);
+
+  if(!myPoints.length){
+    content.appendChild(el('div', { class:'card empty' }, '此條件下尚無成績資料'));
+    return;
+  }
+
+  // 圖表
+  const chartCard = el('div', { class:'card', style:{marginBottom:'12px'} });
+  const chartBox = el('div', { style:{overflowX:'auto'} });
+  chartCard.appendChild(chartBox);
+  renderLineChart(chartBox, [
+    { label:'我的分數', color:'#3b82f6', points: myPoints },
+    { label:'班級平均', color:'#94a3b8', dashed:true, points: avgPoints }
+  ], { width: Math.max(600, myPoints.length * 60), height: 300, yMin: 0, yMax: 100 });
+  content.appendChild(chartCard);
+
+  // 統計
+  const vals = myPoints.map(p => p.y);
+  const maxV = Math.max(...vals);
+  const minV = Math.min(...vals);
+  const avg = Math.round(vals.reduce((a,b)=>a+b,0) / vals.length);
+  const prog = vals.length >= 2 ? (vals[vals.length-1] - vals[0]) : 0;
+  content.appendChild(el('div', { class:'grid grid-4' },
+    el('div', { class:'stat s-success' }, el('div', { class:'num' }, String(maxV)), el('div', { class:'lbl' }, '最高')),
+    el('div', { class:'stat s-danger' }, el('div', { class:'num' }, String(minV)), el('div', { class:'lbl' }, '最低')),
+    el('div', { class:'stat s-primary' }, el('div', { class:'num' }, String(avg)), el('div', { class:'lbl' }, '平均')),
+    el('div', { class:'stat ' + (prog>=0?'s-success':'s-danger') },
+      el('div', { class:'num' }, (prog>=0?'+':'') + prog),
+      el('div', { class:'lbl' }, '進步幅度')
+    )
+  ));
+
+  // 明細
+  const list = el('div', { class:'card', style:{marginTop:'12px'} });
+  list.appendChild(el('h3', null, '📋 明細'));
+  myPoints.slice().reverse().forEach(p => {
+    list.appendChild(el('div', { class:'list-row' },
+      el('div', { class:'info' },
+        el('div', { class:'name' }, p.title || '?'),
+        el('div', { class:'sub' }, p.x)
+      ),
+      el('span', { class:'tag ' + (p.y>=80?'t-success':p.y>=60?'t-warn':'t-danger') }, String(p.y))
+    ));
+  });
+  content.appendChild(list);
+}
+
+/* ─── 學生個人頁：最近徽章橫向列 hook ─── */
+function renderRecentBadgesForMe(){
+  const me = (typeof currentStudent === 'function') ? currentStudent() : null;
+  if(!me) return null;
+  try { checkAndAwardBadges(me.id); } catch(_) {}
+  const bs = getStudentBadges(me.id).sort((a,b)=> (b.earnedAt||0)-(a.earnedAt||0)).slice(0,3);
+  if(!bs.length) return null;
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('div', { class:'flex-between' },
+    el('h3', null, '🏅 最近獲得的徽章'),
+    el('button', { class:'btn btn-sm', onclick:()=> go('mybadges') }, '查看全部 →')
+  ));
+  const row = el('div', { class:'flex', style:{gap:'8px',marginTop:'8px',overflowX:'auto'} });
+  bs.forEach(b => {
+    const def = BADGE_DEFS[b.type] || { label:b.type, icon:'🏅' };
+    const color = BADGE_LEVEL_COLOR[b.level] || '#666';
+    row.appendChild(el('div', { style:{minWidth:'90px',textAlign:'center',padding:'8px',border:'2px solid '+color,borderRadius:'8px'} },
+      el('div', { style:{fontSize:'24px'} }, def.icon),
+      el('div', { style:{fontWeight:'700',color:color,fontSize:'12px'} }, BADGE_LEVEL_LABEL[b.level] + ' ' + def.label)
+    ));
+  });
+  card.appendChild(row);
+  return card;
+}
+
+/* ─── 隱私保護：__App / __Sync getter 之外，這裡額外曝出  ─── */
+/* （學生端的 notes 屬私人，老師端透過 db 直接讀也只在 admin override 時才用，
+    這裡實際隱私保護依賴 __App getter 在 student/parent 時不回傳 db；
+    teacher 端維持可讀，因為老師本來就有資料庫存取權。
+    若要嚴格阻擋老師看，可另存 indexed-db；批次 5 採折衷方案。） */
 
 // batch 1 安全強化：只在 ?debug=1 時暴露完整 App / Sync；
 // 否則學生 session 拿到的只有非敏感欄位（避免 console 一行抓全班密碼）
