@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -4464,18 +4464,6 @@ function renderLogin(root){
       );
       grid.appendChild(studentCard);
     }
-    // batch 4-21：家長登入入口
-    if(lc.showParentBtn !== false){
-      const parentCard = el('button', { class:'role-choice-card', onclick: e => {
-        e.currentTarget.classList.add('tapped');
-        setTimeout(()=> { App._loginStage = 'parent'; rerender(); }, 220);
-      }},
-        el('span', { class:'rc-ico' }, lc.parentIcon || '👨‍👩‍👧'),
-        el('div', { class:'rc-title' }, lc.parentLabel || '我是家長'),
-        el('div', { class:'rc-sub' }, lc.parentSub || '查看子女學習狀況')
-      );
-      grid.appendChild(parentCard);
-    }
     stage.appendChild(grid);
     card.appendChild(stage);
   }
@@ -4484,9 +4472,6 @@ function renderLogin(root){
   }
   else if(App._loginStage === 'student'){
     card.appendChild(renderLoginStudentStage());
-  }
-  else if(App._loginStage === 'parent'){
-    card.appendChild(renderLoginParentStage());
   }
 
   // 自訂歡迎訊息
@@ -5205,8 +5190,6 @@ function renderChrome(root, role){
   // sidebar (desktop)
   if(role === 'teacher'){
     app.appendChild(renderSidebarTeacher());
-  } else if(role === 'parent'){
-    app.appendChild(renderSidebarParent());
   } else {
     app.appendChild(renderSidebarStudent());
   }
@@ -5217,7 +5200,6 @@ function renderChrome(root, role){
   const content = el('div', { class:'content', id:'main-content' });
   main.appendChild(content);
   if(role === 'teacher') main.appendChild(renderBottomNavTeacher());
-  else if(role === 'parent') main.appendChild(renderBottomNavParent());
   else main.appendChild(renderBottomNavStudent());
 
   app.appendChild(main);
@@ -5481,14 +5463,9 @@ function renderTopbar(role){
     appearance:'🎨 外觀設定',
     uieditor:'🛠️ 介面編輯器',
     exportcenter:'📦 匯出中心',
-    parents:'👨‍👩‍👧 家長帳號', teachers:'🧑‍🏫 老師管理',
+    teachers:'🧑‍🏫 老師管理',
     behavior:'⭐ 行為點數', quiz:'📝 線上小考',
     help:'📖 使用說明', install:'📲 安裝 App'
-  } : role === 'parent' ? {
-    pchildren:'👨‍👩‍👧 我的子女', patt:'📅 出席紀錄',
-    pgrade:'🎯 學期成績', psub:'📥 繳交紀錄',
-    pfeedback:'💬 評價回饋', pmsg:'💬 訊息',
-    pset:'⚙️ 個人設定', help:'📖 使用說明'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
     sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
@@ -14839,7 +14816,7 @@ function rerender(){
 
   const content = renderChrome(root, App.session.role);
 
-  // batch 4-24：副老師權限攔截（admin / student / parent 都直接放行）
+  // batch 4-24：副老師權限攔截（admin / student 都直接放行）
   try {
     if(App.session.role === 'teacher' && !hasPermission(App.session, App.view)){
       content.innerHTML = '';
@@ -14889,25 +14866,12 @@ function rerender(){
       else if(v === 'uieditor') rUiEditor(content);   // 介面編輯器
       else if(v === 'exportcenter') rExportCenter(content); // batch 3：匯出中心
       // batch 4 新增頁面
-      else if(v === 'parents') rParents(content);     // batch 4-21
       else if(v === 'behavior') rBehavior(content);   // batch 4-23
       else if(v === 'teachers') rTeachers(content);   // batch 4-24
       else if(v === 'quiz') rQuiz(content);           // batch 4-25
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else { App.view = 'overview'; rOv(content); }
-    } else if(App.session.role === 'parent'){
-      // batch 4-21：家長端
-      const v = App.view;
-      if(v === 'pchildren' || !v) rParentChildren(content);
-      else if(v === 'patt') rParentAttendance(content);
-      else if(v === 'pgrade') rParentGrades(content);
-      else if(v === 'psub') rParentSubmissions(content);
-      else if(v === 'pfeedback') rParentFeedback(content);
-      else if(v === 'pmsg') rParentMessages(content);
-      else if(v === 'pset') rParentSettings(content);
-      else if(v === 'help') rHelp(content);
-      else { App.view = 'pchildren'; rParentChildren(content); }
     } else {
       const v = App.view;
       if(v === 'checkin' || !v) rCheckIn(content);
@@ -17560,7 +17524,6 @@ function getSidebarItems(role){
         { key:'timer', icon:'⏰', label:'課堂計時器' }
       ]},
       manage: { label:'管理', items: [
-        { key:'parents', icon:'👨‍👩‍👧', label:'家長帳號' },
         { key:'teachers', icon:'🧑‍🏫', label:'老師管理' }
       ]},
       system: { label:'系統', items: [
@@ -17575,22 +17538,6 @@ function getSidebarItems(role){
         { key:'uieditor', icon:'🛠️', label:'介面編輯器' },
         { key:'firebase', icon:'☁️', label:'跨裝置同步' },
         { key:'install', icon:'📲', label:'安裝 App' },
-        { key:'help', icon:'📖', label:'使用說明' }
-      ]}
-    };
-  } else if(role === 'parent'){
-    // batch 4-21：家長端 sidebar
-    return {
-      p_func: { label:'功能', items: [
-        { key:'pchildren', icon:'👨‍👩‍👧', label:'我的子女' },
-        { key:'patt', icon:'📅', label:'出席紀錄' },
-        { key:'pgrade', icon:'🎯', label:'學期成績' },
-        { key:'psub', icon:'📥', label:'繳交紀錄' },
-        { key:'pfeedback', icon:'💬', label:'評價回饋' },
-        { key:'pmsg', icon:'💬', label:'訊息' }
-      ]},
-      p_other: { label:'設定', items: [
-        { key:'pset', icon:'⚙️', label:'個人設定' },
         { key:'help', icon:'📖', label:'使用說明' }
       ]}
     };
@@ -19055,599 +19002,6 @@ function filterStudentsByPerms(students){
   if(p.classes === '*') return students;
   const allow = new Set(p.classes || []);
   return (students || []).filter(s => allow.has(s.cls));
-}
-
-/* ════════════════════════════════════════════════════════════
-   batch 4-21：家長帳號（parent role）
-   ──────────────────────────────────────────────────────────── */
-function currentParent(){
-  if(!App.session || App.session.role !== 'parent') return null;
-  return (App.db.parents || []).find(p => p.id === App.session.id) || null;
-}
-function parentChildren(){
-  const me = currentParent();
-  if(!me) return [];
-  const ids = new Set(me.children || []);
-  return (App.db.students || []).filter(s => ids.has(s.id));
-}
-
-/* ─ 家長 sidebar / bottom nav ─ */
-function renderSidebarParent(){
-  const side = el('aside', { class:'sidebar' + (App.sidebarCollapsed ? ' collapsed' : '') });
-  side.appendChild(sidebarToggleButton());
-  const me = currentParent();
-  side.appendChild(el('div', { class:'brand' },
-    el('div', { class:'brand-logo' }, 'V3'),
-    el('div', { class:'brand-title' }, '家長後台')
-  ));
-  side.appendChild(sideSection('p_func', '功能', buildSidebarItems('parent', 'p_func', {})));
-  side.appendChild(sideSection('p_other', '設定', buildSidebarItems('parent', 'p_other', {})));
-  side.appendChild(el('div', { style:{flex:'1'} }));
-  side.appendChild(el('div', { class:'card', style:{padding:'10px'} },
-    el('div', { class:'small', style:{fontWeight:'600'} }, me?.name || '家長'),
-    el('div', { class:'tiny muted' }, (me?.children || []).length + ' 位子女'),
-    el('div', { style:{marginTop:'6px',display:'flex',gap:'4px'} },
-      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: toggleTheme }, App.theme==='dark'?'☀️':'🌙'),
-      el('button', { class:'btn btn-sm', style:{flex:'1'}, onclick: doLogout }, '⎋')
-    )
-  ));
-  return side;
-}
-function renderBottomNavParent(){
-  const nav = el('nav', { class:'bottom-nav' });
-  const items = [
-    { v:'pchildren', i:'👨‍👩‍👧', t:'子女' },
-    { v:'patt', i:'📅', t:'出席' },
-    { v:'pgrade', i:'🎯', t:'成績' },
-    { v:'pmsg', i:'💬', t:'訊息' },
-    { v:'pset', i:'⚙️', t:'設定' }
-  ];
-  items.forEach(it => {
-    const b = el('button', { class:'nav-item ' + (App.view===it.v?'active':''),
-      onclick: ()=> go(it.v) },
-      el('span', { class:'ico' }, it.i),
-      el('span', null, it.t)
-    );
-    nav.appendChild(b);
-  });
-  return nav;
-}
-
-/* ─ 家長登入頁 ─ */
-function renderLoginParentStage(){
-  const stage = el('div', { class:'login-stage' });
-  stage.appendChild(el('h3', { style:{marginBottom:'14px'} }, '👨‍👩‍👧 家長登入'));
-
-  const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, 'Email'));
-  const i1 = el('input', { class:'input', type:'email', placeholder:'parent@example.com', autocomplete:'username' });
-  f1.appendChild(i1);
-  stage.appendChild(f1);
-
-  const f2 = el('div', { class:'field' });
-  f2.appendChild(el('label', { class:'label' }, '密碼'));
-  const pwWrap = el('div', { class:'pw-input-wrap' });
-  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
-  const togglePw = el('button', { type:'button', class:'pw-toggle', onclick: e => {
-    e.preventDefault();
-    if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
-    else { i2.type = 'password'; togglePw.textContent = '👁'; }
-  }}, '👁');
-  pwWrap.appendChild(i2); pwWrap.appendChild(togglePw);
-  f2.appendChild(pwWrap);
-  stage.appendChild(f2);
-
-  const submit = async ()=>{
-    const em = i1.value.trim().toLowerCase();
-    const pw = i2.value;
-    if(!em || !pw){ toast('請輸入 Email 與密碼','danger'); return; }
-    const cand = (App.db.parents || []).find(p => (p.email||'').toLowerCase() === em);
-    if(!cand){ toast('Email 或密碼錯誤','danger'); return; }
-    const ok = await verifyPassword(pw, cand.password);
-    if(!ok){ toast('Email 或密碼錯誤','danger'); return; }
-    if(!isPasswordHashed(cand.password)){
-      try { cand.password = await hashPassword(pw); saveDB(); } catch(e){}
-    }
-    App.session = { role:'parent', id:cand.id, name:cand.name, email:cand.email };
-    saveSession();
-    saveLastUser({ role:'parent', id:cand.id, name:cand.name, ts:Date.now() });
-    App._loginStage = null;
-    toast('歡迎，' + cand.name + '！','success');
-    go('pchildren');
-    // 首次登入強制改密碼
-    try {
-      if(cand.mustChangePw){
-        setTimeout(()=> forceChangeParentPassword(cand.id), 500);
-      }
-    } catch(_){}
-  };
-
-  const btnRow = el('div', { class:'flex', style:{marginTop:'10px'} },
-    el('button', { class:'btn', style:{flex:'0 0 auto'}, onclick: ()=> { App._loginStage = 'choose'; rerender(); } }, '← 返回'),
-    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: submit }, '登入 →')
-  );
-  stage.appendChild(btnRow);
-
-  i1.addEventListener('keydown', e => { if(e.key==='Enter') i2.focus(); });
-  i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
-  setTimeout(()=> i1.focus(), 80);
-
-  return stage;
-}
-
-function forceChangeParentPassword(parentId){
-  const p = (App.db.parents || []).find(x => x.id === parentId);
-  if(!p) return;
-  const m = modal('', { dismissable:false });
-  m.root.appendChild(el('h2', null, '🔐 請設定新密碼'));
-  m.root.appendChild(el('p', { style:{fontSize:'14px',lineHeight:'1.6'} },
-    '為了帳號安全，首次登入請設定新密碼。'));
-  const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, '新密碼（至少 6 字元）'));
-  const i1 = el('input', { class:'input', type:'password' });
-  f1.appendChild(i1);
-  m.root.appendChild(f1);
-  const f2 = el('div', { class:'field' });
-  f2.appendChild(el('label', { class:'label' }, '確認密碼'));
-  const i2 = el('input', { class:'input', type:'password' });
-  f2.appendChild(i2);
-  m.root.appendChild(f2);
-  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none'} });
-  m.root.appendChild(err);
-  const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: async ()=> {
-    if(!i1.value || i1.value.length < 6){ err.textContent='密碼至少 6 字元'; err.style.display='block'; return; }
-    if(i1.value !== i2.value){ err.textContent='兩次密碼不一致'; err.style.display='block'; return; }
-    const hashed = await hashPasswordSafe(i1.value);
-    if(!hashed.ok){ err.textContent='密碼雜湊失敗'; err.style.display='block'; return; }
-    p.password = hashed.value;
-    p.mustChangePw = false;
-    p.passwordChangedAt = Date.now();
-    saveDB();
-    m.close();
-    toast('✅ 密碼設定成功','success');
-  }}, '設定密碼'));
-  m.root.appendChild(actions);
-  setTimeout(()=> i1.focus(), 100);
-}
-
-/* ─ 老師後台：家長帳號管理 ─ */
-function rParents(content){
-  content.appendChild(el('h1', null, '👨‍👩‍👧 家長帳號管理'));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
-    '為家長建立帳號並綁定子女，家長登入後僅能查看綁定子女的資料'));
-
-  const card = el('div', { class:'card' });
-  card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
-    el('h3', null, '所有家長（' + (App.db.parents || []).length + ' 位）'),
-    el('button', { class:'btn btn-primary btn-sm', onclick: ()=> openParentEdit(null) }, '＋ 新增家長')
-  ));
-
-  if(!(App.db.parents || []).length){
-    card.appendChild(el('div', { class:'empty' },
-      el('div', { class:'ico' }, '👨‍👩‍👧'),
-      el('div', null, '尚無家長帳號'),
-      el('button', { class:'btn btn-primary', style:{marginTop:'12px'}, onclick: ()=> openParentEdit(null) }, '＋ 新增第一位家長')
-    ));
-  } else {
-    // 依「子女所屬班級」摺疊分組
-    const groups = {};
-    (App.db.parents || []).forEach(p => {
-      const kids = (p.children || []).map(id => (App.db.students||[]).find(s => s.id === id)).filter(Boolean);
-      const clsList = [...new Set(kids.map(s => s.cls || '未分班'))];
-      const key = clsList.length ? clsList.join(' / ') : '（未綁定）';
-      groups[key] = groups[key] || [];
-      groups[key].push(p);
-    });
-    Object.keys(groups).sort().forEach(k => {
-      const grp = el('details', { open:'true', style:{marginTop:'10px',border:'1px solid var(--border)',borderRadius:'10px',padding:'8px 12px'} });
-      grp.appendChild(el('summary', { style:{cursor:'pointer',fontWeight:'600'} }, '🏫 ' + k + '（' + groups[k].length + '）'));
-      groups[k].forEach(p => {
-        const kids = (p.children || []).map(id => (App.db.students||[]).find(s => s.id === id)).filter(Boolean);
-        const row = el('div', { class:'list-row' });
-        row.appendChild(el('div', { class:'avatar' }, initials(p.name)));
-        row.appendChild(el('div', { class:'info' },
-          el('div', { class:'name' }, p.name + (p.mustChangePw ? ' ⚠️' : '')),
-          el('div', { class:'sub' }, '📧 ' + (p.email||'') + ' · 子女：' + (kids.map(s => s.name + (s.cls?'(' + s.cls + ')':'')).join('、') || '（尚未綁定）'))
-        ));
-        const acts = el('div', { class:'flex' },
-          el('button', { class:'btn btn-sm', onclick: ()=> openParentEdit(p) }, '✏️ 編輯'),
-          el('button', { class:'btn btn-sm', onclick: ()=> resetParentPassword(p.id) }, '🔑 重設密碼'),
-          el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
-            const ok = await confirmDlg('確定刪除家長「' + p.name + '」？', { danger:true });
-            if(!ok) return;
-            App.db.parents = App.db.parents.filter(x => x.id !== p.id);
-            saveDB();
-            toast('已刪除','success');
-            rerender();
-          }}, '🗑')
-        );
-        row.appendChild(acts);
-        grp.appendChild(row);
-      });
-      card.appendChild(grp);
-    });
-  }
-  content.appendChild(card);
-}
-
-function openParentEdit(parent){
-  const isNew = !parent;
-  const m = modal('');
-  m.root.appendChild(el('h2', null, isNew ? '➕ 新增家長' : '✏️ 編輯家長'));
-
-  const fName = el('div', { class:'field' });
-  fName.appendChild(el('label', { class:'label' }, '家長姓名 *'));
-  const iName = el('input', { class:'input', value: parent?.name || '' });
-  fName.appendChild(iName);
-  m.root.appendChild(fName);
-
-  const fEmail = el('div', { class:'field' });
-  fEmail.appendChild(el('label', { class:'label' }, 'Email（登入用）*'));
-  const iEmail = el('input', { class:'input', type:'email', value: parent?.email || '' });
-  fEmail.appendChild(iEmail);
-  m.root.appendChild(fEmail);
-
-  let initialPw = '';
-  if(isNew){
-    const fPw = el('div', { class:'field' });
-    fPw.appendChild(el('label', { class:'label' }, '初始密碼（將要求首次登入更改）'));
-    initialPw = 'p' + Math.random().toString(36).slice(2,8);
-    const iPw = el('input', { class:'input', value: initialPw });
-    iPw.addEventListener('input', e => { initialPw = e.target.value; });
-    fPw.appendChild(iPw);
-    m.root.appendChild(fPw);
-  }
-
-  // 綁定學生
-  m.root.appendChild(el('div', { class:'label', style:{marginTop:'10px'} }, '綁定子女（可複選）'));
-  const stuBox = el('div', { style:{maxHeight:'260px',overflowY:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
-  const selected = new Set(parent?.children || []);
-  const byCls = {};
-  (App.db.students || []).forEach(s => {
-    const c = s.cls || '未分班';
-    byCls[c] = byCls[c] || [];
-    byCls[c].push(s);
-  });
-  Object.keys(byCls).sort().forEach(c => {
-    stuBox.appendChild(el('div', { class:'small muted', style:{marginTop:'6px',fontWeight:'600'} }, '🏫 ' + c));
-    byCls[c].forEach(s => {
-      const lab = el('label', { style:{display:'block',padding:'4px 6px',cursor:'pointer'} });
-      const chk = el('input', { type:'checkbox' });
-      if(selected.has(s.id)) chk.checked = true;
-      chk.addEventListener('change', e => {
-        if(e.target.checked) selected.add(s.id); else selected.delete(s.id);
-      });
-      lab.appendChild(chk);
-      lab.appendChild(document.createTextNode(' ' + s.name + (s.sid ? ' (' + s.sid + ')' : '')));
-      stuBox.appendChild(lab);
-    });
-  });
-  if(!Object.keys(byCls).length){
-    stuBox.appendChild(el('div', { class:'small muted' }, '（尚無學生）'));
-  }
-  m.root.appendChild(stuBox);
-
-  const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
-    const name = iName.value.trim();
-    const email = iEmail.value.trim().toLowerCase();
-    if(!name){ toast('請輸入姓名','danger'); return; }
-    if(!email || !/.+@.+\..+/.test(email)){ toast('Email 格式錯誤','danger'); return; }
-    // 檢查 email 唯一
-    const dup = (App.db.parents || []).find(p => (p.email||'').toLowerCase() === email && p.id !== parent?.id);
-    if(dup){ toast('此 Email 已被使用','danger'); return; }
-    if(isNew){
-      const hashed = await hashPasswordSafe(initialPw);
-      const np = {
-        id: nid(),
-        name: name,
-        email: email,
-        password: hashed.ok ? hashed.value : initialPw,
-        children: [...selected],
-        mustChangePw: true,
-        avatar: '',
-        createdAt: Date.now()
-      };
-      App.db.parents = App.db.parents || [];
-      App.db.parents.push(np);
-      saveDB();
-      m.close();
-      toast('已新增家長，初始密碼：' + initialPw,'success', 6000);
-    } else {
-      parent.name = name;
-      parent.email = email;
-      parent.children = [...selected];
-      saveDB();
-      m.close();
-      toast('已更新','success');
-    }
-    rerender();
-  }}, isNew ? '➕ 新增' : '💾 儲存'));
-  m.root.appendChild(actions);
-}
-
-async function resetParentPassword(parentId){
-  const p = (App.db.parents || []).find(x => x.id === parentId);
-  if(!p) return;
-  const ok = await confirmDlg('要重設「' + p.name + '」的密碼嗎？');
-  if(!ok) return;
-  const newPw = 'p' + Math.random().toString(36).slice(2,8);
-  const hashed = await hashPasswordSafe(newPw);
-  p.password = hashed.ok ? hashed.value : newPw;
-  p.mustChangePw = true;
-  saveDB();
-  toast('新密碼：' + newPw + '（請通知家長首次登入需改密碼）','success', 8000);
-}
-
-/* ─ 家長端頁面 ─ */
-function rParentChildren(content){
-  const me = currentParent();
-  if(!me){ content.appendChild(el('div',{class:'card'},'尚未綁定資料')); return; }
-  content.appendChild(el('h1', null, '👨‍👩‍👧 我的子女'));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
-    '歡迎，' + me.name + '！您可查看下列子女的學習狀況'));
-
-  const kids = parentChildren();
-  if(!kids.length){
-    content.appendChild(el('div', { class:'card' },
-      el('div', { class:'empty' },
-        el('div', { class:'ico' }, '🧑‍🎓'),
-        el('div', null, '尚未綁定子女'),
-        el('div', { class:'small muted' }, '請聯絡老師為您綁定學生資料')
-      )
-    ));
-    return;
-  }
-
-  const grid = el('div', { class:'grid grid-2' });
-  const today = td();
-  kids.forEach(s => {
-    const todayAtt = (App.db.attendance || []).find(a => a.studentId === s.id && a.date === today);
-    const points = computeBehaviorPoints(s.id);
-    const card = el('div', { class:'card card-hover' });
-    card.appendChild(el('div', { class:'flex', style:{alignItems:'center',gap:'12px'} },
-      el('div', { class:'avatar', style:{width:'56px',height:'56px',fontSize:'20px'} }, initials(s.name)),
-      el('div', null,
-        el('div', { style:{fontSize:'18px',fontWeight:'700'} }, s.name),
-        el('div', { class:'small muted' }, (s.cls||'') + (s.sid ? ' · 學號 ' + s.sid : ''))
-      )
-    ));
-    card.appendChild(el('div', { class:'small', style:{marginTop:'10px',padding:'8px',background:'var(--surface-2)',borderRadius:'6px'} },
-      '📅 今日：' + (todayAtt ? (todayAtt.status || '已到') : '尚未簽到')
-    ));
-    card.appendChild(el('div', { class:'small', style:{marginTop:'6px',display:'flex',justifyContent:'space-between'} },
-      el('span', null, '⭐ 累積點數'),
-      el('span', { style:{fontWeight:'700',color: points.total>=0?'var(--success)':'var(--danger)'} }, (points.total>=0?'+':'') + points.total)
-    ));
-    card.appendChild(el('div', { class:'flex', style:{marginTop:'10px',flexWrap:'wrap'} },
-      el('button', { class:'btn btn-sm', onclick: ()=> { App._parentFilterStu = s.id; go('patt'); } }, '📅 出席'),
-      el('button', { class:'btn btn-sm', onclick: ()=> { App._parentFilterStu = s.id; go('pgrade'); } }, '🎯 成績'),
-      el('button', { class:'btn btn-sm', onclick: ()=> { App._parentFilterStu = s.id; go('psub'); } }, '📥 繳交')
-    ));
-    grid.appendChild(card);
-  });
-  content.appendChild(grid);
-}
-
-function parentChildSelector(){
-  const kids = parentChildren();
-  if(kids.length <= 1){
-    return { selector:null, ids: kids.map(k => k.id) };
-  }
-  const wrap = el('div', { class:'card', style:{marginBottom:'10px',padding:'8px 10px'} });
-  wrap.appendChild(el('span', { class:'small muted', style:{marginRight:'6px'} }, '檢視子女：'));
-  const sel = el('select', { class:'input', style:{display:'inline-block',width:'auto'} });
-  sel.appendChild(el('option', { value:'' }, '全部'));
-  kids.forEach(k => sel.appendChild(el('option', { value:k.id, selected: App._parentFilterStu===k.id }, k.name + (k.cls ? '（' + k.cls + '）' : ''))));
-  sel.addEventListener('change', e => { App._parentFilterStu = e.target.value || null; rerender(); });
-  wrap.appendChild(sel);
-  const ids = App._parentFilterStu ? [App._parentFilterStu] : kids.map(k => k.id);
-  return { selector: wrap, ids };
-}
-
-function rParentAttendance(content){
-  content.appendChild(el('h1', null, '📅 出席紀錄'));
-  const sel = parentChildSelector();
-  if(sel.selector) content.appendChild(sel.selector);
-  const idSet = new Set(sel.ids);
-  const recs = (App.db.attendance || []).filter(a => idSet.has(a.studentId))
-    .sort((a,b) => (b.date||'').localeCompare(a.date||'') || (b.ts||0) - (a.ts||0));
-  if(!recs.length){
-    content.appendChild(el('div', { class:'card empty' }, '尚無出席紀錄'));
-    return;
-  }
-  const card = el('div', { class:'card' });
-  recs.slice(0, 200).forEach(r => {
-    const stu = (App.db.students||[]).find(s => s.id === r.studentId);
-    const w = fmtWeekTag(r.date);
-    card.appendChild(el('div', { class:'list-row' },
-      el('div', { class:'info' },
-        el('div', { class:'name' }, (stu?.name || '?') + ' · ' + r.date + (w ? ' （' + w + '）' : '')),
-        el('div', { class:'sub' }, (r.time || '') + ' · ' + (r.status || '已到') + (r.method ? ' · ' + r.method : ''))
-      )
-    ));
-  });
-  content.appendChild(card);
-}
-
-function rParentGrades(content){
-  content.appendChild(el('h1', null, '🎯 學期成績'));
-  const sel = parentChildSelector();
-  if(sel.selector) content.appendChild(sel.selector);
-  const ids = sel.ids;
-  if(!ids.length){ content.appendChild(el('div',{class:'card empty'},'無資料')); return; }
-  const grades = App.db.grades || {};
-  ids.forEach(sid => {
-    const stu = (App.db.students||[]).find(s => s.id === sid);
-    if(!stu) return;
-    const card = el('div', { class:'card', style:{marginBottom:'10px'} });
-    card.appendChild(el('h3', null, '🧑‍🎓 ' + stu.name + (stu.cls ? '（' + stu.cls + '）' : '')));
-    const g = grades[sid] || {};
-    const rows = [
-      ['出席分數', g.att],
-      ['作業分數', g.asgn],
-      ['期中考', g.mid],
-      ['期末考', g.fin || g.final],
-      ['總分', g.total]
-    ];
-    rows.forEach(([k,v]) => {
-      card.appendChild(el('div', { class:'list-row' },
-        el('div', { class:'info' }, el('div', { class:'name' }, k)),
-        el('div', { style:{fontWeight:'700'} }, (v != null) ? String(v) : '—')
-      ));
-    });
-    // 小考成績（quizzes via DB.grades records）
-    const scores = (App.db.scores || []).filter(x => x.studentId === sid);
-    if(scores.length){
-      card.appendChild(el('div', { class:'small muted', style:{marginTop:'8px',fontWeight:'600'} }, '📝 各項成績'));
-      scores.forEach(sc => {
-        const w = fmtWeekTag(sc.date || td());
-        card.appendChild(el('div', { class:'list-row' },
-          el('div', { class:'info' },
-            el('div', { class:'name' }, sc.title || sc.type || '成績'),
-            el('div', { class:'sub' }, (sc.date || '') + (w ? ' · ' + w : ''))
-          ),
-          el('div', { style:{fontWeight:'700'} }, String(sc.score != null ? sc.score : '—'))
-        ));
-      });
-    }
-    content.appendChild(card);
-  });
-}
-
-function rParentSubmissions(content){
-  content.appendChild(el('h1', null, '📥 繳交紀錄'));
-  const sel = parentChildSelector();
-  if(sel.selector) content.appendChild(sel.selector);
-  const idSet = new Set(sel.ids);
-  const subs = (App.db.submissions || []).filter(x => idSet.has(x.studentId))
-    .sort((a,b) => (b.ts||0) - (a.ts||0));
-  if(!subs.length){
-    content.appendChild(el('div', { class:'card empty' }, '尚無繳交紀錄'));
-    return;
-  }
-  const card = el('div', { class:'card' });
-  subs.slice(0, 200).forEach(s => {
-    const stu = (App.db.students||[]).find(x => x.id === s.studentId);
-    const asgn = (App.db.assignments||[]).find(a => a.id === s.assignmentId);
-    const date = s.ts ? new Date(s.ts).toLocaleDateString('zh-TW') : '';
-    const w = fmtWeekTag(date.replace(/\//g,'-'));
-    card.appendChild(el('div', { class:'list-row' },
-      el('div', { class:'info' },
-        el('div', { class:'name' }, (asgn?.title || '作業') + ' — ' + (stu?.name || '')),
-        el('div', { class:'sub' }, date + (w ? ' · ' + w : '') + (s.score != null ? ' · 分數 ' + s.score : ' · 未批改'))
-      )
-    ));
-  });
-  content.appendChild(card);
-}
-
-function rParentFeedback(content){
-  content.appendChild(el('h1', null, '💬 評價回饋'));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
-    '查看老師對子女的評語'));
-  const sel = parentChildSelector();
-  if(sel.selector) content.appendChild(sel.selector);
-  const idSet = new Set(sel.ids);
-  const notes = (App.db.attendanceNotes || []).filter(n => idSet.has(n.studentId))
-    .sort((a,b) => (b.ts||0) - (a.ts||0));
-  if(!notes.length){
-    content.appendChild(el('div', { class:'card empty' }, '尚無評語'));
-    return;
-  }
-  const card = el('div', { class:'card' });
-  notes.forEach(n => {
-    const stu = (App.db.students||[]).find(x => x.id === n.studentId);
-    card.appendChild(el('div', { class:'list-row' },
-      el('div', { class:'info' },
-        el('div', { class:'name' }, (stu?.name || '?') + (n.by ? ' · ' + n.by : '')),
-        el('div', { class:'sub' }, n.text),
-        el('div', { class:'tiny muted' }, fmtDateTime(n.ts || Date.now()))
-      )
-    ));
-  });
-  content.appendChild(card);
-}
-
-function rParentMessages(content){
-  content.appendChild(el('h1', null, '💬 訊息'));
-  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
-    '老師發送給您的訊息'));
-  const me = currentParent();
-  // 收件對象：toParentId === me.id 或 toStudentId in children（broadcast）
-  const childIds = new Set(me?.children || []);
-  const msgs = (App.db.messages || []).filter(m =>
-    m.toParentId === me?.id ||
-    (m.toStudentId && childIds.has(m.toStudentId)) ||
-    (m.broadcastParents === true)
-  ).sort((a,b) => (b.ts||0) - (a.ts||0));
-  if(!msgs.length){
-    content.appendChild(el('div', { class:'card empty' }, '尚無訊息'));
-    return;
-  }
-  const card = el('div', { class:'card' });
-  msgs.slice(0, 200).forEach(m => {
-    card.appendChild(el('div', { class:'list-row' },
-      el('div', { class:'info' },
-        el('div', { class:'name' }, m.from || '老師'),
-        el('div', { class:'sub' }, m.text || ''),
-        el('div', { class:'tiny muted' }, fmtDateTime(m.ts || Date.now()))
-      )
-    ));
-  });
-  content.appendChild(card);
-}
-
-function rParentSettings(content){
-  const me = currentParent();
-  if(!me){ content.appendChild(el('div',{class:'card'},'未登入')); return; }
-  content.appendChild(el('h1', null, '⚙️ 個人設定'));
-
-  const card = el('div', { class:'card' });
-  card.appendChild(el('h3', null, '👤 個人資料'));
-  card.appendChild(el('div', { class:'list-row' },
-    el('div', { class:'avatar' }, initials(me.name)),
-    el('div', { class:'info' },
-      el('div', { class:'name' }, me.name),
-      el('div', { class:'sub' }, '📧 ' + (me.email || '')),
-      el('div', { class:'tiny muted' }, '子女 ' + (me.children||[]).length + ' 位')
-    )
-  ));
-  content.appendChild(card);
-
-  const card2 = el('div', { class:'card', style:{marginTop:'10px'} });
-  card2.appendChild(el('h3', null, '🔐 變更密碼'));
-  const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, '舊密碼'));
-  const i1 = el('input', { class:'input', type:'password' });
-  f1.appendChild(i1);
-  card2.appendChild(f1);
-  const f2 = el('div', { class:'field' });
-  f2.appendChild(el('label', { class:'label' }, '新密碼（至少 6 字元）'));
-  const i2 = el('input', { class:'input', type:'password' });
-  f2.appendChild(i2);
-  card2.appendChild(f2);
-  const f3 = el('div', { class:'field' });
-  f3.appendChild(el('label', { class:'label' }, '確認新密碼'));
-  const i3 = el('input', { class:'input', type:'password' });
-  f3.appendChild(i3);
-  card2.appendChild(f3);
-  card2.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
-    const okOld = await verifyPassword(i1.value, me.password);
-    if(!okOld){ toast('舊密碼錯誤','danger'); return; }
-    if(!i2.value || i2.value.length < 6){ toast('新密碼至少 6 字元','danger'); return; }
-    if(i2.value !== i3.value){ toast('兩次新密碼不一致','danger'); return; }
-    const hashed = await hashPasswordSafe(i2.value);
-    if(!hashed.ok){ toast('密碼雜湊失敗','danger'); return; }
-    me.password = hashed.value;
-    me.passwordChangedAt = Date.now();
-    saveDB();
-    i1.value=''; i2.value=''; i3.value='';
-    toast('密碼已變更','success');
-  }}, '💾 變更密碼'));
-  content.appendChild(card2);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -22004,7 +21358,7 @@ function renderRecentBadgesForMe(){
 
 /* ─── 隱私保護：__App / __Sync getter 之外，這裡額外曝出  ─── */
 /* （學生端的 notes 屬私人，老師端透過 db 直接讀也只在 admin override 時才用，
-    這裡實際隱私保護依賴 __App getter 在 student/parent 時不回傳 db；
+    這裡實際隱私保護依賴 __App getter 在 student 時不回傳 db；
     teacher 端維持可讀，因為老師本來就有資料庫存取權。
     若要嚴格阻擋老師看，可另存 indexed-db；批次 5 採折衷方案。） */
 
@@ -22025,8 +21379,8 @@ function renderRecentBadgesForMe(){
     Object.defineProperty(window, '__App', {
       configurable: true,
       get(){
-        if(App && App.session && (App.session.role === 'student' || App.session.role === 'parent')){
-          // 學生 / 家長端：不暴露 db / accounts 等敏感資料
+        if(App && App.session && App.session.role === 'student'){
+          // 學生端：不暴露 db / accounts 等敏感資料
           return {
             session: App.session,
             view: App.view,
@@ -22042,8 +21396,8 @@ function renderRecentBadgesForMe(){
     Object.defineProperty(window, '__Sync', {
       configurable: true,
       get(){
-        if(App && App.session && (App.session.role === 'student' || App.session.role === 'parent')){
-          // 學生 / 家長端不暴露 Sync（含 firebase token 等）
+        if(App && App.session && App.session.role === 'student'){
+          // 學生端不暴露 Sync（含 firebase token 等）
           return { _restricted: true };
         }
         return Sync;
