@@ -5395,6 +5395,8 @@ function _runForgotFlow(opts){
         sendBtn.disabled = true;
         sendBtn.textContent = '⏳ 寄送中...';
         const result = await sendOtp(st.account.email, code, 'teacher');
+        st.lastSendResult = result;
+        st.lastCode = code;  // 暫存供「顯示驗證碼」用 (僅 UI session, 不寫 LS)
         if(result === 'webhook'){
           toast('✅ 驗證碼已透過 ' + method + ' 寄出，請查看您的頻道','success', 5000);
         } else if(result === 'mailto'){
@@ -5410,6 +5412,18 @@ function _runForgotFlow(opts){
       }
     }, validExists ? '🔁 重新寄送驗證碼' : '📤 寄出驗證碼');
     stage.appendChild(sendBtn);
+
+    // mailto 模式應急按鈕：使用者沒看到信箱跳出來或沒收到信時可手動顯示
+    if(st.lastSendResult === 'mailto' && st.lastCode && !st.showCodeOnScreen){
+      stage.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'8px',width:'100%'},
+        onclick: ()=> {
+          if(!confirm('警告：直接顯示驗證碼會降低安全性。\n\n只在「無法收到信」或「信箱 APP 沒跳出」時使用。\n\n確認顯示？')) return;
+          st.showCodeOnScreen = true;
+          st.fallbackOtp = st.lastCode;
+          render();
+        }
+      }, '📋 沒收到信？點此顯示驗證碼（應急）'));
+    }
 
     if(validExists){
       stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
@@ -5763,6 +5777,8 @@ function _runForgotFlow(opts){
         sendBtn.disabled = true;
         sendBtn.textContent = '⏳ 寄送中...';
         const result = await sendOtp(st.account.email, code, 'student');
+        st.lastSendResult = result;
+        st.lastCode = code;
         if(result === 'webhook'){
           toast('✅ 驗證碼已透過 ' + method + ' 寄出','success', 5000);
         } else if(result === 'mailto'){
@@ -5775,6 +5791,17 @@ function _runForgotFlow(opts){
       }
     }, validExists ? '🔁 重新寄送' : '📤 寄出驗證碼');
     stage.appendChild(sendBtn);
+
+    if(st.lastSendResult === 'mailto' && st.lastCode && !st.showCodeOnScreen){
+      stage.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'8px',width:'100%'},
+        onclick: ()=> {
+          if(!confirm('警告：直接顯示驗證碼會降低安全性。\n\n只在「無法收到信」時使用。確認顯示？')) return;
+          st.showCodeOnScreen = true;
+          st.fallbackOtp = st.lastCode;
+          render();
+        }
+      }, '📋 沒收到信？點此顯示驗證碼（應急）'));
+    }
 
     if(validExists){
       stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
@@ -6524,6 +6551,14 @@ function forceChangeTeacherPassword(accountId){
     if(typeof logOp === 'function') logOp('passwordChange', '老師 ' + a.username + ' 更新預設密碼');
     m.close();
     toast('✅ 密碼已更新，請妥善保管！','success');
+    // bug fix: 改完預設密碼後若缺 recovery 欄位，繼續強制設定
+    setTimeout(()=> {
+      try {
+        if(!a.email || !a.securityQ || !a.securityA || !a.recoveryCode){
+          forceSetupRecovery(a.id);
+        }
+      } catch(e){ _swallow('chain-forceSetupRecovery', e); }
+    }, 500);
   };
 
   i1.addEventListener('keydown', e => { if(e.key === 'Enter') i2.focus(); });
@@ -16836,6 +16871,25 @@ function boot(){
     }
     try { if(typeof Sync !== 'undefined' && Sync.setNode) Sync.setNode('parents', null); } catch(_){_swallow('m2-fbrm',_)}
   } catch(_){_swallow('m2-cleanup',_)}
+
+  // bug fix: session 還原時若主老師缺 recovery 欄位，延遲提示設定
+  // (避免每次 reload 都跳，加 LS 旗標一天內不重複)
+  setTimeout(()=> {
+    try {
+      if(!App.session || App.session.role !== 'teacher') return;
+      const acc = (App.db.accounts || []).find(a => a.id === App.session.id);
+      if(!acc) return;
+      // 副老師不需要 (用 admin 設好的 recovery)
+      if(acc.subRole === 'sub') return;
+      if(acc.email && acc.securityQ && acc.securityA && acc.recoveryCode) return;
+      // 一天內已提示過則跳過
+      const LS_RECOV_HINT = 'cms_v3_recov_hint_' + acc.id;
+      const last = parseInt(localStorage.getItem(LS_RECOV_HINT) || '0', 10);
+      if(Date.now() - last < 24*3600*1000) return;
+      try { localStorage.setItem(LS_RECOV_HINT, String(Date.now())); } catch(_){_swallow('recov-hint-save',_)}
+      if(typeof forceSetupRecovery === 'function') forceSetupRecovery(acc.id);
+    } catch(e){ _swallow('boot-recov-prompt', e); }
+  }, 1500);
 }
 
 function schedulePeriodicNotifications(){
