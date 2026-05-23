@@ -4042,8 +4042,8 @@ function donutChart(parts, opts={}){
 function go(view, subview=null){
   App.view = view;
   App.subview = subview;
-  // batch 3：記錄「最近使用」頁面（登入後才記）
-  try { if(view && App.session) pushRecentPage(view); } catch(e){}
+  // batch 3：最近使用功能已移除 (使用者要求)
+  // try { if(view && App.session) pushRecentPage(view); } catch(e){}
   const hash = '#' + view + (subview ? '/' + subview : '');
   if(location.hash !== hash) location.hash = hash;
   rerender();
@@ -6158,20 +6158,6 @@ function renderSidebarTeacher(){
     feedback: teacherFeedbackBadge() || null
   };
 
-  // batch 3：最近使用分組（最近點過的 5 個項目）
-  const recents = getRecentPages();
-  if(recents.length){
-    const itemMap = {};
-    const all = getSidebarItems('teacher');
-    Object.keys(all).forEach(sk => all[sk].items.forEach(it => itemMap[it.key] = it));
-    const recentNodes = recents
-      .map(k => itemMap[k] ? sideItem(itemMap[k].key, itemMap[k].icon, itemMap[k].label, null) : null)
-      .filter(n => n != null);
-    if(recentNodes.length){
-      side.appendChild(sideSection('recent', '最近使用', recentNodes));
-    }
-  }
-
   // 日常 — 依使用者自訂順序輸出
   side.appendChild(sideSection('daily', '日常', buildSidebarItems('teacher', 'daily', badges)));
 
@@ -6240,20 +6226,6 @@ function renderSidebarStudent(){
     // batch 5-29：今日 / 逾期待辦數
     mytodos: (typeof getStudentTodoBadge === 'function' ? getStudentTodoBadge() : 0) || null
   };
-
-  // batch 3：最近使用分組
-  const recents = getRecentPages();
-  if(recents.length){
-    const itemMap = {};
-    const allS = getSidebarItems('student');
-    Object.keys(allS).forEach(sk => allS[sk].items.forEach(it => itemMap[it.key] = it));
-    const recentNodes = recents
-      .map(k => itemMap[k] ? sideItem(itemMap[k].key, itemMap[k].icon, itemMap[k].label, null) : null)
-      .filter(n => n != null);
-    if(recentNodes.length){
-      side.appendChild(sideSection('recent', '最近使用', recentNodes));
-    }
-  }
 
   side.appendChild(sideSection('s_func', '功能', buildSidebarItems('student', 's_func', sBadges)));
 
@@ -6862,7 +6834,28 @@ function rOv(content){
           if(leave){
             c.appendChild(el('div', { class:'small' }, '📆 ' + (leave.reason || '請假中')));
           } else if(att){
-            c.appendChild(el('div', { class:'small mono' }, '✅ ' + att.time));
+            // 簽到 + 簽退 一起顯示
+            c.appendChild(el('div', { class:'small mono', style:{color:'var(--success)',fontWeight:'700'} }, '✅ 簽到 ' + att.time));
+            if(att.outTime){
+              // 計算上課時長
+              let durTxt = '';
+              try {
+                const [h1,m1] = (att.time||'').split(':').map(Number);
+                const [h2,m2] = (att.outTime||'').split(':').map(Number);
+                if(!isNaN(h1) && !isNaN(h2)){
+                  const min = (h2*60+m2)-(h1*60+m1);
+                  if(min > 0){
+                    const hr = Math.floor(min/60);
+                    const mn = min%60;
+                    durTxt = ' (' + (hr?hr+'h':'') + (mn?mn+'m':'') + ')';
+                  }
+                }
+              } catch(e){}
+              c.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)',fontWeight:'700',marginTop:'2px'} },
+                '👋 簽退 ' + att.outTime + durTxt));
+            } else {
+              c.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '尚未簽退'));
+            }
           } else {
             const acts = el('div', { class:'actions' });
             acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> markPresent(s.id) }, '✓ 補簽'));
