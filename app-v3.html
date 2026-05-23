@@ -5078,8 +5078,19 @@ async function hashAnswer(plain){
   return hashPassword('cms-v3-ans-' + String(plain).trim().toLowerCase());
 }
 
-// 開預設信箱 client（mailto:）寄出 OTP
-function sendOtpMailto(toEmail, code){
+// 寄出 OTP — 優先用 Webhook (Discord/Telegram/LINE)，沒設定才 fallback 到 mailto:
+// 回傳：'webhook' | 'mailto' | 'screen' (告知 UI 用哪種方式)
+async function sendOtp(toEmail, code, role){
+  // 方法 1：嘗試 Webhook (即時送達, 無需 mail client)
+  try {
+    const cfg = whLoad();
+    if(cfg && cfg.enabled && cfg.url){
+      const ok = await _sendOtpViaWebhook(cfg, toEmail, code, role);
+      if(ok) return 'webhook';
+    }
+  } catch(e){ _swallow('otp-webhook', e); }
+
+  // 方法 2：mailto: (跳出信箱 APP 草稿, 使用者要按送出)
   const subject = encodeURIComponent('[課程管理系統] 您的密碼重設驗證碼');
   const body = encodeURIComponent(
     '您好，\n\n' +
@@ -5091,10 +5102,49 @@ function sendOtpMailto(toEmail, code){
   try {
     window.location.href = 'mailto:' + encodeURIComponent(toEmail) +
       '?subject=' + subject + '&body=' + body;
+    return 'mailto';
   } catch(e){
-    toast('無法開啟郵件 client，請手動將驗證碼寄送', 'warning', 4000);
+    _swallow('otp-mailto', e);
+    return 'screen';  // 完全失敗 → UI 會直接顯示 OTP
   }
 }
+
+// Webhook 寄送 OTP 的內部 helper
+async function _sendOtpViaWebhook(cfg, toEmail, code, role){
+  const minutes = Math.floor(FORGOT_OTP_TTL/60000);
+  const text =
+    '🔑 [課程管理系統] 密碼重設驗證碼\n' +
+    '─────────────────────────────\n' +
+    '帳號類型：' + (role === 'student' ? '學生' : '老師') + '\n' +
+    '帳號 Email：' + toEmail + '\n' +
+    '\n' +
+    '🔢 驗證碼：**' + code + '**\n' +
+    '\n' +
+    '⏰ ' + minutes + ' 分鐘內有效\n' +
+    '⚠️ 如非您本人請求，請忽略此通知並考慮更改密碼';
+
+  let body;
+  if(cfg.platform === 'discord'){
+    body = JSON.stringify({ content: text });
+  } else if(cfg.platform === 'telegram'){
+    body = JSON.stringify({ text });
+  } else if(cfg.platform === 'line'){
+    body = JSON.stringify({ messages:[{ type:'text', text }] });
+  } else {
+    body = JSON.stringify({ event:'forgot-otp', toEmail, code, role, ts:Date.now(), text });
+  }
+  try {
+    const opts = { method:'POST', headers:{ 'Content-Type':'application/json' }, body };
+    if(cfg.platform === 'line' && cfg.token){
+      opts.headers['Authorization'] = 'Bearer ' + cfg.token;
+    }
+    const resp = await fetch(cfg.url, opts);
+    return resp && resp.ok;
+  } catch(e){ _swallow('otp-wh-send', e); return false; }
+}
+
+// 向後相容（萬一還有舊呼叫）
+function sendOtpMailto(toEmail, code){ return sendOtp(toEmail, code, 'teacher'); }
 
 // ── 老師忘記密碼：多步驗證流程
 function showTeacherForgotPassword(){
@@ -5294,15 +5344,35 @@ function _runForgotFlow(opts){
 
   /* ── Step 3：寄送 OTP */
   function renderTeacherStep3(){
-    header('📨 寄送驗證碼 — 第 3 / 6 步',
-      '系統會產生 6 位數驗證碼，並透過您的預設郵件 client 寄送到註冊信箱。');
+    const whCfg = whLoad();
+    const whReady = !!(whCfg && whCfg.enabled && whCfg.url);
+    const method = whReady
+      ? (whCfg.platform === 'discord' ? 'Discord' : whCfg.platform === 'telegram' ? 'Telegram' : whCfg.platform === 'line' ? 'LINE' : 'Webhook')
+      : '預設郵件 client';
 
+    header('📨 寄送驗證碼 — 第 3 / 6 步',
+      whReady
+        ? '系統會透過 ' + method + ' Webhook 自動寄出 6 位數驗證碼（即時送達）。'
+        : '系統會產生 6 位數驗證碼，並透過您的預設郵件 client 寄送。');
+
+    // 顯示寄送方式
     stage.appendChild(el('div', { style:{
-      background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
+      background: whReady ? 'var(--success-soft)' : 'var(--surface-2)',
+      borderLeft:'3px solid ' + (whReady ? 'var(--success)' : 'var(--warn)'),
+      padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
     }},
-      el('div', null, '收件人：', el('strong', null, st.account.email)),
-      el('div', { class:'tiny muted', style:{marginTop:'4px'} },
-        '若沒收到請檢查垃圾信件夾，或點下方「重新寄送」（60 秒冷卻）')
+      whReady
+        ? el('div', null,
+            el('div', { style:{fontWeight:'700',color:'var(--success)'} }, '✅ 已設定 ' + method + ' Webhook'),
+            el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+              '驗證碼會自動寄到您的 ' + method + ' 頻道，無需開信箱')
+          )
+        : el('div', null,
+            el('div', { style:{fontWeight:'700',color:'var(--warn)'} }, '⚠️ 未設定 Webhook，使用備用方式（mailto:）'),
+            el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+              '會跳出您的信箱 APP（草稿模式），您需要按「傳送」才會真的寄出。\n建議在「通知設定」設定 Discord/Telegram Webhook 以更穩定。')
+          ),
+      el('div', { style:{marginTop:'8px'} }, '收件人：', el('strong', null, st.account.email))
     ));
 
     // 顯示已寄出的提示（若 sessionStorage 內已有 OTP）
@@ -5311,7 +5381,7 @@ function _runForgotFlow(opts){
     const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
 
     const sendBtn = el('button', { class:'btn btn-primary btn-block',
-      onclick: ()=> {
+      onclick: async ()=> {
         const now = Date.now();
         if(st.lastSent && now - st.lastSent < FORGOT_OTP_RESEND_COOLDOWN){
           const sec = Math.ceil((FORGOT_OTP_RESEND_COOLDOWN - (now - st.lastSent))/1000);
@@ -5322,18 +5392,40 @@ function _runForgotFlow(opts){
         const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: st.role };
         try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){_swallow('auto',e)}
         st.lastSent = now;
-        sendOtpMailto(st.account.email, code);
-        toast('已開啟郵件 client，請寄出後查看信箱','info', 4000);
-        if(typeof logOp === 'function') logOp('forgotOtpSent', '老師 ' + st.username + ' 申請 OTP');
+        sendBtn.disabled = true;
+        sendBtn.textContent = '⏳ 寄送中...';
+        const result = await sendOtp(st.account.email, code, 'teacher');
+        if(result === 'webhook'){
+          toast('✅ 驗證碼已透過 ' + method + ' 寄出，請查看您的頻道','success', 5000);
+        } else if(result === 'mailto'){
+          toast('已開啟郵件 client，請按「傳送」後查看信箱','info', 5000);
+        } else {
+          // 完全失敗 → 顯示在畫面上（含警告）
+          st.fallbackOtp = code;
+          toast('Webhook 與郵件都失敗！驗證碼顯示在畫面上','danger', 8000);
+        }
+        if(typeof logOp === 'function') logOp('forgotOtpSent', '老師 ' + st.username + ' 申請 OTP (' + result + ')');
         // 重新 render 讓「我已收到」按鈕可用
         setTimeout(render, 300);
       }
-    }, validExists ? '🔁 重新寄送驗證碼' : '📤 寄出驗證信');
+    }, validExists ? '🔁 重新寄送驗證碼' : '📤 寄出驗證碼');
     stage.appendChild(sendBtn);
 
     if(validExists){
       stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
         '✓ 已寄出驗證碼，' + Math.ceil((existingOtp.exp - Date.now())/60000) + ' 分鐘內有效'));
+    }
+
+    // fallback：兩種方式都失敗時直接顯示在畫面
+    if(st.fallbackOtp){
+      stage.appendChild(el('div', { style:{
+        background:'var(--danger-soft)', border:'2px dashed var(--danger)',
+        padding:'14px', borderRadius:'8px', marginTop:'10px', textAlign:'center'
+      }},
+        el('div', { class:'small', style:{color:'var(--danger)',fontWeight:'700',marginBottom:'4px'} }, '⚠️ 緊急模式：驗證碼顯示在畫面上'),
+        el('div', { class:'mono', style:{fontSize:'28px',fontWeight:'700',letterSpacing:'6px'} }, st.fallbackOtp),
+        el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '請複製後立即進入下一步，並儘速設定 Webhook')
+      ));
     }
 
     stage.appendChild(actions(
@@ -5633,18 +5725,31 @@ function _runForgotFlow(opts){
 
   /* ── 學生 Step 3：寄送 OTP */
   function renderStudentStep3(){
+    const whCfg = whLoad();
+    const whReady = !!(whCfg && whCfg.enabled && whCfg.url);
+    const method = whReady
+      ? (whCfg.platform === 'discord' ? 'Discord' : whCfg.platform === 'telegram' ? 'Telegram' : whCfg.platform === 'line' ? 'LINE' : 'Webhook')
+      : '預設郵件 client';
+
     header('📨 寄送驗證碼 — 第 3 / 5 步',
-      '系統會產生 6 位數驗證碼，並透過您的預設郵件 client 寄送。');
+      whReady ? '系統會透過 ' + method + ' 自動寄出驗證碼。' : '系統會透過您的預設郵件 client 寄送。');
     stage.appendChild(el('div', { style:{
-      background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
-    }}, el('div', null, '收件人：', el('strong', null, st.account.email))));
+      background: whReady ? 'var(--success-soft)' : 'var(--surface-2)',
+      borderLeft:'3px solid ' + (whReady ? 'var(--success)' : 'var(--warn)'),
+      padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
+    }},
+      whReady
+        ? el('div', { style:{color:'var(--success)',fontWeight:'700'} }, '✅ 透過 ' + method + ' 即時送達')
+        : el('div', { style:{color:'var(--warn)',fontWeight:'700'} }, '⚠️ 跳出信箱 APP 草稿，需手動按「傳送」'),
+      el('div', { style:{marginTop:'8px'} }, '收件人：', el('strong', null, st.account.email))
+    ));
 
     let existingOtp = null;
     try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
     const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
 
-    stage.appendChild(el('button', { class:'btn btn-primary btn-block',
-      onclick: ()=> {
+    const sendBtn = el('button', { class:'btn btn-primary btn-block',
+      onclick: async ()=> {
         const now = Date.now();
         if(st.lastSent && now - st.lastSent < FORGOT_OTP_RESEND_COOLDOWN){
           const sec = Math.ceil((FORGOT_OTP_RESEND_COOLDOWN - (now - st.lastSent))/1000);
@@ -5655,15 +5760,35 @@ function _runForgotFlow(opts){
         const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: 'student' };
         try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){_swallow('auto',e)}
         st.lastSent = now;
-        sendOtpMailto(st.account.email, code);
-        toast('已開啟郵件 client','info', 4000);
+        sendBtn.disabled = true;
+        sendBtn.textContent = '⏳ 寄送中...';
+        const result = await sendOtp(st.account.email, code, 'student');
+        if(result === 'webhook'){
+          toast('✅ 驗證碼已透過 ' + method + ' 寄出','success', 5000);
+        } else if(result === 'mailto'){
+          toast('已開啟郵件 client，請按「傳送」','info', 5000);
+        } else {
+          st.fallbackOtp = code;
+          toast('Webhook 與郵件都失敗！驗證碼顯示在畫面上','danger', 8000);
+        }
         setTimeout(render, 300);
       }
-    }, validExists ? '🔁 重新寄送' : '📤 寄出驗證信'));
+    }, validExists ? '🔁 重新寄送' : '📤 寄出驗證碼');
+    stage.appendChild(sendBtn);
 
     if(validExists){
       stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
         '✓ 已寄出，' + Math.ceil((existingOtp.exp - Date.now())/60000) + ' 分鐘內有效'));
+    }
+
+    if(st.fallbackOtp){
+      stage.appendChild(el('div', { style:{
+        background:'var(--danger-soft)', border:'2px dashed var(--danger)',
+        padding:'14px', borderRadius:'8px', marginTop:'10px', textAlign:'center'
+      }},
+        el('div', { class:'small', style:{color:'var(--danger)',fontWeight:'700',marginBottom:'4px'} }, '⚠️ 緊急模式：驗證碼顯示在畫面上'),
+        el('div', { class:'mono', style:{fontSize:'28px',fontWeight:'700',letterSpacing:'6px'} }, st.fallbackOtp)
+      ));
     }
 
     stage.appendChild(actions(
@@ -13174,6 +13299,16 @@ async function triggerWebhook(eventType, payload){
 function rNotify(content){
   content.appendChild(el('h1', null, '📲 通知設定'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '當有重要事件發生時，自動發送通知到指定平台'));
+
+  // 提示：忘記密碼驗證碼也會用這個 Webhook 寄送
+  content.appendChild(el('div', { class:'card', style:{
+    background:'var(--primary-soft)', borderColor:'var(--primary)',
+    padding:'10px 14px', marginBottom:'12px', fontSize:'13px', lineHeight:'1.7'
+  }},
+    el('div', { style:{fontWeight:'700', color:'var(--primary)'} }, '💡 重要：忘記密碼驗證碼也會用這個 Webhook 寄送'),
+    el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+      '建議啟用並設定好 Discord/Telegram，這樣忘記密碼時驗證碼會直接送到您的頻道，比 mailto: 穩定。')
+  ));
 
   const cfg = whLoad() || { enabled:false, platform:'discord', url:'', token:'', events:{
     announcement:true, 'assignment-due':true, 'attendance-issue':true, 'leave-request':true, checkin:false
