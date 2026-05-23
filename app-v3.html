@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -2002,8 +2002,8 @@ function clearAllTimers(){
   const arr = App._timers || [];
   arr.forEach(id => {
     // id 同時 clearInterval + clearTimeout 都安全（瀏覽器 ID 共用一個池）
-    try { clearInterval(id); } catch(_){}
-    try { clearTimeout(id); } catch(_){}
+    try { clearInterval(id); } catch(_){_swallow('auto',_)}
+    try { clearTimeout(id); } catch(_){_swallow('auto',_)}
   });
   App._timers = [];
 }
@@ -2015,8 +2015,8 @@ function setTimeoutManaged(fn, ms){
 }
 function clearManagedTimer(id){
   if(id == null) return;
-  try { clearInterval(id); } catch(_){}
-  try { clearTimeout(id); } catch(_){}
+  try { clearInterval(id); } catch(_){_swallow('auto',_)}
+  try { clearTimeout(id); } catch(_){_swallow('auto',_)}
   if(App._timers){
     const i = App._timers.indexOf(id);
     if(i >= 0) App._timers.splice(i, 1);
@@ -2103,10 +2103,69 @@ function initials(name){
 }
 
 /* ════════════════════════════════════════════════════════════
-   PASSWORD HASHING (SHA-256 with salt) — batch 1 安全強化
-   保留向後相容：舊明文 password 仍能登入，下次修改自動升級
+   H4: 空 catch 共用 helper — 把 swallow 的錯誤集中到 App._silentErrors，
+        並於 debug 模式（?debug=1 或 window.__DEBUG）印到 console。
+        在老師後台「設定 → 進階」可瀏覽最近錯誤。
    ──────────────────────────────────────────────────────────── */
-async function hashPassword(plain){
+function _swallow(ctx, e){
+  try {
+    if(typeof window !== 'undefined'){
+      if(window.__DEBUG || (location && location.search && location.search.indexOf('debug=1') >= 0)){
+        console.warn('[' + (ctx || '?') + ']', e);
+      }
+    }
+    // 記到內部 buffer（最多 200 筆）
+    if(typeof App !== 'undefined' && App){
+      App._silentErrors = App._silentErrors || [];
+      App._silentErrors.push({
+        ctx: ctx || '?',
+        msg: (e && e.message) ? e.message : String(e),
+        stack: (e && e.stack) ? String(e.stack).split('\n').slice(0,3).join(' | ') : '',
+        ts: Date.now()
+      });
+      if(App._silentErrors.length > 200) App._silentErrors.shift();
+    }
+  } catch(_){ /* swallow swallow */ }
+}
+
+/* ════════════════════════════════════════════════════════════
+   PASSWORD HASHING (SHA-256 with per-account salt) — batch 1 + H5 強化
+   - 新格式：v2$<salt>$<hash64hex>  （salt 隨機 16 bytes）
+   - 舊格式：64 hex（共用固定 salt）— 向後相容
+   - 更舊：明文 / 'plain:...' — 向後相容
+   登入成功後在呼叫端自動升級至新格式
+   ──────────────────────────────────────────────────────────── */
+const _LEGACY_SALT = 'cms-v3-salt-';
+
+function genSalt(){
+  // 16 bytes 隨機 → 32 hex
+  if(typeof crypto !== 'undefined' && crypto && typeof crypto.getRandomValues === 'function'){
+    const buf = new Uint8Array(16);
+    crypto.getRandomValues(buf);
+    return Array.from(buf).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  // fallback（極少觸發）
+  let s = '';
+  for(let i = 0; i < 32; i++) s += Math.floor(Math.random()*16).toString(16);
+  return s;
+}
+
+// 內部：raw SHA-256 hex（不含 prefix）
+async function _sha256Hex(text){
+  const enc = new TextEncoder();
+  const data = enc.encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+/**
+ * hashPassword(plain, salt?)
+ * - 若給 salt → 回傳新格式 'v2$<salt>$<hash>'
+ * - 若未給 salt → 自動產生新 salt，回傳新格式（強烈建議呼叫端用此模式）
+ * 註：之前的呼叫端只傳一個參數 → 自動會升級成新格式（含 per-account salt）
+ */
+async function hashPassword(plain, salt){
   if(plain == null || plain === '') return '';
   if(!(typeof crypto !== 'undefined' && crypto && crypto.subtle && typeof crypto.subtle.digest === 'function')){
     // 安全環境不足：絕不靜默存明文。拋例外讓呼叫端顯示提示。
@@ -2114,16 +2173,19 @@ async function hashPassword(plain){
     err.code = 'NO_CRYPTO_SUBTLE';
     throw err;
   }
-  const enc = new TextEncoder();
-  const data = enc.encode('cms-v3-salt-' + plain);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2,'0')).join('');
+  const realSalt = (typeof salt === 'string' && salt) ? salt : genSalt();
+  const hash = await _sha256Hex(realSalt + ':' + plain);
+  return 'v2$' + realSalt + '$' + hash;
+}
+
+// 內部：產生「舊格式」hash（64 hex）— 僅用於向後相容比對
+async function _hashLegacy(plain){
+  return await _sha256Hex(_LEGACY_SALT + plain);
 }
 
 // 友善地把 hashPassword 失敗顯示給使用者（呼叫端可直接用此 wrapper）
-async function hashPasswordSafe(plain){
-  try { return { ok:true, value: await hashPassword(plain) }; }
+async function hashPasswordSafe(plain, salt){
+  try { return { ok:true, value: await hashPassword(plain, salt) }; }
   catch(e){
     if(typeof toast === 'function'){
       toast('🚨 ' + (e && e.message ? e.message : '密碼雜湊失敗，請改用 HTTPS'), 'danger', 6000);
@@ -2136,13 +2198,28 @@ async function verifyPassword(plain, stored){
   if(stored == null || stored === '') return false;
   if(plain == null) return false;
   const s = String(stored);
-  // 已是 SHA-256 雜湊（64 字元 hex）
+  // 新格式：v2$<salt>$<hash>
+  if(s.indexOf('v2$') === 0){
+    const parts = s.split('$');
+    if(parts.length !== 3) return false;
+    const salt = parts[1];
+    const h = parts[2];
+    try {
+      const candidate = await _sha256Hex(salt + ':' + plain);
+      return candidate === h.toLowerCase();
+    } catch(e){
+      if(typeof toast === 'function'){
+        toast('🚨 ' + (e && e.message ? e.message : '無法驗證密碼，請改用 HTTPS'), 'danger', 6000);
+      }
+      return false;
+    }
+  }
+  // 舊格式：64 hex（共用固定 salt）
   if(/^[0-9a-f]{64}$/i.test(s)){
     try {
-      const h = await hashPassword(plain);
+      const h = await _hashLegacy(plain);
       return h === s.toLowerCase();
     } catch(e){
-      // crypto.subtle 不可用 → 無法驗證 hash
       if(typeof toast === 'function'){
         toast('🚨 ' + (e && e.message ? e.message : '無法驗證密碼，請改用 HTTPS'), 'danger', 6000);
       }
@@ -2161,10 +2238,22 @@ async function verifyPassword(plain, stored){
 }
 
 /**
- * 判斷一個密碼欄位是否已雜湊。
+ * 判斷一個密碼欄位是否已雜湊（新 v2$ 格式 或 舊 64 hex 格式）。
+ * 注意：舊 64 hex 屬於「全域共用 salt」格式，安全性較弱，但仍視為 hashed，
+ * 不會被升級流程當作明文重 hash；如需強制升級到 per-account salt，請另外觸發改密碼流程。
  */
 function isPasswordHashed(stored){
-  return typeof stored === 'string' && /^[0-9a-f]{64}$/i.test(stored);
+  if(typeof stored !== 'string' || !stored) return false;
+  if(stored.indexOf('v2$') === 0) return true;
+  return /^[0-9a-f]{64}$/i.test(stored);
+}
+
+/**
+ * 判斷密碼是否為「新 v2$ 格式」（含 per-account salt）。
+ * 用於登入成功後判斷是否需要升級。
+ */
+function isPasswordV2(stored){
+  return typeof stored === 'string' && stored.indexOf('v2$') === 0;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2319,7 +2408,7 @@ function defaultDB(){
 }
 
 function saveCfg(){
-  try { localStorage.setItem(LS_CFG, JSON.stringify(App.cfg)); } catch(e){}
+  try { localStorage.setItem(LS_CFG, JSON.stringify(App.cfg)); } catch(e){_swallow('auto',e)}
 }
 function loadCfg(){
   try { return JSON.parse(localStorage.getItem(LS_CFG) || 'null'); } catch(e){ return null; }
@@ -2328,7 +2417,31 @@ function dbKey(){
   const room = (App.cfg && App.cfg.roomCode) || 'local';
   return LS_DB + '_' + room;
 }
-function saveDB(){
+/* H3：saveDB debounce
+ * 原本 saveDB 每次 call 都同步 JSON.stringify + localStorage.setItem 整顆 DB。
+ * 改為預設 200ms debounce；關鍵操作（登入 / 改密碼 / 重要設定）傳 immediate=true。
+ * 視窗關閉前以 beforeunload flush 一次。
+ */
+let _saveDBTimer = null;
+function saveDB(immediate){
+  if(immediate === true){
+    if(_saveDBTimer){ clearTimeout(_saveDBTimer); _saveDBTimer = null; }
+    _saveDBNow();
+    return;
+  }
+  if(_saveDBTimer) return;  // 已排隊
+  _saveDBTimer = setTimeout(function(){ _saveDBTimer = null; _saveDBNow(); }, 200);
+}
+// 視窗關閉前 flush 未寫入的 DB（避免資料遺失）
+try {
+  window.addEventListener('beforeunload', function(){
+    if(_saveDBTimer){
+      try { _saveDBNow(); } catch(e){ /* 視窗即將關閉，無法 toast */ }
+    }
+  });
+} catch(e){_swallow('auto',e)}
+
+function _saveDBNow(){
   if(!App.db) return;
   // batch 1：保險。確保 feeds 欄位存在，避免 .slice 失敗
   if(!Array.isArray(App.db.feeds)) App.db.feeds = [];
@@ -2343,7 +2456,7 @@ function saveDB(){
     if(isQuota){
       console.warn('[saveDB] localStorage 容量已滿', e);
       let size = 0;
-      try { size = JSON.stringify(App.db).length; } catch(_){}
+      try { size = JSON.stringify(App.db).length; } catch(_){_swallow('auto',_)}
       const mb = (size/1024/1024).toFixed(2);
       // 明顯告警（不再悄悄截斷）
       if(typeof toast === 'function'){
@@ -2363,13 +2476,13 @@ function saveDB(){
         localStorage.setItem(dbKey(), JSON.stringify(lite));
         // 自動觸發匯出備份（如果函式存在）
         if(typeof exportFullJSON === 'function'){
-          setTimeout(()=> { try { exportFullJSON(); } catch(_){} }, 800);
+          setTimeout(()=> { try { exportFullJSON(); } catch(_){_swallow('auto',_)} }, 800);
         } else if(typeof exportAll === 'function'){
-          setTimeout(()=> { try { exportAll(); } catch(_){} }, 800);
+          setTimeout(()=> { try { exportAll(); } catch(_){_swallow('auto',_)} }, 800);
         }
       } catch(e2){
         console.error('[saveDB] 降級寫入也失敗', e2);
-        try { alert('💥 緊急：localStorage 完全寫不入，請立即手動匯出資料以免遺失！'); } catch(_){}
+        try { alert('💥 緊急：localStorage 完全寫不入，請立即手動匯出資料以免遺失！'); } catch(_){_swallow('auto',_)}
       }
     } else {
       console.error('[saveDB] 未預期錯誤', e);
@@ -2381,7 +2494,7 @@ function loadDB(){
     const raw = localStorage.getItem(dbKey());
     if(!raw){
       App.db = defaultDB();
-      saveDB();
+      saveDB(true);  // H3: 首次初始化 → 立即落地
       return;
     }
     const parsed = JSON.parse(raw);
@@ -2443,7 +2556,7 @@ function autoImportV1(){
   // Guard: only run once.
   try {
     if(localStorage.getItem(LS_V1_IMPORTED) === '1') return false;
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   const v1 = detectV1Students();
   if(!v1) return false;
   if(!App.db) return false;
@@ -2452,7 +2565,7 @@ function autoImportV1(){
   // the teacher already entered manually.
   const existingStu = (App.db.students && App.db.students.length) ? App.db.students.length : 0;
   if(existingStu > 0){
-    try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){}
+    try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){_swallow('auto',e)}
     return false;
   }
 
@@ -2486,7 +2599,7 @@ function autoImportV1(){
   }).filter(Boolean);
 
   if(!cleanStudents.length){
-    try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){}
+    try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){_swallow('auto',e)}
     return false;
   }
 
@@ -2529,7 +2642,7 @@ function autoImportV1(){
   //       importing them would pollute today's stats.
 
   saveDB();
-  try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){}
+  try { localStorage.setItem(LS_V1_IMPORTED, '1'); } catch(e){_swallow('auto',e)}
   console.log('[v3] auto-imported ' + cleanStudents.length + ' students from V1');
   // toast comes later (after rerender) so it actually shows
   App._v1ImportedCount = cleanStudents.length;
@@ -2540,7 +2653,7 @@ function saveSession(){
   try {
     if(App.session) localStorage.setItem(LS_SESSION, JSON.stringify(App.session));
     else localStorage.removeItem(LS_SESSION);
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 function loadSession(){
   try { return JSON.parse(localStorage.getItem(LS_SESSION) || 'null'); } catch(e){ return null; }
@@ -2624,7 +2737,7 @@ function saveTheme(){
   try {
     localStorage.setItem(LS_THEME, App.theme);
     localStorage.setItem(LS_ACCENT, App.accent);
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   saveAppearance();
   applyTheme();
 }
@@ -2644,7 +2757,7 @@ function saveAppearance(){
     // keep legacy keys in sync (other tabs / older code paths still read these)
     localStorage.setItem(LS_THEME, App.theme || 'light');
     localStorage.setItem(LS_ACCENT, App.accent || 'blue');
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 function loadAppearance(){
   let loaded = false;
@@ -2661,7 +2774,7 @@ function loadAppearance(){
       if(v.customAccent) App._customAccent= v.customAccent;
       loaded = true;
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   // legacy fallback (older installs only had LS_THEME / LS_ACCENT)
   if(!loaded){
     try {
@@ -2669,7 +2782,7 @@ function loadAppearance(){
       const a = localStorage.getItem(LS_ACCENT);
       if(t) App.theme  = t;
       if(a) App.accent = a;
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
   // safe defaults
   if(!App.theme)    App.theme    = 'light';
@@ -2696,7 +2809,7 @@ function applyTheme(){
 
   // font family
   const fp = FONT_PRESETS.find(f => f.key === (App.font || 'system')) || FONT_PRESETS[0];
-  try { _loadGoogleFont(fp.gf); } catch(e){}
+  try { _loadGoogleFont(fp.gf); } catch(e){_swallow('auto',e)}
   root.style.setProperty('--font-family', fp.stack);
 
   // custom accent — clear inline overrides first, then re-apply if active
@@ -2717,7 +2830,7 @@ function applyTheme(){
       } else if(mq && mq.addListener){
         mq.addListener(()=> { if(App.theme === 'auto') applyTheme(); });
       }
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
 }
 
@@ -2746,10 +2859,10 @@ function applyCustomAccent(color){
 const Sync = (() => {
   let connectTimer = null;
   function detachAll(){
-    App.listeners.forEach(fn => { try{fn();}catch(e){} });
+    App.listeners.forEach(fn => { try{fn();}catch(e){_swallow('auto',e)} });
     App.listeners = [];
     if(App.fb){
-      try { App.fb.delete(); } catch(e){}
+      try { App.fb.delete(); } catch(e){_swallow('auto',e)}
       App.fb = null; App.fbRef = null;
     }
     App.fbStatus = 'idle';
@@ -2764,7 +2877,7 @@ const Sync = (() => {
       return false;
     }
     try {
-      if(firebase.apps.length){ try{firebase.app().delete();}catch(e){} }
+      if(firebase.apps.length){ try{firebase.app().delete();}catch(e){_swallow('auto',e)} }
       App.fb = firebase.initializeApp(fbCfg);
       const room = (App.cfg && App.cfg.roomCode) || 'default';
       App.fbRef = firebase.database().ref('cms-v3/' + room);
@@ -2798,7 +2911,7 @@ const Sync = (() => {
 
   function _saveDBLocal(){
     // 只寫 localStorage，不會推回 Firebase（避免 listener 觸發 -> push -> listener 迴圈）
-    try { saveDB(); } catch(e){}
+    try { saveDB(); } catch(e){_swallow('auto',e)}
   }
   // batch 2-stab: echo-suppression 改為「set + 用過即丟」
   // 原本用 2.5 秒時間窗：在 push 寫完到 listener 觸發中間 race 不一致；超過 2.5 秒會誤判
@@ -2812,7 +2925,7 @@ const Sync = (() => {
         setIntervalManaged(()=> {
           if(App._echoSet && App._echoSet.size > 0) App._echoSet.clear();
         }, 60000);
-      } catch(e){}
+      } catch(e){_swallow('auto',e)}
     }
     return App._echoSet;
   }
@@ -2835,7 +2948,7 @@ const Sync = (() => {
     if(App._syncRerTimer) return;
     App._syncRerTimer = setTimeout(()=> {
       App._syncRerTimer = null;
-      try { rerender(); } catch(e){}
+      try { rerender(); } catch(e){_swallow('auto',e)}
     }, 80);
   }
 
@@ -3004,7 +3117,7 @@ function notifyRequest(){
       NOTIFY_TYPES.forEach(t => { if(prefs[t.key] !== false) prefs[t.key] = true; });
       App.db.settings.notifications = prefs;
       saveDB();
-      try { Sync.setNode && Sync.setNode('settings', App.db.settings); } catch(e){}
+      try { Sync.setNode && Sync.setNode('settings', App.db.settings); } catch(e){_swallow('auto',e)}
       // 顯示測試
       notify('🔔 通知已啟用', '之後重要事件會推到桌面 / 鎖定畫面', { silent:true });
     } else if(p === 'denied'){
@@ -3046,21 +3159,21 @@ function notify(title, body, options){
       // 某些瀏覽器（特別是 Android Chrome）不允許直接 new Notification，必須透過 SW
       if(navigator.serviceWorker && navigator.serviceWorker.ready){
         navigator.serviceWorker.ready.then(reg => {
-          try { reg.showNotification(title, opts); } catch(_){}
+          try { reg.showNotification(title, opts); } catch(_){_swallow('auto',_)}
         });
       }
       return null;
     }
     n.onclick = () => {
-      try { window.focus(); } catch(_){}
+      try { window.focus(); } catch(_){_swallow('auto',_)}
       if(options.url){
-        try { location.hash = options.url; } catch(_){}
+        try { location.hash = options.url; } catch(_){_swallow('auto',_)}
       }
-      try { n.close(); } catch(_){}
+      try { n.close(); } catch(_){_swallow('auto',_)}
     };
     // 沒指定 requireInteraction 時自動 5 秒後關閉
     if(!options.requireInteraction){
-      setTimeout(()=> { try { n.close(); } catch(_){} }, 5500);
+      setTimeout(()=> { try { n.close(); } catch(_){_swallow('auto',_)} }, 5500);
     }
     return n;
   } catch(e){
@@ -3139,7 +3252,7 @@ function scheduleDueReminders(){
         try {
           const targets = assignmentTargets(asg);
           if(!targets.has(me.id)) return;
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
         // 已繳交？
         const sub = (App.db.submissions || []).find(s => s.studentId === me.id && s.assignmentId === asg.id);
         if(sub) return;
@@ -3147,7 +3260,7 @@ function scheduleDueReminders(){
         if(localStorage.getItem(key)) return;
         notify('📚 作業即將到期', (asg.title || '未命名作業') + ' 剩 ' + Math.max(1, Math.round(hoursLeft)) + ' 小時',
           { type:'dueReminder', tag:'due-' + asg.id, url:'sasgn/' + asg.id });
-        try { localStorage.setItem(key, '1'); } catch(e){}
+        try { localStorage.setItem(key, '1'); } catch(e){_swallow('auto',e)}
       });
     } catch(e){ console.warn('[dueReminder]', e); }
   }
@@ -3172,7 +3285,7 @@ function initBC(){
   } catch(e){ App.bc = null; }
 }
 function bcNotify(){
-  if(App.bc){ try{ App.bc.postMessage({ type:'db-update', ts:Date.now() }); }catch(e){} }
+  if(App.bc){ try{ App.bc.postMessage({ type:'db-update', ts:Date.now() }); }catch(e){_swallow('auto',e)} }
 }
 
 /* ---- storage event for cross-tab ---- */
@@ -3307,14 +3420,14 @@ function markMessagesRead(){
   const meId = App.session.role === 'teacher' ? 'teacher' : App.session.id;
   const key = LS_KEY + '_lastread_' + (App.cfg?.roomCode||'local') + '_' + meId;
   const latest = App.db.messages.reduce((m,x)=> Math.max(m, x.ts||0), 0);
-  try { localStorage.setItem(key, String(latest)); } catch(e){}
+  try { localStorage.setItem(key, String(latest)); } catch(e){_swallow('auto',e)}
 }
 function markDMRead(otherId){
   // batch 2: 老師讀完特定學生對話時、學生讀完老師對話時，紀錄該對話最後讀時間
   if(!App.session) return;
   const meId = App.session.role === 'teacher' ? 'teacher' : App.session.id;
   const key = LS_KEY + '_lastread_dm_' + (App.cfg?.roomCode||'local') + '_' + meId + '_' + otherId;
-  try { localStorage.setItem(key, String(Date.now())); } catch(e){}
+  try { localStorage.setItem(key, String(Date.now())); } catch(e){_swallow('auto',e)}
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -3510,7 +3623,7 @@ async function idbKeys(){
 
 async function idbUsage(){
   if(navigator.storage && navigator.storage.estimate){
-    try { return await navigator.storage.estimate(); } catch(e){}
+    try { return await navigator.storage.estimate(); } catch(e){_swallow('auto',e)}
   }
   return { usage: 0, quota: 0 };
 }
@@ -3586,7 +3699,7 @@ async function gdAuth(){
           if(resp.error){ rej(new Error(resp.error)); return; }
           _gdToken = resp.access_token;
           _gdTokenExpiry = Date.now() + (parseInt(resp.expires_in) || 3600) * 1000;
-          try { gapi.client.setToken({ access_token: _gdToken }); } catch(e){}
+          try { gapi.client.setToken({ access_token: _gdToken }); } catch(e){_swallow('auto',e)}
           res(resp);
         },
       });
@@ -3703,7 +3816,7 @@ async function attachUpload(file){
       const usage = await idbUsage();
       const pct = usage.quota ? (usage.usage / usage.quota) : 0;
       if(pct >= overflowThreshold) target = 'drive';
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
 
   // 強制 Drive：超過 IDB 單檔上限
@@ -3737,7 +3850,7 @@ async function attachUpload(file){
       if(file.size > ATTACH_MAX_SIZE){
         throw new Error('Drive 上傳失敗且本機容量不足：' + e.message);
       }
-      try { toast('Drive 上傳失敗，改用本機儲存：' + e.message, 'warn', 5000); } catch(_){}
+      try { toast('Drive 上傳失敗，改用本機儲存：' + e.message, 'warn', 5000); } catch(_){_swallow('auto',_)}
       // fallthrough to IDB
     }
   }
@@ -3824,7 +3937,7 @@ async function attachDelete(meta){
     return;
   }
   if(meta.key){
-    try { await idbDelete(meta.key); } catch(e){}
+    try { await idbDelete(meta.key); } catch(e){_swallow('auto',e)}
   }
 }
 
@@ -3903,7 +4016,7 @@ async function cleanupOrphanAttachments(){
   if(!ok) return;
   let n = 0;
   for(const k of orphans){
-    try { await idbDelete(k); n++; } catch(e){}
+    try { await idbDelete(k); n++; } catch(e){_swallow('auto',e)}
   }
   toast('已清除 ' + n + ' 個孤兒附件','success');
   if(typeof rerender === 'function') rerender();
@@ -3940,7 +4053,7 @@ function downloadPDF(title, htmlContent){
   w.document.write(htmlContent || '');
   w.document.write('</body></html>');
   w.document.close();
-  setTimeout(()=> { try { w.print(); } catch(e){} }, 400);
+  setTimeout(()=> { try { w.print(); } catch(e){_swallow('auto',e)} }, 400);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -4043,7 +4156,7 @@ function go(view, subview=null){
   App.view = view;
   App.subview = subview;
   // batch 3：最近使用功能已移除 (使用者要求)
-  // try { if(view && App.session) pushRecentPage(view); } catch(e){}
+  // try { if(view && App.session) pushRecentPage(view); } catch(e){_swallow('auto',e)}
   const hash = '#' + view + (subview ? '/' + subview : '');
   if(location.hash !== hash) location.hash = hash;
   rerender();
@@ -4275,7 +4388,7 @@ function studentRegisterFlow(){
     };
     App.db.pending.push(pending);
     saveDB();
-    try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(e){}
+    try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(e){_swallow('auto',e)}
     if(typeof logOp === 'function') logOp('register', name + ' 註冊申請');
     m.close();
     toast('✅ 註冊已送出！等待老師審核','success', 3500);
@@ -4302,7 +4415,7 @@ function saveLastUser(u){
   try {
     if(u) localStorage.setItem(LS_LAST_USER, JSON.stringify(u));
     else localStorage.removeItem(LS_LAST_USER);
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 function loadRemember(){
   try { return JSON.parse(localStorage.getItem(LS_REMEMBER) || 'null'); } catch(e){ return null; }
@@ -4311,21 +4424,72 @@ function saveRemember(r){
   try {
     if(r) localStorage.setItem(LS_REMEMBER, JSON.stringify(r));
     else localStorage.removeItem(LS_REMEMBER);
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
-// 簡單混淆（非真加密，只防直接看見）— 用於「記住我」存密碼
-function _obfuscatePw(pw){
-  try {
-    if(!pw) return '';
-    return 'o:' + btoa(unescape(encodeURIComponent(pw)));
-  } catch(e){ return ''; }
+// H2：「記住我」改用隨機 token，不再把明文密碼存 localStorage。
+//      舊函式名保留為空 stub，避免外部殘留呼叫端炸掉。
+function _obfuscatePw(){ return ''; }
+function _deobfuscatePw(){ return ''; }
+
+/* H2: login token helpers
+ * - genLoginToken 產生 32 bytes 隨機 token（64 hex）
+ * - LS 只存「明文 token」+ username/studentId；account 內存該 token 的 hash + 過期時間
+ * - 7 天過期；每次成功 quickContinue 自動清掉舊的 expired token
+ */
+function genLoginToken(){
+  if(typeof crypto !== 'undefined' && crypto && typeof crypto.getRandomValues === 'function'){
+    const buf = new Uint8Array(32);
+    crypto.getRandomValues(buf);
+    return Array.from(buf).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  // fallback
+  let s = '';
+  for(let i = 0; i < 64; i++) s += Math.floor(Math.random()*16).toString(16);
+  return s;
 }
-function _deobfuscatePw(s){
-  try {
-    if(!s || typeof s !== 'string') return '';
-    if(s.startsWith('o:')) return decodeURIComponent(escape(atob(s.slice(2))));
-    return s;
-  } catch(e){ return ''; }
+
+// 將 token 雜湊（用全域 _hashLegacy；不需要 per-account salt，因 token 本身就是高熵隨機）
+async function _hashLoginToken(tok){
+  try { return await _hashLegacy(tok); } catch(e){ _swallow('hashLoginToken', e); return ''; }
+}
+
+const LOGIN_TOKEN_TTL_MS = 7 * 24 * 3600 * 1000;
+
+// 移除過期的 loginTokens（純函式，呼叫端決定何時 saveDB）
+function _cleanExpiredTokens(arr){
+  const now = Date.now();
+  return (arr || []).filter(t => t && typeof t.hash === 'string' && (t.exp || 0) > now);
+}
+
+// 為 account / student 加入一個新 loginToken（會自動清理過期）
+async function _addLoginToken(target, tok){
+  if(!target) return;
+  target.loginTokens = _cleanExpiredTokens(target.loginTokens);
+  const hash = await _hashLoginToken(tok);
+  if(!hash) return;
+  target.loginTokens.push({
+    hash,
+    exp: Date.now() + LOGIN_TOKEN_TTL_MS,
+    ua: (navigator.userAgent || '').slice(0, 60),
+    ts: Date.now()
+  });
+}
+
+// 驗證 token；若 match 則回傳 true，並更新 ts；不 match 則 false
+async function _verifyLoginToken(target, tok){
+  if(!target || !tok) return false;
+  target.loginTokens = _cleanExpiredTokens(target.loginTokens);
+  const hash = await _hashLoginToken(tok);
+  if(!hash) return false;
+  const found = target.loginTokens.find(t => t.hash === hash);
+  if(!found) return false;
+  found.ts = Date.now();  // 更新最後使用時間
+  return true;
+}
+
+// 老師後台「登出所有裝置」用
+function _clearAllLoginTokens(target){
+  if(target) target.loginTokens = [];
 }
 function loadLoginStep(){
   try { return localStorage.getItem(LS_LOGIN_STEP) || 'choose'; } catch(e){ return 'choose'; }
@@ -4334,34 +4498,40 @@ function saveLoginStep(step){
   try {
     if(step) localStorage.setItem(LS_LOGIN_STEP, step);
     else localStorage.removeItem(LS_LOGIN_STEP);
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 
 // Try one-click continue from saved last user.
-function quickContinueAsLast(){
+// H2: 改為「驗證 token」而非單純「rem 有 ts 就免密」
+async function quickContinueAsLast(){
   const lu = loadLastUser();
   if(!lu) return toast('沒有上次登入紀錄','danger');
   if(lu.role === 'teacher'){
     const a = App.db.accounts.find(x => x.id === lu.id || x.username === lu.username);
     if(!a) return toast('帳號已被刪除，請重新登入','danger');
-    // remember-me: skip password if within 7 days
+    // H2: 必須有 token 且能在 account 找到 hash 配對
     const rem = loadRemember();
-    const remOk = rem && rem.username === a.username && (Date.now() - rem.ts) < 7*24*3600*1000;
+    let remOk = false;
+    if(rem && rem.username === a.username && rem.token && (Date.now() - (rem.ts||0)) < LOGIN_TOKEN_TTL_MS){
+      try { remOk = await _verifyLoginToken(a, rem.token); } catch(e){ _swallow('teacher-quick-token', e); }
+    }
     if(remOk){
-      App.session = { role:'teacher', id:a.id, name:a.name, username:a.username };
+      App.session = { role:'teacher', id:a.id, name:a.name, username:a.username, subRole: a.subRole || null };
       saveSession();
       saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
+      saveDB(true);  // 更新 loginTokens 內 ts
       toast('歡迎回來，' + a.name + '！','success');
       go('overview');
       // batch 1：仍要檢查老師是否標記為 mustChangePw
       try {
         if(a.mustChangePw){
-          setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){} }, 500);
+          setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){_swallow('auto',_)} }, 500);
         }
-      } catch(_){}
+      } catch(_){_swallow('auto',_)}
       return;
     }
-    // otherwise prompt for password
+    // token 不存在 / 過期 / 不匹配 → 清掉 LS，要求重新輸入密碼
+    if(rem) saveRemember(null);
     App._loginStage = 'teacher';
     App._loginPrefill = { username: a.username };
     rerender();
@@ -4377,7 +4547,7 @@ function quickContinueAsLast(){
 function renderLogin(root){
   root.innerHTML = '';
   // 確保 _uiCustom 已載入（首次登入時可能尚未 boot 到該分支）
-  try { App._uiCustom = App._uiCustom || loadUiCustom(); } catch(e){}
+  try { App._uiCustom = App._uiCustom || loadUiCustom(); } catch(e){_swallow('auto',e)}
   const lc = (App._uiCustom && App._uiCustom.login) || {};
 
   const wrap = el('div', { class:'center-wrap' });
@@ -4397,7 +4567,7 @@ function renderLogin(root){
             width:'100%', height:'100%', objectFit:'cover', borderRadius:'inherit'
           } }));
         }
-      } catch(e){}
+      } catch(e){_swallow('auto',e)}
     })();
   } else {
     logoEl.textContent = lc.logoEmoji || '🎓';
@@ -4513,7 +4683,7 @@ function renderLogin(root){
           localStorage.removeItem(LS_SESSION);
           localStorage.removeItem(LS_LAST_USER);
           localStorage.removeItem(LS_REMEMBER);
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
         rerender();
       }
     }}, '← 切換教室');
@@ -4542,10 +4712,9 @@ function renderLoginTeacherStage(){
   const f2 = el('div', { class:'field' });
   f2.appendChild(el('label', { class:'label' }, '密碼'));
   const pwWrap = el('div', { class:'pw-input-wrap' });
-  // 修 Bug B：若已勾選記住我且帳號一致，自動帶入密碼
-  const savedPw = (rememberSaved && rememberSaved.username && (!prefill.username || prefill.username === rememberSaved.username))
-    ? _deobfuscatePw(rememberSaved.pw || '') : '';
-  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password', value: savedPw });
+  // H2: 不再自動帶入明文密碼。若 token 仍有效會走 quickContinueAsLast 直接登入；
+  //     否則需要使用者重新輸入。
+  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
   const togglePw = el('button', { type:'button', class:'pw-toggle', onclick: e => {
     e.preventDefault();
     if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
@@ -4560,7 +4729,7 @@ function renderLoginTeacherStage(){
   const rememberChk = el('input', { type:'checkbox' });
   if(rememberSaved && rememberSaved.username) rememberChk.checked = true;
   rememberLabel.appendChild(rememberChk);
-  rememberLabel.appendChild(document.createTextNode(' 記住我（自動帶入帳號密碼）'));
+  rememberLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
   stage.appendChild(rememberLabel);
 
   const _lcT = (App._uiCustom && App._uiCustom.login) || {};
@@ -4583,21 +4752,26 @@ function renderLoginTeacherStage(){
     if(!candidate){ toast('帳號或密碼錯誤','danger'); return; }
     const ok = await verifyPassword(pw, candidate.password);
     if(!ok){ toast('帳號或密碼錯誤','danger'); return; }
-    // 自動升級：若仍為明文密碼，登入後改存雜湊
-    if(!isPasswordHashed(candidate.password)){
+    // 自動升級：若非 v2$ 新格式（明文 / 'plain:' / 舊 64 hex 共用 salt）→ 升級到 per-account salt
+    if(!isPasswordV2(candidate.password)){
       try {
-        candidate.password = await hashPassword(pw);
-        saveDB();
-        try { Sync.setMap('accounts', App.db.accounts); } catch(e){}
-      } catch(e){}
+        candidate.password = await hashPassword(pw);  // 不傳 salt → 自動產生新 salt
+        saveDB(true);  // 立即寫入（避免使用者立即關掉視窗）
+        try { Sync.setMap('accounts', App.db.accounts); } catch(e){_swallow('auto',e)}
+      } catch(e){ _swallow('upgrade-acc-pw', e); }
     }
     const a = candidate;
-    App.session = { role:'teacher', id:a.id, name:a.name, username:a.username };
+    App.session = { role:'teacher', id:a.id, name:a.name, username:a.username, subRole: a.subRole || null };
     saveSession();
     saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
     if(rememberChk.checked){
-      // 修 Bug B：同時記住密碼（混淆後存放）
-      saveRemember({ username:a.username, pw: _obfuscatePw(pw), ts:Date.now() });
+      // H2: 用隨機 token，明文密碼絕不存 LS
+      try {
+        const tok = genLoginToken();
+        await _addLoginToken(a, tok);
+        saveRemember({ username: a.username, token: tok, ts: Date.now() });
+        saveDB(true);  // 立即寫入新 token
+      } catch(e){ _swallow('teacher-issue-token', e); saveRemember(null); }
     } else {
       saveRemember(null);
     }
@@ -4608,12 +4782,12 @@ function renderLoginTeacherStage(){
     try {
       const isDefaultPair = (a.username === 'admin' && pw === 'admin123');
       if(isDefaultPair || a.mustChangePw){
-        setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){} }, 500);
+        setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){_swallow('auto',_)} }, 500);
       } else if(!a.email || !a.securityQ || !a.securityA || !a.recoveryCode){
         // 批次 6：若缺 recovery 欄位（email/安全問題/恢復碼）→ 強制設定
-        setTimeout(()=> { try { forceSetupRecovery(a.id); } catch(_){} }, 800);
+        setTimeout(()=> { try { forceSetupRecovery(a.id); } catch(_){_swallow('auto',_)} }, 800);
       }
-    } catch(_){}
+    } catch(_){_swallow('auto',_)}
   };
 
   const btnRow = el('div', { class:'flex', style:{marginTop:'10px'} },
@@ -4685,12 +4859,12 @@ function incForgotLock(username){
   if(l.count >= FORGOT_LOCK_MAX){
     l.lockedUntil = Date.now() + FORGOT_LOCK_DURATION;
   }
-  try { localStorage.setItem(key, JSON.stringify(l)); } catch(e){}
+  try { localStorage.setItem(key, JSON.stringify(l)); } catch(e){_swallow('auto',e)}
   return l;
 }
 
 function clearForgotLock(username){
-  try { localStorage.removeItem(FORGOT_LOCK_KEY_PREFIX + String(username||'').toLowerCase()); } catch(e){}
+  try { localStorage.removeItem(FORGOT_LOCK_KEY_PREFIX + String(username||'').toLowerCase()); } catch(e){_swallow('auto',e)}
 }
 
 // 把分鐘數轉成「X 分鐘」/「X 小時 Y 分」字串
@@ -4774,7 +4948,7 @@ function showTeacherForgotPassword(){
             name:'管理員', role:'teacher', mustChangePw:true, createdAt: Date.now()
           });
           saveDB();
-          try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+          try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
           if(typeof logOp === 'function') logOp('teacherInit', '建立預設管理員 admin');
           m0.close();
           toast('✅ 已建立預設管理員，請以 admin / admin123 登入','success', 5000);
@@ -4965,7 +5139,7 @@ function _runForgotFlow(opts){
 
     // 顯示已寄出的提示（若 sessionStorage 內已有 OTP）
     let existingOtp = null;
-    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
     const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
 
     const sendBtn = el('button', { class:'btn btn-primary btn-block',
@@ -4978,7 +5152,7 @@ function _runForgotFlow(opts){
         }
         const code = genOTP6();
         const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: st.role };
-        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){}
+        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){_swallow('auto',e)}
         st.lastSent = now;
         sendOtpMailto(st.account.email, code);
         toast('已開啟郵件 client，請寄出後查看信箱','info', 4000);
@@ -5019,7 +5193,7 @@ function _runForgotFlow(opts){
       if(isForgotLocked(st.username)){ render(); return; }
       const v = inp.value.trim();
       let saved = null;
-      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
       if(!saved || saved.username !== st.username || saved.exp <= Date.now()){
         toast('驗證碼已過期，請重新寄送','warning', 4000);
         st.step = 3;
@@ -5110,15 +5284,17 @@ function _runForgotFlow(opts){
       try {
         const sameAsOld = await verifyPassword(p1, st.account.password);
         if(sameAsOld){ err.textContent='新密碼不可與舊密碼相同'; err.style.display='block'; return; }
-      } catch(_){}
+      } catch(_){_swallow('auto',_)}
       const hashed = await hashPasswordSafe(p1);
       if(!hashed.ok){ err.textContent='密碼雜湊失敗，請改用 HTTPS'; err.style.display='block'; return; }
       st.account.password = hashed.value;
       st.account.passwordChangedAt = Date.now();
       st.account.mustChangePw = false;
-      saveDB();
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
-      try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){}
+      // H2: 密碼重設 → 清掉所有 loginTokens
+      _clearAllLoginTokens(st.account);
+      saveDB(true);  // H3: 密碼變更立即寫入
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){_swallow('auto',e)}
       clearForgotLock(st.username);
       if(typeof logOp === 'function')
         logOp('teacherPwReset', '老師 ' + st.username + ' 透過忘記密碼流程重設密碼' + (st.useRecovery ? '（恢復碼）':''));
@@ -5295,7 +5471,7 @@ function _runForgotFlow(opts){
     }}, el('div', null, '收件人：', el('strong', null, st.account.email))));
 
     let existingOtp = null;
-    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
     const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
 
     stage.appendChild(el('button', { class:'btn btn-primary btn-block',
@@ -5308,7 +5484,7 @@ function _runForgotFlow(opts){
         }
         const code = genOTP6();
         const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: 'student' };
-        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){}
+        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){_swallow('auto',e)}
         st.lastSent = now;
         sendOtpMailto(st.account.email, code);
         toast('已開啟郵件 client','info', 4000);
@@ -5345,7 +5521,7 @@ function _runForgotFlow(opts){
       if(isForgotLocked(st.username)){ render(); return; }
       const v = inp.value.trim();
       let saved = null;
-      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){}
+      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
       if(!saved || saved.username !== st.username || saved.exp <= Date.now()){
         toast('驗證碼已過期','warning', 4000);
         st.step = 3;
@@ -5399,8 +5575,8 @@ function _runForgotFlow(opts){
         ts: Date.now()
       });
       saveDB();
-      try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
-      try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){}
+      try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){_swallow('auto',e)}
+      try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){_swallow('auto',e)}
       clearForgotLock(st.username);
       if(typeof logOp === 'function') logOp('pwResetRequest', st.account.name + ' 申請重設密碼（已 OTP 驗證）');
       m.close();
@@ -5578,7 +5754,7 @@ function forceSetupRecovery(accountId){
       a.recoveryCode = await hashAnswer(plainCode);
       a.recoveryCodeSetAt = Date.now();
       saveDB();
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
       if(typeof logOp === 'function') logOp('recoverySetup', '老師 ' + a.username + ' 完成復原資訊設定');
       showRecoveryCodeStage(plainCode);
     } catch(e){
@@ -5658,21 +5834,34 @@ function renderLoginStudentStage(){
   const stuRemChk = el('input', { type:'checkbox' });
   if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId) stuRemChk.checked = true;
   stuRemLabel.appendChild(stuRemChk);
-  stuRemLabel.appendChild(document.createTextNode(' 記住我（自動帶入帳號密碼）'));
+  stuRemLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
   stage.appendChild(stuRemLabel);
 
-  // 自動回填上次記住的學生
+  // 自動回填上次記住的學生（H2: 只回填班級+姓名，不帶入密碼；若 token 有效則 quickLogin）
   if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId){
     const lastStu = App.db.students.find(x => x.id === _stuRem.studentId);
     if(lastStu){
       App._loginCls = lastStu.cls || '未分班';
       App._loginStuId = lastStu.id;
       // 同步下拉
-      setTimeout(()=> {
-        selCls.value = App._loginCls;
-        refreshNameList();
-        selName.value = String(lastStu.id);
-        iPw.value = _deobfuscatePw(_stuRem.pw || '');
+      setTimeout(async ()=> {
+        try {
+          selCls.value = App._loginCls;
+          refreshNameList();
+          selName.value = String(lastStu.id);
+          // H2: 嘗試 token 自動登入
+          if(_stuRem.token && (Date.now() - (_stuRem.ts||0)) < LOGIN_TOKEN_TTL_MS){
+            const ok = await _verifyLoginToken(lastStu, _stuRem.token);
+            if(ok){
+              saveDB(true);
+              finishStudentLogin(lastStu);
+              return;
+            } else {
+              // token 無效 → 清掉
+              saveRemember(null);
+            }
+          }
+        } catch(e){ _swallow('stu-quick-token', e); }
       }, 0);
     }
   }
@@ -5729,17 +5918,22 @@ function renderLoginStudentStage(){
       iPw.focus();
       return;
     }
-    // 自動升級為雜湊
-    if(!isPasswordHashed(s.password)){
+    // 自動升級為 v2$ per-account salt 雜湊
+    if(!isPasswordV2(s.password)){
       try {
         s.password = await hashPassword(pw);
-        saveDB();
-        try { Sync.setMap('students', App.db.students); } catch(e){}
-      } catch(e){}
+        saveDB(true);  // 立即寫入
+        try { Sync.setMap('students', App.db.students); } catch(e){_swallow('auto',e)}
+      } catch(e){ _swallow('upgrade-stu-pw', e); }
     }
-    // 修 Bug B：學生端勾選記住我 → 存學生 id + 混淆密碼
+    // H2: 學生端勾選記住我 → 改用隨機 token，不再存任何密碼形式
     if(stuRemChk.checked){
-      saveRemember({ role:'student', studentId: s.id, pw: _obfuscatePw(pw), ts:Date.now() });
+      try {
+        const tok = genLoginToken();
+        await _addLoginToken(s, tok);
+        saveRemember({ role:'student', studentId: s.id, token: tok, ts: Date.now() });
+        saveDB(true);
+      } catch(e){ _swallow('stu-issue-token', e); saveRemember(null); }
     } else {
       // 取消勾選 → 清掉記住資料 (僅當原本是學生記憶)
       const existing = loadRemember();
@@ -5835,8 +6029,8 @@ function studentTapToLogin(studentId){
       try {
         s.password = await hashPassword(pw);
         saveDB();
-        try { Sync.setMap('students', App.db.students); } catch(e){}
-      } catch(e){}
+        try { Sync.setMap('students', App.db.students); } catch(e){_swallow('auto',e)}
+      } catch(e){_swallow('auto',e)}
     }
     m.close();
     finishStudentLogin(s);
@@ -5857,7 +6051,7 @@ function finishStudentLogin(s){
   saveLastUser({ role:'student', id:s.id, name:s.name, cls:s.cls||'', ts:Date.now() });
   App._loginStage = null;
   // 套用學生個人背景
-  setTimeout(()=> { try { applyStudentBg(); } catch(e){} }, 100);
+  setTimeout(()=> { try { applyStudentBg(); } catch(e){_swallow('auto',e)} }, 100);
   // 第一次登入或老師重設過密碼 → 強制改密碼
   if(s.mustChangePw){
     toast('歡迎，' + s.name + '！首次登入請更新密碼','info', 4000);
@@ -5930,7 +6124,8 @@ function forceChangePassword(studentId){
     s.password = hashed.value;
     s.mustChangePw = false;
     s.passwordChangedAt = Date.now();
-    saveDB();
+    _clearAllLoginTokens(s);  // H2: 改密碼 → 清掉所有記住裝置
+    saveDB(true);  // H3: 立即寫入
     if(typeof logOp === 'function') logOp('passwordChange', s.name + ' 完成首次密碼設定');
     if(typeof Sync !== 'undefined' && Sync.push) Sync.push('students');
     m.close();
@@ -6003,8 +6198,9 @@ function forceChangeTeacherPassword(accountId){
     a.password = hashed.value;
     a.mustChangePw = false;
     a.passwordChangedAt = Date.now();
-    saveDB();
-    try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts); } catch(_){}
+    _clearAllLoginTokens(a);  // H2: 改密碼 → 清掉所有記住裝置
+    saveDB(true);  // H3: 立即寫入
+    try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts); } catch(_){_swallow('auto',_)}
     if(typeof logOp === 'function') logOp('passwordChange', '老師 ' + a.username + ' 更新預設密碼');
     m.close();
     toast('✅ 密碼已更新，請妥善保管！','success');
@@ -6087,7 +6283,7 @@ function sideSection(key, title, items){
     try {
       const v = localStorage.getItem('cms_v3_sidebar_group_' + key + '_collapsed');
       if(v === '1') App._sideExpanded[key] = false;
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
   // 預設展開（true）
   const isExpanded = App._sideExpanded[key] !== false;
@@ -6096,9 +6292,9 @@ function sideSection(key, title, items){
     style:{cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',userSelect:'none'},
     onclick:()=> {
       App._sideExpanded[key] = !isExpanded;
-      try { localStorage.setItem('cms_v3_side_expanded', JSON.stringify(App._sideExpanded)); } catch(e){}
+      try { localStorage.setItem('cms_v3_side_expanded', JSON.stringify(App._sideExpanded)); } catch(e){_swallow('auto',e)}
       // batch 3：每組單獨 key（題目要求格式）
-      try { localStorage.setItem('cms_v3_sidebar_group_' + key + '_collapsed', isExpanded ? '1' : '0'); } catch(e){}
+      try { localStorage.setItem('cms_v3_sidebar_group_' + key + '_collapsed', isExpanded ? '1' : '0'); } catch(e){_swallow('auto',e)}
       rerender();
     }
   },
@@ -6436,7 +6632,7 @@ function teacherFeedbackBadge(){
 function markFeedbackRead(){
   if(!App.session || App.session.role !== 'teacher') return;
   const key = LS_KEY + '_fb_lastread_' + (App.cfg?.roomCode||'local');
-  try { localStorage.setItem(key, String(Date.now())); } catch(e){}
+  try { localStorage.setItem(key, String(Date.now())); } catch(e){_swallow('auto',e)}
 }
 function studentNewAssignmentCount(){
   if(!App.session || App.session.role !== 'student') return 0;
@@ -6448,7 +6644,7 @@ function studentUnreadAnnouncements(){
   if(!App.session || App.session.role !== 'student') return 0;
   const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + App.session.id;
   let last = 0;
-  try { last = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e){}
+  try { last = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e){_swallow('auto',e)}
   return App.db.announcements.filter(a => (a.ts||0) > last && !isAnnouncementExpired(a)).length;
 }
 function studentPendingPeerCount(){
@@ -6473,7 +6669,7 @@ function isAnnouncementExpired(a){
 function toggleTheme(){
   App.theme = App.theme === 'dark' ? 'light' : 'dark';
   saveTheme();
-  try { applyBranding(); } catch(e){}
+  try { applyBranding(); } catch(e){_swallow('auto',e)}
   rerender();
 }
 function doLogout(){
@@ -6485,7 +6681,7 @@ function doLogout(){
     App._loginPrefill = null;
     // batch 2-stab: 清掉所有 managed timer（QR 倒數、due reminder、notification、計時器…）
     // 並重置 App.qrTimer / App._dueReminderTimer / App._notifyTimer / App._timerTick
-    try { clearAllTimers(); } catch(e){}
+    try { clearAllTimers(); } catch(e){_swallow('auto',e)}
     App.qrTimer = null;
     App._dueReminderTimer = null;
     App._notifyTimer = null;
@@ -6522,7 +6718,7 @@ function rOv(content){
         el('div', { style:{whiteSpace:'pre-wrap',fontSize:'14px',lineHeight:'1.7'} }, extra)
       ));
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 
   // quick-start CTA (only when no students)
   if(isOverviewVisible('quickstart')){
@@ -6618,7 +6814,7 @@ function rOv(content){
               const mn = min%60;
               dur = (hr?hr+'h':'') + (mn?mn+'m':'') || '0m';
             }
-          } catch(e){}
+          } catch(e){_swallow('auto',e)}
         }
         const stTxt = a.outTime ? '✅ 已簽退' : '🟢 上課中';
         const stColor = a.outTime ? 'var(--muted)' : 'var(--success)';
@@ -6850,7 +7046,7 @@ function rOv(content){
                     durTxt = ' (' + (hr?hr+'h':'') + (mn?mn+'m':'') + ')';
                   }
                 }
-              } catch(e){}
+              } catch(e){_swallow('auto',e)}
               c.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)',fontWeight:'700',marginTop:'2px'} },
                 '👋 簽退 ' + att.outTime + durTxt));
             } else {
@@ -6877,6 +7073,9 @@ function rOv(content){
 }
 
 function markPresent(studentId, options={}){
+  // H1: 副老師寫入權限攔截
+  if(!requirePerm('canEditAttendance','編輯出席')) return;
+  if(!checkStudentClassPerm(studentId)){ toast('您沒有此學生班級的權限','warning'); return; }
   const s = findStudent(studentId);
   if(!s) return toast('找不到學生','danger');
   const today = td();
@@ -6908,11 +7107,14 @@ function markPresent(studentId, options={}){
   }
   bcNotify();
   toast('已標記 ' + s.name + ' 出席','success');
-  try { checkAndAwardBadges(studentId); } catch(_) {} // batch 5-27：徽章
+  try { checkAndAwardBadges(studentId); } catch(_) {_swallow('auto',_)} // batch 5-27：徽章
   rerender();
 }
 
 function openLeaveDialog(studentId){
+  // H1: 副老師寫入權限攔截
+  if(!requirePerm('canEditAttendance','編輯出席')) return;
+  if(!checkStudentClassPerm(studentId)){ toast('您沒有此學生班級的權限','warning'); return; }
   const s = findStudent(studentId);
   if(!s) return;
   promptDlg('請假原因（會自動批准）', '', { title:'為 ' + s.name + ' 請假' }).then(reason => {
@@ -7063,17 +7265,20 @@ function rStu(content){
       ));
       const acts = el('div', { class:'actions' });
       acts.appendChild(el('button', { class:'btn btn-sm', title:'重設密碼為學號末 4 碼', onclick: async ()=> {
+        if(!requirePerm('canEditStudents','重設學生密碼')) return;  // H1
+        if(!checkStudentClassPerm(s.id)){ toast('您沒有此學生班級的權限','warning'); return; }
         const defPw = String(s.sid||'0000').slice(-4);
         const ok = await confirmDlg(
           '確定重設 ' + s.name + ' 的密碼？\n\n新密碼將為「' + defPw + '」（學號末 4 碼）\n下次登入時學生需重新設定密碼',
           { title:'重設密碼' }
         );
         if(!ok) return;
-        s.password = await hashPassword(defPw);
+        s.password = await hashPassword(defPw);  // H5: 自動 per-account salt
         s.mustChangePw = true;
         s.passwordChangedAt = null;
         s.passwordResetAt = Date.now();
-        saveDB();
+        _clearAllLoginTokens(s);  // H2
+        saveDB(true);  // H3: 立即寫入
         if(typeof logOp === 'function') logOp('passwordReset', '重設 ' + s.name + ' 的密碼');
         Sync.setMap('students', App.db.students);
         bcNotify();
@@ -7148,18 +7353,20 @@ function rStu(content){
           el('span', { style:{fontWeight:'600'} }, '🔐 有 ' + unchangedCount + ' 位學生尚未自行修改密碼')
         ),
         el('button', { class:'btn btn-sm', onclick: async ()=> {
+          if(!requirePerm('canEditStudents','批次重設學生密碼')) return;  // H1
           const ok = await confirmDlg('確定批次重設所有學生密碼為「學號末 4 碼」？\n\n下次登入時學生會被要求自行修改', { danger:true, title:'批次重設密碼' });
           if(!ok) return;
           let n = 0;
           for(const s of App.db.students){
             const defPw = String(s.sid||'0000').slice(-4);
-            s.password = await hashPassword(defPw);
+            s.password = await hashPassword(defPw);  // H5: 自動 per-account salt
             s.mustChangePw = true;
             s.passwordChangedAt = null;
             s.passwordResetAt = Date.now();
+            _clearAllLoginTokens(s);  // H2
             n++;
           }
-          saveDB();
+          saveDB(true);  // H3: 立即寫入
           if(typeof logOp === 'function') logOp('passwordReset', '批次重設 ' + n + ' 位學生密碼');
           Sync.setMap('students', App.db.students);
           bcNotify();
@@ -7266,7 +7473,7 @@ function quickCreateStudent(){
     };
     App.db.students.push(rec);
     saveDB();
-    try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){}
+    try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){_swallow('auto',e)}
     toast('✓ 已建立 ' + name + '（預設密碼 ' + password + '，學生首次登入需改密碼）','success', 3000);
 
     App._quickLastCls = cls;
@@ -7280,7 +7487,7 @@ function quickCreateStudent(){
       updatePreview();
       iName.focus();
       // partial rerender of list behind modal
-      try { rerender(); } catch(e){}
+      try { rerender(); } catch(e){_swallow('auto',e)}
     } else {
       m.close();
       rerender();
@@ -7348,6 +7555,8 @@ function openStudentEdit(s=null){
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    // H1: 副老師寫入權限攔截
+    if(!requirePerm('canEditStudents','編輯學生')) return;
     const name = inps.name.value.trim();
     if(!name) return toast('姓名必填','danger');
     if(isNew){
@@ -7358,26 +7567,28 @@ function openStudentEdit(s=null){
         else if(k === 'password'){
           // 新增：若留空 → 用學號末 4 碼當預設
           const raw = v || String(rec.sid || '').slice(-4) || '0000';
-          rec.password = await hashPassword(raw);
+          rec.password = await hashPassword(raw);  // H5: 自動產生 per-account salt
           if(!v) rec.mustChangePw = true;
         } else rec[k] = v;
       }
       App.db.students.push(rec);
     } else {
+      // 編輯非自己班級的學生需要班級權限
+      if(!checkStudentClassPerm(s.id)){ toast('您沒有此學生班級的權限','warning'); return; }
       for(const k of Object.keys(inps)){
         const v = inps[k].value;
         if(k === 'seat') s[k] = parseInt(v,10) || 0;
         else if(k === 'password'){
           // 編輯：留空 = 不修改
           if(v){
-            s.password = await hashPassword(v);
+            s.password = await hashPassword(v);  // H5: 自動產生 per-account salt
             s.passwordChangedAt = Date.now();
             s.mustChangePw = false;
           }
         } else s[k] = v;
       }
     }
-    saveDB();
+    saveDB(true);  // H3: 密碼變更立即寫入
     Sync.setMap('students', App.db.students);
     bcNotify();
     toast(isNew?'已新增':'已更新','success');
@@ -7521,7 +7732,7 @@ function rAtt(content){
       if(cw > 0) weekBar.appendChild(el('span', { class:'tag s-success' }, '本週 第 ' + cw + ' 週'));
       content.appendChild(weekBar);
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 
   // filter tabs
   const tabs = el('div', { class:'tab-bar', style:{maxWidth:'500px',marginBottom:'12px'} });
@@ -7619,7 +7830,7 @@ function rAtt(content){
               duration = ' (' + (hrs?hrs+'h':'') + (mn?mn+'m':'') + ')';
             }
           }
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
         card.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)',fontWeight:'700',marginTop:'2px'} },
           '👋 簽退 ' + a.outTime + duration));
       } else {
@@ -7717,6 +7928,8 @@ function rAtt(content){
 }
 
 function bulkMark(status){
+  // H1: 副老師寫入權限攔截
+  if(!requirePerm('canEditAttendance','編輯出席')) return;
   confirmDlg(status==='present' ? '要把全班標記為已簽到嗎？' : '要清掉本日所有簽到嗎？', { danger: status!=='present' }).then(ok => {
     if(!ok) return;
     const date = App._attDate || td();
@@ -7749,6 +7962,8 @@ function bulkMark(status){
 }
 
 function clearTodayAttendance(){
+  // H1: 副老師寫入權限攔截
+  if(!requirePerm('canEditAttendance','清空出席')) return;
   confirmDlg('要清空 ' + (App._attDate||td()) + ' 的所有簽到嗎？此操作無法復原', { danger:true }).then(ok => {
     if(!ok) return;
     const date = App._attDate || td();
@@ -8009,7 +8224,7 @@ function buildMsgComposer(onSend){
       const chip = el('div', { class:'file-chip', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',background:'var(--primary-soft)',color:'var(--primary)',borderRadius:'14px',fontSize:'12px'} },
         el('span', null, '📎 ' + pendingAttach.name + ' (' + Math.round((pendingAttach.size||0)/1024) + ' KB)'),
         el('span', { style:{cursor:'pointer'}, onclick: ()=> {
-          if(pendingAttach && pendingAttach.key) { try { attachDelete(pendingAttach); } catch(e){} }
+          if(pendingAttach && pendingAttach.key) { try { attachDelete(pendingAttach); } catch(e){_swallow('auto',e)} }
           pendingAttach = null; refreshAttachSlot();
         } }, '✗')
       );
@@ -8063,7 +8278,7 @@ function pushMsg(toId, text, attach, opts){
     // 對方 = 收件人；若是廣播 'all'，自己端只通知「不是自己發的」
     // pushMsg 是由自己呼叫的 → 自己端絕對 skip
     // 其它端則由 child_added listener 觸發後再通知
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   return rec;
 }
 
@@ -8467,7 +8682,7 @@ function rSFeedback(content){
       App.db.feedbacks.push(rec);
     }
     saveDB();
-    try { Sync.setMap('feedbacks', App.db.feedbacks); } catch(e){}
+    try { Sync.setMap('feedbacks', App.db.feedbacks); } catch(e){_swallow('auto',e)}
     bcNotify();
     App._feedbackEdit = false;
     toast('✅ 回饋已送出（匿名）','success');
@@ -8609,7 +8824,7 @@ function rFeedback(content){
       if(!ok) return;
       App.db.feedbacks = App.db.feedbacks.filter(x => x.id !== f.id);
       saveDB();
-      try { Sync.setMap('feedbacks', App.db.feedbacks); } catch(e){}
+      try { Sync.setMap('feedbacks', App.db.feedbacks); } catch(e){_swallow('auto',e)}
       bcNotify();
       toast('已刪除','success');
       rerender();
@@ -8918,8 +9133,9 @@ async function approvePwReset(rid){
   s.passwordResetAt = Date.now();
   r.status = 'approved';
   r.processedAt = Date.now();
-  saveDB();
-  try { Sync.setMap('students', App.db.students); Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
+  _clearAllLoginTokens(s);  // H2: 密碼重設 → 清掉所有 loginTokens
+  saveDB(true);  // H3: 立即寫入
+  try { Sync.setMap('students', App.db.students); Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){_swallow('auto',e)}
   if(typeof logOp === 'function') logOp('pwResetApprove', '核准重設 ' + s.name + ' 密碼為 ' + defPw);
   toast('✅ 已重設 ' + s.name + ' 密碼為 ' + defPw + '，請告知學生','success', 5000);
   rerender();
@@ -8932,7 +9148,7 @@ function rejectPwReset(rid){
     r.status = 'rejected';
     r.processedAt = Date.now();
     saveDB();
-    try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){}
+    try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){_swallow('auto',e)}
     toast('已拒絕請求','warning');
     rerender();
   });
@@ -9003,7 +9219,7 @@ function renderNotifyCard(){
       App.db.settings.notifications = App.db.settings.notifications || {};
       App.db.settings.notifications[t.key] = ck.checked;
       saveDB();
-      try { Sync.setNode && Sync.setNode('settings', App.db.settings); } catch(e){}
+      try { Sync.setNode && Sync.setNode('settings', App.db.settings); } catch(e){_swallow('auto',e)}
     };
     lbl.appendChild(ck);
     lbl.appendChild(el('span', null, t.label));
@@ -9056,7 +9272,7 @@ function renderAttendanceStatusesCard(){
           if(!ok) return;
           App.db.settings.attendanceStatuses = getAttendanceStatuses().filter(x => x.key !== st.key);
           saveDB();
-          try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){}
+          try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){_swallow('auto',e)}
           toast('已刪除','warn');
           refresh();
         }}, '🗑'));
@@ -9075,7 +9291,7 @@ function renderAttendanceStatusesCard(){
       if(!ok) return;
       App.db.settings.attendanceStatuses = defaultAttendanceStatuses();
       saveDB();
-      try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){}
+      try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){_swallow('auto',e)}
       toast('已還原為預設','success');
       refresh();
     }}, '↺ 還原預設')
@@ -9148,7 +9364,7 @@ function openAttendanceStatusEditor(existing, onDone){
     }
     App.db.settings.attendanceStatuses = statuses;
     saveDB();
-    try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){}
+    try { Sync.setNode('settings', App.db.settings); bcNotify(); } catch(e){_swallow('auto',e)}
     toast(isNew ? '已新增' : '已更新','success');
     m.close();
     if(onDone) onDone();
@@ -9188,6 +9404,8 @@ function rSettings(content){
   card.appendChild(fLate);
 
   card.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    // H1: 副老師寫入權限攔截
+    if(!requirePerm('canEditSettings','編輯設定')) return;
     App.db.settings.schoolName = iSchool.value.trim() || '我的課程';
     App.db.settings.teacherName = iTeacher.value.trim() || '老師';
     App.db.settings.startTime = iStart.value || '08:00';
@@ -9241,12 +9459,15 @@ function rSettings(content){
     ));
     const acts = el('div', { class:'actions' });
     acts.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+      if(!requirePerm('canManageTeachers','改老師密碼')) return;  // H1
       const newpw = await promptDlg('新密碼', '', { type:'password' });
       if(newpw === null) return;
       if(!newpw) return toast('不可空','danger');
-      a.password = await hashPassword(newpw);
-      saveDB();
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+      a.password = await hashPassword(newpw);  // H5: 自動 per-account salt
+      a.passwordChangedAt = Date.now();
+      _clearAllLoginTokens(a);  // H2
+      saveDB(true);  // H3: 立即寫入
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
       toast('已更新（已加密儲存）','success');
     } }, '🔑 改密碼'));
     if(App.db.accounts.length > 1){
@@ -9265,13 +9486,43 @@ function rSettings(content){
     if(App.db.accounts.find(a => a.username === u)) return toast('已存在','danger');
     const p = await promptDlg('密碼', '', { type:'password' }); if(!p) return;
     const n = await promptDlg('顯示名稱', u); if(n === null) return;
-    const hashed = await hashPassword(p);
+    const hashed = await hashPassword(p);  // H5: 自動 per-account salt
     App.db.accounts.push({ id:nid(), username:u, password:hashed, name:n||u, role:'teacher', ts:Date.now() });
-    saveDB();
-    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+    saveDB(true);  // H3: 建立帳號立即寫入
+    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
     toast('已新增','success'); rerender();
   } }, '＋ 新增老師帳號'));
   content.appendChild(card3);
+
+  // H4: 進階 → 內部錯誤紀錄（被吞掉的 catch）
+  const cardDbg = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardDbg.appendChild(el('h3', null, '🐞 進階：內部錯誤紀錄'));
+  cardDbg.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+    '當系統內部 catch 到非致命錯誤時會記在這裡（最多 200 筆）。一般使用者可忽略；回報問題時可附上。'));
+  cardDbg.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> {
+    const errs = (App._silentErrors || []).slice().reverse();
+    const m = modal('');
+    m.root.appendChild(el('h2', null, '🐞 內部錯誤紀錄（' + errs.length + ' 筆）'));
+    if(!errs.length){
+      m.root.appendChild(el('div', { class:'empty' }, '目前沒有任何內部錯誤紀錄'));
+    } else {
+      const box = el('div', { style:{maxHeight:'60vh',overflow:'auto',fontFamily:'monospace',fontSize:'12px'} });
+      errs.forEach(er => {
+        const t = new Date(er.ts).toLocaleString();
+        const row = el('div', { style:{padding:'6px 8px',borderBottom:'1px solid var(--border)'} });
+        row.appendChild(el('div', { style:{color:'var(--accent)'} }, '[' + er.ctx + '] ' + t));
+        row.appendChild(el('div', null, er.msg || ''));
+        if(er.stack) row.appendChild(el('div', { class:'muted tiny' }, er.stack));
+        box.appendChild(row);
+      });
+      m.root.appendChild(box);
+    }
+    const actions = el('div', { class:'modal-actions' });
+    actions.appendChild(el('button', { class:'btn', onclick: ()=> { App._silentErrors = []; m.close(); toast('已清空','success'); } }, '🗑 清空紀錄'));
+    actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> m.close() }, '關閉'));
+    m.root.appendChild(actions);
+  } }, '🐞 顯示內部錯誤紀錄'));
+  content.appendChild(cardDbg);
 
   // Claude API key
   const cardAI = el('div', { class:'card', style:{marginTop:'12px'} });
@@ -9286,16 +9537,16 @@ function rSettings(content){
     el('button', { class:'btn btn-primary', onclick: ()=> {
       const v = iK.value.trim();
       if(!v){
-        try { localStorage.removeItem(LS_CLAUDE_KEY); } catch(e){}
+        try { localStorage.removeItem(LS_CLAUDE_KEY); } catch(e){_swallow('auto',e)}
         toast('已清除','warn'); return;
       }
-      try { localStorage.setItem(LS_CLAUDE_KEY, v); } catch(e){}
+      try { localStorage.setItem(LS_CLAUDE_KEY, v); } catch(e){_swallow('auto',e)}
       toast('已儲存','success');
     }}, '💾 儲存'),
     el('button', { class:'btn', onclick: async ()=> {
       // test call
       iK.value = iK.value.trim();
-      try { localStorage.setItem(LS_CLAUDE_KEY, iK.value); } catch(e){}
+      try { localStorage.setItem(LS_CLAUDE_KEY, iK.value); } catch(e){_swallow('auto',e)}
       toast('測試中…','', 1200);
       const r = await askClaude('請用 1 句中文回覆「測試成功」','你是測試助理');
       if(r) toast('AI 回應：' + r.slice(0,40),'success', 4000);
@@ -9317,7 +9568,7 @@ function rSettings(content){
       }
     } }, '📲 加到主畫面'),
     el('button', { class:'btn', onclick: ()=> {
-      try { localStorage.removeItem(LS_PWA_DISMISS); } catch(e){}
+      try { localStorage.removeItem(LS_PWA_DISMISS); } catch(e){_swallow('auto',e)}
       toast('已重設提示','success');
     }}, '重置提示')
   ));
@@ -9351,7 +9602,7 @@ function rSettings(content){
       if(!ok2) return;
       try {
         Object.keys(localStorage).filter(k => k.startsWith(LS_KEY)).forEach(k => localStorage.removeItem(k));
-      } catch(e){}
+      } catch(e){_swallow('auto',e)}
       location.reload();
     } }, '🔄 重設系統')
   ));
@@ -9414,7 +9665,7 @@ function rFirebase(content){
     } }, '💾 套用'),
     el('button', { class:'btn', onclick:()=> {
       Sync.detachAll();
-      try { localStorage.removeItem(LS_FB); } catch(e){}
+      try { localStorage.removeItem(LS_FB); } catch(e){_swallow('auto',e)}
       ta.value = '';
       toast('已停用同步','warn');
       rerender();
@@ -9564,7 +9815,7 @@ function rCheckIn(content){
       }
       sessionStorage.setItem(todayKey, '1');
     }
-  } catch(_) {}
+  } catch(_) {_swallow('auto',_)}
   const already = studentSignedToday(me.id);
   const onLeave = studentOnLeaveToday(me.id);
 
@@ -9691,7 +9942,7 @@ function rCheckIn(content){
           el('div', { style:{display:'flex',gap:'4px'} },
             el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('install') }, '看說明'),
             el('button', { class:'btn btn-sm', onclick:()=> {
-              try { localStorage.setItem('cms_v3_install_dismissed','1'); } catch(e){}
+              try { localStorage.setItem('cms_v3_install_dismissed','1'); } catch(e){_swallow('auto',e)}
               rerender();
             }}, '不再提醒')
           )
@@ -9699,7 +9950,7 @@ function rCheckIn(content){
       );
       content.appendChild(hint);
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 
 function doStudentCheckIn(){
@@ -9773,7 +10024,7 @@ function studentCheckOut(){
   rec.outTime = nt();
   rec.outTs = Date.now();
   saveDB();
-  try { Sync.setMap('attendance', App.db.attendance); } catch(e){}
+  try { Sync.setMap('attendance', App.db.attendance); } catch(e){_swallow('auto',e)}
   bcNotify();
   toast('👋 簽退成功！' + rec.outTime, 'success', 3000);
   setTimeout(()=> rerender(), 600);
@@ -9907,7 +10158,7 @@ function rMe(content){
   try {
     const bc = renderRecentBadgesForMe();
     if(bc) content.appendChild(bc);
-  } catch(_) {}
+  } catch(_) {_swallow('auto',_)}
 
   // ─── 個人資料卡 ───
   const card = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
@@ -10017,7 +10268,7 @@ function rMe(content){
   // 個人背景存在 localStorage 而非 DB (僅自己看到)
   const myBgKey = 'cms_v3_stu_bg_' + me.id;
   let curBg = '';
-  try { curBg = localStorage.getItem(myBgKey) || ''; } catch(e){}
+  try { curBg = localStorage.getItem(myBgKey) || ''; } catch(e){_swallow('auto',e)}
 
   // 預覽
   if(curBg){
@@ -10044,7 +10295,7 @@ function rMe(content){
   cardBg.appendChild(bgFile);
   if(curBg){
     cardBg.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'8px'}, onclick: ()=> {
-      try { localStorage.removeItem(myBgKey); } catch(e){}
+      try { localStorage.removeItem(myBgKey); } catch(e){_swallow('auto',e)}
       applyStudentBg();
       rerender();
     }}, '🗑 移除背景'));
@@ -10056,7 +10307,7 @@ function rMe(content){
     const rng = el('input', { type:'range', min:0, max:90, value: Math.round((1-curOpacity)*100), style:{width:'100%'} });
     rng.addEventListener('input', e => {
       const opacity = 1 - (e.target.value / 100);
-      try { localStorage.setItem(myBgKey + '_opacity', String(opacity)); } catch(err){}
+      try { localStorage.setItem(myBgKey + '_opacity', String(opacity)); } catch(err){_swallow('auto',err)}
       applyStudentBg();
     });
     cardBg.appendChild(rng);
@@ -10074,9 +10325,10 @@ function rMe(content){
     const newpw = await promptDlg('新密碼', '', { type:'password' });
     if(newpw === null) return;
     if(!newpw) return toast('不可空','danger');
-    me.password = await hashPassword(newpw);
+    me.password = await hashPassword(newpw);  // H5: 自動 per-account salt
     me.passwordChangedAt = Date.now();
-    saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+    _clearAllLoginTokens(me);  // H2: 改密碼 → 清掉記住裝置
+    saveDB(true); Sync.setMap('students', App.db.students); bcNotify();  // H3: 立即寫入
     toast('已更新','success');
   } }, '🔑 修改密碼'));
   content.appendChild(card3);
@@ -10096,14 +10348,14 @@ function applyStudentBg(){
   }
   const key = 'cms_v3_stu_bg_' + me.id;
   let bg = '';
-  try { bg = localStorage.getItem(key) || ''; } catch(e){}
+  try { bg = localStorage.getItem(key) || ''; } catch(e){_swallow('auto',e)}
   if(!bg){
     document.body.style.backgroundImage = '';
     document.body.style.backgroundSize = '';
     return;
   }
   let opacity = 0.3;
-  try { opacity = parseFloat(localStorage.getItem(key + '_opacity') || '0.3'); } catch(e){}
+  try { opacity = parseFloat(localStorage.getItem(key + '_opacity') || '0.3'); } catch(e){_swallow('auto',e)}
   // 取得當前 bg 色
   const bgColor = getComputedStyle(document.body).backgroundColor || '#fff';
   document.body.style.backgroundImage = `linear-gradient(rgba(255,255,255,${1-opacity}), rgba(255,255,255,${1-opacity})), url("${bg}")`;
@@ -10221,7 +10473,7 @@ function openStudentSelfEdit(){
     stu.avatar = avatarData;
     stu.profileUpdatedAt = Date.now();
     saveDB();
-    try { Sync.setMap('students', App.db.students); } catch(e){}
+    try { Sync.setMap('students', App.db.students); } catch(e){_swallow('auto',e)}
     bcNotify();
     if(typeof logOp === 'function') logOp('profileSelfEdit', stu.name + ' 自行更新個人資料');
     toast('✅ 已更新個人資料','success');
@@ -10514,6 +10766,8 @@ function openAssignmentEdit(asg){
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    // H1: 副老師寫入權限攔截（新增/編輯作業視為編輯成績）
+    if(!requirePerm('canEditGrades','建立/編輯作業')) return;
     const title = iT.value.trim();
     if(!title) return toast('標題必填','danger');
     const rec = isNew ? { id: nid(), ts: Date.now() } : asg;
@@ -10556,7 +10810,7 @@ async function deleteAssignment(asg){
   Sync.setMap('submissions', App.db.submissions);
   bcNotify();
   // 非同步釋放 IDB 空間
-  (async () => { for(const k of keysToFree){ try { await idbDelete(k); } catch(e){} } })();
+  (async () => { for(const k of keysToFree){ try { await idbDelete(k); } catch(e){_swallow('auto',e)} } })();
   toast('已刪除','warn');
   go('assignments');
 }
@@ -10606,7 +10860,7 @@ function rSub(content){
       wf.appendChild(sel);
       content.appendChild(wf);
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 
   const sBox = el('div', { class:'search-box' });
   const sInp = el('input', { class:'input', placeholder:'搜尋學生 / 作業', oninput: e => {
@@ -10840,6 +11094,8 @@ function openSubmissionGrade(sub, list=null, idx=0){
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
 
   function saveGrade(advance){
+    // H1: 副老師寫入權限攔截
+    if(!requirePerm('canEditGrades','批改作業')) return;
     const sc = parseFloat(iScore.value);
     if(isNaN(sc)) return toast('請輸入分數','danger');
     let finalScore = sc;
@@ -11932,7 +12188,7 @@ function rSAnn(content){
     const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + me.id;
     const latest = App.db.announcements.reduce((m,a)=> Math.max(m, a.ts||0), 0);
     localStorage.setItem(key, String(latest));
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 
   let list = App.db.announcements.slice().sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (b.ts||0)-(a.ts||0));
   list = list.filter(a => !isAnnouncementExpired(a));
@@ -11977,7 +12233,7 @@ Object.assign(App, {
 });
 
 // 還原側邊欄收合狀態
-try { App.sidebarCollapsed = localStorage.getItem('cms_v3_sb_collapsed') === '1'; } catch(e){}
+try { App.sidebarCollapsed = localStorage.getItem('cms_v3_sb_collapsed') === '1'; } catch(e){_swallow('auto',e)}
 try { App._sideExpanded = JSON.parse(localStorage.getItem('cms_v3_side_expanded') || '{}'); } catch(e){ App._sideExpanded = {}; }
 
 function applySidebarCollapse(){
@@ -11995,7 +12251,7 @@ function applySidebarCollapse(){
 
 function toggleSidebar(){
   App.sidebarCollapsed = !App.sidebarCollapsed;
-  try { localStorage.setItem('cms_v3_sb_collapsed', App.sidebarCollapsed ? '1':'0'); } catch(e){}
+  try { localStorage.setItem('cms_v3_sb_collapsed', App.sidebarCollapsed ? '1':'0'); } catch(e){_swallow('auto',e)}
   applySidebarCollapse();
 }
 
@@ -12006,7 +12262,7 @@ function wsLoad(){
   try { return JSON.parse(localStorage.getItem(LS_WS_LIST) || '[]'); } catch(e){ return []; }
 }
 function wsSave(list){
-  try { localStorage.setItem(LS_WS_LIST, JSON.stringify(list)); } catch(e){}
+  try { localStorage.setItem(LS_WS_LIST, JSON.stringify(list)); } catch(e){_swallow('auto',e)}
 }
 function wsRegisterCurrent(){
   if(!App.cfg || !App.cfg.roomCode) return;
@@ -12026,9 +12282,9 @@ function wsRegisterCurrent(){
 }
 function wsSwitchTo(roomCode){
   // detach firebase, swap cfg, reload db
-  try { Sync.detachAll(); } catch(e){}
+  try { Sync.detachAll(); } catch(e){_swallow('auto',e)}
   // batch 2-stab: 切教室時把舊教室的 interval / timeout 全部清掉，避免殘留更新到新 db
-  try { clearAllTimers(); } catch(e){}
+  try { clearAllTimers(); } catch(e){_swallow('auto',e)}
   App.qrTimer = null;
   App._dueReminderTimer = null;
   App._notifyTimer = null;
@@ -12089,7 +12345,7 @@ function rWorkspace(content){
       actions.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         const ok = await confirmDlg('刪除教室 ' + w.name + '？資料會清空！', { danger:true });
         if(!ok) return;
-        try { localStorage.removeItem(LS_DB + '_' + w.roomCode); } catch(e){}
+        try { localStorage.removeItem(LS_DB + '_' + w.roomCode); } catch(e){_swallow('auto',e)}
         wsSave(list.filter(x => x.id !== w.id));
         toast('已刪除','warn');
         rerender();
@@ -12109,7 +12365,7 @@ async function wsCreateNew(){
   list.push({ id:nid(), roomCode, name:name.trim(), created:Date.now(), lastUsed:Date.now() });
   wsSave(list);
   // switch immediately
-  try { Sync.detachAll(); } catch(e){}
+  try { Sync.detachAll(); } catch(e){_swallow('auto',e)}
   App.cfg = Object.assign({}, App.cfg||{}, { roomCode });
   saveCfg();
   loadDB();
@@ -12136,7 +12392,7 @@ async function wsCreateNew(){
           if(srcAcc) App.db.accounts[0].password = srcAcc.password || '';
         }
       }
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
   saveDB();
   initBC();
@@ -12179,7 +12435,7 @@ function generateQrPayload(){
   // 控制數量上限
   if(App.db._qrCodes.length > 50) App.db._qrCodes = App.db._qrCodes.slice(-50);
   saveDB();
-  try { Sync.setMap('_qrCodes', App.db._qrCodes); } catch(e){}
+  try { Sync.setMap('_qrCodes', App.db._qrCodes); } catch(e){_swallow('auto',e)}
   return code;
 }
 
@@ -12203,7 +12459,7 @@ function markQrUsed(code, studentId){
     c.used = c.used || [];
     if(c.used.indexOf(studentId) < 0) c.used.push(studentId);
     saveDB();
-    try { Sync.setMap('_qrCodes', App.db._qrCodes); } catch(e){}
+    try { Sync.setMap('_qrCodes', App.db._qrCodes); } catch(e){_swallow('auto',e)}
   }
 }
 
@@ -12275,7 +12531,7 @@ function rQR(content){
     el('button', { class:'btn btn-sm', onclick: ()=>{
       try {
         if(navigator.clipboard) navigator.clipboard.writeText(url);
-      } catch(e){}
+      } catch(e){_swallow('auto',e)}
       toast('已複製連結','success');
     }}, '🔗 複製連結'),
     el('button', { class:'btn btn-sm', onclick: ()=> {
@@ -12336,7 +12592,7 @@ function handleQrJoinHash(){
       const ok = confirm('要切換到教室 "' + params.join + '" 並嘗試簽到？');
       if(!ok){ location.hash = ''; return false; }
     }
-    try { Sync.detachAll(); } catch(e){}
+    try { Sync.detachAll(); } catch(e){_swallow('auto',e)}
     App.cfg = { roomCode: params.join, role: (App.cfg && App.cfg.role) || 'student' };
     saveCfg();
     loadDB();
@@ -12584,7 +12840,7 @@ function whLoad(){
   catch(e){ return null; }
 }
 function whSave(cfg){
-  try { localStorage.setItem(LS_WEBHOOK, JSON.stringify(cfg)); } catch(e){}
+  try { localStorage.setItem(LS_WEBHOOK, JSON.stringify(cfg)); } catch(e){_swallow('auto',e)}
 }
 
 async function triggerWebhook(eventType, payload){
@@ -13020,7 +13276,7 @@ function logOp(type, msg, meta){
     });
     if(App.db._logs.length > 1000) App.db._logs = App.db._logs.slice(-1000);
     // do not call saveDB here to avoid recursion; assume caller will save
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 
 /* ---- Backup system (auto-once-per-day + manual) ---- */
@@ -13032,11 +13288,11 @@ function backupList(){
       if(k && k.startsWith(LS_BACKUP_PREFIX)){
         const date = k.slice(LS_BACKUP_PREFIX.length);
         let size = 0;
-        try { size = localStorage.getItem(k).length; } catch(e){}
+        try { size = localStorage.getItem(k).length; } catch(e){_swallow('auto',e)}
         list.push({ key:k, date, size });
       }
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   return list.sort((a,b) => b.date.localeCompare(a.date));
 }
 function backupCreate(label){
@@ -13056,10 +13312,10 @@ function backupCreate(label){
     const all = backupList();
     if(all.length > 7){
       all.slice(7).forEach(b => {
-        try { localStorage.removeItem(b.key); } catch(e){}
+        try { localStorage.removeItem(b.key); } catch(e){_swallow('auto',e)}
       });
     }
-    try { localStorage.setItem(LS_BACKUP_LAST, today); } catch(e){}
+    try { localStorage.setItem(LS_BACKUP_LAST, today); } catch(e){_swallow('auto',e)}
     return key;
   } catch(e){
     console.warn('backup failed', e);
@@ -13072,7 +13328,7 @@ function backupAutoIfNeeded(){
     const last = localStorage.getItem(LS_BACKUP_LAST) || '';
     if(last === td()) return;
     backupCreate(td());
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 async function backupRestore(key){
   try {
@@ -13284,7 +13540,7 @@ function storageUsage(){
       total += size;
       if(k.startsWith(LS_KEY)) cms += size;
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   // browsers usually allow 5MB
   const LIMIT = 5 * 1024 * 1024;
   return {
@@ -13388,7 +13644,7 @@ function journeyDone(key){
   try {
     const st = journeyState(); st[key] = Date.now();
     localStorage.setItem(LS_JOURNEY_DONE, JSON.stringify(st));
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 /* ─── v3.1: hello-bar greeting (time-aware) ──────────────────── */
 function timeGreeting(){
@@ -13496,7 +13752,7 @@ async function renderDemoData(){
     });
   }
   saveDB();
-  try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){}
+  try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){_swallow('auto',e)}
   toast('✅ 已建立 5 位示範學生（密碼皆為學號末 4 碼）','success', 3500);
   go('students');
 }
@@ -14043,11 +14299,11 @@ function rStorage(content){
       const info = await idbUsage();
       usage = info.usage || 0;
       quota = info.quota || 0;
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
     try {
       const keys = await idbKeys();
       fileCount = (keys || []).filter(k => typeof k === 'string' && k.indexOf('attach_') === 0).length;
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
     const usedMB = (usage / 1024 / 1024).toFixed(1);
     const quotaMB = quota ? (quota / 1024 / 1024).toFixed(0) : '?';
     const pct = quota ? Math.min(100, (usage / quota * 100)).toFixed(1) : 0;
@@ -14136,7 +14392,7 @@ function rStorage(content){
   actions.appendChild(el('button', { class:'btn', onclick: async ()=> {
     const ok = await confirmDlg('刪除所有自動備份？');
     if(!ok) return;
-    backupList().forEach(b => { try{ localStorage.removeItem(b.key); }catch(e){} });
+    backupList().forEach(b => { try{ localStorage.removeItem(b.key); }catch(e){_swallow('auto',e)} });
     rerender(); toast('已刪除','success');
   }}, '🗑 清備份'));
   card3.appendChild(actions);
@@ -14233,7 +14489,7 @@ function openGoogleDriveSetup(){
     App.db.settings.googleDrive = newCfg;
     saveDB();
     if(typeof logOp === 'function'){
-      try { logOp('settings','更新 Google Drive 設定（' + (newCfg.enabled ? '啟用' : '停用') + '）'); } catch(_){}
+      try { logOp('settings','更新 Google Drive 設定（' + (newCfg.enabled ? '啟用' : '停用') + '）'); } catch(_){_swallow('auto',_)}
     }
     if(newCfg.enabled){
       try {
@@ -14400,7 +14656,7 @@ function rBackup(content){
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         const ok = await confirmDlg('刪除這份備份？', { danger:true });
         if(!ok) return;
-        try { localStorage.removeItem(b.key); } catch(e){}
+        try { localStorage.removeItem(b.key); } catch(e){_swallow('auto',e)}
         rerender(); toast('已刪除','success');
       }}, '🗑'));
       row.appendChild(acts);
@@ -14610,8 +14866,8 @@ function buildSubmissionForm(asg, me, existing){
       logOp('submit','繳交：' + asg.title);
       saveDB(); Sync.push('submissions', rec); bcNotify();
       toast('已繳交！','success');
-      try { checkAndAwardBadges(rec.studentId); } catch(_) {} // batch 5-27
-      try { autoFinishAsgnTodo(rec.studentId, rec.assignmentId); } catch(_) {} // batch 5-29
+      try { checkAndAwardBadges(rec.studentId); } catch(_) {_swallow('auto',_)} // batch 5-27
+      try { autoFinishAsgnTodo(rec.studentId, rec.assignmentId); } catch(_) {_swallow('auto',_)} // batch 5-29
       rerender();
     }}, existing?'💾 儲存修改':'✅ 送出繳交'),
     existing ? el('button', { class:'btn', onclick:()=> { App._editSub = null; rerender(); } }, '取消') : null
@@ -15262,6 +15518,9 @@ function matrixCurrentStatus(stuId, maps){
 }
 
 function matrixSetStatus(stuId, status){
+  // H1: 副老師寫入權限攔截
+  if(!requirePerm('canEditAttendance','編輯出席')) return;
+  if(!checkStudentClassPerm(stuId)){ toast('您沒有此學生班級的權限','warning'); return; }
   const s = findStudent(stuId);
   if(!s) return;
   const today = td();
@@ -15430,7 +15689,7 @@ function rMatrix(content){
     // drag-and-drop seat swap
     cell.addEventListener('dragstart', e => {
       cell.classList.add('dragging');
-      try { e.dataTransfer.setData('text/plain', s.id); } catch(err){}
+      try { e.dataTransfer.setData('text/plain', s.id); } catch(err){_swallow('auto',err)}
       e.dataTransfer.effectAllowed = 'move';
     });
     cell.addEventListener('dragend', ()=> {
@@ -15443,7 +15702,7 @@ function rMatrix(content){
       e.preventDefault();
       cell.classList.remove('drag-over');
       let srcId = '';
-      try { srcId = e.dataTransfer.getData('text/plain'); } catch(err){}
+      try { srcId = e.dataTransfer.getData('text/plain'); } catch(err){_swallow('auto',err)}
       if(!srcId || srcId === s.id) return;
       const src = App.db.students.find(x => x.id === srcId);
       if(!src) return;
@@ -15628,7 +15887,7 @@ function initPWA(){
   if('serviceWorker' in navigator){
     try {
       navigator.serviceWorker.register('sw-v3.js').catch(()=>null);
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
   // listen for install prompt
   window.addEventListener('beforeinstallprompt', e => {
@@ -15655,12 +15914,12 @@ function showPwaInstallChip(){
     el('button', { class:'btn btn-sm btn-primary', onclick: async ()=> {
       if(!App.pwaPrompt) return;
       App.pwaPrompt.prompt();
-      try { await App.pwaPrompt.userChoice; } catch(e){}
+      try { await App.pwaPrompt.userChoice; } catch(e){_swallow('auto',e)}
       App.pwaPrompt = null;
       chip.remove();
     }}, '安裝'),
     el('button', { class:'btn btn-sm', onclick: ()=> {
-      try { localStorage.setItem(LS_PWA_DISMISS, '1'); } catch(e){}
+      try { localStorage.setItem(LS_PWA_DISMISS, '1'); } catch(e){_swallow('auto',e)}
       chip.remove();
     }}, '不再提示')
   );
@@ -15725,7 +15984,7 @@ function rerender(){
       ));
       return;
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 
   // route
   try {
@@ -15809,7 +16068,7 @@ function rerender(){
   }
 
   // batch 3：登入後首次顯示新手引導（已完成過或 tour 仍開著時自動跳過）
-  try { maybeShowTour(); } catch(e){}
+  try { maybeShowTour(); } catch(e){_swallow('auto',e)}
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -15834,7 +16093,7 @@ function boot(){
             const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
             defaultAdminHashes.add(hex);
           }
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
         try {
           for(let i=0; i<localStorage.length; i++){
             const k = localStorage.key(i);
@@ -15855,7 +16114,7 @@ function boot(){
               if(hasNonDefault) break;
             }
           }
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
 
         if(hasNonDefault){
           // 2) 鎖定檢查
@@ -15902,7 +16161,7 @@ function boot(){
                   }
                 }
               }
-            } catch(e){}
+            } catch(e){_swallow('auto',e)}
           } else {
             const p = prompt('密碼：');
             if(p === null){ location.replace(location.pathname); return; }
@@ -15931,17 +16190,17 @@ function boot(){
                   if(match){ verified = true; break; }
                 }
               }
-            } catch(e){}
+            } catch(e){_swallow('auto',e)}
           }
 
           if(!verified){
             const fails = parseInt(localStorage.getItem('cms_v3_adminreset_fails') || '0', 10) + 1;
-            try { localStorage.setItem('cms_v3_adminreset_fails', String(fails)); } catch(e){}
+            try { localStorage.setItem('cms_v3_adminreset_fails', String(fails)); } catch(e){_swallow('auto',e)}
             if(fails >= 3){
               try {
                 localStorage.setItem('cms_v3_adminreset_lock', String(Date.now() + 5*60*1000));
                 localStorage.removeItem('cms_v3_adminreset_fails');
-              } catch(e){}
+              } catch(e){_swallow('auto',e)}
             }
             const remain = Math.max(0, 3 - fails);
             document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
@@ -15954,7 +16213,7 @@ function boot(){
               + '</div></div>';
             return;
           }
-          try { localStorage.removeItem('cms_v3_adminreset_fails'); } catch(e){}
+          try { localStorage.removeItem('cms_v3_adminreset_fails'); } catch(e){_swallow('auto',e)}
         }
 
         // 4) 通過驗證（或無非預設帳號）→ 執行重設
@@ -15990,13 +16249,13 @@ function boot(){
               }
               localStorage.setItem(k, JSON.stringify(db));
               resetCount++;
-            } catch(e){}
+            } catch(e){_swallow('auto',e)}
           }
         }
         try {
           localStorage.removeItem('cms_v3_session');
           localStorage.removeItem('cms_v3_remember');
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
         document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:system-ui;text-align:center;padding:20px">'
           + '<div style="font-size:64px;margin-bottom:20px">✅</div>'
           + '<h1 style="font-size:24px;margin:0 0 10px;color:#16a34a">老師密碼已重設！</h1>'
@@ -16038,7 +16297,7 @@ function boot(){
   try { App._uiCustom = loadUiCustom(); } catch(e){ App._uiCustom = { sections:{}, items:{}, order:{}, overview:{}, login:{}, pageTexts:{}, customBlocks:[] }; }
 
   // 學生個人背景套用（若已登入）
-  setTimeout(()=> { try { if(typeof applyStudentBg === 'function') applyStudentBg(); } catch(e){} }, 200);
+  setTimeout(()=> { try { if(typeof applyStudentBg === 'function') applyStudentBg(); } catch(e){_swallow('auto',e)} }, 200);
 
   // cfg & session
   App.cfg = loadCfg();
@@ -16076,7 +16335,7 @@ function boot(){
   initDragDrop();
 
   // Phase 4: auto-backup once per day
-  try { backupAutoIfNeeded(); } catch(e){}
+  try { backupAutoIfNeeded(); } catch(e){_swallow('auto',e)}
 
   rerender();
 
@@ -16088,7 +16347,7 @@ function boot(){
     const n = App._v1ImportedCount;
     App._v1ImportedCount = 0;
     setTimeout(()=> {
-      try { toast('✅ 已從舊版自動匯入 ' + n + ' 位學生','success', 5000); } catch(e){}
+      try { toast('✅ 已從舊版自動匯入 ' + n + ' 位學生','success', 5000); } catch(e){_swallow('auto',e)}
     }, 1500);
   }
 
@@ -16104,7 +16363,7 @@ function boot(){
   try { scheduleDueReminders(); } catch(e){ console.warn('[scheduleDueReminders]', e); }
 
   // ═══ IndexedDB 持久化 + 舊版 attach 自動遷移 ═══
-  try { requestPersistentStorage(); } catch(e){}
+  try { requestPersistentStorage(); } catch(e){_swallow('auto',e)}
   setTimeout(async () => {
     try {
       const n = await migrateAllAttachments();
@@ -16125,7 +16384,7 @@ function schedulePeriodicNotifications(){
     const soon = App.db.assignments.filter(a => isAssignmentDueSoon(a));
     if(soon.length){
       triggerWebhook('assignment-due', { count: soon.length, titles: soon.map(s=>s.title).join('、') });
-      try { localStorage.setItem(LS_KEY + '_notif_due', String(Date.now())); } catch(e){}
+      try { localStorage.setItem(LS_KEY + '_notif_due', String(Date.now())); } catch(e){_swallow('auto',e)}
     }
   }
   // batch 2-stab: managed timer 版本
@@ -17427,6 +17686,8 @@ function openAttNoteEditor(student){
 }
 
 function exportAttReportCSV(){
+  // H1: 副老師寫入權限攔截
+  if(!requirePerm('canExport','匯出資料')) return;
   // 修 Bug A：匯出彙總 + 明細兩個 CSV
   const rows = [['姓名','班級','出席率','出席天數','總天數','遲到','缺席','請假']];
   App.db.students.forEach(s => {
@@ -17461,7 +17722,7 @@ function exportAttReportCSV(){
           const [h1,m1] = at.time.split(':').map(Number);
           const [h2,m2] = at.outTime.split(':').map(Number);
           mins = String((h2*60+m2)-(h1*60+m1));
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
       }
       const stat = at.outTime ? '已簽退' : (at.status === 'late' ? '遲到' : '已簽到');
       dRows.push([at.date||'', s.name||'', s.cls||'', at.time||'', at.outTime||'', mins, stat]);
@@ -17506,7 +17767,7 @@ function openTeacherProfile(){
           preview.appendChild(el('img', { src:url, style:{width:'100%',height:'100%',objectFit:'cover'} }));
           return;
         }
-      } catch(e){}
+      } catch(e){_swallow('auto',e)}
     }
     preview.style.background = 'var(--primary-soft)';
     preview.textContent = initials(me.name || 'T');
@@ -17519,7 +17780,7 @@ function openTeacherProfile(){
     const f = e.target.files[0]; if(!f) return;
     if(f.size > 2 * 1024 * 1024){ toast('圖片不能超過 2MB','danger'); return; }
     try {
-      if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){} }
+      if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){_swallow('auto',_)} }
       avatarMeta = await attachUpload(f);
       await refreshAvatar();
       toast('頭像已上傳','success');
@@ -17528,7 +17789,7 @@ function openTeacherProfile(){
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
     el('button', { class:'btn btn-sm', onclick:()=> fileInp.click() }, '📷 選擇圖片'),
     el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
-      if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){} }
+      if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){_swallow('auto',_)} }
       avatarMeta = null;
       await refreshAvatar();
       toast('已移除頭像','info');
@@ -17558,6 +17819,30 @@ function openTeacherProfile(){
   f3.appendChild(i3);
   m.root.appendChild(f3);
 
+  // H2: 登出所有裝置（清空所有 loginTokens）
+  const f4 = el('div', { class:'field', style:{marginTop:'8px'} });
+  const tokenCount = (me.loginTokens || []).length;
+  f4.appendChild(el('label', { class:'label' }, '🔐 已記住此帳號的裝置：' + tokenCount + ' 個'));
+  f4.appendChild(el('button', {
+    type: 'button',
+    class: 'btn btn-sm',
+    style: { marginTop:'4px' },
+    onclick: async ()=> {
+      const ok = await confirmDlg('確定登出所有「記住我」裝置嗎？\n下次都得重新輸入密碼。', { danger:true });
+      if(!ok) return;
+      _clearAllLoginTokens(me);
+      // 同步清掉本機的 LS
+      try {
+        const rem = loadRemember();
+        if(rem && rem.username === me.username) saveRemember(null);
+      } catch(e){ _swallow('clearRemember', e); }
+      saveDB(true);
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
+      toast('已登出所有裝置','success');
+    }
+  }, '🚪 登出所有裝置'));
+  m.root.appendChild(f4);
+
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
@@ -17568,14 +17853,17 @@ function openTeacherProfile(){
       if(i2.value.length < 4){ toast('密碼至少 4 字元','danger'); return; }
       if(i2.value !== i3.value){ toast('兩次密碼不一致','danger'); return; }
       try {
-        me.password = await hashPassword(i2.value);
-        if(typeof logOp === 'function') logOp('teacherPwChange','改密碼');
+        me.password = await hashPassword(i2.value);  // H5: 自動 per-account salt
+        me.passwordChangedAt = Date.now();
+        // 改密碼後安全：清掉所有 loginTokens，要求所有裝置重新登入
+        _clearAllLoginTokens(me);
+        if(typeof logOp === 'function') logOp('teacherPwChange','改密碼（已登出所有裝置）');
       } catch(e){ toast('密碼加密失敗：'+(e.message||e),'danger'); return; }
     }
-    saveDB();
-    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){}
+    saveDB(true);  // H3: 改密碼 → 立即寫入
+    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
     if(App.session) App.session.name = me.name;
-    try { saveSession(); } catch(e){}
+    try { saveSession(); } catch(e){ _swallow('saveSession', e); }
     toast('已儲存','success');
     m.close();
     rerender();
@@ -17616,7 +17904,7 @@ function rAppearance(content){
   [['light','☀️ 亮色'],['dark','🌙 暗色'],['auto','🔄 跟隨系統']].forEach(([v,l]) => {
     r1.appendChild(el('button', {
       class:'btn ' + (App.theme===v ? 'btn-primary' : ''),
-      onclick:()=> { App.theme = v; saveAppearance(); applyTheme(); try{ applyBranding(); }catch(e){} rerender(); }
+      onclick:()=> { App.theme = v; saveAppearance(); applyTheme(); try{ applyBranding(); }catch(e){_swallow('auto',e)} rerender(); }
     }, l));
   });
   c1.appendChild(r1);
@@ -17685,7 +17973,7 @@ function rAppearance(content){
       style:{fontFamily:f.stack},
       onclick:()=> {
         App.font = f.key;
-        try { _loadGoogleFont(f.gf); } catch(e){}
+        try { _loadGoogleFont(f.gf); } catch(e){_swallow('auto',e)}
         saveAppearance(); applyTheme(); rerender();
       }
     }, f.label));
@@ -17756,10 +18044,10 @@ function rAppearance(content){
       App.db.branding.bgImage = null;
       App.db.branding.bgColor = null;
       App.db.branding.bgOpacity = null;
-      try { saveDB(); Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+      try { saveDB(); Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
     }
     saveAppearance(); applyTheme();
-    try { await applyBranding(); } catch(e){}
+    try { await applyBranding(); } catch(e){_swallow('auto',e)}
     toast('已重置全部外觀','success');
     rerender();
   }}, '🗑 重置全部外觀'));
@@ -17782,11 +18070,11 @@ function renderBrandingCard(){
     if(f.size > 3 * 1024 * 1024){ toast('圖片不能超過 3MB','danger'); return; }
     try {
       if(App.db.branding.bgImage){
-        try { await attachDelete(App.db.branding.bgImage); } catch(_){}
+        try { await attachDelete(App.db.branding.bgImage); } catch(_){_swallow('auto',_)}
       }
       App.db.branding.bgImage = await attachUpload(f);
       saveDB();
-      try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+      try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
       await applyBranding();
       toast('背景已設定','success');
       rerender();
@@ -17796,11 +18084,11 @@ function renderBrandingCard(){
   if(App.db.branding.bgImage){
     f2.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
       if(App.db.branding.bgImage){
-        try { await attachDelete(App.db.branding.bgImage); } catch(_){}
+        try { await attachDelete(App.db.branding.bgImage); } catch(_){_swallow('auto',_)}
       }
       App.db.branding.bgImage = null;
       saveDB();
-      try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+      try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
       await applyBranding();
       toast('已移除背景','info');
       rerender();
@@ -17825,7 +18113,7 @@ function renderBrandingCard(){
       onclick: async ()=> {
         App.db.branding.bgColor = c;
         saveDB();
-        try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+        try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
         await applyBranding();
         rerender();
       }
@@ -17836,7 +18124,7 @@ function renderBrandingCard(){
   const resetBtn = el('button', { class:'btn btn-sm', style:{marginLeft:'auto'}, onclick: async ()=> {
     App.db.branding.bgColor = null;
     saveDB();
-    try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+    try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
     await applyBranding();
     toast('已重置底色','info');
     rerender();
@@ -17858,7 +18146,7 @@ function renderBrandingCard(){
   });
   rng.addEventListener('change', async ()=> {
     saveDB();
-    try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){}
+    try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
   });
   f4.appendChild(rng);
   card.appendChild(f4);
@@ -17935,7 +18223,7 @@ function rRandomPicker(content){
     sel.appendChild(o);
   });
   if(App._pickerCls && App._pickerCls !== 'all'){
-    try { sel.value = App._pickerCls; } catch(e){}
+    try { sel.value = App._pickerCls; } catch(e){_swallow('auto',e)}
   }
   filters.appendChild(sel);
 
@@ -18164,11 +18452,11 @@ function updateTimerDisplay(){
       const wasWork = (App._pomCycle || 'work') === 'work';
       App._pomCycle = wasWork ? 'rest' : 'work';
       App._timerElapsed = 0;
-      try { notify('🍅 番茄鐘', wasWork ? '工作時段結束，休息 5 分鐘' : '休息結束，回到工作', { type:'timer' }); } catch(e){}
+      try { notify('🍅 番茄鐘', wasWork ? '工作時段結束，休息 5 分鐘' : '休息結束，回到工作', { type:'timer' }); } catch(e){_swallow('auto',e)}
       toast(wasWork ? '工作時段結束！休息 5 分鐘' : '休息結束！回到工作','success', 5000);
       rerender();
     } else {
-      try { notify('⏰ 時間到', '倒數計時結束', { type:'timer' }); } catch(e){}
+      try { notify('⏰ 時間到', '倒數計時結束', { type:'timer' }); } catch(e){_swallow('auto',e)}
       toast('⏰ 時間到！','success', 5000);
     }
     // 響鈴（嘗試）
@@ -18181,7 +18469,7 @@ function updateTimerDisplay(){
       gain.gain.setValueAtTime(0.3, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.8);
       osc.start(); osc.stop(ctx.currentTime + 0.8);
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
 }
 
@@ -18374,7 +18662,7 @@ function getPageTitle(viewKey, fallbackTitle){
     App._uiCustom = App._uiCustom || loadUiCustom();
     const pt = (App._uiCustom.pageTexts || {})[viewKey];
     if(pt && pt.title) return pt.title;
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   return fallbackTitle;
 }
 function getPageSub(viewKey, fallbackSub){
@@ -18382,7 +18670,7 @@ function getPageSub(viewKey, fallbackSub){
     App._uiCustom = App._uiCustom || loadUiCustom();
     const pt = (App._uiCustom.pageTexts || {})[viewKey];
     if(pt && pt.sub) return pt.sub;
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
   return fallbackSub;
 }
 
@@ -18540,7 +18828,7 @@ function rUiEditor(content){
     if(App.session?.role === 'teacher'){
       content.appendChild(renderBreadcrumb([{label:'⚙️ 設定', go:'settings'},{label:'🛠️ 介面編輯器'}]));
     }
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 
   content.appendChild(el('h1', null, '🛠️ 介面編輯器'));
   content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
@@ -18739,7 +19027,7 @@ function renderSidebarEditor(content){
         try {
           e.dataTransfer.setData('text/plain', JSON.stringify({sec:secKey, key:it.key}));
           e.dataTransfer.effectAllowed = 'move';
-        } catch(err){}
+        } catch(err){_swallow('auto',err)}
       });
       row.addEventListener('dragend', ()=> { row.style.opacity = '1'; });
       row.addEventListener('dragover', e => {
@@ -18754,7 +19042,7 @@ function renderSidebarEditor(content){
           const data = JSON.parse(e.dataTransfer.getData('text/plain'));
           if(data.sec !== secKey || data.key === it.key) return;
           uiEditorReorder(secKey, data.key, it.key, isTeacher);
-        } catch(err){}
+        } catch(err){_swallow('auto',err)}
       });
 
       // ─── 觸控拖曳（手機） ─────────────────────────
@@ -18883,7 +19171,7 @@ function renderLoginEditor(content){
           logoPreview.appendChild(el('img', { src:url, style:{width:'100%',height:'100%',objectFit:'cover'} }));
           return;
         }
-      } catch(e){}
+      } catch(e){_swallow('auto',e)}
     }
     logoPreview.textContent = lc.logoEmoji || '🎓';
   }
@@ -18908,7 +19196,7 @@ function renderLoginEditor(content){
     if(!f) return;
     if(f.size > 1024*1024){ toast('圖片不能超過 1 MB','danger'); inpImg.value=''; return; }
     try {
-      if(lc.logoImage){ try { await attachDelete(lc.logoImage); } catch(_){} }
+      if(lc.logoImage){ try { await attachDelete(lc.logoImage); } catch(_){_swallow('auto',_)} }
       lc.logoImage = await attachUpload(f);
       saveUiCustom();
       await refreshLogo();
@@ -18921,7 +19209,7 @@ function renderLoginEditor(content){
 
   if(lc.logoImage){
     logoActs.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
-      try { await attachDelete(lc.logoImage); } catch(_){}
+      try { await attachDelete(lc.logoImage); } catch(_){_swallow('auto',_)}
       lc.logoImage = null;
       saveUiCustom();
       await refreshLogo();
@@ -19055,7 +19343,7 @@ function renderLoginEditor(content){
         if(typeof saveSession === 'function') saveSession();
         App._loginStage = 'choose';
         App._loginPrefill = null;
-      } catch(e){}
+      } catch(e){_swallow('auto',e)}
       rerender();
     });
   }}, '🔄 立即預覽（會登出）'));
@@ -19420,7 +19708,7 @@ function renderInstallCard(){
         try {
           App.pwaPrompt.prompt();
           await App.pwaPrompt.userChoice;
-        } catch(e){}
+        } catch(e){_swallow('auto',e)}
         App.pwaPrompt = null;
         toast('安裝指令已送出','success');
       }
@@ -19512,7 +19800,7 @@ function closeTour(markDone){
     try {
       const role = App._tourRole || (App.session && App.session.role);
       if(role) localStorage.setItem(tourKey(role), '1');
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
   }
   App._tourIdx = null;
   App._tourRole = null;
@@ -19527,7 +19815,7 @@ function maybeShowTour(){
     // 避免每次 rerender 都重複塞
     if(document.getElementById('tour-card')) return;
     setTimeout(()=> showTour(role), 600);  // 略延後，讓畫面先穩定
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 // 對外暴露給「重新引導」按鈕使用
 function resetTour(){
@@ -19550,7 +19838,7 @@ function pushRecentPage(view){
     const cur = JSON.parse(localStorage.getItem(RECENT_PAGES_KEY) || '[]');
     const next = [view].concat(cur.filter(v => v !== view)).slice(0, RECENT_PAGES_MAX);
     localStorage.setItem(RECENT_PAGES_KEY, JSON.stringify(next));
-  } catch(e){}
+  } catch(e){_swallow('auto',e)}
 }
 function getRecentPages(){
   try { return JSON.parse(localStorage.getItem(RECENT_PAGES_KEY) || '[]'); }
@@ -19929,6 +20217,46 @@ function filterStudentsByPerms(students){
   return (students || []).filter(s => allow.has(s.cls));
 }
 
+/* ─── H1: 副老師寫入權限檢查 ───
+ * 用法：在寫入點入口 if(!requirePerm('canEditStudents','編輯學生')) return;
+ * - admin / 主老師 → 永遠 true
+ * - 副老師 → 看 perms[permKey]
+ * - 非老師 session → 一律拒絕
+ */
+function isSubTeacher(){
+  const s = App.session;
+  if(!s || s.role !== 'teacher') return false;
+  // teachers[] 內存在 → 副老師
+  const sub = (App.db.teachers || []).find(t => t.id === s.id);
+  return !!sub;
+}
+function checkPerm(permKey){
+  const session = App.session;
+  if(!session || session.role !== 'teacher') return false;
+  const perms = getTeacherPerms(session);
+  if(!perms) return false;
+  if(perms._admin) return true;  // 主老師全允許
+  return !!perms[permKey];
+}
+function requirePerm(permKey, label){
+  if(!checkPerm(permKey)){
+    if(typeof toast === 'function') toast('您沒有' + (label || '此操作') + '的權限', 'warning');
+    return false;
+  }
+  return true;
+}
+// 副老師班級權限檢查（針對單一學生操作）
+function checkStudentClassPerm(studentId){
+  const session = App.session;
+  if(!session || session.role !== 'teacher') return false;
+  const perms = getTeacherPerms(session);
+  if(!perms) return false;
+  if(perms._admin || perms.classes === '*') return true;
+  const s = (App.db.students || []).find(x => x.id === studentId);
+  if(!s) return true;  // 找不到學生交由後續邏輯處理
+  return (perms.classes || []).includes(s.cls);
+}
+
 /* ════════════════════════════════════════════════════════════
    batch 4-23：行為記錄
    ──────────────────────────────────────────────────────────── */
@@ -20123,7 +20451,7 @@ function openBehaviorQuickAdd(){
     saveDB();
     m.close();
     toast('已記錄','success');
-    try { checkAndAwardBadges(rec.studentId); } catch(_) {} // batch 5-27
+    try { checkAndAwardBadges(rec.studentId); } catch(_) {_swallow('auto',_)} // batch 5-27
     rerender();
   }}, '✅ 確認'));
   m.root.appendChild(actions);
@@ -20359,17 +20687,19 @@ function openTeacherEdit(t){
 }
 
 async function resetSubTeacherPassword(tid){
+  // H1: 副老師管理權限（只有 admin / 主老師能用）
+  if(!requirePerm('canManageTeachers','管理老師帳號')) return;
   const t = (App.db.teachers||[]).find(x => x.id === tid);
   if(!t) return;
   const ok = await confirmDlg('要重設「' + t.name + '」的密碼嗎？');
   if(!ok) return;
   const newPw = 't' + Math.random().toString(36).slice(2,8);
-  const hashed = await hashPasswordSafe(newPw);
+  const hashed = await hashPasswordSafe(newPw);  // H5: 自動產生 per-account salt
   t.password = hashed.ok ? hashed.value : newPw;
   t.mustChangePw = true;
   const acc = (App.db.accounts||[]).find(a => a.id === t.id);
   if(acc){ acc.password = t.password; acc.mustChangePw = true; }
-  saveDB();
+  saveDB(true);  // H3: 密碼變更立即寫入
   toast('新密碼：' + newPw,'success', 8000);
 }
 
@@ -21032,7 +21362,7 @@ function finishQuiz(t, quiz, me, timeout, content){
   }
   syncQuizScore(sub, quiz);
   saveDB();
-  try { checkAndAwardBadges(me.id); } catch(_) {} // batch 5-27
+  try { checkAndAwardBadges(me.id); } catch(_) {_swallow('auto',_)} // batch 5-27
   App._quizTaking = null;
   if(timeout) toast('⏰ 時間到，自動交卷！','warn');
   else toast('✅ 已提交，得分 ' + score + ' 分','success', 5000);
@@ -21313,11 +21643,11 @@ function exportStudentReport(studentId){
 
   // 開新視窗（避免被擋住時退回 iframe）
   let win = null;
-  try { win = window.open('', '_blank', 'width=820,height=900'); } catch(_) {}
+  try { win = window.open('', '_blank', 'width=820,height=900'); } catch(_) {_swallow('auto',_)}
   if(win){
     win.document.open(); win.document.write(html); win.document.close();
     // 等渲染後自動觸發列印
-    setTimeout(()=> { try { win.focus(); win.print(); } catch(_){} }, 600);
+    setTimeout(()=> { try { win.focus(); win.print(); } catch(_){_swallow('auto',_)} }, 600);
     toast('已開啟成績單視窗','success');
   } else {
     // 退回隱藏 iframe
@@ -21330,7 +21660,7 @@ function exportStudentReport(studentId){
     ifr.contentDocument.open();
     ifr.contentDocument.write(html);
     ifr.contentDocument.close();
-    setTimeout(()=> { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch(_){} }, 600);
+    setTimeout(()=> { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch(_){_swallow('auto',_)} }, 600);
     toast('已產生成績單（彈窗被擋，已用隱藏 iframe）','info');
   }
 }
@@ -21437,7 +21767,7 @@ function checkAndAwardBadges(studentId){
         // toast
         try {
           toast('🎉 恭喜獲得 [' + BADGE_LEVEL_LABEL[lv] + '] ' + def.label + '徽章！', 'success', 5000);
-        } catch(_) {}
+        } catch(_) {_swallow('auto',_)}
         // notification
         App.db.notifications.push({
           id: nid(),
@@ -21451,7 +21781,7 @@ function checkAndAwardBadges(studentId){
     });
   });
   if(awarded > 0){
-    try { saveDB(); } catch(_) {}
+    try { saveDB(); } catch(_) {_swallow('auto',_)}
   }
   return awarded;
 }
@@ -21470,7 +21800,7 @@ function renderBadgeCard(badge){
 function rMyBadges(content){
   const me = currentStudent(); if(!me) return;
   // 進頁時也順手檢查一次
-  try { checkAndAwardBadges(me.id); } catch(_) {}
+  try { checkAndAwardBadges(me.id); } catch(_) {_swallow('auto',_)}
 
   const badges = getStudentBadges(me.id);
   const total = Object.keys(BADGE_DEFS).length * BADGE_LEVELS.length;
@@ -21520,7 +21850,7 @@ function rMyBadges(content){
 function openStudentBadgesView(studentId){
   const s = (App.db.students || []).find(x => x.id === studentId);
   if(!s) return;
-  try { checkAndAwardBadges(studentId); } catch(_) {}
+  try { checkAndAwardBadges(studentId); } catch(_) {_swallow('auto',_)}
   const badges = getStudentBadges(studentId);
   const m = modal('');
   m.root.appendChild(el('h2', null, '🏅 ' + s.name + ' 的徽章'));
@@ -21834,7 +22164,7 @@ function rMyTodos(content){
   const me = currentStudent(); if(!me) return;
   if(!Array.isArray(App.db.todos)) App.db.todos = [];
   // 進頁自動同步
-  try { syncTodosFromAssignmentsQuizzes(me.id); saveDB(); } catch(_) {}
+  try { syncTodosFromAssignmentsQuizzes(me.id); saveDB(); } catch(_) {_swallow('auto',_)}
 
   const todos = (App.db.todos || []).filter(t => t.studentId === me.id);
   const today = _b5TodoToday();
@@ -22260,7 +22590,7 @@ function rMyTrend(content){
 function renderRecentBadgesForMe(){
   const me = (typeof currentStudent === 'function') ? currentStudent() : null;
   if(!me) return null;
-  try { checkAndAwardBadges(me.id); } catch(_) {}
+  try { checkAndAwardBadges(me.id); } catch(_) {_swallow('auto',_)}
   const bs = getStudentBadges(me.id).sort((a,b)=> (b.earnedAt||0)-(a.earnedAt||0)).slice(0,3);
   if(!bs.length) return null;
   const card = el('div', { class:'card', style:{marginTop:'12px'} });
@@ -22296,7 +22626,7 @@ function renderRecentBadgesForMe(){
       window.__App = App;
       window.__Sync = Sync;
       console.info('[debug] window.__App / __Sync 已暴露（?debug=1）');
-    } catch(e){}
+    } catch(e){_swallow('auto',e)}
     return;
   }
   // 非 debug 模式：用 getter 過濾
