@@ -4313,6 +4313,20 @@ function saveRemember(r){
     else localStorage.removeItem(LS_REMEMBER);
   } catch(e){}
 }
+// 簡單混淆（非真加密，只防直接看見）— 用於「記住我」存密碼
+function _obfuscatePw(pw){
+  try {
+    if(!pw) return '';
+    return 'o:' + btoa(unescape(encodeURIComponent(pw)));
+  } catch(e){ return ''; }
+}
+function _deobfuscatePw(s){
+  try {
+    if(!s || typeof s !== 'string') return '';
+    if(s.startsWith('o:')) return decodeURIComponent(escape(atob(s.slice(2))));
+    return s;
+  } catch(e){ return ''; }
+}
 function loadLoginStep(){
   try { return localStorage.getItem(LS_LOGIN_STEP) || 'choose'; } catch(e){ return 'choose'; }
 }
@@ -4528,7 +4542,10 @@ function renderLoginTeacherStage(){
   const f2 = el('div', { class:'field' });
   f2.appendChild(el('label', { class:'label' }, '密碼'));
   const pwWrap = el('div', { class:'pw-input-wrap' });
-  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
+  // 修 Bug B：若已勾選記住我且帳號一致，自動帶入密碼
+  const savedPw = (rememberSaved && rememberSaved.username && (!prefill.username || prefill.username === rememberSaved.username))
+    ? _deobfuscatePw(rememberSaved.pw || '') : '';
+  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password', value: savedPw });
   const togglePw = el('button', { type:'button', class:'pw-toggle', onclick: e => {
     e.preventDefault();
     if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
@@ -4538,12 +4555,12 @@ function renderLoginTeacherStage(){
   f2.appendChild(pwWrap);
   stage.appendChild(f2);
 
-  // Remember me
+  // Remember me（修 Bug B：勾選後同時記住密碼，再次登入自動帶入）
   const rememberLabel = el('label', { class:'remember-row' });
   const rememberChk = el('input', { type:'checkbox' });
   if(rememberSaved && rememberSaved.username) rememberChk.checked = true;
   rememberLabel.appendChild(rememberChk);
-  rememberLabel.appendChild(document.createTextNode(' 記住我（7 天內免輸入密碼）'));
+  rememberLabel.appendChild(document.createTextNode(' 記住我（自動帶入帳號密碼）'));
   stage.appendChild(rememberLabel);
 
   const _lcT = (App._uiCustom && App._uiCustom.login) || {};
@@ -4579,7 +4596,8 @@ function renderLoginTeacherStage(){
     saveSession();
     saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
     if(rememberChk.checked){
-      saveRemember({ username:a.username, ts:Date.now() });
+      // 修 Bug B：同時記住密碼（混淆後存放）
+      saveRemember({ username:a.username, pw: _obfuscatePw(pw), ts:Date.now() });
     } else {
       saveRemember(null);
     }
@@ -4770,6 +4788,31 @@ function renderLoginStudentStage(){
   f3.appendChild(pwWrap);
   stage.appendChild(f3);
 
+  // 修 Bug B：學生端也支援記住密碼
+  const _stuRem = loadRemember();
+  const stuRemLabel = el('label', { class:'remember-row' });
+  const stuRemChk = el('input', { type:'checkbox' });
+  if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId) stuRemChk.checked = true;
+  stuRemLabel.appendChild(stuRemChk);
+  stuRemLabel.appendChild(document.createTextNode(' 記住我（自動帶入帳號密碼）'));
+  stage.appendChild(stuRemLabel);
+
+  // 自動回填上次記住的學生
+  if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId){
+    const lastStu = App.db.students.find(x => x.id === _stuRem.studentId);
+    if(lastStu){
+      App._loginCls = lastStu.cls || '未分班';
+      App._loginStuId = lastStu.id;
+      // 同步下拉
+      setTimeout(()=> {
+        selCls.value = App._loginCls;
+        refreshNameList();
+        selName.value = String(lastStu.id);
+        iPw.value = _deobfuscatePw(_stuRem.pw || '');
+      }, 0);
+    }
+  }
+
   function refreshNameList(){
     const cls = selCls.value;
     selName.innerHTML = '';
@@ -4829,6 +4872,14 @@ function renderLoginStudentStage(){
         saveDB();
         try { Sync.setMap('students', App.db.students); } catch(e){}
       } catch(e){}
+    }
+    // 修 Bug B：學生端勾選記住我 → 存學生 id + 混淆密碼
+    if(stuRemChk.checked){
+      saveRemember({ role:'student', studentId: s.id, pw: _obfuscatePw(pw), ts:Date.now() });
+    } else {
+      // 取消勾選 → 清掉記住資料 (僅當原本是學生記憶)
+      const existing = loadRemember();
+      if(existing && existing.role === 'student') saveRemember(null);
     }
     // 登入成功
     finishStudentLogin(s);
@@ -5766,6 +5817,71 @@ function rOv(content){
     ));
   }
   if(grid.childNodes.length) content.appendChild(grid);
+
+  // 修 Bug A：今日簽到簽退明細
+  try {
+    const todayStr = td();
+    const todayAtt = (App.db.attendance || []).filter(a => a.date === todayStr);
+    if(todayAtt.length){
+      const detailCard = el('div', { class:'card', style:{marginBottom:'12px'} });
+      detailCard.appendChild(el('div', { class:'flex-between' },
+        el('h3', null, '🕒 今日簽到 / 簽退明細'),
+        el('button', { class:'btn btn-sm', onclick:()=> go('attendance'), title:'進入出席管理' }, '管理 →')
+      ));
+      const wrap = el('div', { style:{overflowX:'auto'} });
+      const tbl = el('table', { class:'rep-table', style:{width:'100%',marginTop:'8px'} });
+      const th = el('thead');
+      th.appendChild(el('tr', null,
+        el('th', null, '姓名'),
+        el('th', null, '班級'),
+        el('th', null, '簽到時間'),
+        el('th', null, '簽退時間'),
+        el('th', null, '時長'),
+        el('th', null, '狀態')
+      ));
+      tbl.appendChild(th);
+      const tb = el('tbody');
+      // 按簽到時間排序
+      const rows = todayAtt.slice().sort((x,y)=> (x.time||'').localeCompare(y.time||''));
+      rows.forEach(a => {
+        const s = (App.db.students||[]).find(x => x.id === a.studentId);
+        if(!s) return;
+        let dur = '—';
+        if(a.time && a.outTime){
+          try {
+            const [h1,m1] = a.time.split(':').map(Number);
+            const [h2,m2] = a.outTime.split(':').map(Number);
+            const min = (h2*60+m2)-(h1*60+m1);
+            if(min > 0){
+              const hr = Math.floor(min/60);
+              const mn = min%60;
+              dur = (hr?hr+'h':'') + (mn?mn+'m':'') || '0m';
+            }
+          } catch(e){}
+        }
+        const stTxt = a.outTime ? '✅ 已簽退' : '🟢 上課中';
+        const stColor = a.outTime ? 'var(--muted)' : 'var(--success)';
+        tb.appendChild(el('tr', null,
+          el('td', null, s.name || ''),
+          el('td', null, s.cls || ''),
+          el('td', { class:'mono' }, a.time || '—'),
+          el('td', { class:'mono', style:{color: a.outTime?'var(--accent)':'var(--muted)',fontWeight: a.outTime?'700':'normal'} },
+            a.outTime || '尚未簽退'),
+          el('td', { class:'mono' }, dur),
+          el('td', { style:{color:stColor,fontWeight:'600'} }, stTxt)
+        ));
+      });
+      tbl.appendChild(tb);
+      wrap.appendChild(tbl);
+      detailCard.appendChild(wrap);
+      // 統計：已簽退 / 上課中
+      const signedOut = todayAtt.filter(a => a.outTime).length;
+      const stillIn = todayAtt.length - signedOut;
+      detailCard.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} },
+        '已簽到 ' + todayAtt.length + ' 人 · 上課中 ' + stillIn + ' · 已簽退 ' + signedOut));
+      content.appendChild(detailCard);
+    }
+  } catch(e){ console.warn('[overview today detail]', e); }
 
   // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考
   try {
@@ -16536,6 +16652,7 @@ function openAttNoteEditor(student){
 }
 
 function exportAttReportCSV(){
+  // 修 Bug A：匯出彙總 + 明細兩個 CSV
   const rows = [['姓名','班級','出席率','出席天數','總天數','遲到','缺席','請假']];
   App.db.students.forEach(s => {
     const r = studentAttSummary(s.id);
@@ -16550,7 +16667,40 @@ function exportAttReportCSV(){
   a.download = '出席報表_' + (App._attRange.from||'all') + '_' + (App._attRange.to||'all') + '.csv';
   a.click();
   setTimeout(()=> URL.revokeObjectURL(url), 1000);
-  toast('已匯出 CSV','success');
+
+  // 另外再匯出明細 (每筆簽到/簽退)
+  try {
+    const dRows = [['日期','姓名','班級','簽到時間','簽退時間','時長(分)','狀態']];
+    const r = App._attRange || { from:'', to:'' };
+    const atts = App.db.attendance.filter(a => {
+      if(r.from && a.date < r.from) return false;
+      if(r.to && a.date > r.to) return false;
+      return true;
+    }).sort((x,y)=> (x.date||'').localeCompare(y.date||'') || (x.time||'').localeCompare(y.time||''));
+    atts.forEach(at => {
+      const s = App.db.students.find(x => x.id === at.studentId);
+      if(!s) return;
+      let mins = '';
+      if(at.time && at.outTime){
+        try {
+          const [h1,m1] = at.time.split(':').map(Number);
+          const [h2,m2] = at.outTime.split(':').map(Number);
+          mins = String((h2*60+m2)-(h1*60+m1));
+        } catch(e){}
+      }
+      const stat = at.outTime ? '已簽退' : (at.status === 'late' ? '遲到' : '已簽到');
+      dRows.push([at.date||'', s.name||'', s.cls||'', at.time||'', at.outTime||'', mins, stat]);
+    });
+    const csv2 = dRows.map(r => r.map(c => '"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+    const blob2 = new Blob([bom + csv2], { type:'text/csv;charset=utf-8' });
+    const url2 = URL.createObjectURL(blob2);
+    const a2 = document.createElement('a');
+    a2.href = url2;
+    a2.download = '出席明細_簽到簽退_' + (App._attRange.from||'all') + '_' + (App._attRange.to||'all') + '.csv';
+    setTimeout(()=> { a2.click(); setTimeout(()=> URL.revokeObjectURL(url2), 1000); }, 500);
+  } catch(e){ console.warn('[exportAttReportCSV detail]', e); }
+
+  toast('已匯出 CSV (彙總 + 簽到簽退明細)','success');
 }
 
 /* ════════════════════════════════════════════════════════════
