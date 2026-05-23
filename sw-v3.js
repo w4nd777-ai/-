@@ -1,5 +1,7 @@
 /* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
-const CACHE_NAME = 'cms-v3-2026-05-19';
+// M3: CACHE_NAME 動態化 — 每次部署 bump BUILD 字串即可強制取得新版資源
+const BUILD = '2026-05-23-r2';
+const CACHE_NAME = 'cms-v3-' + BUILD;
 const CORE_ASSETS = [
   'manifest.json',
   'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
@@ -14,6 +16,7 @@ self.addEventListener('install', e => {
 });
 
 self.addEventListener('activate', e => {
+  // 清掉所有非當前版本的 cache（避免舊版資源殘留）
   e.waitUntil(
     caches.keys().then(keys => Promise.all(
       keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
@@ -50,17 +53,22 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // 其他靜態資源 cache-first
+  // M3: 其他靜態資源（Firebase JS 等）改為 stale-while-revalidate
+  //  - 有 cache → 立即回應 cache（快），同時背景 fetch 更新 cache
+  //  - 沒 cache → await fetch（慢，但只發生在第一次）
   e.respondWith(
     caches.match(e.request).then(hit => {
-      if(hit) return hit;
-      return fetch(e.request).then(resp => {
+      // 背景更新：不論有沒有 cache 都嘗試抓新版寫回
+      const networkFetch = fetch(e.request).then(resp => {
         if(resp && resp.status === 200 && (url.origin === self.location.origin || url.host.includes('gstatic.com'))){
           const clone = resp.clone();
           caches.open(CACHE_NAME).then(c => { try { c.put(e.request, clone); } catch(_){} });
         }
         return resp;
       }).catch(()=> hit || new Response('Offline', {status:503}));
+
+      // 有 cache 就先回，背景默默更新；沒 cache 就等 fetch
+      return hit || networkFetch;
     })
   );
 });

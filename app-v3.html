@@ -2129,6 +2129,26 @@ function _swallow(ctx, e){
 }
 
 /* ════════════════════════════════════════════════════════════
+   Round 2 M5: friendlyError — 把瀏覽器/Firebase 噴出的英文錯誤
+   訊息對映成使用者看得懂的繁體中文。未知錯誤回通用訊息並把詳細
+   原文寫進 _silentErrors，方便老師到「設定 → 進階」查 debug。
+   ──────────────────────────────────────────────────────────── */
+function friendlyError(e){
+  const msg = e && (e.message || (typeof e === 'string' ? e : String(e))) || '';
+  if(/quota|exceeded/i.test(msg)) return '儲存空間已滿，請清理或匯出';
+  if(/network|fetch|failed to fetch|networkerror/i.test(msg)) return '網路連線失敗，請檢查網路';
+  if(/permission|denied|forbidden/i.test(msg)) return '權限不足';
+  if(/abort/i.test(msg)) return '操作已取消';
+  if(/timeout|timed out/i.test(msg)) return '操作逾時，請稍後再試';
+  if(/storage/i.test(msg)) return '儲存失敗';
+  if(/crypto|subtle/i.test(msg)) return '加密功能不可用 (請改用 https://)';
+  if(/json|unexpected token|syntax/i.test(msg)) return '資料格式錯誤';
+  // 不認得 → 通用訊息，把原文丟到 silent errors 供 debug
+  _swallow('friendlyError-raw', e);
+  return '發生未預期錯誤，請重新整理或聯絡管理員';
+}
+
+/* ════════════════════════════════════════════════════════════
    PASSWORD HASHING (SHA-256 with per-account salt) — batch 1 + H5 強化
    - 新格式：v2$<salt>$<hash64hex>  （salt 隨機 16 bytes）
    - 舊格式：64 hex（共用固定 salt）— 向後相容
@@ -2275,7 +2295,13 @@ function toast(msg, type='', dur=2400){
 }
 
 function modal(content, opts={}){
+  // Round 2 M8：維護 modal stack + 支援 beforeClose（async）攔截關閉
+  App._openModals = App._openModals || [];
   const host = $('#modal-host');
+  // 既然 host 一次只放一個 modal，新開時把舊 stack 清空避免 ESC 對著「已被 innerHTML 清掉的舊 modal handle」失效
+  if(host.firstChild){
+    try { App._openModals.length = 0; } catch(_){_swallow('modal-stack-reset',_)}
+  }
   host.innerHTML = '';
   const wrap = el('div', { class:'modal-host', onclick: e => {
     if(e.target === wrap && opts.dismissable !== false) close();
@@ -2286,11 +2312,35 @@ function modal(content, opts={}){
   else m.appendChild(content);
   wrap.appendChild(m);
   host.appendChild(wrap);
-  function close(){ wrap.style.animation = 'fadeIn .2s ease-out reverse'; setTimeout(()=> { host.innerHTML=''; }, 180); }
-  return { close, root:m };
+  let _closed = false;
+  async function close(force){
+    if(_closed) return;
+    // beforeClose hook：回傳 false / Promise<false> → 阻止關閉（給表單 modal 提示「未儲存」用）
+    if(!force && typeof opts.beforeClose === 'function'){
+      try {
+        const r = await opts.beforeClose();
+        if(r === false) return;
+      } catch(_){_swallow('modal-beforeClose',_)}
+    }
+    _closed = true;
+    // 從 stack 移除
+    try {
+      const i = App._openModals.indexOf(handle);
+      if(i >= 0) App._openModals.splice(i, 1);
+    } catch(_){_swallow('modal-stack-pop',_)}
+    wrap.style.animation = 'fadeIn .2s ease-out reverse';
+    setTimeout(()=> { try { host.innerHTML=''; } catch(_){_swallow('modal-clear',_)} }, 180);
+  }
+  const handle = { close, root:m };
+  App._openModals.push(handle);
+  return handle;
 }
 
-function closeModal(){ $('#modal-host').innerHTML = ''; }
+function closeModal(){
+  // Round 2 M8：closeModal 也要清掉 stack（避免 ESC 對著已不存在的 modal 觸發）
+  try { if(App._openModals) App._openModals.length = 0; } catch(_){_swallow('closeModal-stack',_)}
+  $('#modal-host').innerHTML = '';
+}
 
 function confirmDlg(msg, opts={}){
   return new Promise(resolve => {
@@ -2376,7 +2426,9 @@ function defaultDB(){
     selfEvals: [],         // batch 2: 學生自評
     attendanceNotes: [],   // batch 2: 老師對學生的出席評語 {id, studentId, text, ts, by}
     feedbacks: [],         // batch 2: 匿名課程回饋（學生看匿名、老師看實名）{id, studentId, studentName, cls, ratings, text, ts, term}
-    parents: [],           // batch 4-21: 家長帳號 {id,name,email,password,children:[studentId,...],mustChangePw,avatar}
+    // Round 2 M2: parents 集合已移除（家長登入功能已停用）。
+    //  保留 student.parentName/parentPhone/parentEmail 作為聯絡資訊；
+    //  Google Drive metadata.parents 與此無關（folder ID）保留。
     behavior: [],          // batch 4-23: 行為記錄 {id, studentId, date, category, type, points, note, teacherId, ts}
     quizzes: [],           // batch 4-25: 線上小考 {id, title, ...}
     quizSubmissions: [],   // batch 4-25: 學生小考作答 {id, quizId, studentId, ...}
@@ -2500,7 +2552,8 @@ function loadDB(){
     const parsed = JSON.parse(raw);
     App.db = Object.assign(defaultDB(), parsed);
     // ensure all arrays exist
-    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','parents','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications'];
+    // Round 2 M2: 'parents' 已從 arrFields 移除
+    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications'];
     arrFields.forEach(f => { if(!Array.isArray(App.db[f])) App.db[f] = []; });
     if(!App.db.settings || typeof App.db.settings !== 'object') App.db.settings = defaultDB().settings;
     if(!App.db.branding || typeof App.db.branding !== 'object') App.db.branding = defaultDB().branding;
@@ -2893,7 +2946,7 @@ const Sync = (() => {
       return true;
     } catch(e){
       App.fbStatus = 'error';
-      toast('Firebase 設定錯誤：' + (e.message || e), 'danger');
+      toast('Firebase 設定錯誤：' + friendlyError(e), 'danger');
       return false;
     }
   }
@@ -3054,12 +3107,12 @@ const Sync = (() => {
     _markEcho(node, key);
     return App.fbRef.child(node).child(key).set(data).then(()=>true).catch(()=>false);
   }
-  function setNode(node, data){
+  function _setNodeNow(node, data){
     saveDB();
     if(!App.fbRef) return Promise.resolve(false);
     return App.fbRef.child(node).set(data).then(()=>true).catch(()=>false);
   }
-  function setMap(node, arr, keyField='id'){
+  function _setMapNow(node, arr, keyField){
     saveDB();
     if(!App.fbRef) return Promise.resolve(false);
     const obj = {};
@@ -3072,6 +3125,49 @@ const Sync = (() => {
     });
     return App.fbRef.child(node).set(obj).then(()=>true).catch(()=>false);
   }
+  // Round 2 M6：Firebase 寫入 debounce
+  //  - 同一個 node 在 500ms 內若被多次呼叫，只會以最後一份資料寫一次。
+  //  - 重要操作（登入 / 密碼變更 / 帳號異動）呼叫時傳 immediate=true 立即寫入並 flush。
+  //  - beforeunload 會 flush 殘留 queue，避免資料遺失。
+  const _syncQueue = new Map();   // node -> { kind:'node'|'map', data, keyField }
+  let _syncTimer = null;
+  function _flushSync(){
+    for(const [node, item] of _syncQueue){
+      try {
+        if(item.kind === 'map') _setMapNow(node, item.data, item.keyField || 'id');
+        else _setNodeNow(node, item.data);
+      } catch(e){ _swallow('flushSync', e); }
+    }
+    _syncQueue.clear();
+    if(_syncTimer){ clearTimeout(_syncTimer); _syncTimer = null; }
+  }
+  function setNode(node, data, immediate){
+    if(immediate === true){
+      _syncQueue.delete(node);
+      return _setNodeNow(node, data);
+    }
+    _syncQueue.set(node, { kind:'node', data });
+    if(!_syncTimer) _syncTimer = setTimeout(_flushSync, 500);
+    return Promise.resolve(true);
+  }
+  function setMap(node, arr, keyFieldOrImmediate, immediateOpt){
+    // 兼容舊呼叫：setMap(node, arr) / setMap(node, arr, 'id') / setMap(node, arr, true) / setMap(node, arr, 'id', true)
+    let keyField = 'id';
+    let immediate = false;
+    if(typeof keyFieldOrImmediate === 'boolean'){
+      immediate = keyFieldOrImmediate;
+    } else if(typeof keyFieldOrImmediate === 'string'){
+      keyField = keyFieldOrImmediate;
+      if(immediateOpt === true) immediate = true;
+    }
+    if(immediate === true){
+      _syncQueue.delete(node);
+      return _setMapNow(node, arr, keyField);
+    }
+    _syncQueue.set(node, { kind:'map', data: arr, keyField });
+    if(!_syncTimer) _syncTimer = setTimeout(_flushSync, 500);
+    return Promise.resolve(true);
+  }
   function remove(node, id){
     saveDB();
     if(!App.fbRef) return Promise.resolve(false);
@@ -3079,7 +3175,15 @@ const Sync = (() => {
     _markEcho(node, id);
     return App.fbRef.child(node).child(String(id)).remove().then(()=>true).catch(()=>false);
   }
-  return { init, push, setNode, setMap, remove, detachAll };
+  // beforeunload 時 flush（避免資料遺失）
+  try {
+    window.addEventListener('beforeunload', function(){
+      if(_syncQueue.size > 0){
+        try { _flushSync(); } catch(_){ /* 視窗關閉中 */ }
+      }
+    });
+  } catch(_){_swallow('sync-beforeunload',_)}
+  return { init, push, setNode, setMap, remove, detachAll, _flushSync };
 })();
 
 /* ════════════════════════════════════════════════════════════
@@ -3850,7 +3954,7 @@ async function attachUpload(file){
       if(file.size > ATTACH_MAX_SIZE){
         throw new Error('Drive 上傳失敗且本機容量不足：' + e.message);
       }
-      try { toast('Drive 上傳失敗，改用本機儲存：' + e.message, 'warn', 5000); } catch(_){_swallow('auto',_)}
+      try { toast('Drive 上傳失敗，改用本機儲存：' + friendlyError(e), 'warn', 5000); } catch(_){_swallow('auto',_)}
       // fallthrough to IDB
     }
   }
@@ -4155,8 +4259,7 @@ function donutChart(parts, opts={}){
 function go(view, subview=null){
   App.view = view;
   App.subview = subview;
-  // batch 3：最近使用功能已移除 (使用者要求)
-  // try { if(view && App.session) pushRecentPage(view); } catch(e){_swallow('auto',e)}
+  // batch 3：最近使用功能已移除 (使用者要求 + Round 2 M1 死碼清理)
   const hash = '#' + view + (subview ? '/' + subview : '');
   if(location.hash !== hash) location.hash = hash;
   rerender();
@@ -4953,7 +5056,7 @@ function showTeacherForgotPassword(){
           m0.close();
           toast('✅ 已建立預設管理員，請以 admin / admin123 登入','success', 5000);
         } catch(err){
-          toast('建立失敗：' + (err && err.message || err), 'danger', 5000);
+          toast('建立失敗：' + friendlyError(err), 'danger', 5000);
         }
       }}, '建立預設管理員 admin')
     );
@@ -5293,7 +5396,8 @@ function _runForgotFlow(opts){
       // H2: 密碼重設 → 清掉所有 loginTokens
       _clearAllLoginTokens(st.account);
       saveDB(true);  // H3: 密碼變更立即寫入
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      // Round 2 M6: 密碼變更 → 立即 sync 不 debounce
+      try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){_swallow('auto',e)}
       try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){_swallow('auto',e)}
       clearForgotLock(st.username);
       if(typeof logOp === 'function')
@@ -5919,11 +6023,14 @@ function renderLoginStudentStage(){
       return;
     }
     // 自動升級為 v2$ per-account salt 雜湊
+    // Round 2 M10：先算新 hash 並驗證格式正確才覆蓋，避免 hashPassword 失敗時把舊明文當 hash 存回 DB
     if(!isPasswordV2(s.password)){
       try {
-        s.password = await hashPassword(pw);
+        const newHash = await hashPassword(pw);
+        if(!newHash || !newHash.startsWith('v2$')) throw new Error('hash invalid');
+        s.password = newHash;
         saveDB(true);  // 立即寫入
-        try { Sync.setMap('students', App.db.students); } catch(e){_swallow('auto',e)}
+        try { Sync.setMap('students', App.db.students, true); } catch(e){ _swallow('sync-stu',e); }
       } catch(e){ _swallow('upgrade-stu-pw', e); }
     }
     // H2: 學生端勾選記住我 → 改用隨機 token，不再存任何密碼形式
@@ -6025,12 +6132,15 @@ function studentTapToLogin(studentId){
       inp.focus(); inp.select();
       return;
     }
+    // Round 2 M10：先算新 hash 並驗證格式正確才覆蓋（同上）
     if(!isPasswordHashed(s.password)){
       try {
-        s.password = await hashPassword(pw);
-        saveDB();
-        try { Sync.setMap('students', App.db.students); } catch(e){_swallow('auto',e)}
-      } catch(e){_swallow('auto',e)}
+        const newHash = await hashPassword(pw);
+        if(!newHash || !newHash.startsWith('v2$')) throw new Error('hash invalid');
+        s.password = newHash;
+        saveDB(true);
+        try { Sync.setMap('students', App.db.students, true); } catch(e){ _swallow('sync-stu',e); }
+      } catch(e){ _swallow('upgradeStudentPw', e); }
     }
     m.close();
     finishStudentLogin(s);
@@ -8180,6 +8290,14 @@ function rMsg(content){
 // 共用：渲染一個訊息泡泡（DM / 公開均適用）
 function renderMsgBubble(m, meId){
   const me = (m.fromId === meId) || (App.session.role === 'teacher' && m.fromId === 'teacher');
+  // Round 2 M9：匿名訊息顯示邏輯
+  //  - 老師：看到「真名 (匿名訊息)」紅字標籤
+  //  - 其他學生：看到「匿名」+ 不暴露 fromName
+  //  - 自己（發訊者）：看到「匿名 (你)」，提醒自己這則是匿名
+  const isAnon = !!m.anonymous;
+  const viewerRole = (App.session && App.session.role) || 'student';
+  const teacherView = viewerRole === 'teacher';
+  const isSelf = me;
   const bubble = el('div', { style:{
     background: me ? 'var(--primary)' : 'var(--surface-2)',
     color: me ? '#fff' : 'var(--text)',
@@ -8205,16 +8323,39 @@ function renderMsgBubble(m, meId){
     bubble.appendChild(ac);
   }
   const isPriv = (m.toId && m.toId !== 'all');
-  bubble.appendChild(el('div', { style:{fontSize:'10px',opacity:.7,marginTop:'4px'} },
-    (m.fromName||'') + ' · ' + relTime(m.ts||0) + (isPriv ? ' · 🔒 私訊' : '')));
+  // 計算發訊者顯示名稱
+  let displayName;
+  if(isAnon){
+    if(teacherView){
+      // 老師看到實名 + 標籤
+      displayName = (m.fromName || '匿名') + ' 🕶';
+    } else if(isSelf){
+      displayName = '🕶 匿名 (你)';
+    } else {
+      displayName = '🕶 匿名';
+    }
+  } else {
+    displayName = m.fromName || '';
+  }
+  const metaRow = el('div', { style:{fontSize:'10px',opacity:.7,marginTop:'4px'} },
+    displayName + ' · ' + relTime(m.ts||0) + (isPriv ? ' · 🔒 私訊' : ''));
+  bubble.appendChild(metaRow);
+  // 老師端：在匿名訊息旁加紅字標籤
+  if(isAnon && teacherView){
+    metaRow.appendChild(el('span', { style:{color:'#dc2626',marginLeft:'6px',fontWeight:'600'} }, '(匿名訊息)'));
+  }
   return el('div', { style:{display:'flex',flexDirection:'column'} }, bubble);
 }
 
 // 共用：輸入欄（附件 + 文字 + 送出）
-function buildMsgComposer(onSend){
+// Round 2 M9: 第三個參數 opts 支援 { allowAnonymous:true } → 顯示「☐ 匿名發送」勾選框
+//             onSend 簽名變為 onSend(text, attach, { anonymous })
+function buildMsgComposer(onSend, _legacy, opts){
+  opts = opts || {};
   const inputBar = el('div', { style:{display:'flex',gap:'8px',marginTop:'12px',paddingTop:'12px',borderTop:'1px solid var(--border)',flexWrap:'wrap',alignItems:'center'} });
   const inp = el('input', { class:'input', placeholder:'輸入訊息...', style:{flex:'1',minWidth:'140px'} });
   let pendingAttach = null;
+  let anonymous = false;
   const fInp = el('input', { type:'file', style:{display:'none'} });
   const attachPreviewSlot = el('div', { style:{width:'100%',display:'none',padding:'6px 0'} });
   function refreshAttachSlot(){
@@ -8245,7 +8386,7 @@ function buildMsgComposer(onSend){
   const send = ()=>{
     const t = inp.value.trim();
     if(!t && !pendingAttach){ return; }
-    onSend(t, pendingAttach);
+    onSend(t, pendingAttach, { anonymous });
     inp.value = '';
     pendingAttach = null;
     refreshAttachSlot();
@@ -8255,10 +8396,41 @@ function buildMsgComposer(onSend){
   inputBar.appendChild(fInp);
   inputBar.appendChild(inp);
   inputBar.appendChild(el('button', { class:'btn btn-primary', onclick: send }, '送出'));
+  // Round 2 M9：允許匿名發送（學生公開留言時用）
+  if(opts.allowAnonymous){
+    const anonLabel = el('label', { style:{display:'inline-flex',alignItems:'center',gap:'4px',fontSize:'12px',color:'var(--text-muted)',cursor:'pointer',marginLeft:'4px',whiteSpace:'nowrap'} });
+    const anonChk = el('input', { type:'checkbox' });
+    anonChk.addEventListener('change', ()=> { anonymous = !!anonChk.checked; });
+    anonLabel.appendChild(anonChk);
+    anonLabel.appendChild(document.createTextNode(' 🕶 匿名發送'));
+    inputBar.appendChild(anonLabel);
+  }
   return { inputBar, attachPreviewSlot };
 }
 
+// Round 2 M7: 學生發送訊息速率限制（防洗版 + 防被惡意自動化）
+//  - 最近 10 秒不能再發
+//  - 今日累計不能超過 50 則
+//  - 老師不受限制
+function canSendMessage(studentId){
+  const NOW = Date.now();
+  const RECENT_MS = 10 * 1000;
+  const DAY_MS = 24 * 3600 * 1000;
+  const myMsgs = (App.db.messages || []).filter(m => m && m.fromId === studentId);
+  // 10 秒冷卻
+  const lastTs = myMsgs.reduce((mx, m) => Math.max(mx, m.ts || 0), 0);
+  if(lastTs && (NOW - lastTs) < RECENT_MS){
+    const wait = Math.ceil((RECENT_MS - (NOW - lastTs)) / 1000);
+    return { ok:false, msg:'請等 ' + wait + ' 秒再發送' };
+  }
+  // 今日 50 則上限
+  const today = myMsgs.filter(m => (m.ts || 0) > NOW - DAY_MS).length;
+  if(today >= 50) return { ok:false, msg:'今日已達訊息上限 (50 則)' };
+  return { ok:true };
+}
+
 function pushMsg(toId, text, attach, opts){
+  opts = opts || {};
   const rec = {
     id: nid(),
     fromId: App.session.role === 'teacher' ? 'teacher' : App.session.id,
@@ -8269,6 +8441,10 @@ function pushMsg(toId, text, attach, opts){
     attach: attach || null,
     ts: Date.now()
   };
+  // Round 2 M9: 學生公開留言可標 anonymous（私訊 / 老師發訊息不適用）
+  if(opts.anonymous && App.session.role === 'student' && (toId === 'all' || !toId)){
+    rec.anonymous = true;
+  }
   App.db.messages.push(rec);
   saveDB();
   Sync.push('messages', rec);
@@ -8525,11 +8701,18 @@ function rMsgStudent(content){
     msgs.forEach(m => list.appendChild(renderMsgBubble(m, me.id)));
   }
 
-  const { inputBar, attachPreviewSlot } = buildMsgComposer((text, attach)=> {
+  const { inputBar, attachPreviewSlot } = buildMsgComposer((text, attach, sendOpts)=> {
+    // Round 2 M7: 學生身分發訊息前先做 rate limit 檢查
+    if(App.session && App.session.role === 'student'){
+      const r = canSendMessage(App.session.id);
+      if(!r.ok){ toast(r.msg, 'warning'); return; }
+    }
     const targetId = tab === 'teacher' ? 'teacher' : 'all';
-    pushMsg(targetId, text, attach);
+    // 私訊老師 → 不允許匿名（避免「匿名」變舉發保護傘 + 老師仍能對應到學生）
+    const anonymous = (sendOpts && sendOpts.anonymous) && targetId === 'all';
+    pushMsg(targetId, text, attach, { anonymous });
     rerender();
-  });
+  }, null, { allowAnonymous: tab === 'all' });
   card.appendChild(attachPreviewSlot);
   card.appendChild(inputBar);
   content.appendChild(card);
@@ -9453,9 +9636,19 @@ function rSettings(content){
   App.db.accounts.forEach(a => {
     const row = el('div', { class:'list-row' });
     row.appendChild(el('div', { class:'avatar' }, initials(a.name)));
+    // Round 2 M4：不再洩漏密碼長度，改為顯示「✅ 已設定 (上次更新：YYYY-MM-DD)」
+    const _pwSubText = (function(){
+      if(!a.password) return '⚠️ 尚未設定密碼';
+      if(a.passwordChangedAt){
+        const d = new Date(a.passwordChangedAt);
+        const ymd = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        return '✅ 已設定 (上次更新：' + ymd + ')';
+      }
+      return '✅ 已設定';
+    })();
     row.appendChild(el('div', { class:'info' },
       el('div', { class:'name' }, a.name + '  @' + a.username),
-      el('div', { class:'sub' }, '密碼長度：' + (a.password||'').length)
+      el('div', { class:'sub' }, _pwSubText)
     ));
     const acts = el('div', { class:'actions' });
     acts.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
@@ -9674,7 +9867,7 @@ function rFirebase(content){
       // batch 3：用 withLoading 顯示重連狀態
       const card = e.target.closest('.card') || document.querySelector('.content');
       try { await withLoading(card, ()=> Promise.resolve(Sync.init()), 'Firebase 連線中...'); }
-      catch(err){ toast('重連失敗：' + (err.message||err), 'warn'); }
+      catch(err){ toast('重連失敗：' + friendlyError(err), 'warn'); }
     }}, '🔄 重連')
   ));
   content.appendChild(card);
@@ -10210,7 +10403,7 @@ function rMe(content){
       saveDB(); Sync.setMap('students', App.db.students); bcNotify();
       toast('✅ 頭像已更新','success');
       rerender();
-    } catch(err){ toast('上傳失敗：'+err.message,'danger'); }
+    } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
   });
   cardAv.appendChild(avFile);
   if(me.avatar){
@@ -12696,12 +12889,12 @@ async function askClaude(prompt, system){
     });
     const data = await r.json();
     if(data.error){
-      toast('AI 錯誤：' + (data.error.message||''),'danger', 4000);
+      toast('AI 錯誤：' + (data.error.message||friendlyError(data.error)),'danger', 4000);
       return null;
     }
     return (data.content && data.content[0] && data.content[0].text) || '';
   } catch(e){
-    toast('AI 呼叫失敗：' + (e.message||e),'danger', 4000);
+    toast('AI 呼叫失敗：' + friendlyError(e),'danger', 4000);
     return null;
   }
 }
@@ -13346,7 +13539,7 @@ async function backupRestore(key){
     rerender();
     return true;
   } catch(e){
-    toast('還原失敗：' + e.message,'danger');
+    toast('還原失敗：' + friendlyError(e),'danger');
     return false;
   }
 }
@@ -13404,7 +13597,7 @@ async function importFullJSON(file){
     }}, '確定覆蓋'));
     m.root.appendChild(acts);
   } catch(e){
-    toast('解析失敗：' + e.message, 'danger');
+    toast('解析失敗：' + friendlyError(e), 'danger');
   }
 }
 
@@ -13625,7 +13818,7 @@ async function importStudentsCSVFile(file){
     toast('已匯入 ' + added.length + ' 學生','success');
     rerender();
   } catch(e){
-    toast('CSV 解析失敗：' + e.message, 'danger');
+    toast('CSV 解析失敗：' + friendlyError(e), 'danger');
   }
 }
 
@@ -14366,7 +14559,7 @@ function rStorage(content){
         } else {
           toast('無法取得容量資訊','warn');
         }
-      } catch(e){ toast('查詢失敗：' + e.message,'danger'); }
+      } catch(e){ toast('查詢失敗：' + friendlyError(e),'danger'); }
     }}, '📊 查容量'));
     row.appendChild(btns);
     info.appendChild(row);
@@ -14496,7 +14689,7 @@ function openGoogleDriveSetup(){
         await gdAuth();
         toast('✅ Google Drive 已連接','success');
       } catch(e){
-        toast('授權失敗：' + e.message,'danger', 5000);
+        toast('授權失敗：' + friendlyError(e),'danger', 5000);
       }
     } else {
       toast('已儲存（Drive 停用中）','info');
@@ -15886,7 +16079,21 @@ function initPWA(){
   // register sw
   if('serviceWorker' in navigator){
     try {
-      navigator.serviceWorker.register('sw-v3.js').catch(()=>null);
+      navigator.serviceWorker.register('sw-v3.js').then(reg => {
+        // M3: 每次載入頁面都主動檢查是否有新版 SW
+        try { reg.update(); } catch(_){_swallow('sw-update',_)}
+      }).catch(()=>null);
+
+      // M3: 收到 controllerchange（新 SW 已 activate + claim）→ 自動 reload
+      // 用 flag 避免無窮 reload
+      let _swReloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if(_swReloading) return;
+        _swReloading = true;
+        try { toast('已更新到最新版本，重新載入...', 'info', 2000); } catch(_){_swallow('sw-toast',_)}
+        // 給 toast 一點時間顯示
+        setTimeout(()=> { try { location.reload(); } catch(_){_swallow('sw-reload',_)} }, 600);
+      });
     } catch(e){_swallow('auto',e)}
   }
   // listen for install prompt
@@ -16370,6 +16577,18 @@ function boot(){
       if(n > 0) console.log('[v3] 已移轉 ' + n + ' 個附件到 IndexedDB');
     } catch(e){ console.warn('[migrate]', e); }
   }, 2500);
+
+  // Round 2 M1：一次性清掉「最近使用」舊 localStorage key
+  try { localStorage.removeItem('cms_v3_recent_pages'); } catch(_){_swallow('m1-rmkey',_)}
+
+  // Round 2 M2：一次性清掉 parents 集合（local + 同步 Firebase 節點）
+  try {
+    if(App.db && Array.isArray(App.db.parents)){
+      delete App.db.parents;
+      try { saveDB(true); } catch(_){_swallow('m2-save',_)}
+    }
+    try { if(typeof Sync !== 'undefined' && Sync.setNode) Sync.setNode('parents', null); } catch(_){_swallow('m2-fbrm',_)}
+  } catch(_){_swallow('m2-cleanup',_)}
 }
 
 function schedulePeriodicNotifications(){
@@ -16505,12 +16724,21 @@ function renderSkeleton(rows){
 function toastInfo(msg, dur){ toast(msg, 'info', dur || 2400); }
 function toastWarning(msg, dur){ toast(msg, 'warning', dur || 2800); }
 
-/* Keyboard: Esc closes modal */
+/* Keyboard: Esc closes modal
+   Round 2 M8：走正規 close pipeline（不再 host.innerHTML = '' 暴力清掉），
+   讓 beforeClose hook 有機會攔截，避免使用者按 ESC 直接丟掉未存表單。 */
 document.addEventListener('keydown', function(e){
   if(e.key === 'Escape'){
+    const stack = (App && App._openModals) || [];
+    const top = stack[stack.length - 1];
+    if(top && typeof top.close === 'function'){
+      try { top.close(); } catch(_){_swallow('esc-close',_)}
+      e.preventDefault();
+      return;
+    }
+    // 後援：stack 為空但 DOM 有 modal（極端 race condition），用舊行為清掉
     const host = $('#modal-host');
     if(host && host.firstChild){
-      // simulate clicking close by clearing
       host.innerHTML = '';
     }
   }
@@ -17784,7 +18012,7 @@ function openTeacherProfile(){
       avatarMeta = await attachUpload(f);
       await refreshAvatar();
       toast('頭像已上傳','success');
-    } catch(err){ toast('上傳失敗：' + (err.message||err),'danger'); }
+    } catch(err){ toast('上傳失敗：' + friendlyError(err),'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
     el('button', { class:'btn btn-sm', onclick:()=> fileInp.click() }, '📷 選擇圖片'),
@@ -17837,7 +18065,8 @@ function openTeacherProfile(){
         if(rem && rem.username === me.username) saveRemember(null);
       } catch(e){ _swallow('clearRemember', e); }
       saveDB(true);
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
+      // Round 2 M6: 登出所有裝置 → 立即 sync
+      try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
       toast('已登出所有裝置','success');
     }
   }, '🚪 登出所有裝置'));
@@ -17858,10 +18087,11 @@ function openTeacherProfile(){
         // 改密碼後安全：清掉所有 loginTokens，要求所有裝置重新登入
         _clearAllLoginTokens(me);
         if(typeof logOp === 'function') logOp('teacherPwChange','改密碼（已登出所有裝置）');
-      } catch(e){ toast('密碼加密失敗：'+(e.message||e),'danger'); return; }
+      } catch(e){ toast('密碼加密失敗：'+friendlyError(e),'danger'); return; }
     }
     saveDB(true);  // H3: 改密碼 → 立即寫入
-    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
+    // Round 2 M6: 改密碼 → 立即 sync 不 debounce
+    try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
     if(App.session) App.session.name = me.name;
     try { saveSession(); } catch(e){ _swallow('saveSession', e); }
     toast('已儲存','success');
@@ -18078,7 +18308,7 @@ function renderBrandingCard(){
       await applyBranding();
       toast('背景已設定','success');
       rerender();
-    } catch(err){ toast('失敗：'+(err.message||err),'danger'); }
+    } catch(err){ toast('失敗：'+friendlyError(err),'danger'); }
   });
   f2.appendChild(fileInp);
   if(App.db.branding.bgImage){
@@ -19203,7 +19433,7 @@ function renderLoginEditor(content){
       toast('Logo 已更新','success');
       // 觸發重繪讓「移除圖片」按鈕出現
       rerender();
-    } catch(err){ toast('上傳失敗：'+err.message,'danger'); }
+    } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
   });
   logoActs.appendChild(inpImg);
 
@@ -19824,26 +20054,13 @@ function resetTour(){
     if(role) localStorage.removeItem(tourKey(role));
     toast('已重置引導，將重新顯示','success');
     showTour(role);
-  } catch(e){ toast('重置失敗：' + (e.message||e), 'warn'); }
+  } catch(e){ toast('重置失敗：' + friendlyError(e), 'warn'); }
 }
 
 /* ---- 第 18 項-3：最近使用頁面追蹤 ---- */
-const RECENT_PAGES_KEY = 'cms_v3_recent_pages';
-const RECENT_PAGES_MAX = 5;
-function pushRecentPage(view){
-  if(!view) return;
-  // 不追蹤這些「中繼/系統」頁面
-  if(['exportcenter'].indexOf(view) >= 0) { /* 仍可記 */ }
-  try {
-    const cur = JSON.parse(localStorage.getItem(RECENT_PAGES_KEY) || '[]');
-    const next = [view].concat(cur.filter(v => v !== view)).slice(0, RECENT_PAGES_MAX);
-    localStorage.setItem(RECENT_PAGES_KEY, JSON.stringify(next));
-  } catch(e){_swallow('auto',e)}
-}
-function getRecentPages(){
-  try { return JSON.parse(localStorage.getItem(RECENT_PAGES_KEY) || '[]'); }
-  catch(e){ return []; }
-}
+// Round 2 M1: 整段功能已移除（使用者要求拿掉「最近使用」UI）。
+//   原本提供 pushRecentPage / getRecentPages / RECENT_PAGES_KEY / RECENT_PAGES_MAX，
+//   已無 caller，連同 localStorage key 一起清理（boot 階段做一次性 removeItem）。
 
 /* ---- 第 18 項-4：側邊欄即時搜尋 ---- */
 function sidebarSearchFilter(q){
@@ -22636,6 +22853,9 @@ function renderRecentBadgesForMe(){
       get(){
         if(App && App.session && App.session.role === 'student'){
           // 學生端：不暴露 db / accounts 等敏感資料
+          // Round 2 M9：這層保護同時擋掉「devtools 透過 __App.db.messages.fromId
+          //   反推匿名留言作者」的攻擊。學生 console 只看得到 session / view / cfg
+          //   等非敏感欄位；rendered DOM 已不含 fromId（renderMsgBubble 只輸出 displayName）。
           return {
             session: App.session,
             view: App.view,
