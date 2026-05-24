@@ -1549,6 +1549,7 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 .mascot-svg[data-mascot-on-dark="true"] .m-pupil{ fill:#fff; }
 .mascot-svg[data-mascot-on-dark="true"] .m-mouth{ stroke:#fff3e0; }
 .mascot-svg[data-mascot-on-dark="true"] .m-happy-eye path{ stroke:#fff; }
+.mascot-svg[data-mascot-on-dark="true"] .m-nose{ fill:#fff3e0; }
 /* ── 響應式：平板/手機 ── */
 @media (max-width:600px){
   .login-spotify-shell{ padding:16px 12px; }
@@ -5172,52 +5173,58 @@ async function quickContinueAsLast(){
 // opts.onDark — 暗色卡片內 (眼/嘴 stroke 改亮色)，預設 false
 function buildMascotSVG(opts){
   const o = opts || {};
-  const color = o.color || '#f4a76a';
-  // 副色 — 從主色衍生淺色 (內耳/下巴 highlight)
-  const lightColor = '#ffd9b0';   // 簡化：固定米黃，與大多數色都協調
-  const innerEar = '#ffd3a8';
+  // 預設改為標準小熊棕色
+  const color = o.color || '#b88560';
+  const darkColor = o.darkColor || '#8a5d3a';      // 耳輪 / 鼻子
+  const innerEar = '#f4c5b8';                       // 粉嫩內耳
+  const muzzle = '#f9e2c8';                          // 鼻吻區（淺米色）
   const onDark = o.onDark ? 'true' : 'false';
   const svg =
     '<svg class="mascot-svg" data-state="idle" data-mascot-on-dark="' + onDark + '" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-      // 兩隻耳朵
-      '<ellipse cx="28" cy="36" rx="11" ry="13" fill="' + color + '"/>' +
-      '<ellipse cx="92" cy="36" rx="11" ry="13" fill="' + color + '"/>' +
-      '<ellipse cx="28" cy="38" rx="6" ry="7" fill="' + innerEar + '"/>' +
-      '<ellipse cx="92" cy="38" rx="6" ry="7" fill="' + innerEar + '"/>' +
-      // 主臉
-      '<circle cx="60" cy="62" r="38" fill="' + color + '"/>' +
-      '<ellipse cx="60" cy="74" rx="26" ry="18" fill="' + lightColor + '"/>' +
-      // 紅暈（focus 時顯示）
-      '<circle class="m-blush" cx="35" cy="74" r="6" fill="#ff8aa3" opacity="0"/>' +
-      '<circle class="m-blush" cx="85" cy="74" r="6" fill="#ff8aa3" opacity="0"/>' +
-      // 預設眼睛（橢圓 + 瞳孔）
+      // 兩隻圓圓的耳朵
+      '<circle cx="32" cy="36" r="12" fill="' + color + '"/>' +
+      '<circle cx="88" cy="36" r="12" fill="' + color + '"/>' +
+      // 內耳粉色
+      '<circle cx="32" cy="38" r="6" fill="' + innerEar + '"/>' +
+      '<circle cx="88" cy="38" r="6" fill="' + innerEar + '"/>' +
+      // 圓圓的臉（main body）
+      '<circle cx="60" cy="66" r="34" fill="' + color + '"/>' +
+      // 鼻吻區（突出的淺色橢圓）
+      '<ellipse cx="60" cy="78" rx="18" ry="14" fill="' + muzzle + '"/>' +
+      // 紅暈腮紅（focus 時顯示）
+      '<ellipse class="m-blush" cx="32" cy="74" r="5" rx="6" ry="4" fill="#ff9eb5" opacity="0"/>' +
+      '<ellipse class="m-blush" cx="88" cy="74" r="5" rx="6" ry="4" fill="#ff9eb5" opacity="0"/>' +
+      // 預設眼睛（小黑點，可愛關鍵）
       '<g class="m-eye m-eye-l">' +
-        '<ellipse cx="46" cy="58" rx="6" ry="8" fill="#fff"/>' +
-        '<circle class="m-pupil" cx="46" cy="60" r="3.5" fill="#222"/>' +
-        '<circle cx="47" cy="58.5" r="1.2" fill="#fff"/>' +
+        '<circle class="m-pupil" cx="48" cy="64" r="3.2" fill="#2a1810"/>' +
+        '<circle cx="49" cy="63" r="1" fill="#fff"/>' +
       '</g>' +
       '<g class="m-eye m-eye-r">' +
-        '<ellipse cx="74" cy="58" rx="6" ry="8" fill="#fff"/>' +
-        '<circle class="m-pupil" cx="74" cy="60" r="3.5" fill="#222"/>' +
-        '<circle cx="75" cy="58.5" r="1.2" fill="#fff"/>' +
+        '<circle class="m-pupil" cx="72" cy="64" r="3.2" fill="#2a1810"/>' +
+        '<circle cx="73" cy="63" r="1" fill="#fff"/>' +
       '</g>' +
-      // 失敗 X 眼（兩條線交叉），預設隱藏
-      '<g class="m-x-eye" opacity="0" stroke="#d33" stroke-width="2.2" stroke-linecap="round">' +
-        '<line x1="40" y1="52" x2="52" y2="64"/>' +
-        '<line x1="52" y1="52" x2="40" y2="64"/>' +
-        '<line x1="68" y1="52" x2="80" y2="64"/>' +
-        '<line x1="80" y1="52" x2="68" y2="64"/>' +
+      // 失敗 X 眼，預設隱藏
+      '<g class="m-x-eye" opacity="0" stroke="#d33" stroke-width="1.8" stroke-linecap="round">' +
+        '<line x1="44" y1="60" x2="52" y2="68"/>' +
+        '<line x1="52" y1="60" x2="44" y2="68"/>' +
+        '<line x1="68" y1="60" x2="76" y2="68"/>' +
+        '<line x1="76" y1="60" x2="68" y2="68"/>' +
       '</g>' +
-      // 成功 ^_^ 眼，預設隱藏
-      '<g class="m-happy-eye" opacity="0" stroke="#222" stroke-width="2.4" stroke-linecap="round" fill="none">' +
-        '<path d="M40 60 Q46 52 52 60"/>' +
-        '<path d="M68 60 Q74 52 80 60"/>' +
+      // 成功 ^_^ 眯眼，預設隱藏
+      '<g class="m-happy-eye" opacity="0" stroke="#2a1810" stroke-width="2" stroke-linecap="round" fill="none">' +
+        '<path d="M44 64 Q48 60 52 64"/>' +
+        '<path d="M68 64 Q72 60 76 64"/>' +
       '</g>' +
-      // 嘴巴（預設微笑）
-      '<path class="m-mouth" d="M50 80 Q60 88 70 80" stroke="#7a3f10" stroke-width="2.6" fill="none" stroke-linecap="round"/>' +
-      // 兩隻短手（預設隱藏在臉下方，cover/typing/peek 才出現遮眼）
-      '<ellipse class="m-hand m-hand-l" cx="42" cy="110" rx="14" ry="10" fill="' + color + '"/>' +
-      '<ellipse class="m-hand m-hand-r" cx="78" cy="110" rx="14" ry="10" fill="' + color + '"/>' +
+      // 小三角形鼻子（可愛重點）
+      '<path class="m-nose" d="M57 75 L63 75 L60 79 Z" fill="' + darkColor + '"/>' +
+      // 嘴巴（預設小微笑，細線, 偏短）
+      '<path class="m-mouth" d="M55 84 Q60 87 65 84" stroke="' + darkColor + '" stroke-width="1.6" fill="none" stroke-linecap="round"/>' +
+      // 兩隻圓圓的手（預設隱藏在臉下方，cover/typing/peek 才舉起來遮眼）
+      '<circle class="m-hand m-hand-l" cx="40" cy="110" r="11" fill="' + color + '"/>' +
+      '<circle class="m-hand m-hand-r" cx="80" cy="110" r="11" fill="' + color + '"/>' +
+      // 手的肉墊（一旦舉起來可以看到）
+      '<circle class="m-paw m-paw-l" cx="40" cy="113" r="4" fill="' + innerEar + '" opacity="0"/>' +
+      '<circle class="m-paw m-paw-r" cx="80" cy="113" r="4" fill="' + innerEar + '" opacity="0"/>' +
     '</svg>';
   const wrap = document.createElement('div');
   wrap.className = 'mascot-wrap';
