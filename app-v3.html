@@ -2127,6 +2127,36 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 .side-item.search-hidden{ display:none !important; }
 .side-section-title.search-hidden{ display:none !important; }
 
+/* ---- 側邊欄頂部「全部展開/收合」按鈕列 ---- */
+.side-expand-row{
+  display:flex; gap:4px; padding:4px 8px 6px;
+  justify-content:space-between;
+  border-bottom:1px solid var(--border);
+  margin-bottom:4px;
+}
+.btn-side-mini{
+  flex:1; padding:4px 8px; font-size:11px;
+  background:transparent; border:1px solid var(--border);
+  border-radius:4px; color:var(--text-muted); cursor:pointer;
+  transition:all .15s;
+}
+.btn-side-mini:hover{ background:var(--surface-2); color:var(--text); }
+
+/* ---- 側邊欄項目拖拉排序 ---- */
+.side-item{ position:relative; }
+.side-item[draggable="true"]{ cursor:grab; }
+.side-item[draggable="true"]:active{ cursor:grabbing; }
+.side-item.dragging{ opacity:.45; }
+.side-item.drag-over-top{
+  border-top:2px solid var(--primary) !important;
+  background:var(--primary-soft);
+}
+.side-item.drag-over-bottom{
+  border-bottom:2px solid var(--primary) !important;
+  background:var(--primary-soft);
+}
+.sidebar.collapsed .side-expand-row{ display:none; }
+
 /* ---- 局部 loading 遮罩（withLoading helper 使用） ---- */
 .loading-local{
   position:absolute; inset:0; z-index:5;
@@ -7890,10 +7920,16 @@ function sideItem(view, icon, label, badge){
   const finalIcon = cust.icon || icon;
   const finalLabel = cust.label || label;
   const active = App.view === view;
-  const b = el('button', { class:'side-item ' + (active?'active':''), onclick:()=> go(view), title: finalLabel },
+  const b = el('button', { class:'side-item ' + (active?'active':''), onclick:(e)=> {
+    // 拖拉中不觸發點擊
+    if(b.classList.contains('dragging')) { e.preventDefault(); return; }
+    go(view);
+  }, title: finalLabel },
     el('span', { class:'ico' }, finalIcon),
     el('span', null, finalLabel)
   );
+  // 記住 view key（讓 makeItemDraggable 使用）
+  b.dataset.itemKey = view;
   if(badge) b.appendChild(el('span', { class:'badge' }, String(badge)));
   return b;
 }
@@ -7907,6 +7943,28 @@ function sidebarToggleButton(){
   }, '◀');
 }
 
+/* 側邊欄頂部「全部展開 / 全部收合」按鈕列 */
+function renderSidebarExpandRow(isTeacher){
+  const keys = isTeacher
+    ? ['daily','teaching','tools','manage','system']
+    : ['s_func','s_learn','s_other'];
+  const setAll = (collapsed) => {
+    App._sideExpanded = App._sideExpanded || {};
+    keys.forEach(k => {
+      App._sideExpanded[k] = !collapsed;  // expanded = !collapsed
+      try { localStorage.setItem('cms_v3_sidebar_group_' + k + '_collapsed', collapsed ? '1' : '0'); } catch(_){}
+    });
+    try { localStorage.setItem('cms_v3_side_expanded', JSON.stringify(App._sideExpanded)); } catch(_){}
+    rerender();
+  };
+  return el('div', { class:'side-expand-row' },
+    el('button', { type:'button', class:'btn-side-mini', title:'全部展開',
+      onclick: () => setAll(false) }, '▾ 全部展開'),
+    el('button', { type:'button', class:'btn-side-mini', title:'全部收合',
+      onclick: () => setAll(true) }, '▸ 全部收合')
+  );
+}
+
 function sideSection(key, title, items){
   // 介面編輯器：若分組被隱藏 → 不渲染
   if(typeof isSectionVisible === 'function' && !isSectionVisible(key)){
@@ -7917,11 +7975,12 @@ function sideSection(key, title, items){
 
   // 分組可摺疊（batch 3：同步寫每組獨立 key，相容舊 _sideExpanded）
   App._sideExpanded = App._sideExpanded || {};
-  // 初始化時讀取每組獨立 key（若舊資料已存在 _sideExpanded 則優先用舊值）
+  // 初始化時優先讀每組獨立 key（'1' = 收合, '0' = 展開）
   if(App._sideExpanded[key] === undefined){
     try {
       const v = localStorage.getItem('cms_v3_sidebar_group_' + key + '_collapsed');
       if(v === '1') App._sideExpanded[key] = false;
+      else if(v === '0') App._sideExpanded[key] = true;
     } catch(e){_swallow('auto',e)}
   }
   // 預設展開（true）
@@ -7962,13 +8021,103 @@ function buildSidebarItems(role, secKey, badgeMap, specialMap){
       const cust = ((App._uiCustom && App._uiCustom.items) || {})[it.key] || {};
       if(cust.hidden) return;
       const node = specialMap[it.key](cust);
-      if(node) out.push(node);
+      if(node){
+        // 也讓特殊項目可拖拉（同分組內）
+        try { if(node.dataset) node.dataset.itemKey = it.key; } catch(_){}
+        if(typeof makeItemDraggable === 'function'){
+          try { makeItemDraggable(node, role, secKey, it.key); } catch(_){}
+        }
+        out.push(node);
+      }
     } else {
       const node = sideItem(it.key, it.icon, it.label, badgeMap[it.key] || null);
-      if(node) out.push(node);
+      if(node){
+        if(typeof makeItemDraggable === 'function'){
+          try { makeItemDraggable(node, role, secKey, it.key); } catch(_){}
+        }
+        out.push(node);
+      }
     }
   });
   return out;
+}
+
+/* ─── 側邊欄拖拉排序 helpers ─── */
+function makeItemDraggable(itemEl, role, sectionKey, itemKey){
+  if(!itemEl || itemEl.dataset.dragBound === '1') return;
+  itemEl.dataset.dragBound = '1';
+  itemEl.dataset.section = sectionKey;
+  itemEl.dataset.role = role;
+  itemEl.draggable = true;
+
+  itemEl.addEventListener('dragstart', e => {
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        role: role, section: sectionKey, key: itemKey
+      }));
+    } catch(_){}
+    itemEl.classList.add('dragging');
+  });
+  itemEl.addEventListener('dragend', () => {
+    itemEl.classList.remove('dragging');
+    // 清掉所有 drag-over 標記
+    document.querySelectorAll('.side-item.drag-over-top, .side-item.drag-over-bottom')
+      .forEach(n => n.classList.remove('drag-over-top','drag-over-bottom'));
+  });
+  itemEl.addEventListener('dragover', e => {
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch(_){}
+    // 依滑鼠在元素內的 y 位置決定插入位置 (上半 / 下半)
+    const rect = itemEl.getBoundingClientRect();
+    const isTop = (e.clientY - rect.top) < rect.height / 2;
+    itemEl.classList.remove(isTop ? 'drag-over-bottom' : 'drag-over-top');
+    itemEl.classList.add(isTop ? 'drag-over-top' : 'drag-over-bottom');
+  });
+  itemEl.addEventListener('dragleave', () => {
+    itemEl.classList.remove('drag-over-top','drag-over-bottom');
+  });
+  itemEl.addEventListener('drop', e => {
+    e.preventDefault();
+    const wasTop = itemEl.classList.contains('drag-over-top');
+    itemEl.classList.remove('drag-over-top','drag-over-bottom');
+    try {
+      const data = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
+      // 只允許同 role 同分組內拖
+      if(data.role !== role) return;
+      if(data.section !== sectionKey) return;
+      if(!data.key || data.key === itemKey) return;
+      reorderSidebarItem(role, sectionKey, data.key, itemKey, wasTop ? 'before' : 'after');
+    } catch(err){ try{_swallow('drag-drop', err);}catch(_){ } }
+  });
+}
+
+function reorderSidebarItem(role, sectionKey, srcKey, dstKey, mode){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  App._uiCustom.order = App._uiCustom.order || {};
+  // 取得當前 default order
+  const defaultItems = (getSidebarItems(role)[sectionKey] || {}).items || [];
+  const defaultKeys = defaultItems.map(it => it.key);
+  // 注意：_uiCustom.order 目前是以 sectionKey 為頂層鍵（與 uiEditorReorder 一致），共用 teacher/student
+  let order = (App._uiCustom.order[sectionKey] || []).slice();
+  if(!order.length) order = defaultKeys.slice();
+  // 過濾不存在的；補上新項目
+  order = order.filter(k => defaultKeys.includes(k));
+  defaultKeys.forEach(k => { if(!order.includes(k)) order.push(k); });
+  // 移除 src
+  const srcIdx = order.indexOf(srcKey);
+  if(srcIdx < 0) return;
+  order.splice(srcIdx, 1);
+  // 找 dst 新位置
+  let dstIdx = order.indexOf(dstKey);
+  if(dstIdx < 0){ order.push(srcKey); }
+  else {
+    if(mode === 'after') dstIdx += 1;
+    order.splice(dstIdx, 0, srcKey);
+  }
+  App._uiCustom.order[sectionKey] = order;
+  saveUiCustom();
+  rerender();
 }
 
 function renderSidebarTeacher(){
@@ -7985,6 +8134,9 @@ function renderSidebarTeacher(){
   searchInp.addEventListener('input', e => sidebarSearchFilter(e.target.value));
   searchWrap.appendChild(searchInp);
   side.appendChild(searchWrap);
+
+  // 全部展開 / 全部收合
+  side.appendChild(renderSidebarExpandRow(true));
 
   // badges 對應表
   const badges = {
@@ -8052,6 +8204,9 @@ function renderSidebarStudent(){
   searchInp.addEventListener('input', e => sidebarSearchFilter(e.target.value));
   searchWrap.appendChild(searchInp);
   side.appendChild(searchWrap);
+
+  // 全部展開 / 全部收合
+  side.appendChild(renderSidebarExpandRow(false));
 
   const sBadges = {
     messages: unreadMessages() || null,
@@ -21105,6 +21260,22 @@ function renderSidebarEditor(content){
     card1.appendChild(secWrap);
   });
   content.appendChild(card1);
+
+  // 重置所有項目順序
+  const cardOrderReset = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardOrderReset.appendChild(el('h3', null, '↺ 重置項目順序'));
+  cardOrderReset.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '清除側邊欄拖拉排序，恢復成預設順序（不影響顯示/隱藏與圖示）'));
+  cardOrderReset.appendChild(el('button', { class:'btn', onclick: async ()=> {
+    const ok = await confirmDlg('確定要將所有分組的項目順序重置為預設？', { title:'重置順序' });
+    if(!ok) return;
+    App._uiCustom = App._uiCustom || loadUiCustom();
+    App._uiCustom.order = {};
+    saveUiCustom();
+    toast('已重置為預設順序','success');
+    rerender();
+  }}, '↺ 重置為預設順序'));
+  content.appendChild(cardOrderReset);
 
   // 套用變更
   const cardApply = el('div', { class:'card', style:{marginTop:'12px',background:'var(--primary-soft)',borderColor:'var(--primary)'} });
