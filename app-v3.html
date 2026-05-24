@@ -20297,43 +20297,179 @@ function rAppearance(content){
 // ── 2) 背景圖片 / 顏色 / 透明度 ────────────────────────────────
 function renderBrandingCard(){
   const card = el('div', { class:'card', style:{marginTop:'12px'} });
-  card.appendChild(el('h3', null, '🖼️ 背景設定'));
-  card.appendChild(el('div', { class:'small muted', style:{marginBottom:'6px'} },
-    '自訂 app 背景圖片、底色、透明度（會即時套用）'));
+  card.appendChild(el('h3', null, '🖼️ 頁面背景設定'));
+  card.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
+    '自訂整個 app 的背景圖片、底色、透明度（會即時套用 / 同步到其他裝置）'));
 
-  // 背景圖
-  const f2 = el('div', { class:'field' });
-  f2.appendChild(el('label', { class:'label' }, '背景圖片（選填，最大 3MB）'));
-  const fileInp = el('input', { type:'file', accept:'image/*' });
+  // 強化版背景圖上傳 (大按鈕 + 預覽框 + 拖放 + URL)
+  const f2 = el('div', { class:'field', style:{background:'var(--surface-2)',padding:'14px',borderRadius:'10px'} });
+  f2.appendChild(el('label', { class:'label', style:{fontSize:'14px',fontWeight:'700',marginBottom:'8px'} }, '🖼 背景圖片'));
+  f2.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'10px',lineHeight:'1.6'} },
+    '支援 PNG / JPG / SVG / GIF · 最大 3MB · 自動 cover 滿版 / 同步雲端'));
+
+  // 預覽區 (大張一點)
+  const previewBox = el('div', { style:{
+    width:'100%',height:'140px',borderRadius:'10px',
+    background:'var(--surface)',border:'2px dashed var(--border)',
+    display:'flex',alignItems:'center',justifyContent:'center',
+    overflow:'hidden',marginBottom:'12px',position:'relative',
+    backgroundSize:'cover',backgroundPosition:'center'
+  } });
+  async function refreshBgPreview(){
+    previewBox.innerHTML = '';
+    previewBox.style.background = 'var(--surface)';
+    previewBox.style.border = '2px dashed var(--border)';
+    if(App.db.branding && App.db.branding.bgImage){
+      try {
+        let url = App.db.branding.bgImage;
+        if(!/^https?:\/\//i.test(String(url)) && !/^data:/i.test(String(url))){
+          url = await attachGetUrl(App.db.branding.bgImage);
+        }
+        if(url){
+          previewBox.style.backgroundImage = "url('" + String(url).replace(/'/g,"\\'") + "')";
+          previewBox.style.backgroundSize = 'cover';
+          previewBox.style.backgroundPosition = 'center';
+          previewBox.style.border = '2px solid var(--success, #22c55e)';
+          previewBox.appendChild(el('div', { style:{
+            position:'absolute',bottom:'4px',right:'6px',
+            background:'rgba(0,0,0,0.6)',color:'#fff',
+            padding:'2px 8px',borderRadius:'4px',fontSize:'10px'
+          } }, '已套用'));
+          return;
+        }
+      } catch(e){ _swallow('bg-preview', e); }
+    }
+    previewBox.appendChild(el('div', { class:'tiny muted', style:{textAlign:'center',padding:'8px'} }, '尚無背景圖（點下方按鈕或拖放圖片）'));
+  }
+  refreshBgPreview();
+  f2.appendChild(previewBox);
+
+  // 隱藏的 file input + 大按鈕
+  const fileInp = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
   fileInp.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    if(f.size > 3 * 1024 * 1024){ toast('圖片不能超過 3MB','danger'); return; }
+    if(f.size > 3 * 1024 * 1024){ toast('圖片不能超過 3MB','danger'); fileInp.value=''; return; }
     try {
-      if(App.db.branding.bgImage){
+      if(App.db.branding.bgImage && !/^https?:\/\//i.test(String(App.db.branding.bgImage))){
         try { await attachDelete(App.db.branding.bgImage); } catch(_){_swallow('auto',_)}
       }
       App.db.branding.bgImage = await attachUpload(f);
       saveDB();
       try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
       await applyBranding();
-      toast('背景已設定','success');
+      await refreshBgPreview();
+      toast('✅ 背景已設定','success');
       rerender();
-    } catch(err){ toast('失敗：'+friendlyError(err),'danger'); }
+    } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
   });
   f2.appendChild(fileInp);
-  if(App.db.branding.bgImage){
-    f2.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
-      if(App.db.branding.bgImage){
+  f2.appendChild(el('button', { class:'btn btn-primary', style:{width:'100%',marginBottom:'8px'},
+    onclick: ()=> fileInp.click() }, '📁 從電腦選擇背景圖上傳'));
+
+  // 拖放
+  previewBox.addEventListener('dragover', e => { e.preventDefault(); previewBox.style.opacity = '0.6'; });
+  previewBox.addEventListener('dragleave', e => { previewBox.style.opacity = '1'; });
+  previewBox.addEventListener('drop', async e => {
+    e.preventDefault(); previewBox.style.opacity = '1';
+    const f = e.dataTransfer?.files?.[0];
+    if(!f) return;
+    if(!/^image\//.test(f.type)){ toast('請拖入圖片檔','warning'); return; }
+    if(f.size > 3 * 1024 * 1024){ toast('圖片不能超過 3MB','danger'); return; }
+    try {
+      if(App.db.branding.bgImage && !/^https?:\/\//i.test(String(App.db.branding.bgImage))){
         try { await attachDelete(App.db.branding.bgImage); } catch(_){_swallow('auto',_)}
       }
-      App.db.branding.bgImage = null;
+      App.db.branding.bgImage = await attachUpload(f);
       saveDB();
       try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
       await applyBranding();
-      toast('已移除背景','info');
+      await refreshBgPreview();
+      toast('✅ 背景已設定','success');
       rerender();
-    }}, '🗑 移除背景'));
+    } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
+  });
+  f2.appendChild(el('div', { class:'tiny muted', style:{textAlign:'center',marginBottom:'8px'} },
+    '💡 也可以直接把圖片拖到上方預覽框'));
+
+  // 分隔
+  f2.appendChild(el('div', { style:{height:'1px',background:'var(--border)',margin:'10px 0'} }));
+
+  // URL 輸入
+  f2.appendChild(el('label', { class:'tiny muted', style:{display:'block',marginBottom:'4px'} }, '或 貼上圖片網址'));
+  const urlRow = el('div', { class:'flex', style:{gap:'6px'} });
+  const urlInp = el('input', { class:'input', placeholder:'https://example.com/bg.jpg',
+    value: (typeof App.db.branding.bgImage === 'string' && /^https?:\/\//i.test(App.db.branding.bgImage)) ? App.db.branding.bgImage : '',
+    style:{flex:'1'} });
+  urlRow.appendChild(urlInp);
+  urlRow.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+    const v = urlInp.value.trim();
+    if(!v){ toast('請輸入網址','warning'); return; }
+    if(!/^https?:\/\//i.test(v)){ toast('網址須以 http:// 或 https:// 開頭','warning'); return; }
+    App.db.branding.bgImage = v;
+    saveDB();
+    try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
+    await applyBranding();
+    await refreshBgPreview();
+    toast('✅ 背景網址已套用','success');
+  }}, '套用'));
+  f2.appendChild(urlRow);
+
+  // 移除按鈕
+  if(App.db.branding && App.db.branding.bgImage){
+    f2.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{width:'100%',marginTop:'10px'},
+      onclick: async ()=> {
+        if(!await confirmDlg('確定移除背景圖?', { title:'確認' })) return;
+        if(App.db.branding.bgImage && !/^https?:\/\//i.test(String(App.db.branding.bgImage))){
+          try { await attachDelete(App.db.branding.bgImage); } catch(_){_swallow('auto',_)}
+        }
+        App.db.branding.bgImage = null;
+        saveDB();
+        try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
+        await applyBranding();
+        await refreshBgPreview();
+        toast('已移除背景','info');
+        rerender();
+      }}, '🗑 移除背景圖'));
   }
+
+  // 內建範例背景 (預設提供 6 張漂亮的)
+  f2.appendChild(el('div', { style:{height:'1px',background:'var(--border)',margin:'10px 0'} }));
+  f2.appendChild(el('label', { class:'tiny muted', style:{display:'block',marginBottom:'6px'} }, '或選擇內建範例背景'));
+  const PRESET_BGS = [
+    { name:'藍綠漸層', url:'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="%2367e8f9"/><stop offset="1" stop-color="%231e40af"/></linearGradient></defs><rect width="800" height="600" fill="url(%23g)"/></svg>') },
+    { name:'粉紫漸層', url:'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="%23fbbf24"/><stop offset="0.5" stop-color="%23ec4899"/><stop offset="1" stop-color="%238b5cf6"/></linearGradient></defs><rect width="800" height="600" fill="url(%23g)"/></svg>') },
+    { name:'森林綠', url:'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="%2334d399"/><stop offset="1" stop-color="%23064e3b"/></linearGradient></defs><rect width="800" height="600" fill="url(%23g)"/></svg>') },
+    { name:'夕陽橘', url:'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="%23fed7aa"/><stop offset="0.5" stop-color="%23fb923c"/><stop offset="1" stop-color="%23c2410c"/></linearGradient></defs><rect width="800" height="600" fill="url(%23g)"/></svg>') },
+    { name:'深夜星空', url:'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><defs><radialGradient id="g" cx="0.3" cy="0.2" r="0.9"><stop offset="0" stop-color="%231e3a8a"/><stop offset="1" stop-color="%23030712"/></radialGradient></defs><rect width="800" height="600" fill="url(%23g)"/><circle cx="200" cy="100" r="2" fill="white"/><circle cx="500" cy="80" r="1.5" fill="white"/><circle cx="650" cy="200" r="2" fill="white"/><circle cx="100" cy="300" r="1.5" fill="white"/><circle cx="700" cy="400" r="2" fill="white"/><circle cx="400" cy="500" r="1.5" fill="white"/></svg>') },
+    { name:'純白簡約', url:'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><rect width="800" height="600" fill="%23fafafa"/></svg>') }
+  ];
+  const bgGrid = el('div', { style:{display:'grid',gridTemplateColumns:'repeat(3, 1fr)',gap:'6px'} });
+  PRESET_BGS.forEach(p => {
+    const cell = el('div', { style:{
+      height:'48px',borderRadius:'6px',cursor:'pointer',
+      backgroundImage:'url("' + p.url + '")',backgroundSize:'cover',backgroundPosition:'center',
+      border:'1px solid var(--border)',
+      display:'flex',alignItems:'flex-end',justifyContent:'center',padding:'2px',
+      transition:'transform .15s'
+    }, title: p.name });
+    cell.appendChild(el('div', { style:{
+      background:'rgba(0,0,0,0.5)',color:'#fff',
+      padding:'1px 6px',borderRadius:'3px',fontSize:'9px',fontWeight:'600'
+    } }, p.name));
+    cell.addEventListener('click', async ()=> {
+      App.db.branding.bgImage = p.url;
+      saveDB();
+      try { Sync.setNode('branding', App.db.branding); bcNotify(); } catch(e){_swallow('auto',e)}
+      await applyBranding();
+      await refreshBgPreview();
+      toast('已套用內建背景：' + p.name,'success');
+      rerender();
+    });
+    cell.addEventListener('mouseenter', ()=> cell.style.transform = 'scale(1.05)');
+    cell.addEventListener('mouseleave', ()=> cell.style.transform = 'scale(1)');
+    bgGrid.appendChild(cell);
+  });
+  f2.appendChild(bgGrid);
   card.appendChild(f2);
 
   // 背景顏色
