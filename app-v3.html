@@ -3013,8 +3013,8 @@ button:focus-visible,
   animation:modalIn2 .28s var(--ease-spring);
 }
 @keyframes modalIn2{
-  from{ opacity:0; transform:translateY(8px) scale(.96); }
-  to{ opacity:1; transform:none; }
+  from{ opacity:0; }
+  to{ opacity:1; }
 }
 .modal h2{
   font-size:var(--fs-xl);
@@ -3148,8 +3148,8 @@ button:focus-visible,
     animation:toastInDesktop2 .3s var(--ease-out) both;
   }
   @keyframes toastInDesktop2{
-    from{ opacity:0; transform:translateX(24px) scale(.96); }
-    to{ opacity:1; transform:translateX(0) scale(1); }
+    from{ opacity:0; }
+    to{ opacity:1; }
   }
   .toast-host{ gap:var(--s-2); }
 }
@@ -3176,7 +3176,6 @@ button:focus-visible,
              border-color var(--tx-base) var(--ease-out);
 }
 .stu-card:hover{
-  transform:translateY(-2px);
   box-shadow:var(--shadow-md-2);
 }
 .stu-card .name{
@@ -3308,18 +3307,12 @@ body .content > .page-head > h1{
   }
 }
 
-/* === 2. 卡片 — 軟陰影 + 漸層邊 + 微抬 === */
+/* === 2. 卡片 — 軟陰影 (無動畫) === */
 body .card{
   border: 1px solid rgba(0,0,0,0.06) !important;
   border-radius: 14px !important;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -8px rgba(0,0,0,0.08) !important;
-  transition: transform .25s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow .25s cubic-bezier(0.16, 1, 0.3, 1) !important;
   padding: 20px !important;
-}
-body .card:hover{
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.05), 0 16px 32px -10px rgba(0,0,0,0.12) !important;
 }
 
 [data-theme="dark"] body .card{
@@ -3328,7 +3321,7 @@ body .card:hover{
   background: #1a1d23 !important;
 }
 
-/* === 3. 統計卡 — 漸層背景 + 巨大數字 === */
+/* === 3. 統計卡 — 漸層背景 + 巨大數字 (無 hover 動) === */
 body .stat{
   position: relative !important;
   background: var(--surface) !important;
@@ -3337,18 +3330,12 @@ body .stat{
   padding: 20px !important;
   overflow: hidden !important;
   box-shadow: 0 4px 12px -4px rgba(0,0,0,0.08) !important;
-  transition: transform .25s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow .25s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 body .stat::before{
   content: "";
   position: absolute; inset: 0;
   background: linear-gradient(135deg, transparent 0%, color-mix(in srgb, var(--primary) 8%, transparent) 100%);
   pointer-events: none; opacity: 1;
-}
-body .stat:hover{
-  transform: translateY(-3px) !important;
-  box-shadow: 0 8px 24px -4px rgba(0,0,0,0.12) !important;
 }
 body .stat .num{
   font-size: 40px !important;
@@ -3371,14 +3358,12 @@ body .stat.s-warn::before{ background: linear-gradient(135deg, transparent 0%, r
 body .stat.s-danger::before{ background: linear-gradient(135deg, transparent 0%, rgba(239,68,68,0.12) 100%); }
 body .stat.s-accent::before{ background: linear-gradient(135deg, transparent 0%, rgba(168,85,247,0.12) 100%); }
 
-/* === 4. 按鈕 — 更明顯陰影 + 大圓角 + 按下回饋 === */
+/* === 4. 按鈕 — 圓角 + 主按鈕彩色陰影 (無 hover 抬) === */
 body .btn{
   border-radius: 10px !important;
   font-weight: 600 !important;
   letter-spacing: -0.005em !important;
-  transition: transform .12s cubic-bezier(0.16, 1, 0.3, 1),
-              background-color .15s ease,
-              box-shadow .15s ease !important;
+  transition: background-color .15s ease, box-shadow .15s ease !important;
 }
 body .btn-primary{
   box-shadow: 0 2px 4px -1px color-mix(in srgb, var(--primary) 30%, transparent),
@@ -3387,9 +3372,7 @@ body .btn-primary{
 body .btn-primary:hover{
   box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--primary) 40%, transparent),
               0 2px 6px -2px color-mix(in srgb, var(--primary) 30%, transparent) !important;
-  transform: translateY(-1px);
 }
-body .btn:active{ transform: scale(0.97) !important; }
 
 /* === 5. 輸入框 — 更明顯的 focus ring === */
 body .input:focus,
@@ -3442,19 +3425,18 @@ body .topbar{
   border-bottom: 1px solid rgba(0,0,0,0.06) !important;
 }
 
-/* === 8. List rows — 卡片化 + hover 變色 === */
+/* === 8. List rows — 卡片化 + hover 變色 (無動) === */
 body .list-row{
   padding: 14px 16px !important;
   border-radius: 12px !important;
   border: 1px solid transparent !important;
   background: var(--surface) !important;
-  transition: all .15s ease !important;
+  transition: background-color .15s ease, border-color .15s ease !important;
   gap: 12px !important;
 }
 body .list-row:hover{
   background: color-mix(in srgb, var(--primary) 4%, var(--surface)) !important;
   border-color: rgba(0,0,0,0.06) !important;
-  transform: translateX(2px);
 }
 
 /* === 9. Modal — 大圓角 + 強陰影 + spring 入場 === */
@@ -3490,12 +3472,7 @@ body .badge{
   background: color-mix(in srgb, var(--text) 30%, transparent);
 }
 
-/* === 12. 進入頁面動畫 === */
-.content{ animation: contentIn .35s cubic-bezier(0.16, 1, 0.3, 1) both; }
-@keyframes contentIn{
-  from{ opacity: 0; transform: translateY(6px); }
-  to{ opacity: 1; transform: none; }
-}
+/* === 12. 進入頁面動畫 (已移除, 避免每次操作都晃動) === */
 
 /* === 13. 選取文字主色 === */
 ::selection{ background: color-mix(in srgb, var(--primary) 30%, transparent); color: var(--text); }
