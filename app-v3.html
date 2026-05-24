@@ -1572,6 +1572,141 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 }
 
 /* ════════════════════════════════════════════════════════════
+   LOGIN — 風格預設擴充欄位（border / backdrop / font-stack /
+            primary 文字色 / 漸層主色 / split 版型）
+   ──────────────────────────────────────────────────────────── */
+.login-spotify-shell{
+  /* 新增變數預設值（preset 套用時會被覆寫） */
+  --lc-card-border: none;
+  --lc-card-backdrop: none;
+  --lc-font-stack: inherit;
+  --lc-primary-fg: #fff;
+  --lc-primary-bg: var(--lc-primary);
+  --lc-input-bg: #fff;
+  --lc-input-fg: #222;
+  --lc-input-border: #fff;
+  font-family: var(--lc-font-stack);
+}
+.login-spotify-card{
+  border: var(--lc-card-border);
+  backdrop-filter: var(--lc-card-backdrop);
+  -webkit-backdrop-filter: var(--lc-card-backdrop);
+  font-family: var(--lc-font-stack);
+}
+/* 主按鈕：支援漸層（background 取代 background-color） */
+.login-spotify-card .btn-pill-primary{
+  background: var(--lc-primary-bg);
+  color: var(--lc-primary-fg);
+}
+/* 暗色輸入框 (Discord / X) */
+.login-spotify-shell[data-login-input-dark="true"] .login-spotify-card .input,
+.login-spotify-shell[data-login-input-dark="true"] .login-spotify-card select.input{
+  background: var(--lc-input-bg);
+  color: var(--lc-input-fg);
+  border-color: var(--lc-input-border);
+}
+.login-spotify-shell[data-login-input-dark="true"] .login-spotify-card .input::placeholder{
+  color: rgba(255,255,255,.4);
+}
+.login-spotify-shell[data-login-input-dark="true"] .login-spotify-card .pw-toggle{
+  color: rgba(255,255,255,.6);
+}
+.login-spotify-shell[data-login-input-dark="true"] .login-spotify-card .pw-toggle:hover{
+  background: rgba(255,255,255,.08);
+}
+/* 亮色卡片：文字色翻轉 */
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card{
+  color: #1a1a1a;
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .lsc-title{ color:#111; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .lsc-sub{ color:#666; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .label{ color:#444; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .remember-row{ color:#444; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .lsc-tiny-muted{ color:#999; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card hr.sep{
+  background: rgba(0,0,0,.08);
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-tabs{ border-bottom-color: rgba(0,0,0,.1); }
+.login-spotify-shell[data-login-card-tone="light"] .login-tabs button{ color:#999; }
+.login-spotify-shell[data-login-card-tone="light"] .login-tabs button:hover{ color:#333; }
+.login-spotify-shell[data-login-card-tone="light"] .login-tabs button.active{ color:#111; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .input{
+  background:#fff; color:#222; border:1px solid #dadce0;
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .default-hint{
+  background: rgba(0,0,0,.04); border:1px solid rgba(0,0,0,.1); color:#333;
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .default-hint code{
+  background: rgba(0,0,0,.06); color:#111;
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .default-hint .dh-actions button{
+  background: rgba(0,0,0,.05); border:1px solid rgba(0,0,0,.1); color:#222;
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .last-user-box{
+  background: rgba(0,0,0,.03); border:1px solid rgba(0,0,0,.1); color:#222;
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .last-user-greet{ color:#111; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .last-user-meta{ color:#666; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .last-user-clear{ color:#888; }
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .btn-pill-ghost{
+  color:#333; border-color: rgba(0,0,0,.15);
+}
+.login-spotify-shell[data-login-card-tone="light"] .login-spotify-card .btn-pill-ghost:hover{
+  background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.3);
+}
+/* ── Split 版型（Instagram 風）：左 hero + 右卡片 ── */
+.login-spotify-shell[data-login-layout="split"]{
+  display:grid;
+  grid-template-columns: 1fr;
+  align-items:center; justify-items:center;
+  padding:24px 16px;
+  gap:24px;
+}
+@media (min-width: 900px){
+  .login-spotify-shell[data-login-layout="split"]{
+    grid-template-columns: 1.05fr 0.95fr;
+    max-width: 1100px;
+    margin: 0 auto;
+    gap:40px;
+    padding:40px 24px;
+    min-height:100vh;
+    min-height:100dvh;
+  }
+}
+.login-hero-pane{
+  display:none;
+  flex-direction:column; gap:18px;
+  max-width:420px; padding:24px;
+  text-align:center;
+}
+@media (min-width: 900px){
+  .login-hero-pane{ display:flex; }
+}
+.login-hero-pane .hero-logo{
+  width:80px; height:80px; border-radius:20px;
+  background: var(--lc-primary-bg);
+  display:flex; align-items:center; justify-content:center;
+  font-size:40px; margin:0 auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15);
+}
+.login-hero-pane .hero-title{
+  font-size:28px; font-weight:800; letter-spacing:-.02em;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0,0,0,.3);
+}
+.login-hero-pane .hero-sub{
+  font-size:15px; line-height:1.6;
+  color: rgba(255,255,255,.85);
+  text-shadow: 0 1px 4px rgba(0,0,0,.2);
+}
+.login-spotify-shell[data-login-layout="split"][data-login-card-tone="light"] .login-hero-pane .hero-title{
+  color:#222; text-shadow:none;
+}
+.login-spotify-shell[data-login-layout="split"][data-login-card-tone="light"] .login-hero-pane .hero-sub{
+  color:#555; text-shadow:none;
+}
+
+/* ════════════════════════════════════════════════════════════
    LOGIN — 互動吉祥物 SVG 樣式（Spotify 卡片內共用）
    ──────────────────────────────────────────────────────────── */
 /* ── 互動吉祥物 ── */
@@ -5280,13 +5415,139 @@ function bindMascotInteractions(stage){
   } catch(e){_swallow('mascot-bind',e)}
 }
 
+// ════════════════════════════════════════════════════════════
+// 7 個一鍵切換的登入畫面風格預設
+// ────────────────────────────────────────────────────────────
+// 套用 preset 時會把 preset 的欄位覆寫到 lc 上，再呼叫
+// applyLoginCustomStyle / rerender。預設仍為 spotify（向後相容）。
+// ────────────────────────────────────────────────────────────
+const LOGIN_PRESETS = {
+  spotify: {
+    name:'Spotify (預設)', layout:'centered',
+    cardBg:'#2a2d33', cardWidth:360, cardRadius:12,
+    primary:'#1db954',
+    pageBgType:'solid', pageBgColor:'#f0f0f0',
+    inputStyle:'pill', cardTone:'dark', inputDark:false,
+    mascotOnDark:true, mascotColor:'#b88560', fontStack:''
+  },
+  instagram: {
+    name:'Instagram', layout:'split',
+    cardBg:'#ffffff', cardWidth:350, cardRadius:1,
+    primary:'linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)',
+    primaryFg:'#fff',
+    pageBgType:'image',
+    pageBgImage:'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=1600',
+    pageBgFrom:'#fafafa', pageBgTo:'#dbdbdb',
+    inputStyle:'square', cardTone:'light', inputDark:false,
+    mascotOnDark:false, mascotColor:'#b88560',
+    fontStack:'-apple-system,Segoe UI,Roboto,sans-serif'
+  },
+  apple: {
+    name:'Apple', layout:'centered',
+    cardBg:'rgba(255,255,255,0.85)', cardWidth:320, cardRadius:18,
+    primary:'#0071e3',
+    pageBgType:'gradient', pageBgFrom:'#f5f5f7', pageBgTo:'#e8e8ed',
+    inputStyle:'rounded', cardTone:'light', inputDark:false,
+    mascotOnDark:false, mascotColor:'#b88560',
+    fontStack:'-apple-system,BlinkMacSystemFont,SF Pro Display,Helvetica Neue,sans-serif',
+    cardBackdrop:'blur(30px) saturate(180%)'
+  },
+  google: {
+    name:'Google', layout:'centered',
+    cardBg:'#ffffff', cardWidth:408, cardRadius:8,
+    primary:'#1a73e8',
+    pageBgType:'solid', pageBgColor:'#ffffff',
+    inputStyle:'normal', cardTone:'light', inputDark:false,
+    mascotOnDark:false, mascotColor:'#b88560',
+    fontStack:'Google Sans,Roboto,Arial,sans-serif',
+    cardBorder:'1px solid #dadce0'
+  },
+  notion: {
+    name:'Notion', layout:'centered',
+    cardBg:'#ffffff', cardWidth:380, cardRadius:6,
+    primary:'#000000',
+    pageBgType:'solid', pageBgColor:'#f7f6f3',
+    inputStyle:'normal', cardTone:'light', inputDark:false,
+    mascotOnDark:false, mascotColor:'#b88560',
+    fontStack:'ui-sans-serif,-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,sans-serif',
+    cardBorder:'1px solid #e5e7eb'
+  },
+  discord: {
+    name:'Discord', layout:'centered',
+    cardBg:'#313338', cardWidth:480, cardRadius:5,
+    primary:'#5865f2',
+    pageBgType:'gradient', pageBgFrom:'#5865f2', pageBgTo:'#404eed',
+    inputStyle:'square', cardTone:'dark', inputDark:true,
+    inputBg:'#1e1f22', inputFg:'#dbdee1', inputBorder:'#1e1f22',
+    mascotOnDark:true, mascotColor:'#b88560',
+    fontStack:'gg sans,Helvetica Neue,Helvetica,Arial,sans-serif'
+  },
+  x: {
+    name:'X (Twitter)', layout:'centered',
+    cardBg:'#000000', cardWidth:380, cardRadius:16,
+    primary:'#ffffff', primaryFg:'#000',
+    pageBgType:'solid', pageBgColor:'#000000',
+    inputStyle:'rounded', cardTone:'dark', inputDark:true,
+    inputBg:'#000000', inputFg:'#ffffff', inputBorder:'#2f3336',
+    mascotOnDark:true, mascotColor:'#b88560',
+    fontStack:'Chirp,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
+    cardBorder:'1px solid #2f3336'
+  }
+};
+
+// 把 preset 內容套到 lc（保留使用者已輸入的標題/Logo/welcome 等內容欄位）
+function applyLoginPreset(lc, presetKey){
+  const p = LOGIN_PRESETS[presetKey];
+  if(!p || !lc) return;
+  // 視覺欄位：全部覆寫
+  const visualKeys = [
+    'layout','cardBg','cardWidth','cardRadius','primary','primaryFg',
+    'pageBgType','pageBgColor','pageBgFrom','pageBgTo','pageBgImage',
+    'inputStyle','cardTone','inputDark','inputBg','inputFg','inputBorder',
+    'mascotOnDark','mascotColor','fontStack','cardBackdrop','cardBorder'
+  ];
+  visualKeys.forEach(k => {
+    if(p[k] !== undefined) lc[k] = p[k];
+    else delete lc[k]; // preset 沒設 → 清掉殘留值（避免上一個 preset 漏出來）
+  });
+  lc.preset = presetKey;
+}
+
+// 取出 gradient 字串裡的第一個顏色（給 tab indicator 等 fallback 用）
+function extractFirstColor(s){
+  if(!s || typeof s !== 'string') return null;
+  // 抓 #hex / rgb()/ rgba()/ hsl()/ 已知顏色名（簡易）
+  const m = s.match(/#[0-9a-f]{3,8}\b|rgba?\([^)]+\)|hsla?\([^)]+\)/i);
+  return m ? m[0] : null;
+}
+
 // 把使用者在 UI 編輯器設定的 login 客製 (lc) 轉成 CSS 變數注入 shell
 function applyLoginCustomStyle(shell, lc){
   if(!shell || !lc) return;
   const s = shell.style;
   if(lc.cardBg)        s.setProperty('--lc-card-bg', lc.cardBg);
-  if(lc.primary)       s.setProperty('--lc-primary', lc.primary);
+  if(lc.primary){
+    // primary 可能是 css color 或 linear-gradient(...)
+    const primStr = String(lc.primary);
+    const isGradient = /gradient\s*\(/i.test(primStr);
+    if(isGradient){
+      s.setProperty('--lc-primary-bg', primStr);
+      // tab indicator / 連結色 fallback：取漸層第一個顏色
+      const firstC = extractFirstColor(primStr) || '#22c55e';
+      s.setProperty('--lc-primary', firstC);
+    } else {
+      s.setProperty('--lc-primary', primStr);
+      s.setProperty('--lc-primary-bg', primStr);
+    }
+  }
+  if(lc.primaryFg)     s.setProperty('--lc-primary-fg', lc.primaryFg);
   if(lc.mascotColor)   s.setProperty('--lc-mascot-color', lc.mascotColor);
+  if(lc.cardBorder)    s.setProperty('--lc-card-border', lc.cardBorder);
+  if(lc.cardBackdrop)  s.setProperty('--lc-card-backdrop', lc.cardBackdrop);
+  if(lc.fontStack)     s.setProperty('--lc-font-stack', lc.fontStack);
+  if(lc.inputBg)       s.setProperty('--lc-input-bg', lc.inputBg);
+  if(lc.inputFg)       s.setProperty('--lc-input-fg', lc.inputFg);
+  if(lc.inputBorder)   s.setProperty('--lc-input-border', lc.inputBorder);
   // 頁面背景：solid / gradient / image
   if(lc.pageBgType === 'solid' && lc.pageBgColor){
     s.setProperty('--lc-page-bg', lc.pageBgColor);
@@ -5298,12 +5559,17 @@ function applyLoginCustomStyle(shell, lc){
     s.setProperty('--lc-page-bg', "url('" + String(lc.pageBgImage).replace(/'/g,"\\'") + "') center/cover no-repeat");
   }
   // 輸入框圓角樣式
-  if(lc.inputStyle === 'square')      s.setProperty('--lc-input-radius', '4px');
-  else if(lc.inputStyle === 'normal') s.setProperty('--lc-input-radius', '8px');
-  else if(lc.inputStyle === 'pill')   s.setProperty('--lc-input-radius', '24px');
+  if(lc.inputStyle === 'square')        s.setProperty('--lc-input-radius', '4px');
+  else if(lc.inputStyle === 'normal')   s.setProperty('--lc-input-radius', '8px');
+  else if(lc.inputStyle === 'rounded')  s.setProperty('--lc-input-radius', '12px');
+  else if(lc.inputStyle === 'pill')     s.setProperty('--lc-input-radius', '24px');
   // 卡片寬度 / 圓角
   if(lc.cardWidth)  s.setProperty('--lc-card-width', String(lc.cardWidth) + 'px');
   if(lc.cardRadius != null) s.setProperty('--lc-card-radius', String(lc.cardRadius) + 'px');
+  // data 屬性：給 CSS 選擇器用
+  shell.setAttribute('data-login-layout', lc.layout || 'centered');
+  shell.setAttribute('data-login-card-tone', lc.cardTone || 'dark');
+  shell.setAttribute('data-login-input-dark', lc.inputDark ? 'true' : 'false');
 }
 
 function renderLogin(root){
@@ -5319,18 +5585,44 @@ function renderLogin(root){
   const heroTitle = lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統';
   const heroSub = lc.subtitle || '極簡校園管理工具';
 
+  // ─── Split 版型：左 hero 區（>=900px 才顯示，CSS 控制） ───
+  if(lc.layout === 'split'){
+    const hero = el('div', { class:'login-hero-pane' });
+    const heroLogo = el('div', { class:'hero-logo' });
+    if(lc.logoImage){
+      heroLogo.textContent = lc.logoEmoji || '🎓';
+      (async ()=>{
+        try {
+          const url = await attachGetUrl(lc.logoImage);
+          if(url){
+            heroLogo.innerHTML = '';
+            heroLogo.appendChild(el('img', { src:url, style:{width:'100%',height:'100%',objectFit:'cover',borderRadius:'inherit'} }));
+          }
+        } catch(e){_swallow('auto',e)}
+      })();
+    } else {
+      heroLogo.textContent = lc.logoEmoji || '🎓';
+    }
+    hero.appendChild(heroLogo);
+    hero.appendChild(el('div', { class:'hero-title' }, heroTitle));
+    hero.appendChild(el('div', { class:'hero-sub' }, heroSub));
+    shell.appendChild(hero);
+  }
+
   // ─── 居中卡片 ───
   const card = el('div', { class:'login-spotify-card' });
 
   // ── 頂部：吉祥物 + Logo + 標題 ──
   const top = el('div', { class:'lsc-top' });
 
-  // 吉祥物 (60×60, 暗色卡片用亮 stroke)
+  // 吉祥物 (60×60, 暗色卡片用亮 stroke; mascotOnDark 來自 preset)
   if(lc.showMascot !== false){
     const mascotWrap = el('div', { class:'lsc-mascot' });
+    const mascotOnDark = (lc.mascotOnDark !== undefined) ? !!lc.mascotOnDark
+      : ((lc.cardTone || 'dark') === 'dark'); // 沒設 → 依卡片色調
     mascotWrap.appendChild(buildMascotSVG({
       color: lc.mascotColor || '#f4a76a',
-      onDark: true
+      onDark: mascotOnDark
     }));
     top.appendChild(mascotWrap);
   }
@@ -20491,6 +20783,93 @@ function renderLoginEditor(content){
   content.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
     '客製化登入畫面的標題、Logo、身分選擇按鈕與提示。改完設定後，登出即可看到效果。'));
 
+  // ─── 0) 風格預設（7 個一鍵切換） ───
+  const cardPreset = el('div', { class:'card', style:{marginBottom:'12px',background:'linear-gradient(135deg,rgba(99,102,241,.08),rgba(168,85,247,.08))',borderColor:'rgba(99,102,241,.25)'} });
+  cardPreset.appendChild(el('h3', { style:{marginTop:'0'} }, '✨ 風格預設（一鍵套用大廠設計）'));
+  cardPreset.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '選一個預設風格立即套用所有外觀設定（背景、配色、字型、版型）。下方的細項仍可微調覆寫。'));
+
+  const presetRow = el('div', { class:'flex', style:{gap:'10px',alignItems:'center',flexWrap:'wrap'} });
+  presetRow.appendChild(el('label', { class:'small', style:{fontWeight:'600',minWidth:'70px'} }, '預設風格'));
+  const presetSel = el('select', { class:'input', style:{flex:'1',minWidth:'200px',maxWidth:'320px'} });
+  // 「自訂」選項
+  presetSel.appendChild(el('option', { value:'_custom' }, '── 自訂（不套預設）──'));
+  Object.keys(LOGIN_PRESETS).forEach(key => {
+    const opt = el('option', { value:key }, LOGIN_PRESETS[key].name);
+    presetSel.appendChild(opt);
+  });
+  // 目前選擇：lc.preset（沒設 → 預設 spotify）
+  const curPreset = lc.preset || 'spotify';
+  presetSel.value = (LOGIN_PRESETS[curPreset] ? curPreset : '_custom');
+
+  presetSel.addEventListener('change', async ()=> {
+    const v = presetSel.value;
+    if(v === '_custom'){
+      delete lc.preset;
+      saveUiCustom();
+      toast('已切換為自訂模式，目前設定保留','info');
+      return;
+    }
+    const p = LOGIN_PRESETS[v];
+    if(!p) return;
+    const ok = await confirmDlg(
+      '套用「' + p.name + '」風格？\n\n會覆寫目前的卡片背景 / 配色 / 字型 / 輸入框 / 版型等外觀設定，\n但標題、Logo、歡迎訊息、Tab 標籤等文字內容不變。',
+      { title:'套用風格預設' }
+    );
+    if(!ok){
+      // 還原 select 顯示
+      presetSel.value = (LOGIN_PRESETS[lc.preset] ? lc.preset : '_custom');
+      return;
+    }
+    applyLoginPreset(lc, v);
+    saveUiCustom();
+    toast('已套用「' + p.name + '」風格','success');
+    rerender();
+  });
+  presetRow.appendChild(presetSel);
+  cardPreset.appendChild(presetRow);
+
+  // 快速套用按鈕陣（縮圖風格）
+  const quickRow = el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',marginTop:'12px'} });
+  Object.keys(LOGIN_PRESETS).forEach(key => {
+    const p = LOGIN_PRESETS[key];
+    const isActive = (lc.preset || 'spotify') === key;
+    // swatch: 顯示卡片 + 主色
+    const sw = el('button', {
+      type:'button',
+      class: 'btn btn-sm' + (isActive ? ' btn-primary' : ''),
+      style:{
+        padding:'4px 10px', fontSize:'12px',
+        border: isActive ? '2px solid var(--primary)' : '1px solid var(--border)',
+        background: isActive ? '' : 'var(--surface-2)'
+      },
+      onclick: async ()=> {
+        if((lc.preset || 'spotify') === key){
+          toast('已是「' + p.name + '」風格','info');
+          return;
+        }
+        const ok = await confirmDlg('套用「' + p.name + '」風格？會覆寫所有外觀設定。');
+        if(!ok) return;
+        applyLoginPreset(lc, key);
+        saveUiCustom();
+        toast('已套用「' + p.name + '」風格','success');
+        rerender();
+      }
+    });
+    // 加色點
+    const firstColor = extractFirstColor(String(p.primary)) || p.primary;
+    sw.appendChild(el('span', { style:{
+      display:'inline-block', width:'10px', height:'10px', borderRadius:'50%',
+      background: firstColor, marginRight:'6px', verticalAlign:'middle',
+      border:'1px solid rgba(0,0,0,.15)'
+    } }));
+    sw.appendChild(el('span', null, p.name));
+    quickRow.appendChild(sw);
+  });
+  cardPreset.appendChild(quickRow);
+
+  content.appendChild(cardPreset);
+
   // a) 標題與 Logo
   const card1 = el('div', { class:'card' });
   card1.appendChild(el('h3', null, '🏷️ 標題與 Logo'));
@@ -20714,14 +21093,24 @@ function renderLoginEditor(content){
     const mr = (lc.cardRadius != null ? lc.cardRadius : 12);
     const cBg = lc.cardBg || '#2a2d33';
     const prim = lc.primary || '#22c55e';
+    const primFg = lc.primaryFg || '#fff';
+    const isLight = (lc.cardTone === 'light');
+    const isInpDark = !!lc.inputDark;
+    const inpBg = isInpDark ? (lc.inputBg || '#1e1f22') : '#fff';
+    const inpBorder = lc.cardBorder || 'none';
     const irad = (lc.inputStyle === 'square') ? '3px'
-              : (lc.inputStyle === 'normal') ? '6px' : '16px';
+              : (lc.inputStyle === 'normal') ? '6px'
+              : (lc.inputStyle === 'rounded') ? '9px'
+              : '16px';
     const mini = el('div', { style:{
       width: mw + 'px', maxWidth:'100%',
       background: cBg, borderRadius: mr + 'px',
       padding:'14px 12px', boxShadow:'0 8px 24px rgba(0,0,0,.3)',
-      color:'#fff', display:'flex', flexDirection:'column', gap:'8px',
-      textAlign:'center', boxSizing:'border-box'
+      color: isLight ? '#222' : '#fff',
+      display:'flex', flexDirection:'column', gap:'8px',
+      textAlign:'center', boxSizing:'border-box',
+      border: inpBorder,
+      backdropFilter: lc.cardBackdrop || 'none'
     } });
     if(lc.showMascot !== false){
       mini.appendChild(el('div', { style:{fontSize:'28px',lineHeight:'1'} }, '🐻'));
@@ -20730,14 +21119,16 @@ function renderLoginEditor(content){
       lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統'));
     // 假 input
     mini.appendChild(el('div', { style:{
-      height:'24px', background:'#fff', borderRadius: irad, margin:'4px 0'
+      height:'24px', background: inpBg, borderRadius: irad, margin:'4px 0',
+      border: isLight ? '1px solid rgba(0,0,0,.1)' : (isInpDark ? '1px solid #2f3336' : 'none')
     } }));
     mini.appendChild(el('div', { style:{
-      height:'24px', background:'#fff', borderRadius: irad
+      height:'24px', background: inpBg, borderRadius: irad,
+      border: isLight ? '1px solid rgba(0,0,0,.1)' : (isInpDark ? '1px solid #2f3336' : 'none')
     } }));
-    // 主按鈕
+    // 主按鈕（支援漸層）
     mini.appendChild(el('div', { style:{
-      height:'26px', background: prim, color:'#fff',
+      height:'26px', background: prim, color: primFg,
       borderRadius:'14px', fontWeight:'700', fontSize:'11px',
       display:'flex', alignItems:'center', justifyContent:'center',
       marginTop:'4px'
@@ -20745,10 +21136,23 @@ function renderLoginEditor(content){
     miniPreview.appendChild(mini);
   }
 
+  // 把可能是 rgba()/gradient 的值轉成 <input type=color> 可接受的 7 碼 hex（fallback）
+  const _toHex7 = (v, fallback) => {
+    if(!v || typeof v !== 'string') return fallback;
+    const s = v.trim();
+    if(/^#[0-9a-f]{6}$/i.test(s)) return s;
+    if(/^#[0-9a-f]{3}$/i.test(s)){ // #abc → #aabbcc
+      return '#' + s.slice(1).split('').map(c => c+c).join('').toLowerCase();
+    }
+    // gradient / rgba / 名稱 → 取得第一個 # 顏色 fallback
+    const m = s.match(/#[0-9a-f]{6}\b/i);
+    return m ? m[0] : fallback;
+  };
+
   // ── 控制 1：卡片背景色 ──
   const fld_cBg = el('div', { class:'field' });
   fld_cBg.appendChild(el('label', { class:'label' }, '1. 卡片背景色'));
-  const cBgInp = el('input', { type:'color', value: lc.cardBg || '#2a2d33',
+  const cBgInp = el('input', { type:'color', value: _toHex7(lc.cardBg, '#2a2d33'),
     style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
   cBgInp.addEventListener('input', ()=> {
     lc.cardBg = cBgInp.value;
@@ -20761,7 +21165,7 @@ function renderLoginEditor(content){
   // ── 控制 2：主色 (按鈕色) ──
   const fld_prim = el('div', { class:'field' });
   fld_prim.appendChild(el('label', { class:'label' }, '2. 主色 (按鈕 / Tab 指示線)'));
-  const primInp = el('input', { type:'color', value: lc.primary || '#22c55e',
+  const primInp = el('input', { type:'color', value: _toHex7(lc.primary, '#22c55e'),
     style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
   primInp.addEventListener('input', ()=> {
     lc.primary = primInp.value;
@@ -20837,7 +21241,7 @@ function renderLoginEditor(content){
   fld_inp.appendChild(el('label', { class:'label' }, '4. 輸入框樣式'));
   const inpStyleRow = el('div', { class:'flex', style:{gap:'12px',flexWrap:'wrap'} });
   const cur_inp = lc.inputStyle || 'pill';
-  [['pill','圓角 Pill'],['normal','一般圓角'],['square','直角']].forEach(([v,lblTxt]) => {
+  [['pill','圓角 Pill (24px)'],['rounded','圓角中 (12px)'],['normal','一般圓角 (8px)'],['square','直角 (4px)']].forEach(([v,lblTxt]) => {
     const r = el('input', { type:'radio', name:'lc_inp_' + Date.now() });
     r.checked = (cur_inp === v);
     r.addEventListener('change', ()=> {
@@ -20930,13 +21334,17 @@ function renderLoginEditor(content){
   // ── 重置預設 ──
   cardSpot.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'10px'},
     onclick: async ()=> {
-      const ok = await confirmDlg('要把 Spotify 風格的 11 項設定重置為預設值嗎？');
+      const ok = await confirmDlg('要把所有外觀設定重置為 Spotify 預設嗎？');
       if(!ok) return;
-      ['cardBg','primary','pageBgType','pageBgColor','pageBgFrom','pageBgTo','pageBgImage',
-        'inputStyle','cardWidth','cardRadius','showMascot','mascotColor'].forEach(k => { delete lc[k]; });
+      ['cardBg','primary','primaryFg','pageBgType','pageBgColor','pageBgFrom','pageBgTo','pageBgImage',
+        'inputStyle','cardWidth','cardRadius','showMascot','mascotColor',
+        'layout','cardTone','inputDark','inputBg','inputFg','inputBorder',
+        'mascotOnDark','fontStack','cardBackdrop','cardBorder','preset'].forEach(k => { delete lc[k]; });
+      // 回到 Spotify 預設
+      applyLoginPreset(lc, 'spotify');
       saveUiCustom();
       rerender();
-    } }, '↺ 重置 Spotify 風格設定'));
+    } }, '↺ 重置為 Spotify 預設'));
 
   refreshMiniPreview();
   content.appendChild(cardSpot);
