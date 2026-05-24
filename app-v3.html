@@ -1385,6 +1385,20 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   width:60px; height:60px;
   filter:drop-shadow(0 4px 10px rgba(0,0,0,.4));
 }
+/* 11 個 Logo 樣式選擇器：品牌 LOGO / emoji / 自訂圖片 包裝 */
+.login-logo-brand,
+.login-logo-emoji,
+.login-logo-image{
+  width:60px; height:60px;
+  display:flex; align-items:center; justify-content:center;
+  line-height:1;
+}
+.login-logo-brand svg{ width:100%; height:100%; display:block; }
+.login-spotify-card .lsc-mascot .login-logo-brand,
+.login-spotify-card .lsc-mascot .login-logo-emoji,
+.login-spotify-card .lsc-mascot .login-logo-image{
+  filter:drop-shadow(0 4px 10px rgba(0,0,0,.4));
+}
 .login-spotify-card .lsc-logo-row{
   display:flex; align-items:center; justify-content:center; gap:8px;
   margin-bottom:2px;
@@ -5495,6 +5509,154 @@ const LOGIN_PRESETS = {
   }
 };
 
+// ════════════════════════════════════════════════════════════
+// LOGIN LOGO 樣式選擇器 — 11 個 logo 選項
+// ────────────────────────────────────────────────────────────
+// 互動小熊 / 7 個品牌 LOGO (Spotify/IG/Apple/Google/Notion/Discord/X)
+// / 自訂 emoji / 自訂上傳圖片
+// 純手寫 SVG，沒有外部資源 / base64。品牌 LOGO 為近似形狀僅供示範。
+// ────────────────────────────────────────────────────────────
+const _BRAND_LOGOS = {
+  // Spotify：綠色圓 + 3 條向右上凸的白色弧線
+  spotify:
+    '<svg viewBox="0 0 168 168" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      '<circle cx="84" cy="84" r="84" fill="#1db954"/>' +
+      // 三條由短到長、由下到上的弧線（聲波）
+      '<path d="M40 116 Q84 96 130 118" stroke="#fff" stroke-width="10" fill="none" stroke-linecap="round"/>' +
+      '<path d="M36 92 Q84 68 134 96"   stroke="#fff" stroke-width="12" fill="none" stroke-linecap="round"/>' +
+      '<path d="M32 66 Q84 38 138 72"   stroke="#fff" stroke-width="14" fill="none" stroke-linecap="round"/>' +
+    '</svg>',
+  // Instagram：粉紫漸層圓角方框 + 同心圓鏡頭 + 右上小點
+  instagram:
+    '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      '<defs>' +
+        '<radialGradient id="igGrad" cx="30%" cy="110%" r="130%">' +
+          '<stop offset="0%" stop-color="#fdf497"/>' +
+          '<stop offset="45%" stop-color="#fd5949"/>' +
+          '<stop offset="60%" stop-color="#d6249f"/>' +
+          '<stop offset="90%" stop-color="#285aeb"/>' +
+        '</radialGradient>' +
+      '</defs>' +
+      '<rect x="10" y="10" width="180" height="180" rx="44" ry="44" fill="url(#igGrad)"/>' +
+      '<circle cx="100" cy="100" r="50" fill="none" stroke="#fff" stroke-width="14"/>' +
+      '<circle cx="100" cy="100" r="22" fill="none" stroke="#fff" stroke-width="14"/>' +
+      '<circle cx="148" cy="52" r="10" fill="#fff"/>' +
+    '</svg>',
+  // Apple：黑色蘋果輪廓 + 葉子（近似簡化路徑）
+  apple:
+    '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      // 葉子
+      '<path d="M58 18 C 60 26 54 32 48 30 C 48 22 52 18 58 18 Z" fill="#1d1d1f"/>' +
+      // 蘋果本體（咬一口）— 由兩個半瓣組成，右上凹陷模擬咬口
+      '<path d="M50 30 ' +
+        'C 38 28 24 36 22 54 ' +
+        'C 20 70 30 88 42 88 ' +
+        'C 46 88 48 86 50 86 ' +
+        'C 52 86 54 88 58 88 ' +
+        'C 70 88 80 70 78 54 ' +
+        'C 76 40 66 32 56 32 ' +
+        'C 54 32 52 31 50 30 Z" fill="#1d1d1f"/>' +
+      // 咬口（白色弧切凹）
+      '<path d="M78 40 C 74 34 68 32 64 36 C 68 42 74 44 78 40 Z" fill="#fff"/>' +
+    '</svg>',
+  // Google：4 色 G 字母（藍/紅/黃/綠四段弧 + 橫線）
+  google:
+    '<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      // 藍：右上 → 右下橫線
+      '<path fill="#4285f4" d="M44 24 c0 -1.4 -.1 -2.7 -.4 -4 H24 v8 h11.3 c-.5 2.6 -2 4.8 -4.3 6.3 v5.3 h7 C42 35.8 44 30.4 44 24 z"/>' +
+      // 綠：左下半
+      '<path fill="#34a853" d="M24 44 c5.8 0 10.6 -1.9 14.1 -5.2 l-7 -5.3 c-1.9 1.3 -4.4 2.1 -7.1 2.1 -5.5 0 -10.1 -3.7 -11.8 -8.6 H4.9 v5.4 C8.5 39.6 15.7 44 24 44 z"/>' +
+      // 黃：左
+      '<path fill="#fbbc04" d="M12.2 27 c-.4 -1.3 -.7 -2.6 -.7 -3.9 s.2 -2.7 .7 -3.9 v-5.4 H4.9 C3.7 16.4 3 20.1 3 23.1 s.7 6.7 1.9 9.4 L12.2 27 z"/>' +
+      // 紅：左上
+      '<path fill="#ea4335" d="M24 11.4 c3.1 0 5.9 1.1 8.1 3.2 l6.1 -6.1 C34.5 5 29.7 3 24 3 15.7 3 8.5 7.4 4.9 13.8 l7.3 5.4 C13.9 14.4 18.5 11.4 24 11.4 z"/>' +
+    '</svg>',
+  // Notion：白底圓角方框 + 黑色 N 字幾何（左豎、右豎、對角線）
+  notion:
+    '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      '<rect x="6" y="6" width="88" height="88" rx="10" ry="10" fill="#fff" stroke="#000" stroke-width="4"/>' +
+      // N 字：左豎 + 對角 + 右豎
+      '<path d="M28 24 L28 76" stroke="#000" stroke-width="8" stroke-linecap="square" fill="none"/>' +
+      '<path d="M72 24 L72 76" stroke="#000" stroke-width="8" stroke-linecap="square" fill="none"/>' +
+      '<path d="M30 26 L70 74" stroke="#000" stroke-width="8" stroke-linecap="square" fill="none"/>' +
+    '</svg>',
+  // Discord：紫色對話框 + 兩個白色橢圓眼睛（簡化版小怪）
+  discord:
+    '<svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      // 圓角底
+      '<rect x="4" y="4" width="72" height="72" rx="18" ry="18" fill="#5865f2"/>' +
+      // 身體輪廓（簡化吉祥物頭）
+      '<path d="M22 26 ' +
+        'C 22 22 26 20 30 20 ' +
+        'L 50 20 ' +
+        'C 54 20 58 22 58 26 ' +
+        'L 58 50 ' +
+        'C 58 56 54 60 48 60 ' +
+        'L 46 60 L 42 64 L 38 60 L 32 60 ' +
+        'C 26 60 22 56 22 50 Z" fill="#fff"/>' +
+      // 兩個橢圓眼睛
+      '<ellipse cx="33" cy="40" rx="3.5" ry="5" fill="#5865f2"/>' +
+      '<ellipse cx="47" cy="40" rx="3.5" ry="5" fill="#5865f2"/>' +
+    '</svg>',
+  // X (Twitter)：黑色圓角方塊 + 兩條白色交叉粗線
+  x:
+    '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      '<rect x="0" y="0" width="24" height="24" rx="4" ry="4" fill="#000"/>' +
+      '<path d="M6 5 L18 19 M18 5 L6 19" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/>' +
+    '</svg>'
+};
+
+function buildBrandLogo(brand){
+  const wrap = document.createElement('div');
+  wrap.className = 'login-logo-brand';
+  wrap.dataset.brand = brand;
+  wrap.innerHTML = _BRAND_LOGOS[brand] || _BRAND_LOGOS.notion;
+  return wrap;
+}
+function buildEmojiLogo(emoji){
+  const wrap = document.createElement('div');
+  wrap.className = 'login-logo-emoji';
+  wrap.style.fontSize = '60px';
+  wrap.style.lineHeight = '1';
+  wrap.textContent = (typeof emoji === 'string' && emoji.trim()) ? emoji.trim() : '🎓';
+  return wrap;
+}
+function buildImageLogo(url){
+  const wrap = document.createElement('div');
+  wrap.className = 'login-logo-image';
+  if(url){
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.style.cssText = 'width:60px;height:60px;object-fit:contain;border-radius:8px;';
+    img.onerror = () => {
+      wrap.innerHTML = '';
+      wrap.style.fontSize = '60px';
+      wrap.textContent = '🎓';
+    };
+    wrap.appendChild(img);
+  } else {
+    wrap.style.fontSize = '60px';
+    wrap.textContent = '🎓';
+  }
+  return wrap;
+}
+
+// 11 個 logo 樣式對映：name 用於 UI 下拉；build(opts) 回 wrapper 節點；interactive=true 代表需要 bindMascotInteractions
+const LOGIN_LOGOS = {
+  bear:      { name:'🐻 互動小熊（預設）', build: (opts)=> buildMascotSVG(opts), interactive:true },
+  school:    { name:'🎓 學校 emoji',     build: ()=> buildEmojiLogo('🎓') },
+  spotify:   { name:'🎵 Spotify',        build: ()=> buildBrandLogo('spotify') },
+  instagram: { name:'📷 Instagram',      build: ()=> buildBrandLogo('instagram') },
+  apple:     { name:'🍎 Apple',          build: ()=> buildBrandLogo('apple') },
+  google:    { name:'🔍 Google',         build: ()=> buildBrandLogo('google') },
+  notion:    { name:'📝 Notion',         build: ()=> buildBrandLogo('notion') },
+  discord:   { name:'🎮 Discord',        build: ()=> buildBrandLogo('discord') },
+  x:         { name:'🐦 X (Twitter)',    build: ()=> buildBrandLogo('x') },
+  emoji:     { name:'😊 自訂 emoji',     build: (opts)=> buildEmojiLogo(opts && opts.emoji) },
+  image:     { name:'🖼 自訂上傳圖片',   build: (opts)=> buildImageLogo(opts && opts.url) }
+};
+
 // 把 preset 內容套到 lc（保留使用者已輸入的標題/Logo/welcome 等內容欄位）
 function applyLoginPreset(lc, presetKey){
   const p = LOGIN_PRESETS[presetKey];
@@ -5615,16 +5777,40 @@ function renderLogin(root){
   // ── 頂部：吉祥物 + Logo + 標題 ──
   const top = el('div', { class:'lsc-top' });
 
-  // 吉祥物 (60×60, 暗色卡片用亮 stroke; mascotOnDark 來自 preset)
+  // 頂部 Logo (60×60) — 11 種樣式可選：互動小熊 / 7 個品牌 / 自訂 emoji / 自訂圖片
   if(lc.showMascot !== false){
     const mascotWrap = el('div', { class:'lsc-mascot' });
     const mascotOnDark = (lc.mascotOnDark !== undefined) ? !!lc.mascotOnDark
       : ((lc.cardTone || 'dark') === 'dark'); // 沒設 → 依卡片色調
-    mascotWrap.appendChild(buildMascotSVG({
-      color: lc.mascotColor || '#f4a76a',
-      onDark: mascotOnDark
-    }));
+    const logoStyle = lc.logoStyle || 'bear';
+    const logoSpec = (typeof LOGIN_LOGOS !== 'undefined' && LOGIN_LOGOS[logoStyle])
+      ? LOGIN_LOGOS[logoStyle] : { build: (o)=> buildMascotSVG(o), interactive:true };
+    let logoNode;
+    try {
+      logoNode = logoSpec.build({
+        color: lc.mascotColor || '#f4a76a',
+        onDark: mascotOnDark,
+        emoji: lc.logoEmoji,
+        url: lc.logoImage  // 注意：自訂圖片 logo 直接吃 logoImage（已是 URL 或 attach id）
+      });
+    } catch(e){
+      _swallow('logo-build', e);
+      logoNode = buildMascotSVG({ color: lc.mascotColor || '#f4a76a', onDark: mascotOnDark });
+    }
+    if(logoNode) mascotWrap.appendChild(logoNode);
     top.appendChild(mascotWrap);
+    // 註：若是 image 樣式且 lc.logoImage 是 attach id（非 URL），嘗試解析為 URL
+    if(logoStyle === 'image' && lc.logoImage && logoNode){
+      (async ()=>{
+        try {
+          const url = await attachGetUrl(lc.logoImage);
+          if(url){
+            const img = logoNode.querySelector('img');
+            if(img) img.src = url;
+          }
+        } catch(e){_swallow('logo-img-url',e)}
+      })();
+    }
   }
 
   // Logo + 系統名 (橫排)
@@ -21288,7 +21474,103 @@ function renderLoginEditor(content){
   fld_r.appendChild(rRow);
   cardSpot.appendChild(fld_r);
 
-  // ── 控制 7：吉祥物顯示 (是/否) ──
+  // ── 控制 6.5：Logo 樣式（11 選 1） ──
+  // 預設 'bear' 互動小熊；可選 7 個品牌 LOGO / 自訂 emoji / 自訂圖片
+  const fld_logoStyle = el('div', { class:'field' });
+  fld_logoStyle.appendChild(el('label', { class:'label' }, '7. Logo 樣式（卡片頂部 60×60）'));
+  const logoStyleSel = el('select', { class:'input', style:{maxWidth:'320px'} });
+  const _curLogoStyle = lc.logoStyle || 'bear';
+  Object.keys(LOGIN_LOGOS).forEach(k => {
+    const o = el('option', { value:k }, LOGIN_LOGOS[k].name);
+    if(k === _curLogoStyle) o.selected = true;
+    logoStyleSel.appendChild(o);
+  });
+  logoStyleSel.addEventListener('change', ()=> {
+    lc.logoStyle = logoStyleSel.value;
+    saveUiCustom();
+    rerender(); // 重繪以顯示對應的子控制
+  });
+  fld_logoStyle.appendChild(logoStyleSel);
+  cardSpot.appendChild(fld_logoStyle);
+
+  // 條件子控制：依 logoStyle 顯示對應設定
+  if(_curLogoStyle === 'bear'){
+    // 互動小熊：顯示主色
+    const fld_mColor = el('div', { class:'field' });
+    fld_mColor.appendChild(el('label', { class:'label small' }, '└ 小熊主色'));
+    const mColorInp = el('input', { type:'color', value: lc.mascotColor || '#f4a76a',
+      style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
+    mColorInp.addEventListener('input', ()=> { lc.mascotColor = mColorInp.value; saveUiCustom(); });
+    fld_mColor.appendChild(mColorInp);
+    fld_mColor.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '預設 #f4a76a (米黃熊)'));
+    cardSpot.appendChild(fld_mColor);
+  } else if(_curLogoStyle === 'emoji'){
+    // 自訂 emoji：輸入框
+    const fld_em = el('div', { class:'field' });
+    fld_em.appendChild(el('label', { class:'label small' }, '└ 自訂 emoji'));
+    const emInp = el('input', { class:'input', placeholder:'🎓', value: lc.logoEmoji || '',
+      style:{maxWidth:'120px',fontSize:'22px',textAlign:'center'} });
+    emInp.addEventListener('change', ()=> {
+      lc.logoEmoji = emInp.value.trim();
+      saveUiCustom();
+    });
+    fld_em.appendChild(emInp);
+    fld_em.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '建議單一 emoji，預設 🎓'));
+    cardSpot.appendChild(fld_em);
+  } else if(_curLogoStyle === 'image'){
+    // 自訂圖片：上傳或網址（共用既有 lc.logoImage）
+    const fld_im = el('div', { class:'field' });
+    fld_im.appendChild(el('label', { class:'label small' }, '└ 自訂圖片（上傳 或 直接貼網址）'));
+    const imRow = el('div', { class:'flex', style:{gap:'8px',alignItems:'center',flexWrap:'wrap'} });
+    // URL 輸入
+    const urlInp = el('input', { class:'input', placeholder:'https://...（也可下方上傳）',
+      value: (typeof lc.logoImage === 'string' && /^https?:\/\//i.test(lc.logoImage)) ? lc.logoImage : '',
+      style:{flex:'1',minWidth:'180px'} });
+    urlInp.addEventListener('change', ()=> {
+      const v = urlInp.value.trim();
+      if(v){ lc.logoImage = v; saveUiCustom(); toast('Logo 圖片已更新','success'); }
+    });
+    imRow.appendChild(urlInp);
+    // 檔案上傳
+    const fileInp = el('input', { type:'file', accept:'image/*' });
+    fileInp.addEventListener('change', async e => {
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      if(f.size > 1024*1024){ toast('圖片不能超過 1 MB','danger'); fileInp.value=''; return; }
+      try {
+        // 若舊值是 attach id（非 URL）→ 刪舊
+        if(lc.logoImage && !/^https?:\/\//i.test(String(lc.logoImage))){
+          try { await attachDelete(lc.logoImage); } catch(_){_swallow('auto',_)}
+        }
+        lc.logoImage = await attachUpload(f);
+        saveUiCustom();
+        toast('Logo 圖片已上傳','success');
+        rerender();
+      } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
+    });
+    imRow.appendChild(fileInp);
+    fld_im.appendChild(imRow);
+    if(lc.logoImage){
+      fld_im.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'},
+        onclick: async ()=> {
+          if(lc.logoImage && !/^https?:\/\//i.test(String(lc.logoImage))){
+            try { await attachDelete(lc.logoImage); } catch(_){_swallow('auto',_)}
+          }
+          lc.logoImage = null;
+          saveUiCustom();
+          rerender();
+        }}, '🗑 移除自訂圖片'));
+    }
+    cardSpot.appendChild(fld_im);
+  } else {
+    // 品牌 LOGO：顯示提示
+    const brandName = (LOGIN_LOGOS[_curLogoStyle] && LOGIN_LOGOS[_curLogoStyle].name) || _curLogoStyle;
+    cardSpot.appendChild(el('div', { class:'small muted',
+      style:{padding:'8px 10px',background:'var(--surface-2)',borderRadius:'6px',marginTop:'4px'} },
+      '將顯示 ' + brandName + ' 品牌 LOGO（純手寫 SVG 近似形狀，僅供示範）'));
+  }
+
+  // ── 控制 8：吉祥物顯示 (是/否) ──
   const fld_mShow = el('div', { class:'field' });
   const mShowChk = el('input', { type:'checkbox' });
   mShowChk.checked = (lc.showMascot !== false);
@@ -21297,21 +21579,8 @@ function renderLoginEditor(content){
     saveUiCustom(); refreshMiniPreview();
   });
   fld_mShow.appendChild(el('label', { class:'small flex', style:{gap:'8px',alignItems:'center',cursor:'pointer'} },
-    mShowChk, el('span', null, '7. 顯示吉祥物（卡片頂部 60×60 互動小熊）')));
+    mShowChk, el('span', null, '8. 顯示頂部 Logo（取消勾選會隱藏整個 60×60 圖示）')));
   cardSpot.appendChild(fld_mShow);
-
-  // ── 控制 8：吉祥物顏色 ──
-  const fld_mColor = el('div', { class:'field' });
-  fld_mColor.appendChild(el('label', { class:'label' }, '8. 吉祥物主色'));
-  const mColorInp = el('input', { type:'color', value: lc.mascotColor || '#f4a76a',
-    style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
-  mColorInp.addEventListener('input', ()=> {
-    lc.mascotColor = mColorInp.value;
-    saveUiCustom();
-  });
-  fld_mColor.appendChild(mColorInp);
-  fld_mColor.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '預設 #f4a76a (米黃熊)'));
-  cardSpot.appendChild(fld_mColor);
 
   // ── 控制 9~11：顯示開關 (showRegister / showForgot / showSwitchRoom) ──
   // 這幾個跟既有 hideXxx 共用；為了 UX 採「顯示」正向開關
@@ -21339,7 +21608,8 @@ function renderLoginEditor(content){
       ['cardBg','primary','primaryFg','pageBgType','pageBgColor','pageBgFrom','pageBgTo','pageBgImage',
         'inputStyle','cardWidth','cardRadius','showMascot','mascotColor',
         'layout','cardTone','inputDark','inputBg','inputFg','inputBorder',
-        'mascotOnDark','fontStack','cardBackdrop','cardBorder','preset'].forEach(k => { delete lc[k]; });
+        'mascotOnDark','fontStack','cardBackdrop','cardBorder','preset',
+        'logoStyle'].forEach(k => { delete lc[k]; });
       // 回到 Spotify 預設
       applyLoginPreset(lc, 'spotify');
       saveUiCustom();
