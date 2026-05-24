@@ -1299,30 +1299,7 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   content:''; flex:1; height:1px; background:var(--border);
 }
 
-.role-choice{
-  display:grid; grid-template-columns:1fr 1fr; gap:12px;
-}
-.role-choice-card{
-  padding:24px 12px; border:2px solid var(--border);
-  border-radius:var(--r-md); cursor:pointer; background:var(--surface);
-  transition:all .25s cubic-bezier(.34,1.56,.64,1);
-  text-align:center; user-select:none;
-}
-.role-choice-card:hover{
-  border-color:var(--primary); transform:translateY(-4px) scale(1.02);
-  box-shadow:var(--shadow-lg);
-}
-.role-choice-card:active{ transform:scale(.96); }
-.role-choice-card .rc-ico{
-  font-size:48px; line-height:1; margin-bottom:10px;
-  display:block;
-}
-.role-choice-card .rc-title{ font-weight:700; font-size:16px; margin-bottom:4px; }
-.role-choice-card .rc-sub{ font-size:11px; color:var(--text-muted); }
-@keyframes rc-pop{
-  0%{ transform:scale(1); } 50%{ transform:scale(1.06); } 100%{ transform:scale(1); }
-}
-.role-choice-card.tapped{ animation:rc-pop .35s ease; }
+/* (移除 .role-choice — Spotify 版用 tab 取代 role choose 卡片) */
 
 .login-stage{ animation:fadeStage .25s ease-out; }
 @keyframes fadeStage{
@@ -1361,147 +1338,241 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 .default-hint .dh-actions button:hover{ background:var(--surface-3); }
 
 /* ════════════════════════════════════════════════════════════
-   LOGIN V3 ▒▒ 分割布局 + 互動吉祥物（Instagram 風格）
+   LOGIN V4 — Spotify 風格：居中深色卡片 + 角色 Tabs + Pill 表單
+   ──────────────────────────────────────────────────────────────
+   CSS 變數（由 applyLoginCustomStyle() 注入到 .login-spotify-shell）：
+     --lc-card-bg / --lc-primary / --lc-page-bg
+     --lc-input-radius / --lc-card-radius / --lc-card-width
+     --lc-mascot-color
    ──────────────────────────────────────────────────────────── */
-/* 外殼：桌機左右分割、手機上下堆疊 */
-.login-v3-shell{
+.login-spotify-shell{
+  /* 預設值 — 若使用者未自訂 */
+  --lc-card-bg: #2a2d33;
+  --lc-primary: #22c55e;
+  --lc-page-bg: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  --lc-input-radius: 24px;
+  --lc-card-radius: 12px;
+  --lc-card-width: 360px;
+  --lc-mascot-color: #f4a76a;
+
   min-height:100vh; min-height:100dvh;
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  background:var(--bg);
+  background: var(--lc-page-bg);
+  display:flex; align-items:center; justify-content:center;
+  padding:24px 16px;
   overflow-x:hidden;
 }
-/* 左半：視覺區（品牌色漸層 + phone mockup + 飄浮裝飾） */
-.login-v3-visual{
-  position:relative; overflow:hidden;
-  background:linear-gradient(135deg, var(--primary) 0%, var(--accent, var(--primary-hover)) 100%);
+.login-spotify-card{
+  width: var(--lc-card-width);
+  max-width:100%;
+  background: var(--lc-card-bg);
+  border-radius: var(--lc-card-radius);
+  padding:28px 24px 22px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35), 0 4px 12px rgba(0,0,0,.15);
   color:#fff;
-  display:flex; flex-direction:column;
-  align-items:center; justify-content:center;
-  padding:40px 32px;
+  position:relative;
+  display:flex; flex-direction:column; gap:14px;
 }
-.login-v3-visual::before{
-  /* 大圓暈染裝飾 */
-  content:''; position:absolute;
-  width:520px; height:520px; border-radius:50%;
-  background:radial-gradient(circle, rgba(255,255,255,.18), transparent 60%);
-  top:-180px; left:-160px; pointer-events:none;
+.login-spotify-card .lsc-top{
+  text-align:center;
 }
-.login-v3-visual::after{
-  content:''; position:absolute;
-  width:420px; height:420px; border-radius:50%;
-  background:radial-gradient(circle, rgba(255,255,255,.12), transparent 60%);
-  bottom:-140px; right:-120px; pointer-events:none;
+.login-spotify-card .lsc-mascot{
+  display:flex; justify-content:center; margin-bottom:4px;
 }
-.login-v3-brand{
-  text-align:center; z-index:2; margin-bottom:24px;
+.login-spotify-card .lsc-mascot .mascot-wrap{
+  margin:0;
 }
-.login-v3-brand h1{
-  font-size:32px; font-weight:800; letter-spacing:-.03em;
-  margin:0 0 6px; color:#fff;
-  text-shadow:0 2px 12px rgba(0,0,0,.18);
+.login-spotify-card .lsc-mascot .mascot-svg{
+  width:60px; height:60px;
+  filter:drop-shadow(0 4px 10px rgba(0,0,0,.4));
 }
-.login-v3-brand .sub{
-  font-size:14px; opacity:.92; color:#fff;
-  letter-spacing:.02em;
+.login-spotify-card .lsc-logo-row{
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  margin-bottom:2px;
 }
-/* 手機 mockup 純 CSS 模擬 */
-.mockup-phone{
-  position:relative; z-index:2;
-  width:240px; height:480px;
-  border-radius:36px;
-  background:linear-gradient(160deg, #1a1f2e 0%, #2a3142 100%);
-  padding:10px;
-  box-shadow:
-    0 30px 60px rgba(0,0,0,.28),
-    0 10px 20px rgba(0,0,0,.18),
-    inset 0 0 0 2px rgba(255,255,255,.08);
-}
-.mockup-phone::before{
-  /* 瀏海 */
-  content:''; position:absolute; top:14px; left:50%;
-  transform:translateX(-50%);
-  width:110px; height:22px; border-radius:14px;
-  background:#0d0f15; z-index:3;
-}
-.mockup-phone::after{
-  /* 喇叭線 */
-  content:''; position:absolute; top:22px; left:50%;
-  transform:translateX(-50%);
-  width:40px; height:4px; border-radius:2px;
-  background:#222731; z-index:4;
-}
-.mockup-screen{
-  width:100%; height:100%; border-radius:28px;
-  background:linear-gradient(180deg, #fff 0%, #f3f5fb 100%);
-  color:#222;
-  padding:38px 16px 18px; box-sizing:border-box;
-  overflow:hidden; position:relative;
-  display:flex; flex-direction:column; gap:10px;
-}
-.mockup-screen .ms-title{
-  font-size:13px; font-weight:700; color:#333;
-  text-align:center; margin-top:2px;
-}
-.mockup-screen .ms-stats{
-  display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px;
-}
-.mockup-screen .ms-stat{
-  background:linear-gradient(135deg,#eef3ff,#e8f0fe);
-  border-radius:12px; padding:10px 8px; text-align:center;
-  border:1px solid rgba(0,0,0,.04);
-}
-.mockup-screen .ms-stat .n{
-  font-size:20px; font-weight:800; color:#3a5cf0; line-height:1;
-}
-.mockup-screen .ms-stat .l{
-  font-size:10px; color:#777; margin-top:4px;
-}
-.mockup-screen .ms-list{
-  margin-top:6px; display:flex; flex-direction:column; gap:6px;
-}
-.mockup-screen .ms-row{
-  display:flex; align-items:center; gap:8px;
-  background:#fff; border-radius:10px; padding:8px;
-  border:1px solid rgba(0,0,0,.05);
-  font-size:11px; color:#333;
-}
-.mockup-screen .ms-row .dot{
-  width:10px; height:10px; border-radius:50%;
-  background:linear-gradient(135deg,#7ee787,#52c41a); flex-shrink:0;
-}
-/* 飄浮裝飾 emoji */
-.login-v3-floats{
-  position:absolute; inset:0; pointer-events:none; z-index:1;
-}
-.login-v3-floats span{
-  position:absolute; font-size:32px; opacity:.85;
-  animation:lv3float 6s ease-in-out infinite;
-  filter:drop-shadow(0 4px 8px rgba(0,0,0,.15));
-}
-.login-v3-floats span:nth-child(1){ top:12%; left:10%; animation-delay:0s; }
-.login-v3-floats span:nth-child(2){ top:22%; right:12%; animation-delay:.8s; font-size:28px; }
-.login-v3-floats span:nth-child(3){ bottom:18%; left:8%; animation-delay:1.6s; font-size:30px; }
-.login-v3-floats span:nth-child(4){ bottom:14%; right:10%; animation-delay:2.4s; font-size:34px; }
-.login-v3-floats span:nth-child(5){ top:48%; left:4%; animation-delay:3.2s; font-size:24px; }
-.login-v3-floats span:nth-child(6){ top:55%; right:5%; animation-delay:4s; font-size:26px; }
-@keyframes lv3float{
-  0%,100%{ transform:translateY(0) rotate(-4deg); }
-  50%{ transform:translateY(-18px) rotate(4deg); }
-}
-
-/* 右半：登入表單區 */
-.login-v3-form{
+.login-spotify-card .lsc-logo{
+  width:32px; height:32px; border-radius:8px;
+  background: var(--lc-primary);
   display:flex; align-items:center; justify-content:center;
-  padding:32px 24px; background:var(--bg);
-  overflow-y:auto;
+  font-size:18px; overflow:hidden; flex-shrink:0;
 }
-.login-v3-form > .login-card{
-  /* 沿用既有 .login-card 但放寬 max-width */
-  max-width:440px; width:100%;
-  box-shadow:var(--shadow-lg);
+.login-spotify-card .lsc-logo img{
+  width:100%; height:100%; object-fit:cover; border-radius:inherit;
+}
+.login-spotify-card .lsc-title{
+  font-size:18px; font-weight:800; color:#fff; letter-spacing:-.02em;
+}
+.login-spotify-card .lsc-sub{
+  font-size:12px; color:rgba(255,255,255,.55); margin-top:2px;
+}
+/* ── 角色 Tabs (老師 / 學生) ── */
+.login-tabs{
+  display:flex; gap:0;
+  border-bottom:1px solid rgba(255,255,255,.1);
+  margin-top:4px;
+}
+.login-tabs button{
+  flex:1; padding:10px 0; background:none; border:none; cursor:pointer;
+  color:rgba(255,255,255,.55); font-weight:600; font-size:14px;
+  border-bottom:2px solid transparent;
+  transition: color .2s ease, border-color .2s ease;
+  position:relative; top:1px;
+}
+.login-tabs button:hover{ color:rgba(255,255,255,.85); }
+.login-tabs button.active{
+  color:#fff;
+  border-bottom-color: var(--lc-primary);
+}
+/* ── Pill 輸入框 ── */
+.login-spotify-card .field{ margin-bottom:10px; }
+.login-spotify-card .label{
+  display:block; font-size:11px; font-weight:700;
+  color:rgba(255,255,255,.7); margin-bottom:4px;
+  text-transform:uppercase; letter-spacing:.06em;
+}
+.login-spotify-card .input,
+.login-spotify-card .input.select,
+.login-spotify-card select.input{
+  width:100%; box-sizing:border-box;
+  height:44px; padding:0 16px;
+  background:#fff; color:#222;
+  border:1px solid #fff;
+  border-radius: var(--lc-input-radius);
+  font-size:14px; outline:none;
+  transition: box-shadow .15s ease, border-color .15s ease;
+}
+.login-spotify-card .input:focus,
+.login-spotify-card select.input:focus{
+  border-color: var(--lc-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc-primary) 30%, transparent);
+}
+.login-spotify-card .input::placeholder{ color:#999; }
+.login-spotify-card .pw-input-wrap{ position:relative; }
+.login-spotify-card .pw-input-wrap .input{ padding-right:48px; }
+.login-spotify-card .pw-toggle{
+  position:absolute; right:6px; top:50%; transform:translateY(-50%);
+  width:36px; height:36px; border:none; background:transparent;
+  cursor:pointer; font-size:18px; line-height:1;
+  border-radius:50%; color:#555;
+}
+.login-spotify-card .pw-toggle:hover{ background:rgba(0,0,0,.06); }
+/* ── 主按鈕 (登入) ── */
+.login-spotify-card .btn-pill-primary{
+  display:block; width:100%; height:44px;
+  background: var(--lc-primary); color:#fff;
+  border:none; border-radius:24px;
+  font-weight:800; font-size:15px; cursor:pointer;
+  transition: transform .12s ease, filter .15s ease, box-shadow .15s ease;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--lc-primary) 35%, transparent);
+}
+.login-spotify-card .btn-pill-primary:hover{ filter:brightness(1.08); transform:translateY(-1px); }
+.login-spotify-card .btn-pill-primary:active{ transform:scale(.98); }
+/* ── 次要按鈕 (註冊/返回) ── */
+.login-spotify-card .btn-pill-ghost{
+  display:block; width:100%; height:42px;
+  background:transparent; color:#fff;
+  border:1px solid rgba(255,255,255,.25);
+  border-radius:24px;
+  font-weight:600; font-size:14px; cursor:pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.login-spotify-card .btn-pill-ghost:hover{
+  background:rgba(255,255,255,.06);
+  border-color:rgba(255,255,255,.45);
+}
+/* ── 記住我 ── */
+.login-spotify-card .remember-row{
+  display:flex; align-items:center; gap:8px;
+  font-size:13px; color:rgba(255,255,255,.85);
+  cursor:pointer; user-select:none; padding:4px 2px;
+}
+.login-spotify-card .remember-row input[type="checkbox"]{
+  width:16px; height:16px; accent-color: var(--lc-primary);
+  cursor:pointer;
+}
+/* ── 連結 / 底部小字 ── */
+.login-spotify-card .lsc-link{
+  color: var(--lc-primary); text-decoration:underline; cursor:pointer;
+  font-size:13px;
+}
+.login-spotify-card .lsc-link:hover{ filter:brightness(1.15); }
+.login-spotify-card .lsc-bottom-links{
+  display:flex; flex-direction:column; gap:6px; align-items:center;
+  margin-top:6px;
+}
+.login-spotify-card .lsc-tiny-muted{
+  font-size:11px; color:rgba(255,255,255,.45); text-align:center;
+}
+.login-spotify-card hr.sep{
+  border:none; height:1px; background:rgba(255,255,255,.1); margin:8px 0;
+}
+.login-spotify-card .sep-text{
+  color:rgba(255,255,255,.45);
+}
+.login-spotify-card .sep-text:before,
+.login-spotify-card .sep-text:after{
+  background:rgba(255,255,255,.1);
+}
+/* ── 預設帳號提示（暗色卡片下調整對比） ── */
+.login-spotify-card .default-hint{
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1);
+  color:rgba(255,255,255,.85);
+  border-radius:10px; padding:8px 10px; font-size:12px;
+}
+.login-spotify-card .default-hint code{
+  background:rgba(0,0,0,.3); color:#fff;
+  padding:1px 6px; border-radius:4px;
+}
+.login-spotify-card .default-hint .dh-actions{
+  display:flex; gap:6px; margin-top:6px;
+}
+.login-spotify-card .default-hint .dh-actions button{
+  background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.15);
+  color:#fff; padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;
+}
+.login-spotify-card .default-hint .dh-actions button:hover{
+  background:rgba(255,255,255,.18);
+}
+/* ── last user 卡片在暗色卡內 ── */
+.login-spotify-card .last-user-box{
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);
+  color:#fff;
+}
+.login-spotify-card .last-user-greet{ color:#fff; }
+.login-spotify-card .last-user-meta{ color:rgba(255,255,255,.6); }
+.login-spotify-card .last-user-quick{
+  background: var(--lc-primary);
+}
+.login-spotify-card .last-user-clear{ color:rgba(255,255,255,.5); }
+/* ── 吉祥物在暗色背景：眼睛/嘴巴 stroke 用亮色 ── */
+.mascot-svg[data-mascot-on-dark="true"] .m-pupil{ fill:#fff; }
+.mascot-svg[data-mascot-on-dark="true"] .m-mouth{ stroke:#fff3e0; }
+.mascot-svg[data-mascot-on-dark="true"] .m-happy-eye path{ stroke:#fff; }
+/* ── 響應式：平板/手機 ── */
+@media (max-width:600px){
+  .login-spotify-shell{ padding:16px 12px; }
+  .login-spotify-card{ width:90%; max-width:380px; }
+}
+@media (max-width:360px){
+  .login-spotify-card{
+    width:100%; padding:20px 16px 18px;
+    border-radius: calc(var(--lc-card-radius) - 4px);
+  }
+  .login-spotify-card .lsc-title{ font-size:16px; }
+  .login-spotify-card .input{ height:42px; font-size:13px; }
+  .login-spotify-card .btn-pill-primary{ height:42px; font-size:14px; }
+}
+/* ── prefers-reduced-motion ── */
+@media (prefers-reduced-motion: reduce){
+  .login-spotify-card .btn-pill-primary,
+  .login-spotify-card .btn-pill-ghost,
+  .login-tabs button{ transition:none !important; }
 }
 
+/* ════════════════════════════════════════════════════════════
+   LOGIN — 互動吉祥物 SVG 樣式（Spotify 卡片內共用）
+   ──────────────────────────────────────────────────────────── */
 /* ── 互動吉祥物 ── */
 .mascot-wrap{
   display:flex; justify-content:center;
@@ -1588,38 +1659,8 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   100%{ transform:scale(1); }
 }
 
-/* 響應式：< 900px 改成上下堆疊 */
-@media (max-width:900px){
-  .login-v3-shell{
-    grid-template-columns:1fr;
-    grid-template-rows:auto 1fr;
-  }
-  .login-v3-visual{
-    padding:24px 16px 28px;
-    min-height:auto;
-  }
-  .mockup-phone{ width:180px; height:340px; }
-  .mockup-phone::before{ width:84px; height:18px; top:12px; }
-  .mockup-phone::after{ top:19px; }
-  .mockup-screen{ padding:32px 12px 14px; }
-  .login-v3-brand h1{ font-size:24px; }
-  .login-v3-brand .sub{ font-size:13px; }
-  .login-v3-floats span{ font-size:24px !important; }
-  .login-v3-form{ padding:20px 16px; }
-}
-/* 超小：< 480px 視覺區只剩 logo + 標題 */
-@media (max-width:480px){
-  .login-v3-visual{ padding:18px 14px 22px; }
-  .login-v3-visual .mockup-phone{ display:none; }
-  .login-v3-brand h1{ font-size:20px; }
-  .login-v3-brand{ margin-bottom:0; }
-  .mascot-svg{ width:96px; height:96px; }
-  .login-v3-form > .login-card{ padding:18px 14px; }
-}
-
-/* a11y：尊重 prefers-reduced-motion */
+/* a11y：尊重 prefers-reduced-motion (吉祥物動畫) */
 @media (prefers-reduced-motion: reduce){
-  .login-v3-floats span,
   .mascot-svg .m-eye,
   .mascot-svg[data-state="typing"] .m-hand,
   .mascot-svg[data-state="fail"],
@@ -5127,18 +5168,25 @@ async function quickContinueAsLast(){
    LOGIN V3 — 分割布局 + 互動吉祥物
    ──────────────────────────────────────────────────────────── */
 // 互動吉祥物 SVG — 純手寫 + CSS 動畫驅動
-function buildMascotSVG(){
-  // 200~400 行內：圓臉、兩耳、大眼、短手、紅暈、預設/X/^_^ 三組眼睛、嘴巴、左右手
+// opts.color  — 主色 (耳/臉/手 fill，預設 #f4a76a)
+// opts.onDark — 暗色卡片內 (眼/嘴 stroke 改亮色)，預設 false
+function buildMascotSVG(opts){
+  const o = opts || {};
+  const color = o.color || '#f4a76a';
+  // 副色 — 從主色衍生淺色 (內耳/下巴 highlight)
+  const lightColor = '#ffd9b0';   // 簡化：固定米黃，與大多數色都協調
+  const innerEar = '#ffd3a8';
+  const onDark = o.onDark ? 'true' : 'false';
   const svg =
-    '<svg class="mascot-svg" data-state="idle" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<svg class="mascot-svg" data-state="idle" data-mascot-on-dark="' + onDark + '" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
       // 兩隻耳朵
-      '<ellipse cx="28" cy="36" rx="11" ry="13" fill="#f4a76a"/>' +
-      '<ellipse cx="92" cy="36" rx="11" ry="13" fill="#f4a76a"/>' +
-      '<ellipse cx="28" cy="38" rx="6" ry="7" fill="#ffd3a8"/>' +
-      '<ellipse cx="92" cy="38" rx="6" ry="7" fill="#ffd3a8"/>' +
+      '<ellipse cx="28" cy="36" rx="11" ry="13" fill="' + color + '"/>' +
+      '<ellipse cx="92" cy="36" rx="11" ry="13" fill="' + color + '"/>' +
+      '<ellipse cx="28" cy="38" rx="6" ry="7" fill="' + innerEar + '"/>' +
+      '<ellipse cx="92" cy="38" rx="6" ry="7" fill="' + innerEar + '"/>' +
       // 主臉
-      '<circle cx="60" cy="62" r="38" fill="#f4a76a"/>' +
-      '<ellipse cx="60" cy="74" rx="26" ry="18" fill="#ffd9b0"/>' +
+      '<circle cx="60" cy="62" r="38" fill="' + color + '"/>' +
+      '<ellipse cx="60" cy="74" rx="26" ry="18" fill="' + lightColor + '"/>' +
       // 紅暈（focus 時顯示）
       '<circle class="m-blush" cx="35" cy="74" r="6" fill="#ff8aa3" opacity="0"/>' +
       '<circle class="m-blush" cx="85" cy="74" r="6" fill="#ff8aa3" opacity="0"/>' +
@@ -5168,8 +5216,8 @@ function buildMascotSVG(){
       // 嘴巴（預設微笑）
       '<path class="m-mouth" d="M50 80 Q60 88 70 80" stroke="#7a3f10" stroke-width="2.6" fill="none" stroke-linecap="round"/>' +
       // 兩隻短手（預設隱藏在臉下方，cover/typing/peek 才出現遮眼）
-      '<ellipse class="m-hand m-hand-l" cx="42" cy="110" rx="14" ry="10" fill="#f4a76a"/>' +
-      '<ellipse class="m-hand m-hand-r" cx="78" cy="110" rx="14" ry="10" fill="#f4a76a"/>' +
+      '<ellipse class="m-hand m-hand-l" cx="42" cy="110" rx="14" ry="10" fill="' + color + '"/>' +
+      '<ellipse class="m-hand m-hand-r" cx="78" cy="110" rx="14" ry="10" fill="' + color + '"/>' +
     '</svg>';
   const wrap = document.createElement('div');
   wrap.className = 'mascot-wrap';
@@ -5225,120 +5273,126 @@ function bindMascotInteractions(stage){
   } catch(e){_swallow('mascot-bind',e)}
 }
 
+// 把使用者在 UI 編輯器設定的 login 客製 (lc) 轉成 CSS 變數注入 shell
+function applyLoginCustomStyle(shell, lc){
+  if(!shell || !lc) return;
+  const s = shell.style;
+  if(lc.cardBg)        s.setProperty('--lc-card-bg', lc.cardBg);
+  if(lc.primary)       s.setProperty('--lc-primary', lc.primary);
+  if(lc.mascotColor)   s.setProperty('--lc-mascot-color', lc.mascotColor);
+  // 頁面背景：solid / gradient / image
+  if(lc.pageBgType === 'solid' && lc.pageBgColor){
+    s.setProperty('--lc-page-bg', lc.pageBgColor);
+  } else if(lc.pageBgType === 'gradient' && (lc.pageBgFrom || lc.pageBgTo)){
+    const from = lc.pageBgFrom || '#0f172a';
+    const to   = lc.pageBgTo   || '#1e293b';
+    s.setProperty('--lc-page-bg', 'linear-gradient(135deg, ' + from + ' 0%, ' + to + ' 100%)');
+  } else if(lc.pageBgType === 'image' && lc.pageBgImage){
+    s.setProperty('--lc-page-bg', "url('" + String(lc.pageBgImage).replace(/'/g,"\\'") + "') center/cover no-repeat");
+  }
+  // 輸入框圓角樣式
+  if(lc.inputStyle === 'square')      s.setProperty('--lc-input-radius', '4px');
+  else if(lc.inputStyle === 'normal') s.setProperty('--lc-input-radius', '8px');
+  else if(lc.inputStyle === 'pill')   s.setProperty('--lc-input-radius', '24px');
+  // 卡片寬度 / 圓角
+  if(lc.cardWidth)  s.setProperty('--lc-card-width', String(lc.cardWidth) + 'px');
+  if(lc.cardRadius != null) s.setProperty('--lc-card-radius', String(lc.cardRadius) + 'px');
+}
+
 function renderLogin(root){
   root.innerHTML = '';
   // 確保 _uiCustom 已載入（首次登入時可能尚未 boot 到該分支）
   try { App._uiCustom = App._uiCustom || loadUiCustom(); } catch(e){_swallow('auto',e)}
   const lc = (App._uiCustom && App._uiCustom.login) || {};
 
-  // ── 外殼：分割布局 ──
-  const shell = el('div', { class:'login-v3-shell' });
-
-  // 取資料供視覺區顯示
-  const stuCount = (App.db.students && App.db.students.length) || 0;
-  const clsSet = new Set((App.db.students||[]).map(s => s.cls || '未分班'));
-  const clsCount = clsSet.size;
-  const lessonCount = Array.isArray(App.db.timetable) ? App.db.timetable.length : 0;
+  // ── 外殼：Spotify 風格居中 ──
+  const shell = el('div', { class:'login-spotify-shell' });
+  applyLoginCustomStyle(shell, lc);
 
   const heroTitle = lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統';
   const heroSub = lc.subtitle || '極簡校園管理工具';
 
-  // ─── 左：視覺區 ───
-  const visual = el('div', { class:'login-v3-visual' });
-  // 飄浮裝飾
-  const floats = el('div', { class:'login-v3-floats' },
-    el('span', null, '📚'),
-    el('span', null, '🎒'),
-    el('span', null, '✏️'),
-    el('span', null, '📝'),
-    el('span', null, '🎓'),
-    el('span', null, '⭐')
-  );
-  visual.appendChild(floats);
-  // 品牌標題
-  const brand = el('div', { class:'login-v3-brand' },
-    el('h1', null, heroTitle),
-    el('div', { class:'sub' }, heroSub)
-  );
-  visual.appendChild(brand);
-  // 手機 mockup
-  const phone = el('div', { class:'mockup-phone' });
-  const phoneScreen = el('div', { class:'mockup-screen' });
-  phoneScreen.appendChild(el('div', { class:'ms-title' }, '今日校園'));
-  const phStats = el('div', { class:'ms-stats' },
-    el('div', { class:'ms-stat' },
-      el('div', { class:'n' }, String(clsCount || 1)),
-      el('div', { class:'l' }, '個班級')
-    ),
-    el('div', { class:'ms-stat' },
-      el('div', { class:'n' }, String(stuCount)),
-      el('div', { class:'l' }, '位學生')
-    )
-  );
-  phoneScreen.appendChild(phStats);
-  const phList = el('div', { class:'ms-list' });
-  const sampleRows = [
-    { dot:true, label:'國文 · 第 1 節' },
-    { dot:true, label:'數學 · 第 2 節' },
-    { dot:true, label:'點名完成 ' + (lessonCount||3) + ' 堂' }
-  ];
-  sampleRows.forEach(r => {
-    phList.appendChild(el('div', { class:'ms-row' },
-      el('span', { class:'dot' }),
-      el('span', null, r.label)
-    ));
-  });
-  phoneScreen.appendChild(phList);
-  phone.appendChild(phoneScreen);
-  visual.appendChild(phone);
+  // ─── 居中卡片 ───
+  const card = el('div', { class:'login-spotify-card' });
 
-  // ─── 右：登入卡片 ───
-  const formCol = el('div', { class:'login-v3-form' });
-  const card = el('div', { class:'login-card login-v2' });
+  // ── 頂部：吉祥物 + Logo + 標題 ──
+  const top = el('div', { class:'lsc-top' });
 
-  // 吉祥物（取代 logo 大圖示）
-  card.appendChild(buildMascotSVG());
-
-  // 若有自訂 logo 圖片，仍顯示一個小 logo
-  if(lc.logoImage || lc.logoEmoji){
-    const logoEl = el('div', { class:'logo-xl', style:{ width:'48px', height:'48px', fontSize:'24px', margin:'0 auto 8px' } });
-    if(lc.logoImage){
-      logoEl.textContent = lc.logoEmoji || '🎓';
-      (async ()=>{
-        try {
-          const url = await attachGetUrl(lc.logoImage);
-          if(url){
-            logoEl.innerHTML = '';
-            logoEl.appendChild(el('img', { src:url, style:{
-              width:'100%', height:'100%', objectFit:'cover', borderRadius:'inherit'
-            } }));
-          }
-        } catch(e){_swallow('auto',e)}
-      })();
-    } else {
-      logoEl.textContent = lc.logoEmoji || '🎓';
-    }
-    card.appendChild(logoEl);
+  // 吉祥物 (60×60, 暗色卡片用亮 stroke)
+  if(lc.showMascot !== false){
+    const mascotWrap = el('div', { class:'lsc-mascot' });
+    mascotWrap.appendChild(buildMascotSVG({
+      color: lc.mascotColor || '#f4a76a',
+      onDark: true
+    }));
+    top.appendChild(mascotWrap);
   }
-  // 標題（卡片內較小）
-  card.appendChild(el('div', { class:'login-hero', style:{marginBottom:'14px'} },
-    el('h1', { class:'brand-h1' }, heroTitle),
-    el('div', { class:'brand-sub' }, heroSub)
-  ));
+
+  // Logo + 系統名 (橫排)
+  const logoRow = el('div', { class:'lsc-logo-row' });
+  const logoEl = el('div', { class:'lsc-logo' });
+  if(lc.logoImage){
+    logoEl.textContent = lc.logoEmoji || '🎓';
+    (async ()=>{
+      try {
+        const url = await attachGetUrl(lc.logoImage);
+        if(url){
+          logoEl.innerHTML = '';
+          logoEl.appendChild(el('img', { src:url }));
+        }
+      } catch(e){_swallow('auto',e)}
+    })();
+  } else {
+    logoEl.textContent = lc.logoEmoji || '🎓';
+  }
+  logoRow.appendChild(logoEl);
+  logoRow.appendChild(el('div', { class:'lsc-title' }, heroTitle));
+  top.appendChild(logoRow);
+  top.appendChild(el('div', { class:'lsc-sub' }, heroSub));
+
+  card.appendChild(top);
 
   // Stage default — back-compat with old App.loginRole flag
-  if(!App._loginStage){
-    App._loginStage = (App.loginRole === 'teacher' || App.loginRole === 'student')
-      ? App.loginRole : 'choose';
+  // 注意：Spotify 版用 tab 切換取代額外的 choose 畫面，
+  //       若沒指定角色 → 預設老師 tab（保留 'choose' 兼容值會自動 fallback）
+  if(!App._loginStage || App._loginStage === 'choose'){
+    App._loginStage = (App.loginRole === 'student') ? 'student' : 'teacher';
   }
 
-  // ─── Last user quick entry (only on choose stage) ───
+  const showT = lc.showTeacherBtn !== false;
+  const showS = lc.showStudentBtn !== false;
+  // 若 stage 對應的 tab 被隱藏 → 切到另一個
+  if(App._loginStage === 'teacher' && !showT && showS) App._loginStage = 'student';
+  if(App._loginStage === 'student' && !showS && showT) App._loginStage = 'teacher';
+
+  // ── 角色 Tabs ──
+  if(showT || showS){
+    const tabs = el('div', { class:'login-tabs', role:'tablist' });
+    if(showT){
+      const tBtn = el('button', { type:'button', role:'tab',
+        class: App._loginStage === 'teacher' ? 'active' : '',
+        onclick: ()=> { App._loginStage = 'teacher'; App._loginPrefill = null; rerender(); }
+      }, lc.teacherLabel || '老師');
+      tabs.appendChild(tBtn);
+    }
+    if(showS){
+      const sBtn = el('button', { type:'button', role:'tab',
+        class: App._loginStage === 'student' ? 'active' : '',
+        onclick: ()=> { App._loginStage = 'student'; App._loginCls = App._loginCls || ''; rerender(); }
+      }, lc.studentLabel || '學生');
+      tabs.appendChild(sBtn);
+    }
+    card.appendChild(tabs);
+  }
+
+  // ── Last user quick entry (只在沒有 active stage 偏好時顯示一次) ──
   const lastUser = loadLastUser();
-  if(App._loginStage === 'choose' && lastUser && !lc.hideLastUser){
+  if(lastUser && !lc.hideLastUser){
     const stillExists = (lastUser.role === 'teacher')
       ? !!App.db.accounts.find(a => a.id === lastUser.id || a.username === lastUser.username)
       : !!App.db.students.find(s => s.id === lastUser.id);
-    if(stillExists){
+    // 僅在 stage 對應 lastUser 角色時顯示，避免老師 tab 顯示學生快速登入
+    if(stillExists && lastUser.role === App._loginStage){
       const colorIdx = (lastUser.id ? String(lastUser.id).charCodeAt(0) : 0) % 8;
       const lub = el('div', { class:'last-user-box' });
       const row = el('div', { class:'last-user-row' },
@@ -5359,61 +5413,26 @@ function renderLogin(root){
         saveLastUser(null); saveRemember(null); rerender();
       }}, '清除登入紀錄'));
       card.appendChild(lub);
-      card.appendChild(el('div', { class:'sep-text' }, '或選擇身分'));
     }
   }
 
-  // ─── Stage: choose role ───
+  // ── 表單 stage ──
   let activeStage = null;
-  if(App._loginStage === 'choose'){
-    const stage = el('div', { class:'login-stage' });
-    const grid = el('div', { class:'role-choice' });
-
-    const showT = lc.showTeacherBtn !== false;
-    const showS = lc.showStudentBtn !== false;
-
-    if(showT){
-      const teacherCard = el('button', { class:'role-choice-card', onclick: e => {
-        e.currentTarget.classList.add('tapped');
-        setTimeout(()=> { App._loginStage = 'teacher'; rerender(); }, 220);
-      }},
-        el('span', { class:'rc-ico' }, lc.teacherIcon || '🧑‍🏫'),
-        el('div', { class:'rc-title' }, lc.teacherLabel || '我是老師'),
-        el('div', { class:'rc-sub' }, lc.teacherSub || '班級管理 / 成績 / 公告')
-      );
-      grid.appendChild(teacherCard);
-    }
-    if(showS){
-      const studentCard = el('button', { class:'role-choice-card', onclick: e => {
-        e.currentTarget.classList.add('tapped');
-        setTimeout(()=> { App._loginStage = 'student'; rerender(); }, 220);
-      }},
-        el('span', { class:'rc-ico' }, lc.studentIcon || '🧑‍🎓'),
-        el('div', { class:'rc-title' }, lc.studentLabel || '我是學生'),
-        el('div', { class:'rc-sub' }, lc.studentSub || '簽到 / 作業 / 成績')
-      );
-      grid.appendChild(studentCard);
-    }
-    stage.appendChild(grid);
-    card.appendChild(stage);
-    activeStage = stage;
-  }
-  else if(App._loginStage === 'teacher'){
+  if(App._loginStage === 'teacher'){
     activeStage = renderLoginTeacherStage();
-    card.appendChild(activeStage);
-  }
-  else if(App._loginStage === 'student'){
+  } else if(App._loginStage === 'student'){
     activeStage = renderLoginStudentStage();
-    card.appendChild(activeStage);
   }
+  if(activeStage) card.appendChild(activeStage);
 
   // 自訂歡迎訊息
   if(lc.welcomeText){
-    card.appendChild(el('div', { class:'card', style:{
-      marginTop:'14px', background:'var(--primary-soft)', borderColor:'var(--primary)',
-      padding:'10px 12px'
+    card.appendChild(el('div', { style:{
+      marginTop:'10px', padding:'10px 12px',
+      background:'rgba(255,255,255,.06)', borderRadius:'8px',
+      border:'1px solid rgba(255,255,255,.1)'
     } },
-      el('div', { style:{whiteSpace:'pre-wrap',fontSize:'13px',lineHeight:'1.7',color:'var(--text)'} },
+      el('div', { style:{whiteSpace:'pre-wrap',fontSize:'13px',lineHeight:'1.7',color:'rgba(255,255,255,.9)'} },
         lc.welcomeText)
     ));
   }
@@ -5421,27 +5440,29 @@ function renderLogin(root){
   // 自訂內容 (position='login-bottom')
   card.appendChild(renderCustomBlocks('login-bottom'));
 
+  // ── 底部：切換教室 ──
   if(!lc.hideSwitchRoom){
     card.appendChild(el('hr', { class:'sep' }));
-    const back = el('button', { class:'btn-ghost small', style:{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',width:'100%'}, onclick: async ()=> {
-      const ok = await confirmDlg('要切換到別的教室嗎？目前的設定會被清除（資料保留）');
-      if(ok){
-        App.cfg = null; App.session = null;
-        try {
-          localStorage.removeItem(LS_CFG);
-          localStorage.removeItem(LS_SESSION);
-          localStorage.removeItem(LS_LAST_USER);
-          localStorage.removeItem(LS_REMEMBER);
-        } catch(e){_swallow('auto',e)}
-        rerender();
+    card.appendChild(el('button', {
+      type:'button',
+      class:'btn-pill-ghost',
+      onclick: async ()=> {
+        const ok = await confirmDlg('要切換到別的教室嗎？目前的設定會被清除（資料保留）');
+        if(ok){
+          App.cfg = null; App.session = null;
+          try {
+            localStorage.removeItem(LS_CFG);
+            localStorage.removeItem(LS_SESSION);
+            localStorage.removeItem(LS_LAST_USER);
+            localStorage.removeItem(LS_REMEMBER);
+          } catch(e){_swallow('auto',e)}
+          rerender();
+        }
       }
-    }}, '← 切換教室');
-    card.appendChild(back);
+    }, '← 切換教室'));
   }
 
-  formCol.appendChild(card);
-  shell.appendChild(visual);
-  shell.appendChild(formCol);
+  shell.appendChild(card);
   root.appendChild(shell);
 
   // 綁定吉祥物互動（focus/blur/input/peek）
@@ -5449,8 +5470,8 @@ function renderLogin(root){
 }
 
 function renderLoginTeacherStage(){
+  // Spotify 版：tab 已標示「老師」，stage 內不再放 H3
   const stage = el('div', { class:'login-stage' });
-  stage.appendChild(el('h3', { style:{marginBottom:'14px'} }, '🧑‍🏫 老師登入'));
 
   const hasDefault = App.db.accounts.some(a => a.username === 'admin' && a.password === 'admin123');
   const prefill = App._loginPrefill || {};
@@ -5574,21 +5595,18 @@ function renderLoginTeacherStage(){
     } catch(_){_swallow('auto',_)}
   };
 
-  const btnRow = el('div', { class:'flex', style:{marginTop:'10px'} },
-    el('button', { class:'btn', style:{flex:'0 0 auto'}, onclick: ()=> { App._loginStage = 'choose'; App._loginPrefill = null; rerender(); } }, '← 返回'),
-    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: submit }, '登入 →')
-  );
-  stage.appendChild(btnRow);
+  // Spotify 版：單一全寬 pill primary 登入按鈕（tab 已負責切換角色，不需要返回鍵）
+  stage.appendChild(el('button', { type:'button', class:'btn-pill-primary',
+    style:{marginTop:'8px'}, onclick: submit }, '登入'));
 
   // 🔑 忘記密碼連結（批次 6：明示需要 Email + 安全問題雙重驗證）
   if(!_lcT.hideForgot){
-    const forgotWrap = el('div', { style:{textAlign:'center',marginTop:'14px'} });
-    forgotWrap.appendChild(el('div', { class:'small' },
-      el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword,
-        style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
+    const forgotWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px'} });
+    forgotWrap.appendChild(
+      el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword, class:'lsc-link' },
         '🔑 忘記密碼？')
-    ));
-    forgotWrap.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} },
+    );
+    forgotWrap.appendChild(el('div', { class:'lsc-tiny-muted' },
       '🛡️ 需 Email 驗證碼 + 安全問題（防止他人未授權重設）'));
     stage.appendChild(forgotWrap);
   }
@@ -6715,23 +6733,21 @@ function forceSetupRecovery(accountId){
 
 function renderLoginStudentStage(){
   // 🔒 隱私友善版：班級下拉 → 姓名下拉 → 密碼
-  // 不顯示其他同學的卡片清單
+  // Spotify 版：tab 已標示「學生」，stage 內不再放 H3
   const _lcS = (App._uiCustom && App._uiCustom.login) || {};
   const stage = el('div', { class:'login-stage' });
-  stage.appendChild(el('h3', null, '🧑‍🎓 學生登入'));
-  stage.appendChild(el('div', { class:'small muted', style:{marginBottom:'14px'} },
+  stage.appendChild(el('div', { class:'lsc-tiny-muted', style:{marginBottom:'8px',textAlign:'left'} },
     '依序選擇班級、姓名，輸入密碼即可登入'));
 
   if(!App.db.students.length){
-    stage.appendChild(el('div', { class:'empty', style:{padding:'24px 8px'} },
-      el('div', { class:'ico', style:{fontSize:'40px'} }, '🧑‍🎓'),
+    stage.appendChild(el('div', { style:{padding:'16px 8px',textAlign:'center',color:'rgba(255,255,255,.85)'} },
+      el('div', { style:{fontSize:'40px',marginBottom:'8px'} }, '🧑‍🎓'),
       el('div', null, '老師還沒建立學生名單'),
-      el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '你可以申請註冊，等待老師審核')
+      el('div', { class:'lsc-tiny-muted', style:{marginTop:'4px'} }, '你可以申請註冊，等待老師審核')
     ));
     if(!_lcS.hideRegister){
-      stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
+      stage.appendChild(el('button', { type:'button', class:'btn-pill-primary', style:{marginTop:'10px'}, onclick: studentRegisterFlow }, '📤 申請註冊'));
     }
-    stage.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'6px'}, onclick: ()=> { App._loginStage = 'choose'; rerender(); } }, '← 返回'));
     return stage;
   }
 
@@ -6916,30 +6932,26 @@ function renderLoginStudentStage(){
   }
   iPw.addEventListener('keydown', e => { if(e.key === 'Enter') attemptLogin(); });
 
-  // 登入按鈕
-  stage.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'8px'}, onclick: attemptLogin }, '登入'));
+  // 登入按鈕 (Spotify 風格 pill primary)
+  stage.appendChild(el('button', { type:'button', class:'btn-pill-primary', style:{marginTop:'8px'}, onclick: attemptLogin }, '登入'));
+
+  // 申請註冊（學生 tab 特有）
+  if(!_lcS.hideRegister){
+    stage.appendChild(el('button', { type:'button', class:'btn-pill-ghost', style:{marginTop:'8px'}, onclick: studentRegisterFlow }, '📤 沒帳號？申請註冊'));
+  }
 
   // 忘記密碼（批次 6：明示需 Email 驗證碼，老師審核才生效）
   if(!_lcS.hideForgot){
-    const fWrap = el('div', { style:{textAlign:'center',marginTop:'10px'} });
-    fWrap.appendChild(el('div', { class:'small' },
-      el('a', { href:'javascript:void(0)', onclick: showForgotPassword,
-        style:{color:'var(--primary)',textDecoration:'underline',cursor:'pointer'} },
+    const fWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px'} });
+    fWrap.appendChild(
+      el('a', { href:'javascript:void(0)', onclick: showForgotPassword, class:'lsc-link' },
         '🔑 忘記密碼？')
-    ));
-    fWrap.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} },
+    );
+    fWrap.appendChild(el('div', { class:'lsc-tiny-muted' },
       '🛡️ 需 Email 驗證碼，老師審核後才生效'));
     stage.appendChild(fWrap);
   }
 
-  stage.appendChild(el('hr', { class:'sep' }));
-  const bottomRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px'} },
-    el('button', { class:'btn', style:{flex:'1'}, onclick: ()=> { App._loginStage = 'choose'; App._loginCls=''; App._loginStuId=''; rerender(); } }, '← 返回')
-  );
-  if(!_lcS.hideRegister){
-    bottomRow.appendChild(el('button', { class:'btn', style:{flex:'1'}, onclick: studentRegisterFlow }, '＋ 申請註冊'));
-  }
-  stage.appendChild(bottomRow);
   return stage;
 }
 
@@ -20654,6 +20666,273 @@ function renderLoginEditor(content){
   card3.appendChild(mkChk('hideSwitchRoom', '隱藏「← 切換教室」按鈕'));
 
   content.appendChild(card3);
+
+  // ─── e) Spotify 風格客製 ───
+  const cardSpot = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardSpot.appendChild(el('h3', null, '🎨 Spotify 風格外觀'));
+  cardSpot.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '調整登入卡片配色、版型與顯示元素。改完即時更新下方迷你預覽。'));
+
+  // ── 迷你預覽 ──
+  const miniPreviewWrap = el('div', { style:{
+    marginBottom:'12px', padding:'12px', borderRadius:'10px',
+    border:'1px dashed var(--border)', background:'var(--surface-2)'
+  } });
+  miniPreviewWrap.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} }, '迷你預覽：'));
+  const miniPreview = el('div', { style:{
+    display:'flex', justifyContent:'center', alignItems:'center', minHeight:'180px',
+    padding:'16px', borderRadius:'8px'
+  } });
+  miniPreviewWrap.appendChild(miniPreview);
+  cardSpot.appendChild(miniPreviewWrap);
+
+  function refreshMiniPreview(){
+    miniPreview.innerHTML = '';
+    miniPreview.style.cssText = 'display:flex;justify-content:center;align-items:center;min-height:180px;padding:16px;border-radius:8px;';
+    // 套頁面背景
+    const pbType = lc.pageBgType || 'gradient';
+    if(pbType === 'solid' && lc.pageBgColor){
+      miniPreview.style.background = lc.pageBgColor;
+    } else if(pbType === 'gradient'){
+      const from = lc.pageBgFrom || '#0f172a';
+      const to   = lc.pageBgTo   || '#1e293b';
+      miniPreview.style.background = 'linear-gradient(135deg,' + from + ' 0%,' + to + ' 100%)';
+    } else if(pbType === 'image' && lc.pageBgImage){
+      miniPreview.style.background = "url('" + String(lc.pageBgImage).replace(/'/g,"\\'") + "') center/cover no-repeat";
+    } else {
+      miniPreview.style.background = 'linear-gradient(135deg,#0f172a 0%,#1e293b 100%)';
+    }
+    // 縮小版卡片
+    const mw = Math.round((lc.cardWidth || 360) * 0.6);
+    const mr = (lc.cardRadius != null ? lc.cardRadius : 12);
+    const cBg = lc.cardBg || '#2a2d33';
+    const prim = lc.primary || '#22c55e';
+    const irad = (lc.inputStyle === 'square') ? '3px'
+              : (lc.inputStyle === 'normal') ? '6px' : '16px';
+    const mini = el('div', { style:{
+      width: mw + 'px', maxWidth:'100%',
+      background: cBg, borderRadius: mr + 'px',
+      padding:'14px 12px', boxShadow:'0 8px 24px rgba(0,0,0,.3)',
+      color:'#fff', display:'flex', flexDirection:'column', gap:'8px',
+      textAlign:'center', boxSizing:'border-box'
+    } });
+    if(lc.showMascot !== false){
+      mini.appendChild(el('div', { style:{fontSize:'28px',lineHeight:'1'} }, '🐻'));
+    }
+    mini.appendChild(el('div', { style:{fontWeight:'700',fontSize:'13px'} },
+      lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統'));
+    // 假 input
+    mini.appendChild(el('div', { style:{
+      height:'24px', background:'#fff', borderRadius: irad, margin:'4px 0'
+    } }));
+    mini.appendChild(el('div', { style:{
+      height:'24px', background:'#fff', borderRadius: irad
+    } }));
+    // 主按鈕
+    mini.appendChild(el('div', { style:{
+      height:'26px', background: prim, color:'#fff',
+      borderRadius:'14px', fontWeight:'700', fontSize:'11px',
+      display:'flex', alignItems:'center', justifyContent:'center',
+      marginTop:'4px'
+    } }, '登入'));
+    miniPreview.appendChild(mini);
+  }
+
+  // ── 控制 1：卡片背景色 ──
+  const fld_cBg = el('div', { class:'field' });
+  fld_cBg.appendChild(el('label', { class:'label' }, '1. 卡片背景色'));
+  const cBgInp = el('input', { type:'color', value: lc.cardBg || '#2a2d33',
+    style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
+  cBgInp.addEventListener('input', ()=> {
+    lc.cardBg = cBgInp.value;
+    saveUiCustom(); refreshMiniPreview();
+  });
+  fld_cBg.appendChild(cBgInp);
+  fld_cBg.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '預設 #2a2d33 (深灰)'));
+  cardSpot.appendChild(fld_cBg);
+
+  // ── 控制 2：主色 (按鈕色) ──
+  const fld_prim = el('div', { class:'field' });
+  fld_prim.appendChild(el('label', { class:'label' }, '2. 主色 (按鈕 / Tab 指示線)'));
+  const primInp = el('input', { type:'color', value: lc.primary || '#22c55e',
+    style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
+  primInp.addEventListener('input', ()=> {
+    lc.primary = primInp.value;
+    saveUiCustom(); refreshMiniPreview();
+  });
+  fld_prim.appendChild(primInp);
+  fld_prim.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '預設 #22c55e (Spotify 綠)'));
+  cardSpot.appendChild(fld_prim);
+
+  // ── 控制 3：頁面背景 (radio: solid / gradient / image) ──
+  const fld_pbg = el('div', { class:'field' });
+  fld_pbg.appendChild(el('label', { class:'label' }, '3. 頁面背景'));
+  const pbType = lc.pageBgType || 'gradient';
+  const radioRow = el('div', { class:'flex', style:{gap:'12px',flexWrap:'wrap',marginBottom:'8px'} });
+  ['solid','gradient','image'].forEach(t => {
+    const lblTxt = t === 'solid' ? '純色' : t === 'gradient' ? '漸層' : '圖片';
+    const r = el('input', { type:'radio', name:'lc_pbg_' + Date.now() });
+    r.checked = (pbType === t);
+    r.addEventListener('change', ()=> {
+      if(r.checked){
+        lc.pageBgType = t;
+        saveUiCustom(); refreshMiniPreview(); rerender();
+      }
+    });
+    const lbl = el('label', { class:'small flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} },
+      r, el('span', null, lblTxt));
+    radioRow.appendChild(lbl);
+  });
+  fld_pbg.appendChild(radioRow);
+
+  if(pbType === 'solid'){
+    const pbColor = el('input', { type:'color', value: lc.pageBgColor || '#0f172a',
+      style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
+    pbColor.addEventListener('input', ()=> {
+      lc.pageBgColor = pbColor.value;
+      saveUiCustom(); refreshMiniPreview();
+    });
+    fld_pbg.appendChild(pbColor);
+  } else if(pbType === 'gradient'){
+    const gradRow = el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} });
+    const gFrom = el('input', { type:'color', value: lc.pageBgFrom || '#0f172a',
+      style:{width:'52px',height:'34px',padding:'2px',cursor:'pointer'} });
+    gFrom.addEventListener('input', ()=> {
+      lc.pageBgFrom = gFrom.value;
+      saveUiCustom(); refreshMiniPreview();
+    });
+    const gTo = el('input', { type:'color', value: lc.pageBgTo || '#1e293b',
+      style:{width:'52px',height:'34px',padding:'2px',cursor:'pointer'} });
+    gTo.addEventListener('input', ()=> {
+      lc.pageBgTo = gTo.value;
+      saveUiCustom(); refreshMiniPreview();
+    });
+    gradRow.appendChild(el('span', { class:'tiny muted' }, '主色'));
+    gradRow.appendChild(gFrom);
+    gradRow.appendChild(el('span', { class:'tiny muted' }, '副色'));
+    gradRow.appendChild(gTo);
+    fld_pbg.appendChild(gradRow);
+  } else if(pbType === 'image'){
+    const pbImgUrl = el('input', { class:'input', placeholder:'圖片網址 (https://...)',
+      value: lc.pageBgImage || '' });
+    pbImgUrl.addEventListener('change', ()=> {
+      lc.pageBgImage = pbImgUrl.value.trim();
+      saveUiCustom(); refreshMiniPreview();
+    });
+    fld_pbg.appendChild(pbImgUrl);
+    fld_pbg.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+      '提示：建議用 1920×1080 風景圖；可貼 Unsplash 直連網址'));
+  }
+  cardSpot.appendChild(fld_pbg);
+
+  // ── 控制 4：輸入框樣式 ──
+  const fld_inp = el('div', { class:'field' });
+  fld_inp.appendChild(el('label', { class:'label' }, '4. 輸入框樣式'));
+  const inpStyleRow = el('div', { class:'flex', style:{gap:'12px',flexWrap:'wrap'} });
+  const cur_inp = lc.inputStyle || 'pill';
+  [['pill','圓角 Pill'],['normal','一般圓角'],['square','直角']].forEach(([v,lblTxt]) => {
+    const r = el('input', { type:'radio', name:'lc_inp_' + Date.now() });
+    r.checked = (cur_inp === v);
+    r.addEventListener('change', ()=> {
+      if(r.checked){ lc.inputStyle = v; saveUiCustom(); refreshMiniPreview(); }
+    });
+    const lbl = el('label', { class:'small flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} },
+      r, el('span', null, lblTxt));
+    inpStyleRow.appendChild(lbl);
+  });
+  fld_inp.appendChild(inpStyleRow);
+  cardSpot.appendChild(fld_inp);
+
+  // ── 控制 5：卡片寬度 (slider 320~480) ──
+  const fld_w = el('div', { class:'field' });
+  fld_w.appendChild(el('label', { class:'label' }, '5. 卡片寬度'));
+  const wRow = el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} });
+  const wRange = el('input', { type:'range', min:'320', max:'480', step:'10',
+    value: String(lc.cardWidth || 360), style:{flex:'1'} });
+  const wDisp = el('span', { class:'small', style:{minWidth:'56px',textAlign:'right'} },
+    String(lc.cardWidth || 360) + 'px');
+  wRange.addEventListener('input', ()=> {
+    lc.cardWidth = parseInt(wRange.value);
+    wDisp.textContent = lc.cardWidth + 'px';
+    saveUiCustom(); refreshMiniPreview();
+  });
+  wRow.appendChild(wRange); wRow.appendChild(wDisp);
+  fld_w.appendChild(wRow);
+  cardSpot.appendChild(fld_w);
+
+  // ── 控制 6：卡片圓角 (slider 0~24) ──
+  const fld_r = el('div', { class:'field' });
+  fld_r.appendChild(el('label', { class:'label' }, '6. 卡片圓角'));
+  const rRow = el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} });
+  const rRange = el('input', { type:'range', min:'0', max:'24', step:'1',
+    value: String(lc.cardRadius != null ? lc.cardRadius : 12), style:{flex:'1'} });
+  const rDisp = el('span', { class:'small', style:{minWidth:'56px',textAlign:'right'} },
+    String(lc.cardRadius != null ? lc.cardRadius : 12) + 'px');
+  rRange.addEventListener('input', ()=> {
+    lc.cardRadius = parseInt(rRange.value);
+    rDisp.textContent = lc.cardRadius + 'px';
+    saveUiCustom(); refreshMiniPreview();
+  });
+  rRow.appendChild(rRange); rRow.appendChild(rDisp);
+  fld_r.appendChild(rRow);
+  cardSpot.appendChild(fld_r);
+
+  // ── 控制 7：吉祥物顯示 (是/否) ──
+  const fld_mShow = el('div', { class:'field' });
+  const mShowChk = el('input', { type:'checkbox' });
+  mShowChk.checked = (lc.showMascot !== false);
+  mShowChk.addEventListener('change', ()=> {
+    lc.showMascot = mShowChk.checked;
+    saveUiCustom(); refreshMiniPreview();
+  });
+  fld_mShow.appendChild(el('label', { class:'small flex', style:{gap:'8px',alignItems:'center',cursor:'pointer'} },
+    mShowChk, el('span', null, '7. 顯示吉祥物（卡片頂部 60×60 互動小熊）')));
+  cardSpot.appendChild(fld_mShow);
+
+  // ── 控制 8：吉祥物顏色 ──
+  const fld_mColor = el('div', { class:'field' });
+  fld_mColor.appendChild(el('label', { class:'label' }, '8. 吉祥物主色'));
+  const mColorInp = el('input', { type:'color', value: lc.mascotColor || '#f4a76a',
+    style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
+  mColorInp.addEventListener('input', ()=> {
+    lc.mascotColor = mColorInp.value;
+    saveUiCustom();
+  });
+  fld_mColor.appendChild(mColorInp);
+  fld_mColor.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '預設 #f4a76a (米黃熊)'));
+  cardSpot.appendChild(fld_mColor);
+
+  // ── 控制 9~11：顯示開關 (showRegister / showForgot / showSwitchRoom) ──
+  // 這幾個跟既有 hideXxx 共用；為了 UX 採「顯示」正向開關
+  const mkInverseChk = (hideKey, label, defaultShow) => {
+    const lbl = el('label', { class:'small flex', style:{gap:'8px',alignItems:'center',padding:'6px 0',cursor:'pointer'} });
+    const chk = el('input', { type:'checkbox' });
+    chk.checked = !lc[hideKey];                              // 顯示 = !hide
+    chk.addEventListener('change', ()=> {
+      lc[hideKey] = !chk.checked;
+      saveUiCustom();
+    });
+    lbl.appendChild(chk);
+    lbl.appendChild(el('span', null, label));
+    return lbl;
+  };
+  cardSpot.appendChild(mkInverseChk('hideRegister',   '9. 顯示「📤 沒帳號？申請註冊」按鈕（學生 tab）'));
+  cardSpot.appendChild(mkInverseChk('hideForgot',     '10. 顯示「🔑 忘記密碼？」連結'));
+  cardSpot.appendChild(mkInverseChk('hideSwitchRoom', '11. 顯示「← 切換教室」按鈕'));
+
+  // ── 重置預設 ──
+  cardSpot.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'10px'},
+    onclick: async ()=> {
+      const ok = await confirmDlg('要把 Spotify 風格的 11 項設定重置為預設值嗎？');
+      if(!ok) return;
+      ['cardBg','primary','pageBgType','pageBgColor','pageBgFrom','pageBgTo','pageBgImage',
+        'inputStyle','cardWidth','cardRadius','showMascot','mascotColor'].forEach(k => { delete lc[k]; });
+      saveUiCustom();
+      rerender();
+    } }, '↺ 重置 Spotify 風格設定'));
+
+  refreshMiniPreview();
+  content.appendChild(cardSpot);
 
   // d) 預覽
   const card4 = el('div', { class:'card', style:{marginTop:'12px'} });
