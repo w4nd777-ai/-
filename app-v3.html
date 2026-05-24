@@ -189,7 +189,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   .brand-title{ font-weight:700; font-size:15px; }
   .side-section-title{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); padding:12px 8px 4px; font-weight:600; }
   .side-item{
-    display:flex; align-items:center; gap:10px; padding:9px 10px;
+    display:flex; align-items:center; gap:8px; padding:9px 10px 9px 4px;
     border-radius:8px; cursor:pointer; color:var(--text-muted);
     transition:background var(--tx),color var(--tx); font-size:14px;
     border:none; background:none; width:100%; text-align:left; font-weight:500;
@@ -202,6 +202,20 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
     position:absolute; right:10px; background:var(--danger); color:#fff;
     font-size:10px; padding:1px 6px; border-radius:8px; min-width:18px; text-align:center;
   }
+  /* 左側拖拉把手 — hover 才顯示 */
+  .side-item .side-drag-handle{
+    display:inline-block; width:14px; min-width:14px;
+    color:var(--text-muted); font-size:12px;
+    text-align:center; line-height:1;
+    cursor:grab; opacity:0;
+    transition:opacity .15s;
+    user-select:none;
+  }
+  .side-item:hover .side-drag-handle,
+  .side-item.dragging .side-drag-handle{ opacity:.7; }
+  .side-item .side-drag-handle:hover{ opacity:1; color:var(--primary); }
+  .side-item.dragging .side-drag-handle{ cursor:grabbing; }
+  .sidebar.collapsed .side-drag-handle{ display:none; }
   .bottom-nav{ display:none; }
   .content{ padding:24px 32px; padding-bottom:32px; }
 
@@ -7924,9 +7938,11 @@ function sideItem(view, icon, label, badge){
     // 拖拉中不觸發點擊
     if(b.classList.contains('dragging')) { e.preventDefault(); return; }
     go(view);
-  }, title: finalLabel },
+  }, title: finalLabel + ' (按住把手 ⋮⋮ 可拖拉排序)' },
+    // 左側拖拉把手 (hover 顯示, 滑鼠按下可拖)
+    el('span', { class:'side-drag-handle', title:'拖拉排序' }, '⋮⋮'),
     el('span', { class:'ico' }, finalIcon),
-    el('span', null, finalLabel)
+    el('span', { class:'side-label' }, finalLabel)
   );
   // 記住 view key（讓 makeItemDraggable 使用）
   b.dataset.itemKey = view;
@@ -8048,7 +8064,20 @@ function makeItemDraggable(itemEl, role, sectionKey, itemKey){
   itemEl.dataset.dragBound = '1';
   itemEl.dataset.section = sectionKey;
   itemEl.dataset.role = role;
-  itemEl.draggable = true;
+  // 拖拉預設關閉, 只在使用者按住左側 .side-drag-handle 時才打開
+  itemEl.draggable = false;
+  const handle = itemEl.querySelector('.side-drag-handle');
+  if(handle){
+    handle.addEventListener('mousedown', ()=> { itemEl.draggable = true; });
+    handle.addEventListener('touchstart', ()=> { itemEl.draggable = true; }, { passive:true });
+    // 點 click 不要觸發路由 (handle 內 click 也會 bubble 到 button)
+    handle.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); });
+  }
+  // 拖拉結束 / 釋放滑鼠後關閉, 確保 click 不會誤觸發 drag
+  const resetDraggable = ()=> { itemEl.draggable = false; };
+  itemEl.addEventListener('mouseup', resetDraggable);
+  itemEl.addEventListener('mouseleave', resetDraggable);
+  itemEl.addEventListener('touchend', resetDraggable);
 
   itemEl.addEventListener('dragstart', e => {
     try {
@@ -8061,6 +8090,7 @@ function makeItemDraggable(itemEl, role, sectionKey, itemKey){
   });
   itemEl.addEventListener('dragend', () => {
     itemEl.classList.remove('dragging');
+    itemEl.draggable = false;  // 確保下次 click 不會誤啟 drag
     // 清掉所有 drag-over 標記
     document.querySelectorAll('.side-item.drag-over-top, .side-item.drag-over-bottom')
       .forEach(n => n.classList.remove('drag-over-top','drag-over-bottom'));
