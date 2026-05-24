@@ -1360,6 +1360,275 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 }
 .default-hint .dh-actions button:hover{ background:var(--surface-3); }
 
+/* ════════════════════════════════════════════════════════════
+   LOGIN V3 ▒▒ 分割布局 + 互動吉祥物（Instagram 風格）
+   ──────────────────────────────────────────────────────────── */
+/* 外殼：桌機左右分割、手機上下堆疊 */
+.login-v3-shell{
+  min-height:100vh; min-height:100dvh;
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  background:var(--bg);
+  overflow-x:hidden;
+}
+/* 左半：視覺區（品牌色漸層 + phone mockup + 飄浮裝飾） */
+.login-v3-visual{
+  position:relative; overflow:hidden;
+  background:linear-gradient(135deg, var(--primary) 0%, var(--accent, var(--primary-hover)) 100%);
+  color:#fff;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:40px 32px;
+}
+.login-v3-visual::before{
+  /* 大圓暈染裝飾 */
+  content:''; position:absolute;
+  width:520px; height:520px; border-radius:50%;
+  background:radial-gradient(circle, rgba(255,255,255,.18), transparent 60%);
+  top:-180px; left:-160px; pointer-events:none;
+}
+.login-v3-visual::after{
+  content:''; position:absolute;
+  width:420px; height:420px; border-radius:50%;
+  background:radial-gradient(circle, rgba(255,255,255,.12), transparent 60%);
+  bottom:-140px; right:-120px; pointer-events:none;
+}
+.login-v3-brand{
+  text-align:center; z-index:2; margin-bottom:24px;
+}
+.login-v3-brand h1{
+  font-size:32px; font-weight:800; letter-spacing:-.03em;
+  margin:0 0 6px; color:#fff;
+  text-shadow:0 2px 12px rgba(0,0,0,.18);
+}
+.login-v3-brand .sub{
+  font-size:14px; opacity:.92; color:#fff;
+  letter-spacing:.02em;
+}
+/* 手機 mockup 純 CSS 模擬 */
+.mockup-phone{
+  position:relative; z-index:2;
+  width:240px; height:480px;
+  border-radius:36px;
+  background:linear-gradient(160deg, #1a1f2e 0%, #2a3142 100%);
+  padding:10px;
+  box-shadow:
+    0 30px 60px rgba(0,0,0,.28),
+    0 10px 20px rgba(0,0,0,.18),
+    inset 0 0 0 2px rgba(255,255,255,.08);
+}
+.mockup-phone::before{
+  /* 瀏海 */
+  content:''; position:absolute; top:14px; left:50%;
+  transform:translateX(-50%);
+  width:110px; height:22px; border-radius:14px;
+  background:#0d0f15; z-index:3;
+}
+.mockup-phone::after{
+  /* 喇叭線 */
+  content:''; position:absolute; top:22px; left:50%;
+  transform:translateX(-50%);
+  width:40px; height:4px; border-radius:2px;
+  background:#222731; z-index:4;
+}
+.mockup-screen{
+  width:100%; height:100%; border-radius:28px;
+  background:linear-gradient(180deg, #fff 0%, #f3f5fb 100%);
+  color:#222;
+  padding:38px 16px 18px; box-sizing:border-box;
+  overflow:hidden; position:relative;
+  display:flex; flex-direction:column; gap:10px;
+}
+.mockup-screen .ms-title{
+  font-size:13px; font-weight:700; color:#333;
+  text-align:center; margin-top:2px;
+}
+.mockup-screen .ms-stats{
+  display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px;
+}
+.mockup-screen .ms-stat{
+  background:linear-gradient(135deg,#eef3ff,#e8f0fe);
+  border-radius:12px; padding:10px 8px; text-align:center;
+  border:1px solid rgba(0,0,0,.04);
+}
+.mockup-screen .ms-stat .n{
+  font-size:20px; font-weight:800; color:#3a5cf0; line-height:1;
+}
+.mockup-screen .ms-stat .l{
+  font-size:10px; color:#777; margin-top:4px;
+}
+.mockup-screen .ms-list{
+  margin-top:6px; display:flex; flex-direction:column; gap:6px;
+}
+.mockup-screen .ms-row{
+  display:flex; align-items:center; gap:8px;
+  background:#fff; border-radius:10px; padding:8px;
+  border:1px solid rgba(0,0,0,.05);
+  font-size:11px; color:#333;
+}
+.mockup-screen .ms-row .dot{
+  width:10px; height:10px; border-radius:50%;
+  background:linear-gradient(135deg,#7ee787,#52c41a); flex-shrink:0;
+}
+/* 飄浮裝飾 emoji */
+.login-v3-floats{
+  position:absolute; inset:0; pointer-events:none; z-index:1;
+}
+.login-v3-floats span{
+  position:absolute; font-size:32px; opacity:.85;
+  animation:lv3float 6s ease-in-out infinite;
+  filter:drop-shadow(0 4px 8px rgba(0,0,0,.15));
+}
+.login-v3-floats span:nth-child(1){ top:12%; left:10%; animation-delay:0s; }
+.login-v3-floats span:nth-child(2){ top:22%; right:12%; animation-delay:.8s; font-size:28px; }
+.login-v3-floats span:nth-child(3){ bottom:18%; left:8%; animation-delay:1.6s; font-size:30px; }
+.login-v3-floats span:nth-child(4){ bottom:14%; right:10%; animation-delay:2.4s; font-size:34px; }
+.login-v3-floats span:nth-child(5){ top:48%; left:4%; animation-delay:3.2s; font-size:24px; }
+.login-v3-floats span:nth-child(6){ top:55%; right:5%; animation-delay:4s; font-size:26px; }
+@keyframes lv3float{
+  0%,100%{ transform:translateY(0) rotate(-4deg); }
+  50%{ transform:translateY(-18px) rotate(4deg); }
+}
+
+/* 右半：登入表單區 */
+.login-v3-form{
+  display:flex; align-items:center; justify-content:center;
+  padding:32px 24px; background:var(--bg);
+  overflow-y:auto;
+}
+.login-v3-form > .login-card{
+  /* 沿用既有 .login-card 但放寬 max-width */
+  max-width:440px; width:100%;
+  box-shadow:var(--shadow-lg);
+}
+
+/* ── 互動吉祥物 ── */
+.mascot-wrap{
+  display:flex; justify-content:center;
+  margin:-8px 0 14px; position:relative;
+}
+.mascot-svg{
+  width:120px; height:120px; display:block;
+  filter:drop-shadow(0 6px 14px rgba(0,0,0,.12));
+  transition:transform .35s cubic-bezier(.34,1.56,.64,1);
+}
+.mascot-svg:hover{ transform:scale(1.04) rotate(-3deg); }
+/* 眼睛預設緩慢眨眼 */
+.mascot-svg .m-eye{
+  transform-origin:center; transform-box:fill-box;
+  transition:transform .25s ease, opacity .2s ease;
+  animation:m-blink 5s ease-in-out infinite;
+}
+.mascot-svg .m-pupil{
+  transition:transform .35s cubic-bezier(.34,1.56,.64,1);
+}
+.mascot-svg .m-mouth{
+  transition:d .3s ease, transform .3s ease;
+}
+.mascot-svg .m-hand{
+  transform-origin:50% 90%; transform-box:fill-box;
+  transition:transform .45s cubic-bezier(.34,1.56,.64,1), opacity .3s ease;
+  opacity:0;
+}
+.mascot-svg .m-blush{
+  opacity:0; transition:opacity .3s ease;
+}
+.mascot-svg .m-x-eye{
+  opacity:0; transition:opacity .25s ease;
+}
+.mascot-svg .m-happy-eye{
+  opacity:0; transition:opacity .25s ease;
+}
+/* 預設眨眼 */
+@keyframes m-blink{
+  0%, 92%, 100%{ transform:scaleY(1); }
+  95%{ transform:scaleY(.1); }
+}
+/* 狀態：focus 帳號 — 眼睛往下看 + 嘴角上揚 */
+.mascot-svg[data-state="lookDown"] .m-pupil{
+  transform:translateY(4px);
+}
+.mascot-svg[data-state="lookDown"] .m-blush{ opacity:.7; }
+/* 狀態：focus 密碼 — 手舉起遮眼 */
+.mascot-svg[data-state="cover"] .m-hand{ opacity:1; transform:translateY(-38px); }
+.mascot-svg[data-state="cover"] .m-hand-r{ transform:translate(2px,-38px) rotate(8deg); }
+.mascot-svg[data-state="cover"] .m-hand-l{ transform:translate(-2px,-38px) rotate(-8deg); }
+.mascot-svg[data-state="cover"] .m-blush{ opacity:.7; }
+/* 狀態：打字密碼 — 手抖、眼睛閉上 */
+.mascot-svg[data-state="typing"] .m-hand{ opacity:1; transform:translateY(-38px); animation:m-shake .35s ease-in-out infinite; }
+.mascot-svg[data-state="typing"] .m-hand-l{ animation-delay:.08s; }
+.mascot-svg[data-state="typing"] .m-eye{ animation:none; transform:scaleY(.08); }
+@keyframes m-shake{
+  0%,100%{ transform:translate(0,-38px) rotate(-6deg); }
+  50%{ transform:translate(2px,-40px) rotate(6deg); }
+}
+/* 狀態：peek — 手下移露縫、眼睛半開 */
+.mascot-svg[data-state="peek"] .m-hand{ opacity:.92; transform:translate(0,-22px); animation:none; }
+.mascot-svg[data-state="peek"] .m-hand-l{ transform:translate(-2px,-22px) rotate(-12deg); }
+.mascot-svg[data-state="peek"] .m-hand-r{ transform:translate(2px,-22px) rotate(12deg); }
+.mascot-svg[data-state="peek"] .m-eye{ animation:none; transform:scaleY(.55); }
+/* 狀態：fail — X X + 嘴角下垂 */
+.mascot-svg[data-state="fail"] .m-eye{ opacity:0; animation:none; }
+.mascot-svg[data-state="fail"] .m-x-eye{ opacity:1; }
+.mascot-svg[data-state="fail"] .m-mouth{ transform:translateY(4px) scaleY(-1); transform-origin:center; transform-box:fill-box; }
+.mascot-svg[data-state="fail"]{ animation:m-shake-fail .35s ease-in-out 2; }
+@keyframes m-shake-fail{
+  0%,100%{ transform:translateX(0); }
+  25%{ transform:translateX(-6px); }
+  75%{ transform:translateX(6px); }
+}
+/* 狀態：success — ^_^ + 大笑 */
+.mascot-svg[data-state="success"] .m-eye{ opacity:0; animation:none; }
+.mascot-svg[data-state="success"] .m-happy-eye{ opacity:1; }
+.mascot-svg[data-state="success"] .m-mouth{ transform:scaleY(1.6) scaleX(1.2); transform-origin:center; transform-box:fill-box; }
+.mascot-svg[data-state="success"]{ animation:m-bounce .55s cubic-bezier(.34,1.56,.64,1); }
+@keyframes m-bounce{
+  0%{ transform:scale(1); }
+  40%{ transform:scale(1.16) translateY(-8px); }
+  100%{ transform:scale(1); }
+}
+
+/* 響應式：< 900px 改成上下堆疊 */
+@media (max-width:900px){
+  .login-v3-shell{
+    grid-template-columns:1fr;
+    grid-template-rows:auto 1fr;
+  }
+  .login-v3-visual{
+    padding:24px 16px 28px;
+    min-height:auto;
+  }
+  .mockup-phone{ width:180px; height:340px; }
+  .mockup-phone::before{ width:84px; height:18px; top:12px; }
+  .mockup-phone::after{ top:19px; }
+  .mockup-screen{ padding:32px 12px 14px; }
+  .login-v3-brand h1{ font-size:24px; }
+  .login-v3-brand .sub{ font-size:13px; }
+  .login-v3-floats span{ font-size:24px !important; }
+  .login-v3-form{ padding:20px 16px; }
+}
+/* 超小：< 480px 視覺區只剩 logo + 標題 */
+@media (max-width:480px){
+  .login-v3-visual{ padding:18px 14px 22px; }
+  .login-v3-visual .mockup-phone{ display:none; }
+  .login-v3-brand h1{ font-size:20px; }
+  .login-v3-brand{ margin-bottom:0; }
+  .mascot-svg{ width:96px; height:96px; }
+  .login-v3-form > .login-card{ padding:18px 14px; }
+}
+
+/* a11y：尊重 prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce){
+  .login-v3-floats span,
+  .mascot-svg .m-eye,
+  .mascot-svg[data-state="typing"] .m-hand,
+  .mascot-svg[data-state="fail"],
+  .mascot-svg[data-state="success"]{
+    animation:none !important;
+  }
+  .mascot-svg, .mascot-svg *{ transition:none !important; }
+}
+
 .cls-group{ margin:14px 0 8px; }
 .cls-group-header{
   display:flex; align-items:center; gap:8px; cursor:pointer;
@@ -4854,42 +5123,208 @@ async function quickContinueAsLast(){
   }
 }
 
+/* ════════════════════════════════════════════════════════════
+   LOGIN V3 — 分割布局 + 互動吉祥物
+   ──────────────────────────────────────────────────────────── */
+// 互動吉祥物 SVG — 純手寫 + CSS 動畫驅動
+function buildMascotSVG(){
+  // 200~400 行內：圓臉、兩耳、大眼、短手、紅暈、預設/X/^_^ 三組眼睛、嘴巴、左右手
+  const svg =
+    '<svg class="mascot-svg" data-state="idle" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      // 兩隻耳朵
+      '<ellipse cx="28" cy="36" rx="11" ry="13" fill="#f4a76a"/>' +
+      '<ellipse cx="92" cy="36" rx="11" ry="13" fill="#f4a76a"/>' +
+      '<ellipse cx="28" cy="38" rx="6" ry="7" fill="#ffd3a8"/>' +
+      '<ellipse cx="92" cy="38" rx="6" ry="7" fill="#ffd3a8"/>' +
+      // 主臉
+      '<circle cx="60" cy="62" r="38" fill="#f4a76a"/>' +
+      '<ellipse cx="60" cy="74" rx="26" ry="18" fill="#ffd9b0"/>' +
+      // 紅暈（focus 時顯示）
+      '<circle class="m-blush" cx="35" cy="74" r="6" fill="#ff8aa3" opacity="0"/>' +
+      '<circle class="m-blush" cx="85" cy="74" r="6" fill="#ff8aa3" opacity="0"/>' +
+      // 預設眼睛（橢圓 + 瞳孔）
+      '<g class="m-eye m-eye-l">' +
+        '<ellipse cx="46" cy="58" rx="6" ry="8" fill="#fff"/>' +
+        '<circle class="m-pupil" cx="46" cy="60" r="3.5" fill="#222"/>' +
+        '<circle cx="47" cy="58.5" r="1.2" fill="#fff"/>' +
+      '</g>' +
+      '<g class="m-eye m-eye-r">' +
+        '<ellipse cx="74" cy="58" rx="6" ry="8" fill="#fff"/>' +
+        '<circle class="m-pupil" cx="74" cy="60" r="3.5" fill="#222"/>' +
+        '<circle cx="75" cy="58.5" r="1.2" fill="#fff"/>' +
+      '</g>' +
+      // 失敗 X 眼（兩條線交叉），預設隱藏
+      '<g class="m-x-eye" opacity="0" stroke="#d33" stroke-width="2.2" stroke-linecap="round">' +
+        '<line x1="40" y1="52" x2="52" y2="64"/>' +
+        '<line x1="52" y1="52" x2="40" y2="64"/>' +
+        '<line x1="68" y1="52" x2="80" y2="64"/>' +
+        '<line x1="80" y1="52" x2="68" y2="64"/>' +
+      '</g>' +
+      // 成功 ^_^ 眼，預設隱藏
+      '<g class="m-happy-eye" opacity="0" stroke="#222" stroke-width="2.4" stroke-linecap="round" fill="none">' +
+        '<path d="M40 60 Q46 52 52 60"/>' +
+        '<path d="M68 60 Q74 52 80 60"/>' +
+      '</g>' +
+      // 嘴巴（預設微笑）
+      '<path class="m-mouth" d="M50 80 Q60 88 70 80" stroke="#7a3f10" stroke-width="2.6" fill="none" stroke-linecap="round"/>' +
+      // 兩隻短手（預設隱藏在臉下方，cover/typing/peek 才出現遮眼）
+      '<ellipse class="m-hand m-hand-l" cx="42" cy="110" rx="14" ry="10" fill="#f4a76a"/>' +
+      '<ellipse class="m-hand m-hand-r" cx="78" cy="110" rx="14" ry="10" fill="#f4a76a"/>' +
+    '</svg>';
+  const wrap = document.createElement('div');
+  wrap.className = 'mascot-wrap';
+  wrap.innerHTML = svg;
+  return wrap;
+}
+
+// 設定吉祥物狀態（CSS [data-state="..."] 切換）
+function setMascotState(state){
+  try {
+    const m = document.querySelector('.mascot-svg');
+    if(!m) return;
+    m.dataset.state = state || 'idle';
+  } catch(e){_swallow('mascot-state',e)}
+}
+
+// 自動綁定吉祥物互動：focus/blur/input/password-toggle
+function bindMascotInteractions(stage){
+  if(!stage) return;
+  try {
+    const inputs = stage.querySelectorAll('input');
+    inputs.forEach(inp => {
+      const isPw = inp.type === 'password' || (inp.getAttribute('autocomplete')||'').indexOf('password') >= 0;
+      inp.addEventListener('focus', () => {
+        // 動態判斷（type 可能被 toggle 改變）
+        const nowPw = inp.type === 'password' || (inp.getAttribute('autocomplete')||'').indexOf('password') >= 0;
+        setMascotState(nowPw ? 'cover' : 'lookDown');
+      });
+      inp.addEventListener('blur', () => setMascotState('idle'));
+      inp.addEventListener('input', () => {
+        const nowPw = inp.type === 'password' || (inp.getAttribute('autocomplete')||'').indexOf('password') >= 0;
+        if(nowPw) setMascotState('typing');
+        else setMascotState('lookDown');
+      });
+    });
+    // 密碼眼睛 toggle 點下 → peek
+    const toggles = stage.querySelectorAll('.pw-toggle');
+    toggles.forEach(btn => {
+      btn.addEventListener('click', () => {
+        setMascotState('peek');
+        // 1.2 秒後依當前焦點回到合理狀態
+        setTimeout(() => {
+          const ae = document.activeElement;
+          if(ae && stage.contains(ae) && ae.tagName === 'INPUT'){
+            const nowPw = ae.type === 'password' || (ae.getAttribute('autocomplete')||'').indexOf('password') >= 0;
+            setMascotState(nowPw ? 'cover' : 'lookDown');
+          } else {
+            setMascotState('idle');
+          }
+        }, 1200);
+      });
+    });
+  } catch(e){_swallow('mascot-bind',e)}
+}
+
 function renderLogin(root){
   root.innerHTML = '';
   // 確保 _uiCustom 已載入（首次登入時可能尚未 boot 到該分支）
   try { App._uiCustom = App._uiCustom || loadUiCustom(); } catch(e){_swallow('auto',e)}
   const lc = (App._uiCustom && App._uiCustom.login) || {};
 
-  const wrap = el('div', { class:'center-wrap' });
-  const card = el('div', { class:'login-card login-v2' });
+  // ── 外殼：分割布局 ──
+  const shell = el('div', { class:'login-v3-shell' });
 
-  // Hero — Logo（圖片優先，否則 emoji）
-  const logoEl = el('div', { class:'logo-xl' });
-  if(lc.logoImage){
-    // 圖片：先放 emoji 預設，背景非同步換成圖片
-    logoEl.textContent = lc.logoEmoji || '🎓';
-    (async ()=>{
-      try {
-        const url = await attachGetUrl(lc.logoImage);
-        if(url){
-          logoEl.innerHTML = '';
-          logoEl.appendChild(el('img', { src:url, style:{
-            width:'100%', height:'100%', objectFit:'cover', borderRadius:'inherit'
-          } }));
-        }
-      } catch(e){_swallow('auto',e)}
-    })();
-  } else {
-    logoEl.textContent = lc.logoEmoji || '🎓';
-  }
+  // 取資料供視覺區顯示
+  const stuCount = (App.db.students && App.db.students.length) || 0;
+  const clsSet = new Set((App.db.students||[]).map(s => s.cls || '未分班'));
+  const clsCount = clsSet.size;
+  const lessonCount = Array.isArray(App.db.timetable) ? App.db.timetable.length : 0;
+
   const heroTitle = lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統';
   const heroSub = lc.subtitle || '極簡校園管理工具';
-  const hero = el('div', { class:'login-hero' },
-    logoEl,
+
+  // ─── 左：視覺區 ───
+  const visual = el('div', { class:'login-v3-visual' });
+  // 飄浮裝飾
+  const floats = el('div', { class:'login-v3-floats' },
+    el('span', null, '📚'),
+    el('span', null, '🎒'),
+    el('span', null, '✏️'),
+    el('span', null, '📝'),
+    el('span', null, '🎓'),
+    el('span', null, '⭐')
+  );
+  visual.appendChild(floats);
+  // 品牌標題
+  const brand = el('div', { class:'login-v3-brand' },
+    el('h1', null, heroTitle),
+    el('div', { class:'sub' }, heroSub)
+  );
+  visual.appendChild(brand);
+  // 手機 mockup
+  const phone = el('div', { class:'mockup-phone' });
+  const phoneScreen = el('div', { class:'mockup-screen' });
+  phoneScreen.appendChild(el('div', { class:'ms-title' }, '今日校園'));
+  const phStats = el('div', { class:'ms-stats' },
+    el('div', { class:'ms-stat' },
+      el('div', { class:'n' }, String(clsCount || 1)),
+      el('div', { class:'l' }, '個班級')
+    ),
+    el('div', { class:'ms-stat' },
+      el('div', { class:'n' }, String(stuCount)),
+      el('div', { class:'l' }, '位學生')
+    )
+  );
+  phoneScreen.appendChild(phStats);
+  const phList = el('div', { class:'ms-list' });
+  const sampleRows = [
+    { dot:true, label:'國文 · 第 1 節' },
+    { dot:true, label:'數學 · 第 2 節' },
+    { dot:true, label:'點名完成 ' + (lessonCount||3) + ' 堂' }
+  ];
+  sampleRows.forEach(r => {
+    phList.appendChild(el('div', { class:'ms-row' },
+      el('span', { class:'dot' }),
+      el('span', null, r.label)
+    ));
+  });
+  phoneScreen.appendChild(phList);
+  phone.appendChild(phoneScreen);
+  visual.appendChild(phone);
+
+  // ─── 右：登入卡片 ───
+  const formCol = el('div', { class:'login-v3-form' });
+  const card = el('div', { class:'login-card login-v2' });
+
+  // 吉祥物（取代 logo 大圖示）
+  card.appendChild(buildMascotSVG());
+
+  // 若有自訂 logo 圖片，仍顯示一個小 logo
+  if(lc.logoImage || lc.logoEmoji){
+    const logoEl = el('div', { class:'logo-xl', style:{ width:'48px', height:'48px', fontSize:'24px', margin:'0 auto 8px' } });
+    if(lc.logoImage){
+      logoEl.textContent = lc.logoEmoji || '🎓';
+      (async ()=>{
+        try {
+          const url = await attachGetUrl(lc.logoImage);
+          if(url){
+            logoEl.innerHTML = '';
+            logoEl.appendChild(el('img', { src:url, style:{
+              width:'100%', height:'100%', objectFit:'cover', borderRadius:'inherit'
+            } }));
+          }
+        } catch(e){_swallow('auto',e)}
+      })();
+    } else {
+      logoEl.textContent = lc.logoEmoji || '🎓';
+    }
+    card.appendChild(logoEl);
+  }
+  // 標題（卡片內較小）
+  card.appendChild(el('div', { class:'login-hero', style:{marginBottom:'14px'} },
     el('h1', { class:'brand-h1' }, heroTitle),
     el('div', { class:'brand-sub' }, heroSub)
-  );
-  card.appendChild(hero);
+  ));
 
   // Stage default — back-compat with old App.loginRole flag
   if(!App._loginStage){
@@ -4929,6 +5364,7 @@ function renderLogin(root){
   }
 
   // ─── Stage: choose role ───
+  let activeStage = null;
   if(App._loginStage === 'choose'){
     const stage = el('div', { class:'login-stage' });
     const grid = el('div', { class:'role-choice' });
@@ -4960,12 +5396,15 @@ function renderLogin(root){
     }
     stage.appendChild(grid);
     card.appendChild(stage);
+    activeStage = stage;
   }
   else if(App._loginStage === 'teacher'){
-    card.appendChild(renderLoginTeacherStage());
+    activeStage = renderLoginTeacherStage();
+    card.appendChild(activeStage);
   }
   else if(App._loginStage === 'student'){
-    card.appendChild(renderLoginStudentStage());
+    activeStage = renderLoginStudentStage();
+    card.appendChild(activeStage);
   }
 
   // 自訂歡迎訊息
@@ -5000,8 +5439,13 @@ function renderLogin(root){
     card.appendChild(back);
   }
 
-  wrap.appendChild(card);
-  root.appendChild(wrap);
+  formCol.appendChild(card);
+  shell.appendChild(visual);
+  shell.appendChild(formCol);
+  root.appendChild(shell);
+
+  // 綁定吉祥物互動（focus/blur/input/peek）
+  if(activeStage) bindMascotInteractions(activeStage);
 }
 
 function renderLoginTeacherStage(){
@@ -5057,12 +5501,13 @@ function renderLoginTeacherStage(){
 
   const submit = async ()=>{
     const u = i1.value.trim(); const pw = i2.value;
-    if(!u || !pw){ toast('請輸入帳號和密碼','danger'); return; }
+    if(!u || !pw){ toast('請輸入帳號和密碼','danger'); try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return; }
     // L1: 登入前先檢查鎖定狀態（與忘記密碼共用同一個帳號計數器）
     if(isForgotLocked(u)){
       const l = getForgotLock(u);
       const left = Math.max(0, l.lockedUntil - Date.now());
       toast('嘗試次數過多，請於 ' + fmtLockRemain(left) + ' 後再試', 'danger');
+      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return;
     }
     const candidate = App.db.accounts.find(x => x.username === u);
@@ -5071,6 +5516,7 @@ function renderLoginTeacherStage(){
       const l = incForgotLock(u);
       const remain = Math.max(0, FORGOT_LOCK_MAX - l.count);
       toast('帳號或密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
+      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return;
     }
     const ok = await verifyPassword(pw, candidate.password);
@@ -5083,8 +5529,11 @@ function renderLoginTeacherStage(){
       } else {
         toast('帳號或密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
       }
+      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return;
     }
+    // 登入成功 → 吉祥物笑
+    try{setMascotState('success');}catch(_){_swallow('auto',_)}
     // L1: 登入成功 → 清除鎖定計數
     clearForgotLock(u);
     // 自動升級：若非 v2$ 新格式（明文 / 'plain:' / 舊 64 hex 共用 salt）→ 升級到 per-account salt
@@ -6399,21 +6848,23 @@ function renderLoginStudentStage(){
   // 登入函式
   async function attemptLogin(){
     const sid = parseInt(selName.value);
-    if(!selCls.value) return toast('請先選擇班級', 'warning');
-    if(!sid) return toast('請選擇你的姓名', 'warning');
+    if(!selCls.value){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請先選擇班級', 'warning'); }
+    if(!sid){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請選擇你的姓名', 'warning'); }
     const pw = iPw.value;
-    if(!pw) return toast('請輸入密碼', 'warning');
+    if(!pw){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請輸入密碼', 'warning'); }
     // L1: 學生 lockout key 用 'stu:' + cls + ':' + sid（避免和老師帳號互相干擾）
     const lockKey = 'stu:' + selCls.value + ':' + sid;
     if(isForgotLocked(lockKey)){
       const l = getForgotLock(lockKey);
       const left = Math.max(0, l.lockedUntil - Date.now());
       toast('嘗試次數過多，請於 ' + fmtLockRemain(left) + ' 後再試', 'danger');
+      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return;
     }
     const s = App.db.students.find(x => x.id === sid);
     if(!s){
       incForgotLock(lockKey);
+      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return toast('學生不存在','danger');
     }
     const stored = s.password || s.pass || (String(s.sid||'0000').slice(-4));
@@ -6427,10 +6878,13 @@ function renderLoginStudentStage(){
       } else {
         toast('密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
       }
+      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       iPw.value = '';
       iPw.focus();
       return;
     }
+    // 登入成功 → 吉祥物笑
+    try{setMascotState('success');}catch(_){_swallow('auto',_)}
     // L1: 登入成功 → 清除鎖定計數
     clearForgotLock(lockKey);
     // 自動升級為 v2$ per-account salt 雜湊
