@@ -5252,10 +5252,46 @@ function saveRemember(r){
     else localStorage.removeItem(LS_REMEMBER);
   } catch(e){_swallow('auto',e)}
 }
-// H2：「記住我」改用隨機 token，不再把明文密碼存 localStorage。
-//      舊函式名保留為空 stub，避免外部殘留呼叫端炸掉。
-function _obfuscatePw(){ return ''; }
-function _deobfuscatePw(){ return ''; }
+// 「記住我」混淆密碼 — 使用 device-key XOR + base64
+// 安全性: 中等 (比純 base64 強, 比真加密弱)
+// 攻擊面: 同一裝置攻擊者可解密. 跨裝置攻擊者拿不到 device key
+// 使用情境: 私人裝置使用者方便登入, 公用裝置請勿勾「記住我」
+function _getDeviceKey(){
+  try {
+    let k = localStorage.getItem('cms_v3_dev_key');
+    if(!k){
+      const buf = new Uint8Array(32);
+      crypto.getRandomValues(buf);
+      k = Array.from(buf).map(b=>b.toString(16).padStart(2,'0')).join('');
+      localStorage.setItem('cms_v3_dev_key', k);
+    }
+    return k;
+  } catch(_){ return 'fallback-key-' + (navigator.userAgent||'x').slice(0,16); }
+}
+function _obfuscatePw(pw){
+  try {
+    if(!pw) return '';
+    const key = _getDeviceKey();
+    let out = '';
+    for(let i=0; i<pw.length; i++){
+      out += String.fromCharCode(pw.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return 'x:' + btoa(unescape(encodeURIComponent(out)));
+  } catch(_){ return ''; }
+}
+function _deobfuscatePw(s){
+  try {
+    if(!s || typeof s !== 'string') return '';
+    if(!s.startsWith('x:')) return '';
+    const key = _getDeviceKey();
+    const raw = decodeURIComponent(escape(atob(s.slice(2))));
+    let out = '';
+    for(let i=0; i<raw.length; i++){
+      out += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return out;
+  } catch(_){ return ''; }
+}
 
 /* H2: login token helpers
  * - genLoginToken 產生 32 bytes 隨機 token（64 hex）
@@ -6221,9 +6257,12 @@ function renderLoginTeacherStage(){
   const f2 = el('div', { class:'field' });
   f2.appendChild(el('label', { class:'label' }, '密碼'));
   const pwWrap = el('div', { class:'pw-input-wrap' });
-  // H2: 不再自動帶入明文密碼。若 token 仍有效會走 quickContinueAsLast 直接登入；
-  //     否則需要使用者重新輸入。
-  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼', autocomplete:'current-password' });
+  // 記住密碼: 若 LS 內有混淆密碼且帳號一致, 自動帶入
+  const savedPw = (rememberSaved && rememberSaved.username
+    && (!prefill.username || prefill.username === rememberSaved.username))
+    ? _deobfuscatePw(rememberSaved.pw || '') : '';
+  const i2 = el('input', { class:'input', type:'password', placeholder:'密碼',
+    autocomplete:'current-password', value: savedPw });
   const togglePw = el('button', { type:'button', class:'pw-toggle', onclick: e => {
     e.preventDefault();
     if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
@@ -6304,12 +6343,13 @@ function renderLoginTeacherStage(){
     saveSession();
     saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
     if(rememberChk.checked){
-      // H2: 用隨機 token，明文密碼絕不存 LS
+      // 記住密碼: 同時存 token + 混淆密碼 (device-key XOR)
+      // 下次帳號密碼自動帶入, 但仍需點登入鍵 (不自動登入)
       try {
         const tok = genLoginToken();
         await _addLoginToken(a, tok);
-        saveRemember({ username: a.username, token: tok, ts: Date.now() });
-        saveDB(true);  // 立即寫入新 token
+        saveRemember({ username: a.username, token: tok, pw: _obfuscatePw(pw), ts: Date.now() });
+        saveDB(true);
       } catch(e){ _swallow('teacher-issue-token', e); saveRemember(null); }
     } else {
       saveRemember(null);
@@ -7531,9 +7571,8 @@ function renderLoginStudentStage(){
   stuRemLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
   stage.appendChild(stuRemLabel);
 
-  // 自動回填上次記住的學生（只回填班級+姓名 + 顯示「上次：XXX」提示，不自動登入）
-  // 修：使用者抱怨「再按一次直接登入無法切換帳號」→ 移除 token 自動登入,
-  //     永遠要按「登入」按鈕才會登入,讓使用者隨時能切換
+  // 自動回填: 班級 + 姓名 + 密碼 (若記住我有存)
+  // 永遠要按「登入」按鈕才會登入, 不自動進系統
   if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId){
     const lastStu = App.db.students.find(x => x.id === _stuRem.studentId);
     if(lastStu){
@@ -7544,6 +7583,9 @@ function renderLoginStudentStage(){
           selCls.value = App._loginCls;
           refreshNameList();
           selName.value = String(lastStu.id);
+          // 帶入混淆密碼
+          const savedStuPw = _deobfuscatePw(_stuRem.pw || '');
+          if(savedStuPw){ iPw.value = savedStuPw; }
           iPw.focus();
         } catch(e){ _swallow('stu-prefill', e); }
       }, 0);
@@ -7638,12 +7680,13 @@ function renderLoginStudentStage(){
         try { Sync.setMap('students', App.db.students, true); } catch(e){ _swallow('sync-stu',e); }
       } catch(e){ _swallow('upgrade-stu-pw', e); }
     }
-    // H2: 學生端勾選記住我 → 改用隨機 token，不再存任何密碼形式
+    // 記住密碼: 同時存 token + 混淆密碼 (device-key XOR)
+    // 下次班級+姓名+密碼自動帶入, 但仍需點登入鍵
     if(stuRemChk.checked){
       try {
         const tok = genLoginToken();
         await _addLoginToken(s, tok);
-        saveRemember({ role:'student', studentId: s.id, token: tok, ts: Date.now() });
+        saveRemember({ role:'student', studentId: s.id, token: tok, pw: _obfuscatePw(pw), ts: Date.now() });
         saveDB(true);
       } catch(e){ _swallow('stu-issue-token', e); saveRemember(null); }
     } else {
