@@ -370,7 +370,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   box-shadow:var(--shadow-sm);
 }
 .card-hover{ transition:transform var(--tx),box-shadow var(--tx); cursor:pointer; }
-.card-hover:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+.card-hover:hover{ box-shadow:var(--shadow); }
 .card h2{ margin-bottom:6px; }
 .card h3{ margin-bottom:4px; }
 
@@ -392,7 +392,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   background:var(--surface); border:1px solid var(--border);
   cursor:pointer; transition:all var(--tx);
 }
-.stat:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+.stat:hover{ box-shadow:var(--shadow); }
 .stat .num{ font-size:28px; font-weight:800; letter-spacing:-.03em; }
 .stat .lbl{ color:var(--text-muted); font-size:12px; font-weight:600; }
 .stat.s-success .num{ color:var(--success); }
@@ -529,8 +529,8 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   position:relative; overflow:hidden;
   letter-spacing:.04em;
 }
-.checkin-btn:hover{ transform:scale(1.03); }
-.checkin-btn:active{ transform:scale(.96); }
+.checkin-btn:hover{ filter:brightness(1.05); }
+.checkin-btn:active{ filter:brightness(.95); }
 .checkin-btn.pulse{ animation:pulse 1.4s infinite; }
 @keyframes pulse{
   0%,100%{ box-shadow:0 12px 40px rgba(37,99,235,.35); }
@@ -610,7 +610,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   border-radius:var(--r-md); cursor:pointer;
   transition:all var(--tx); text-align:center;
 }
-.role-card:hover{ border-color:var(--primary); transform:translateY(-2px); }
+.role-card:hover{ border-color:var(--primary); box-shadow:var(--shadow); }
 .role-card .ico{ font-size:48px; margin-bottom:8px; }
 .role-card h3{ margin-bottom:4px; }
 
@@ -740,7 +740,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   border-radius:var(--r-sm); padding:10px; margin-bottom:8px; cursor:pointer;
   transition:all var(--tx);
 }
-.kanban-card:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+.kanban-card:hover{ box-shadow:var(--shadow); }
 
 .search-box{
   position:relative; margin-bottom:12px;
@@ -1092,10 +1092,10 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   display:flex; flex-direction:column; align-items:center; gap:6px;
 }
 .stu-picker .pcard:hover{
-  border-color:var(--primary); transform:translateY(-2px);
+  border-color:var(--primary);
   box-shadow:var(--shadow);
 }
-.stu-picker .pcard:active{ transform:scale(.97); }
+.stu-picker .pcard:active{ filter:brightness(.95); }
 .stu-picker .pcard .av{
   width:48px; height:48px; border-radius:50%;
   background:var(--primary); color:#fff;
@@ -1128,7 +1128,7 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   position:relative;
 }
 .qs-card:hover{
-  border-color:var(--primary); transform:translateY(-2px);
+  border-color:var(--primary);
   box-shadow:var(--shadow);
 }
 .qs-card.primary{
@@ -1348,8 +1348,8 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   display:flex; align-items:center; justify-content:center; gap:8px;
   box-shadow:var(--shadow); transition:all var(--tx);
 }
-.last-user-quick:hover{ background:var(--primary-hover); transform:translateY(-1px); box-shadow:var(--shadow-lg); }
-.last-user-quick:active{ transform:scale(.98); }
+.last-user-quick:hover{ background:var(--primary-hover); box-shadow:var(--shadow-lg); }
+.last-user-quick:active{ filter:brightness(.95); }
 .last-user-clear{
   background:none; border:none; color:var(--text-muted);
   font-size:11px; cursor:pointer; padding:4px;
@@ -1544,8 +1544,8 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   transition: transform .12s ease, filter .15s ease, box-shadow .15s ease;
   box-shadow: 0 4px 12px color-mix(in srgb, var(--lc-primary) 35%, transparent);
 }
-.login-spotify-card .btn-pill-primary:hover{ filter:brightness(1.08); transform:translateY(-1px); }
-.login-spotify-card .btn-pill-primary:active{ transform:scale(.98); }
+.login-spotify-card .btn-pill-primary:hover{ filter:brightness(1.08); }
+.login-spotify-card .btn-pill-primary:active{ filter:brightness(.92); }
 /* ── 次要按鈕 (註冊/返回) ── */
 .login-spotify-card .btn-pill-ghost{
   display:block; width:100%; height:42px;
@@ -1799,7 +1799,7 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   filter:drop-shadow(0 6px 14px rgba(0,0,0,.12));
   transition:transform .35s cubic-bezier(.34,1.56,.64,1);
 }
-.mascot-svg:hover{ transform:scale(1.04) rotate(-3deg); }
+.mascot-svg:hover{ filter:drop-shadow(0 6px 14px rgba(0,0,0,.12)) brightness(1.05); }
 /* 眼睛預設緩慢眨眼 */
 .mascot-svg .m-eye{
   transform-origin:center; transform-box:fill-box;
@@ -2881,7 +2881,6 @@ button:focus-visible,
 }
 .card-hover{ cursor:pointer; }
 .card-hover:hover{
-  transform:translateY(-2px);
   box-shadow:var(--shadow-md-2);
   border-color:var(--gray-300);
 }
@@ -2907,7 +2906,6 @@ button:focus-visible,
   overflow:hidden;
 }
 .stat:hover{
-  transform:translateY(-2px);
   box-shadow:var(--shadow-md-2);
   border-color:var(--gray-300);
 }
@@ -2993,7 +2991,6 @@ button:focus-visible,
   background:var(--surface);
   color:var(--primary);
   box-shadow:var(--shadow-sm-2);
-  transform:scale(1.02);
 }
 
 /* ── Modal 升級 ── */
@@ -3480,8 +3477,80 @@ body .badge{
 /* === 14. 全域 focus ring 主色 === */
 *:focus-visible{
   outline: 2px solid var(--primary) !important;
-  outline-offset: 2px !important;
-  border-radius: 4px;
+  outline-offset: 3px !important;
+}
+.btn-pill-primary:focus-visible,
+.btn-pill-ghost:focus-visible{
+  outline-offset: 4px !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   第三輪健康檢查 修補 (H-2 ~ L-7)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* H-2: 統計卡彩色 num 顏色 !important (蓋過漸層 ::before 干擾) */
+body .stat.s-success .num{ color: var(--success) !important; }
+body .stat.s-warn .num{ color: var(--warn) !important; }
+body .stat.s-danger .num{ color: var(--danger) !important; }
+body .stat.s-accent .num{ color: var(--accent) !important; }
+body .stat.s-primary .num{ color: var(--primary) !important; }
+
+/* H-3: 黑暗模式 topbar / 卡片邊框可見度 */
+[data-theme="dark"] body .topbar{
+  border-bottom-color: rgba(255,255,255,0.08) !important;
+}
+[data-theme="dark"] body .card{
+  border-color: rgba(255,255,255,0.06) !important;
+}
+
+/* M-1: 4 統計卡 mobile padding / font 縮小 */
+@media(max-width:680px){
+  body .stat{ padding: 14px !important; }
+  body .stat .num{ font-size: 30px !important; }
+  body .stat .lbl{ font-size: 10px !important; }
+}
+
+/* M-2: 超窄螢幕 card / stu-card padding 回小 */
+@media(max-width:360px){
+  body .card{ padding: 14px !important; }
+  body .stu-card{ padding: 12px !important; }
+}
+
+/* M-3: list-row compact variant */
+body .list-row.list-row-compact{
+  padding: 8px 10px !important;
+  gap: 8px !important;
+}
+
+/* M-4: 大標題漸層在 dark mode 對比修正 */
+[data-theme="dark"] body .content > h1,
+[data-theme="dark"] body .content > .page-head > h1{
+  background: none !important;
+  -webkit-text-fill-color: var(--text) !important;
+  color: var(--text) !important;
+}
+
+/* M-6: 觸控裝置強制顯示拖拉把手 + 提示 */
+@media (hover: none){
+  body .side-item .side-drag-handle{ opacity: .5 !important; }
+}
+
+/* L-2: color-mix fallback (老瀏覽器降級) */
+@supports not (background: color-mix(in srgb, red, blue)){
+  body .side-item.active{ background: var(--primary-soft) !important; }
+  body .side-item:hover{ background: var(--primary-soft) !important; }
+  body .list-row:hover{ background: var(--surface-2) !important; }
+}
+
+/* L-5: dark mode 紅色 error ring 降亮度 */
+[data-theme="dark"] .input-error,
+[data-theme="dark"] .input.is-error{
+  box-shadow: 0 0 0 3px rgba(239,68,68,0.25) !important;
+}
+
+/* L-7: stat::before 漸層降亮 (dark mode) */
+[data-theme="dark"] body .stat::before{
+  opacity: 0.5 !important;
 }
 
 </style>
@@ -6800,6 +6869,7 @@ const LOGIN_LOGOS = {
 };
 
 // 把 preset 內容套到 lc（保留使用者已輸入的標題/Logo/welcome 等內容欄位）
+// M-8: 補上 logoStyle / smallLogoStyle / smallLogoEmoji / smallLogoImage 到 visualKeys
 function applyLoginPreset(lc, presetKey){
   const p = LOGIN_PRESETS[presetKey];
   if(!p || !lc) return;
@@ -6808,11 +6878,15 @@ function applyLoginPreset(lc, presetKey){
     'layout','cardBg','cardWidth','cardRadius','primary','primaryFg',
     'pageBgType','pageBgColor','pageBgFrom','pageBgTo','pageBgImage',
     'inputStyle','cardTone','inputDark','inputBg','inputFg','inputBorder',
-    'mascotOnDark','mascotColor','fontStack','cardBackdrop','cardBorder'
+    'mascotOnDark','mascotColor','fontStack','cardBackdrop','cardBorder',
+    'logoStyle','smallLogoStyle','smallLogoEmoji','smallLogoImage'
   ];
+  // 預設 logo 設定（若 preset 沒指定）
+  const _logoDefaults = { logoStyle:'bear', smallLogoStyle:'emoji', smallLogoEmoji:'🎓' };
   visualKeys.forEach(k => {
     if(p[k] !== undefined) lc[k] = p[k];
-    else delete lc[k]; // preset 沒設 → 清掉殘留值（避免上一個 preset 漏出來）
+    else if(_logoDefaults[k] !== undefined) lc[k] = _logoDefaults[k]; // 套上預設, 避免上一個 preset 漏出來
+    else delete lc[k]; // preset 沒設且無預設 → 清掉殘留值
   });
   lc.preset = presetKey;
 }
@@ -7145,7 +7219,7 @@ function renderLoginTeacherStage(){
     ? _deobfuscatePw(rememberSaved.pw || '') : '';
   const i2 = el('input', { class:'input', type:'password', placeholder:'密碼',
     autocomplete:'current-password', value: savedPw });
-  const togglePw = el('button', { type:'button', class:'pw-toggle', onclick: e => {
+  const togglePw = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: e => {
     e.preventDefault();
     if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
     else { i2.type = 'password'; togglePw.textContent = '👁'; }
@@ -7160,6 +7234,8 @@ function renderLoginTeacherStage(){
   if(rememberSaved && rememberSaved.username) rememberChk.checked = true;
   rememberLabel.appendChild(rememberChk);
   rememberLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
+  // L-6: 隱身視窗友善提示（device-key 可能無法保留）
+  rememberLabel.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '⚠ 隱身視窗不支援'));
   stage.appendChild(rememberLabel);
 
   const _lcT = (App._uiCustom && App._uiCustom.login) || {};
@@ -8435,7 +8511,7 @@ function renderLoginStudentStage(){
   f3.appendChild(el('label', { class:'label' }, '③ 輸入密碼'));
   const pwWrap = el('div', { class:'pw-input-wrap' });
   const iPw = el('input', { class:'input', type:'password', placeholder:'輸入密碼', autocomplete:'current-password' });
-  const togBtn = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', onclick: ()=> {
+  const togBtn = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: ()=> {
     iPw.type = iPw.type === 'password' ? 'text' : 'password';
     togBtn.textContent = iPw.type === 'password' ? '👁' : '🙈';
   }}, '👁');
@@ -8451,6 +8527,8 @@ function renderLoginStudentStage(){
   if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId) stuRemChk.checked = true;
   stuRemLabel.appendChild(stuRemChk);
   stuRemLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
+  // L-6: 隱身視窗友善提示
+  stuRemLabel.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '⚠ 隱身視窗不支援'));
   stage.appendChild(stuRemLabel);
 
   // 自動回填: 班級 + 姓名 + 密碼 (若記住我有存)
@@ -8713,7 +8791,7 @@ function forceChangePassword(studentId){
   f1.appendChild(el('label', { class:'label' }, '新密碼（至少 6 個字元）'));
   const wrap1 = el('div', { class:'pw-input-wrap' });
   const i1 = el('input', { class:'input', type:'password', placeholder:'新密碼' });
-  const tog1 = el('button', { type:'button', class:'pw-toggle', onclick: ()=> {
+  const tog1 = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: ()=> {
     i1.type = i1.type === 'password' ? 'text' : 'password';
     tog1.textContent = i1.type === 'password' ? '👁' : '🙈';
   }}, '👁');
@@ -8795,7 +8873,7 @@ function forceChangeTeacherPassword(accountId){
   f1.appendChild(el('label', { class:'label' }, '新密碼（至少 6 個字元）'));
   const wrap1 = el('div', { class:'pw-input-wrap' });
   const i1 = el('input', { class:'input', type:'password', placeholder:'新密碼' });
-  const tog1 = el('button', { type:'button', class:'pw-toggle', onclick: ()=> {
+  const tog1 = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: ()=> {
     i1.type = i1.type === 'password' ? 'text' : 'password';
     tog1.textContent = i1.type === 'password' ? '👁' : '🙈';
   }}, '👁');
@@ -8901,7 +8979,7 @@ function sideItem(view, icon, label, badge){
     go(view);
   }, title: finalLabel + ' (按住把手 ⋮⋮ 可拖拉排序)' },
     // 左側拖拉把手 (hover 顯示, 滑鼠按下可拖)
-    el('span', { class:'side-drag-handle', title:'拖拉排序' }, '⋮⋮'),
+    el('span', { class:'side-drag-handle', title:'拖拉排序', 'aria-label':'拖拉排序', role:'button' }, '⋮⋮'),
     el('span', { class:'ico' }, finalIcon),
     el('span', { class:'side-label' }, finalLabel)
   );
@@ -8926,6 +9004,9 @@ function renderSidebarExpandRow(isTeacher){
     ? ['daily','teaching','tools','manage','system']
     : ['s_func','s_learn','s_other'];
   const setAll = (collapsed) => {
+    // M-7: 保存 sidebar 捲軸位置, 避免 rerender 後跳回頂部
+    const _sb = document.querySelector('.sidebar');
+    const _sbTop = _sb ? _sb.scrollTop : 0;
     App._sideExpanded = App._sideExpanded || {};
     keys.forEach(k => {
       App._sideExpanded[k] = !collapsed;  // expanded = !collapsed
@@ -8933,6 +9014,13 @@ function renderSidebarExpandRow(isTeacher){
     });
     try { localStorage.setItem('cms_v3_side_expanded', JSON.stringify(App._sideExpanded)); } catch(_){}
     rerender();
+    // 還原捲軸
+    setTimeout(()=> {
+      try {
+        const sb2 = document.querySelector('.sidebar');
+        if(sb2) sb2.scrollTop = _sbTop;
+      } catch(_){_swallow('side-scroll',_)}
+    }, 0);
   };
   return el('div', { class:'side-expand-row' },
     el('button', { type:'button', class:'btn-side-mini', title:'全部展開',
@@ -18931,15 +19019,22 @@ function initPWA(){
         try { reg.update(); } catch(_){_swallow('sw-update',_)}
       }).catch(()=>null);
 
-      // M3: 收到 controllerchange（新 SW 已 activate + claim）→ 自動 reload
-      // 用 flag 避免無窮 reload
+      // H-5: 改為手動提示模式 — 若使用者正在輸入 / 有 modal, 顯示橫條讓使用者主動更新, 避免打斷
       let _swReloading = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if(_swReloading) return;
-        _swReloading = true;
-        try { toast('已更新到最新版本，重新載入...', 'info', 2000); } catch(_){_swallow('sw-toast',_)}
-        // 給 toast 一點時間顯示
-        setTimeout(()=> { try { location.reload(); } catch(_){_swallow('sw-reload',_)} }, 600);
+        try {
+          const active = document.activeElement;
+          const inputting = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+          const hasModal = document.querySelectorAll('.modal').length > 0;
+          if(inputting || hasModal){
+            _showSwUpdateBanner(()=> { _swReloading = true; });
+          } else {
+            _swReloading = true;
+            try { toast('已更新到最新版本，重新載入...', 'info', 2000); } catch(_){_swallow('sw-toast',_)}
+            setTimeout(()=> { try { location.reload(); } catch(_){_swallow('sw-reload',_)} }, 600);
+          }
+        } catch(_){_swallow('sw-ctlchg',_)}
       });
     } catch(e){_swallow('auto',e)}
   }
@@ -18955,6 +19050,36 @@ function initPWA(){
     if(p) p.remove();
     toast('已安裝到主畫面','success');
   });
+}
+
+// H-5: SW 更新橫條 (使用者主動觸發 reload)
+function _showSwUpdateBanner(beforeReload){
+  try {
+    if(document.getElementById('sw-update-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'sw-update-banner';
+    banner.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;padding:12px 20px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.2);z-index:99999;font-size:14px;display:flex;align-items:center;gap:12px;max-width:90vw;';
+    const txt = document.createElement('span');
+    txt.textContent = '✨ 新版本可用';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '立即更新';
+    btn.style.cssText = 'background:#fff;color:var(--primary);border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-weight:600;';
+    btn.onclick = ()=> {
+      try { if(typeof beforeReload === 'function') beforeReload(); } catch(_){_swallow('sw-bn',_)}
+      try { location.reload(); } catch(_){_swallow('sw-bn-reload',_)}
+    };
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = '×';
+    close.setAttribute('aria-label','關閉提示');
+    close.style.cssText = 'background:transparent;color:#fff;border:none;font-size:18px;cursor:pointer;padding:0 4px;line-height:1;';
+    close.onclick = ()=> { try { banner.remove(); } catch(_){_swallow('sw-bn-close',_)} };
+    banner.appendChild(txt);
+    banner.appendChild(btn);
+    banner.appendChild(close);
+    document.body.appendChild(banner);
+  } catch(_){_swallow('sw-banner',_)}
 }
 
 function showPwaInstallChip(){
@@ -23002,18 +23127,30 @@ function renderLoginEditor(content){
         title: LOGIN_LOGOS[k].name
       });
       // 60×60 預覽
+      // L-3: 互動吉祥物 SVG 較重 — 只給「選中」狀態渲染真 SVG, 其他用 emoji 縮圖 (從 name 抓開頭 emoji)
       const iconBox = el('div', { style:{width:'60px', height:'60px', display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none'} });
       try {
-        const previewOpts = { color: lc.mascotColor, emoji: lc.logoEmoji || '🎓', url: lc.logoImage, onDark: false };
-        const node = LOGIN_LOGOS[k].build(previewOpts);
-        if(node){
-          // 縮小到 60×60
-          const svg = node.querySelector && node.querySelector('svg');
-          if(svg){ svg.style.width = '60px'; svg.style.height = '60px'; svg.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))'; }
-          node.style.transform = 'scale(0.95)';
-          iconBox.appendChild(node);
+        const isInteractive = !!(LOGIN_LOGOS[k] && LOGIN_LOGOS[k].interactive);
+        const _name = (LOGIN_LOGOS[k] && LOGIN_LOGOS[k].name) || '';
+        // 抓 name 開頭的 emoji (簡易: 第一個非 ASCII 字元到第一個空白前)
+        const _emojiMatch = _name.match(/^(\S+)/);
+        const _emoji = (_emojiMatch && /[^\x00-\x7F]/.test(_emojiMatch[1])) ? _emojiMatch[1] : '🎓';
+        if(isInteractive && !isSel){
+          // 懶載入: 未選中的互動吉祥物只用 emoji 縮圖
+          const ph = el('div', { style:{fontSize:'40px',lineHeight:'1'} }, _emoji);
+          iconBox.appendChild(ph);
         } else {
-          iconBox.textContent = '?';
+          const previewOpts = { color: lc.mascotColor, emoji: lc.logoEmoji || '🎓', url: lc.logoImage, onDark: false };
+          const node = LOGIN_LOGOS[k].build(previewOpts);
+          if(node){
+            // 縮小到 60×60
+            const svg = node.querySelector && node.querySelector('svg');
+            if(svg){ svg.style.width = '60px'; svg.style.height = '60px'; svg.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))'; }
+            node.style.transform = 'scale(0.95)';
+            iconBox.appendChild(node);
+          } else {
+            iconBox.textContent = '?';
+          }
         }
       } catch(_){ iconBox.textContent = '?'; }
       cell.appendChild(iconBox);
@@ -28632,11 +28769,13 @@ function _ensureReadBy(m){
   return m.readBy;
 }
 // 學生在 rMsgStudent 開頁時，把目前可見訊息標為已讀
+// H-4：用 session cache 防止重複 mark / setMap 整批太浪費
 function markMessagesReadForCurrentStudent(){
   try {
     if(!App.session || App.session.role !== 'student') return;
     const meId = App.session.id;
     if(!meId || !Array.isArray(App.db.messages)) return;
+    App._markedReadCache = App._markedReadCache || new Set();
     let touched = false;
     App.db.messages.forEach(m => {
       if(!m) return;
@@ -28645,11 +28784,14 @@ function markMessagesReadForCurrentStudent(){
       // 我可以看到的：給我私訊 OR 公開
       const visible = (m.toId === meId) || ((m.toId || 'all') === 'all');
       if(!visible) return;
+      const cacheKey = m.id + '|' + meId;
+      if(App._markedReadCache.has(cacheKey)) return;
       const arr = _ensureReadBy(m);
       if(!arr.includes(meId)){
         arr.push(meId);
         touched = true;
       }
+      App._markedReadCache.add(cacheKey);
     });
     if(touched){
       try { saveDB(); } catch(_){_swallow('mr-save',_)}
