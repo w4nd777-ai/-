@@ -2463,12 +2463,20 @@ function defaultDB(){
     notes: [],             // batch 5-28: 學生私人筆記 {id, studentId, title, content, tags:[], category, createdAt, updatedAt, pinned}
     todos: [],             // batch 5-29: 待辦事項 {id, studentId, title, dueDate, priority, done, source, sourceId, note, createdAt}
     notifications: [],     // batch 5-27: 系統通知 {id, studentId, type, text, ts, read}
-    semester: {            // batch 4-22: 學期週次系統
+    semester: {            // batch 4-22: 學期週次系統（單一學期，舊版相容）
       startDate: '',       // YYYY-MM-DD
       endDate: '',
       weekDays: [1,2,3,4,5],   // 一~五（0=日, 6=六）
       holidays: []         // [{date:'YYYY-MM-DD', name:''}, ...]
     },
+    // 包 B-1：科目定義
+    subjects: [],          // [{id, name, color, order, archived:false}]
+    // 包 B-2：週課表
+    timetable: [],         // [{id, dayOfWeek(1-7), period, subjectId, classId, teacherId, room, note}]
+    periods: [],           // [{period:1, name:'第一節', startTime:'08:10', endTime:'09:00'}]
+    // 包 B-3：多學期（陣列；當 semesters 存在時優先使用，否則 fallback 到 semester）
+    semesters: [],         // [{id, name, startDate, endDate, weekDays, holidays, current, archivedAt, summary}]
+    _archives: [],         // 學期歷史封存（safety backup）
     settings: {
       schoolName: '我的課程',
       teacherName: '老師',
@@ -6828,6 +6836,7 @@ function renderTopbar(role){
     exportcenter:'📦 匯出中心',
     teachers:'🧑‍🏫 老師管理',
     behavior:'⭐ 行為點數', quiz:'📝 線上小考',
+    subjects:'📚 科目管理', timetable:'🗓 課表', semestermgr:'📅 學期管理',
     help:'📖 使用說明', install:'📲 安裝 App'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
@@ -6837,6 +6846,7 @@ function renderTopbar(role){
     sbehavior:'⭐ 我的點數', squiz:'📝 線上小考',
     mybadges:'🏅 我的徽章', mynotes:'📒 我的筆記',
     mytodos:'✅ 待辦事項', mytrend:'📈 成績趨勢',
+    mytimetable:'📅 我的課表',
     uieditor:'🛠️ 介面編輯器',
     help:'📖 使用說明', install:'📲 安裝 App'
   };
@@ -11137,6 +11147,13 @@ function openAssignmentEdit(asg){
     '此作業在「平均分」計算中佔的權重（例：期末報告設 3，等同 3 份普通作業）'));
   m.root.appendChild(fWeight);
 
+  // 包 B-1：科目下拉
+  const fSubj = el('div', { class:'field' });
+  fSubj.appendChild(el('label', { class:'label' }, '科目'));
+  const iSubj = (typeof subjectSelect === 'function') ? subjectSelect(asg?.subjectId || '') : el('select', { class:'select' });
+  fSubj.appendChild(iSubj);
+  m.root.appendChild(fSubj);
+
   // class picker (only when target=class)
   const fCls = el('div', { class:'field', style:{display:'none'} });
   fCls.appendChild(el('label', { class:'label' }, '班級'));
@@ -11220,6 +11237,10 @@ function openAssignmentEdit(asg){
     rec.targetIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
     rec.attach = attached;
     rec.createdBy = App.session?.name || '老師';
+    // 包 B-1：科目
+    try { rec.subjectId = iSubj.value || ''; } catch(_){ /* fallback */ }
+    // 包 B-3：自動帶入當前學期
+    try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_) {}
     if(isNew) App.db.assignments.push(rec);
     saveDB();
     Sync.setMap('assignments', App.db.assignments);
@@ -11254,10 +11275,11 @@ async function deleteAssignment(asg){
 }
 
 function exportAssignmentsCSV(){
-  const rows = [['標題','截止','滿分','應繳','已繳','繳交率','平均分','遲交']];
+  const rows = [['標題','科目','截止','滿分','應繳','已繳','繳交率','平均分','遲交']];
   App.db.assignments.forEach(a => {
     const st = assignmentStats(a);
-    rows.push([a.title, a.dueAt||'', a.points||100, st.total, st.submitted, st.rate+'%', st.avg, st.late]);
+    const sName = (typeof getSubjectName === 'function') ? getSubjectName(a.subjectId || '') : '';
+    rows.push([a.title, sName, a.dueAt||'', a.points||100, st.total, st.submitted, st.rate+'%', st.avg, st.late]);
   });
   downloadCSV(rows, 'assignments_' + td() + '.csv');
   toast('已匯出','success');
@@ -12483,22 +12505,61 @@ function rSGrade(content){
   }
 
   // submission list
-  const subs = App.db.submissions.filter(s => s.studentId === me.id && typeof s.score === 'number')
+  const allSubs = App.db.submissions.filter(s => s.studentId === me.id && typeof s.score === 'number')
     .sort((a,b)=> (b.gradedAt||0)-(a.gradedAt||0));
-  if(subs.length){
+  if(allSubs.length){
     const card = el('div', { class:'card', style:{marginTop:'12px'} });
     card.appendChild(el('h3', null, '📋 作業成績'));
-    subs.forEach(s => {
-      const asg = App.db.assignments.find(x => x.id === s.assignmentId);
-      const row = el('div', { class:'list-row' });
-      const _wkG = s.ts ? fmtWeekTag(new Date(s.ts).toISOString().slice(0,10)) : '';
-      row.appendChild(el('div', { class:'info' },
-        el('div', { class:'name' }, asg?.title || '?'),
-        el('div', { class:'sub' }, relTime(s.gradedAt||s.ts||0) + (_wkG ? ' · ' + _wkG : ''))
-      ));
-      row.appendChild(el('span', { class:'tag t-success' }, s.score + ' / ' + (asg?.points||100)));
-      card.appendChild(row);
-    });
+
+    // 包 B-1：科目 filter tab
+    App._sgFilter = App._sgFilter || 'all';
+    const subjs = (typeof getSubjects === 'function') ? getSubjects(false) : [];
+    if(subjs.length){
+      const tabs = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'4px',marginBottom:'8px'} });
+      const mkTab = (id, label, color) => {
+        const b = el('button', {
+          class:'btn btn-sm ' + (App._sgFilter === id ? 'btn-primary' : ''),
+          style: color ? { borderLeft:'3px solid ' + color } : {},
+          onclick:()=> { App._sgFilter = id; rerender(); }
+        }, label);
+        return b;
+      };
+      tabs.appendChild(mkTab('all','全部'));
+      subjs.forEach(sj => tabs.appendChild(mkTab(sj.id, sj.name, sj.color)));
+      card.appendChild(tabs);
+    }
+
+    const listBox = el('div');
+    const filtered = (App._sgFilter && App._sgFilter !== 'all')
+      ? allSubs.filter(s => {
+          const asg = App.db.assignments.find(x => x.id === s.assignmentId);
+          const sid = s.subjectId || asg?.subjectId || '';
+          return sid === App._sgFilter;
+        })
+      : allSubs;
+    if(!filtered.length){
+      listBox.appendChild(el('div', { class:'small muted', style:{padding:'8px'} }, '此科目尚無成績'));
+    } else {
+      filtered.forEach(s => {
+        const asg = App.db.assignments.find(x => x.id === s.assignmentId);
+        const row = el('div', { class:'list-row' });
+        const _wkG = s.ts ? fmtWeekTag(new Date(s.ts).toISOString().slice(0,10)) : '';
+        const sid = s.subjectId || asg?.subjectId || '';
+        const sNameTag = sid && typeof getSubjectName === 'function'
+          ? el('span', { class:'tag', style:{background: (getSubjectColor(sid)||'var(--surface-2)'), color:'#fff'} }, getSubjectName(sid))
+          : null;
+        row.appendChild(el('div', { class:'info' },
+          el('div', { class:'name' }, asg?.title || '?'),
+          el('div', { class:'sub' }, relTime(s.gradedAt||s.ts||0) + (_wkG ? ' · ' + _wkG : ''))
+        ));
+        const right = el('div', { class:'flex', style:{gap:'4px',alignItems:'center'} });
+        if(sNameTag) right.appendChild(sNameTag);
+        right.appendChild(el('span', { class:'tag t-success' }, s.score + ' / ' + (asg?.points||100)));
+        row.appendChild(right);
+        listBox.appendChild(row);
+      });
+    }
+    card.appendChild(listBox);
     content.appendChild(card);
   }
 }
@@ -16506,6 +16567,10 @@ function rerender(){
       else if(v === 'behavior') rBehavior(content);   // batch 4-23
       else if(v === 'teachers') rTeachers(content);   // batch 4-24
       else if(v === 'quiz') rQuiz(content);           // batch 4-25
+      // 包 B：教學主軸結構化
+      else if(v === 'subjects') rSubjects(content);       // B-1 科目管理
+      else if(v === 'timetable') rTimetable(content);     // B-2 課表
+      else if(v === 'semestermgr') rSemesterMgr(content); // B-3 學期管理
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else { App.view = 'overview'; rOv(content); }
@@ -16532,6 +16597,7 @@ function rerender(){
       else if(v === 'mynotes') rMyNotes(content);      // batch 5-28
       else if(v === 'mytodos') rMyTodos(content);      // batch 5-29
       else if(v === 'mytrend') rMyTrend(content);      // batch 5-30
+      else if(v === 'mytimetable') rMyTimetable(content); // 包 B-2
       // 學生端不顯示介面編輯器
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
@@ -19255,6 +19321,8 @@ function getSidebarItems(role){
         { key:'submissions', icon:'📥', label:'繳交記錄' },
         { key:'grades', icon:'🎯', label:'學期成績' },
         { key:'quiz', icon:'📝', label:'線上小考' },
+        { key:'subjects', icon:'📚', label:'科目管理' },     // 包 B-1
+        { key:'timetable', icon:'🗓', label:'課表' },        // 包 B-2
         { key:'evals', icon:'💬', label:'課程評價' },
         { key:'feedback', icon:'🗳️', label:'學生回饋' },
         { key:'peer', icon:'⭐', label:'學生互評' },
@@ -19271,6 +19339,7 @@ function getSidebarItems(role){
         { key:'teachers', icon:'🧑‍🏫', label:'老師管理' }
       ]},
       system: { label:'系統', items: [
+        { key:'semestermgr', icon:'📅', label:'學期管理' },  // 包 B-3
         { key:'workspace', icon:'🏢', label:'多教室管理' },
         { key:'notify', icon:'📲', label:'通知設定' },
         { key:'backup', icon:'💼', label:'備份與還原' },
@@ -19289,6 +19358,7 @@ function getSidebarItems(role){
     return {
       s_func: { label:'功能', items: [
         { key:'checkin', icon:'✋', label:'簽到' },
+        { key:'mytimetable', icon:'📅', label:'我的課表' },  // 包 B-2
         { key:'myatt', icon:'📅', label:'出席紀錄' },
         { key:'myleave', icon:'📆', label:'請假' },
         { key:'mytodos', icon:'✅', label:'待辦事項' },
@@ -20444,20 +20514,24 @@ function buildExportCSV(category){
         })
       );
     case 'grades': {
-      const rows = [['學生','作業','分數','評語']];
+      const rows = [['學生','作業','科目','分數','評語']];
       (db.submissions||[]).forEach(sub => {
         const s = stuById[sub.studentId] || {};
         const asg = (db.assignments||[]).find(a => a.id === sub.assignmentId);
-        if(sub.score != null) rows.push([s.name||sub.studentId||'', asg?asg.title:sub.assignmentId, sub.score, sub.comment||'']);
+        const sid = sub.subjectId || (asg && asg.subjectId) || '';
+        const sName = (typeof getSubjectName === 'function') ? getSubjectName(sid) : '';
+        if(sub.score != null) rows.push([s.name||sub.studentId||'', asg?asg.title:sub.assignmentId, sName, sub.score, sub.comment||'']);
       });
       return rows;
     }
     case 'submissions':
-      return [['學生','作業','繳交時間','分數','評語','狀態']].concat(
+      return [['學生','作業','科目','繳交時間','分數','評語','狀態']].concat(
         (db.submissions||[]).map(sub => {
           const s = stuById[sub.studentId] || {};
           const asg = (db.assignments||[]).find(a => a.id === sub.assignmentId);
-          return [s.name||sub.studentId||'', asg?asg.title:sub.assignmentId, sub.submittedAt?new Date(sub.submittedAt).toLocaleString():'', sub.score==null?'':sub.score, sub.comment||'', sub.status||''];
+          const sid = sub.subjectId || (asg && asg.subjectId) || '';
+          const sName = (typeof getSubjectName === 'function') ? getSubjectName(sid) : '';
+          return [s.name||sub.studentId||'', asg?asg.title:sub.assignmentId, sName, sub.submittedAt?new Date(sub.submittedAt).toLocaleString():'', sub.score==null?'':sub.score, sub.comment||'', sub.status||''];
         })
       );
     case 'evals':
@@ -20715,6 +20789,7 @@ function hasPermission(session, view){
   const blocked = {
     teachers: true,             // 老師管理只有 admin
     workspace: true,
+    semestermgr: true,          // 包 B-3：學期管理只有 admin
     backup: !p.canExport,
     exportcenter: !p.canExport,
     settings: !p.canEditSettings,
@@ -21318,6 +21393,14 @@ function quizRenderEditor(c){
   fD.appendChild(iD);
   card.appendChild(fD);
 
+  // 包 B-1：科目下拉
+  const fQSubj = el('div', { class:'field' });
+  fQSubj.appendChild(el('label', { class:'label' }, '科目'));
+  const iQSubj = (typeof subjectSelect === 'function') ? subjectSelect(q.subjectId || '') : el('select', { class:'select' });
+  iQSubj.addEventListener('change', e => { q.subjectId = e.target.value || ''; });
+  fQSubj.appendChild(iQSubj);
+  card.appendChild(fQSubj);
+
   // 設定區
   const fSet = el('div', { class:'grid grid-2' });
   const fTL = el('div', { class:'field' });
@@ -21512,6 +21595,8 @@ function saveQuiz(q, status){
   if(status === 'published' && !(q.questions||[]).length){ toast('題目至少 1 題','danger'); return; }
   q.status = status;
   q.updatedAt = Date.now();
+  // 包 B-3：自動帶入當前學期
+  try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !q.semesterId) q.semesterId = _cs.id; } } catch(_) {}
   App.db.quizzes = App.db.quizzes || [];
   const idx = App.db.quizzes.findIndex(x => x.id === q.id);
   if(idx >= 0) App.db.quizzes[idx] = q;
@@ -22965,7 +23050,7 @@ function renderLineChart(container, dataSeries, options){
 
 /* 收集學生成績資料 → 依週/科目分組 */
 function _b5StudentScoreSeries(studentId, subject, period){
-  // submissions 為主要分數來源；以 assignment.title 推測科目
+  // submissions 為主要分數來源；包 B-1 優先用 subjectId，舊資料退回 title 字串猜
   const subs = (App.db.submissions || []).filter(s => s.studentId === studentId && typeof s.score === 'number');
   const now = Date.now();
   let cutoffMs = 0;
@@ -22973,12 +23058,19 @@ function _b5StudentScoreSeries(studentId, subject, period){
   else if(period === 'semester' && App.db.semester && App.db.semester.startDate){
     cutoffMs = new Date(App.db.semester.startDate + 'T00:00:00').getTime();
   }
+  // 包 B-1：判斷 subject 是 subjectId（精準）還是舊版科目關鍵字（fallback）
+  const subjById = (typeof getSubjectById === 'function') ? getSubjectById(subject) : null;
   const rows = subs.filter(s => {
     if(cutoffMs > 0 && (s.ts || s.gradedAt || 0) < cutoffMs) return false;
     if(subject && subject !== 'all'){
       const asg = (App.db.assignments || []).find(a => a.id === s.assignmentId);
-      const t = (asg && asg.title) || '';
-      if(!t.includes(subject)) return false;
+      if(subjById){
+        const sid = s.subjectId || (asg && asg.subjectId) || '';
+        if(sid !== subject) return false;
+      } else {
+        const t = (asg && asg.title) || '';
+        if(!t.includes(subject)) return false;
+      }
     }
     return true;
   }).sort((a,b) => (a.ts||a.gradedAt||0) - (b.ts||b.gradedAt||0));
@@ -23004,11 +23096,20 @@ function _b5ClassAvgSeries(subject, period){
     cutoffMs = new Date(App.db.semester.startDate + 'T00:00:00').getTime();
   }
   const byLabel = {};
+  // 包 B-1：subject 可能為 subjectId
+  const subjById = (typeof getSubjectById === 'function') ? getSubjectById(subject) : null;
   subs.forEach(s => {
     if(cutoffMs > 0 && (s.ts || s.gradedAt || 0) < cutoffMs) return;
     const asg = (App.db.assignments || []).find(a => a.id === s.assignmentId);
-    const t = (asg && asg.title) || '';
-    if(subject && subject !== 'all' && !t.includes(subject)) return;
+    if(subject && subject !== 'all'){
+      if(subjById){
+        const sid = s.subjectId || (asg && asg.subjectId) || '';
+        if(sid !== subject) return;
+      } else {
+        const t = (asg && asg.title) || '';
+        if(!t.includes(subject)) return;
+      }
+    }
     const dateStr = (s.ts || s.gradedAt) ? new Date(s.ts || s.gradedAt).toISOString().slice(0,10) : '';
     const wk = (typeof getWeekNo === 'function' && dateStr) ? getWeekNo(dateStr) : 0;
     const label = wk ? ('W' + wk) : dateStr.slice(5);
@@ -23030,22 +23131,28 @@ function rMyTrend(content){
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
     '依作業繳交時間順序顯示，分數已換算為百分制'));
 
-  // 蒐集科目候選
-  const subjectSet = new Set(['all']);
-  (App.db.assignments || []).forEach(a => {
-    const t = a.title || '';
-    // 偵測中文科目關鍵詞
-    ['國','數','英','自','社','理','化','生','史','地','音','美','體','資'].forEach(s => {
-      if(t.includes(s)) subjectSet.add(s);
-    });
-  });
-
   // 工具列
   const tool = el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap',marginBottom:'12px'} });
   const sSub = el('select', { class:'select' });
-  Array.from(subjectSet).forEach(s => {
-    sSub.appendChild(el('option', { value:s, selected: s===st.subject }, s==='all'?'全部科目':('🏷️ ' + s)));
-  });
+  // 包 B-1：優先用 DB.subjects（精準 subjectId 篩）；無設定則 fallback 用 title 關鍵字
+  const subjs = (typeof getSubjects === 'function') ? getSubjects(false) : [];
+  sSub.appendChild(el('option', { value:'all', selected: 'all'===st.subject }, '全部科目'));
+  if(subjs.length){
+    subjs.forEach(sj => {
+      sSub.appendChild(el('option', { value: sj.id, selected: sj.id===st.subject }, '🏷️ ' + sj.name));
+    });
+  } else {
+    const subjectSet = new Set();
+    (App.db.assignments || []).forEach(a => {
+      const t = a.title || '';
+      ['國','數','英','自','社','理','化','生','史','地','音','美','體','資'].forEach(s => {
+        if(t.includes(s)) subjectSet.add(s);
+      });
+    });
+    Array.from(subjectSet).forEach(s => {
+      sSub.appendChild(el('option', { value:s, selected: s===st.subject }, '🏷️ ' + s));
+    });
+  }
   sSub.addEventListener('change', ()=> { st.subject = sSub.value; rerender(); });
   tool.appendChild(sSub);
   const sPer = el('select', { class:'select' });
@@ -23185,6 +23292,1112 @@ function renderRecentBadgesForMe(){
     window.__Sync = Sync;
   }
 })();
+
+/* ════════════════════════════════════════════════════════════
+   包 B：教學主軸結構化（科目 / 課表 / 學期切換）
+   ──────────────────────────────────────────────────────────── */
+
+/* ────── B-1：科目（subject）資料模型與 UI ────── */
+
+const _SUBJ_DEFAULT_COLORS = [
+  '#3b82f6','#ef4444','#10b981','#f59e0b',
+  '#8b5cf6','#ec4899','#06b6d4','#84cc16'
+];
+const _SUBJ_DEFAULTS = [
+  { name:'國文', color:'#ef4444' },
+  { name:'英文', color:'#3b82f6' },
+  { name:'數學', color:'#10b981' },
+  { name:'社會', color:'#f59e0b' },
+  { name:'自然', color:'#8b5cf6' },
+  { name:'藝術', color:'#ec4899' },
+  { name:'健體', color:'#06b6d4' },
+  { name:'綜合', color:'#84cc16' }
+];
+
+/* 取得 subjects 陣列；若空則初始化預設 8 個 */
+function getSubjects(includeArchived){
+  if(!App.db) return [];
+  if(!Array.isArray(App.db.subjects)) App.db.subjects = [];
+  if(App.db.subjects.length === 0){
+    // 首次：寫入預設
+    App.db.subjects = _SUBJ_DEFAULTS.map((s, i) => ({
+      id: 'subj_' + (i+1),
+      name: s.name,
+      color: s.color,
+      order: i,
+      archived: false
+    }));
+    try { saveDB(); } catch(_) {}
+    try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('subjects', App.db.subjects); } catch(_) {}
+  }
+  const list = App.db.subjects.slice();
+  list.sort((a,b)=> (a.order||0) - (b.order||0));
+  if(includeArchived) return list;
+  return list.filter(s => !s.archived);
+}
+
+function getSubjectById(id){
+  if(!id) return null;
+  if(!App.db || !Array.isArray(App.db.subjects)) return null;
+  return App.db.subjects.find(s => s.id === id) || null;
+}
+function getSubjectColor(id){
+  const s = getSubjectById(id);
+  return s ? (s.color || 'var(--text-faint)') : 'var(--text-faint)';
+}
+function getSubjectName(id){
+  const s = getSubjectById(id);
+  return s ? s.name : '';
+}
+
+/* 共用：產生科目 <select>（含「未指定」選項） */
+function subjectSelect(currentId, opts){
+  opts = opts || {};
+  const sel = el('select', { class:'select' });
+  sel.appendChild(el('option', { value:'' }, '— 未指定 —'));
+  getSubjects(false).forEach(s => {
+    const opt = el('option', { value:s.id }, '🏷️ ' + s.name);
+    if(s.id === currentId) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  // 若 currentId 屬於已封存科目，仍顯示
+  if(currentId){
+    const sj = getSubjectById(currentId);
+    if(sj && sj.archived){
+      const opt = el('option', { value: sj.id, selected:true }, '🏷️ ' + sj.name + '（已封存）');
+      sel.appendChild(opt);
+    }
+  }
+  return sel;
+}
+
+/* ────── B-1：rSubjects 老師端 ────── */
+function rSubjects(content){
+  if(App.session?.role !== 'teacher') return;
+  content.appendChild(el('h1', null, '📚 科目管理'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '科目用於標記作業 / 成績 / 小考，並可在分析工具依科目維度查看。已封存的科目仍保留歷史資料但不出現在新建下拉中。'));
+
+  App._subjShowArchived = !!App._subjShowArchived;
+
+  const tools = el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap',marginBottom:'10px'} });
+  tools.appendChild(el('button', { class:'btn btn-primary', onclick:()=> openSubjectEdit(null) }, '＋ 新增科目'));
+  tools.appendChild(el('button', {
+    class:'btn btn-sm ' + (App._subjShowArchived ? 'btn-primary' : ''),
+    onclick:()=> { App._subjShowArchived = !App._subjShowArchived; rerender(); }
+  }, App._subjShowArchived ? '✓ 顯示已封存' : '顯示已封存'));
+  content.appendChild(tools);
+
+  const list = getSubjects(App._subjShowArchived);
+  if(!list.length){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📚'),
+      el('div', null, '尚無科目'),
+      el('button', { class:'btn btn-primary', style:{marginTop:'10px'}, onclick:()=> openSubjectEdit(null) }, '＋ 新增第一個科目')
+    ));
+    return;
+  }
+
+  const tbl = el('div', { class:'card' });
+  list.forEach((s, idx) => {
+    const row = el('div', { class:'list-row', style:{borderLeft:'4px solid ' + (s.color||'var(--text-faint)')} });
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name' }, s.name + (s.archived ? '（已封存）' : '')),
+      el('div', { class:'sub' }, '排序 ' + (s.order||0) + ' · 顏色 ' + (s.color||''))
+    ));
+    const acts = el('div', { class:'actions' });
+    // 上移 / 下移
+    acts.appendChild(el('button', { class:'btn btn-sm', disabled: idx===0, onclick:()=> _subjMove(s.id, -1) }, '↑'));
+    acts.appendChild(el('button', { class:'btn btn-sm', disabled: idx===list.length-1, onclick:()=> _subjMove(s.id, +1) }, '↓'));
+    acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openSubjectEdit(s) }, '✏️ 編輯'));
+    if(s.archived){
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> _subjArchive(s.id, false) }, '🔓 還原'));
+    } else {
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> _subjArchive(s.id, true) }, '📦 封存'));
+    }
+    row.appendChild(acts);
+    tbl.appendChild(row);
+  });
+  content.appendChild(tbl);
+}
+
+function _subjMove(id, delta){
+  const all = getSubjects(true);
+  const idx = all.findIndex(s => s.id === id);
+  if(idx < 0) return;
+  const tgt = idx + delta;
+  if(tgt < 0 || tgt >= all.length) return;
+  const a = all[idx], b = all[tgt];
+  const ao = a.order||0, bo = b.order||0;
+  a.order = bo; b.order = ao;
+  saveDB(); try { Sync.setMap('subjects', App.db.subjects); } catch(_) {}
+  rerender();
+}
+
+function _subjArchive(id, archived){
+  const s = getSubjectById(id);
+  if(!s) return;
+  s.archived = !!archived;
+  saveDB(); try { Sync.setMap('subjects', App.db.subjects); } catch(_) {}
+  toast(archived ? '已封存' : '已還原', 'success');
+  rerender();
+}
+
+function openSubjectEdit(subj){
+  const isNew = !subj;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew ? '新增科目' : '編輯科目'));
+
+  const fN = el('div', { class:'field' });
+  fN.appendChild(el('label', { class:'label' }, '名稱 *'));
+  const iN = el('input', { class:'input', value: subj?.name || '' });
+  fN.appendChild(iN); m.root.appendChild(fN);
+
+  const fC = el('div', { class:'field' });
+  fC.appendChild(el('label', { class:'label' }, '顏色'));
+  const colorRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px'} });
+  let pickedColor = subj?.color || _SUBJ_DEFAULT_COLORS[0];
+  _SUBJ_DEFAULT_COLORS.forEach(c => {
+    const sw = el('button', {
+      class:'btn btn-sm',
+      style:{background:c, width:'32px', height:'32px', padding:'0', border: pickedColor===c?'3px solid var(--text)':'2px solid var(--border)'},
+      onclick:(e)=> {
+        e.preventDefault();
+        pickedColor = c;
+        Array.from(colorRow.children).forEach(ch => { if(ch.tagName==='BUTTON') ch.style.border='2px solid var(--border)'; });
+        sw.style.border = '3px solid var(--text)';
+      }
+    });
+    colorRow.appendChild(sw);
+  });
+  fC.appendChild(colorRow);
+  m.root.appendChild(fC);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    if(!requirePerm('canEditSettings','編輯科目')) return;
+    const nm = iN.value.trim();
+    if(!nm) return toast('名稱必填','danger');
+    if(isNew){
+      const all = getSubjects(true);
+      const maxOrder = all.reduce((m, x)=> Math.max(m, x.order||0), 0);
+      const rec = { id: 'subj_' + nid().slice(0,8), name: nm, color: pickedColor, order: maxOrder+1, archived:false };
+      App.db.subjects.push(rec);
+    } else {
+      subj.name = nm; subj.color = pickedColor;
+    }
+    saveDB(); try { Sync.setMap('subjects', App.db.subjects); } catch(_) {}
+    toast(isNew ? '已新增' : '已更新', 'success');
+    m.close(); rerender();
+  }}, isNew ? '新增' : '儲存'));
+  m.root.appendChild(actions);
+}
+
+/* ────── B-2：時間表 / 課表 ────── */
+
+const _PERIOD_DEFAULTS = [
+  { period:1, name:'第一節', startTime:'08:10', endTime:'09:00' },
+  { period:2, name:'第二節', startTime:'09:10', endTime:'10:00' },
+  { period:3, name:'第三節', startTime:'10:10', endTime:'11:00' },
+  { period:4, name:'第四節', startTime:'11:10', endTime:'12:00' },
+  { period:5, name:'第五節', startTime:'13:10', endTime:'14:00' },
+  { period:6, name:'第六節', startTime:'14:10', endTime:'15:00' },
+  { period:7, name:'第七節', startTime:'15:10', endTime:'16:00' },
+  { period:8, name:'第八節', startTime:'16:10', endTime:'17:00' }
+];
+
+function getPeriods(){
+  if(!Array.isArray(App.db.periods)) App.db.periods = [];
+  if(App.db.periods.length === 0){
+    App.db.periods = _PERIOD_DEFAULTS.slice();
+    try { saveDB(); } catch(_) {}
+  }
+  return App.db.periods.slice().sort((a,b)=> (a.period||0)-(b.period||0));
+}
+
+/* 回傳今天該班所有節次的課（按節次排序） */
+function getTodayTimetable(classId){
+  if(!Array.isArray(App.db.timetable)) return [];
+  const dow = new Date().getDay(); // 0=日, 1-6
+  const d = dow === 0 ? 7 : dow;   // 我們的 dayOfWeek 1-7（7=日）
+  return App.db.timetable
+    .filter(t => t.dayOfWeek === d && (!classId || t.classId === classId))
+    .sort((a,b)=> (a.period||0)-(b.period||0));
+}
+
+/* 老師今天的課 */
+function getMyTeachingToday(teacherId){
+  if(!Array.isArray(App.db.timetable)) return [];
+  const dow = new Date().getDay();
+  const d = dow === 0 ? 7 : dow;
+  return App.db.timetable
+    .filter(t => t.dayOfWeek === d && t.teacherId === teacherId)
+    .sort((a,b)=> (a.period||0)-(b.period||0));
+}
+
+/* 根據當前時間取出當下節次 */
+function getCurrentPeriod(){
+  const now = new Date();
+  const t = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  return getPeriodByTime(t);
+}
+function getPeriodByTime(timeStr){
+  const periods = getPeriods();
+  for(const p of periods){
+    if(timeStr >= (p.startTime||'') && timeStr <= (p.endTime||'')) return p;
+  }
+  return null;
+}
+
+/* 老師端：課表頁 */
+function rTimetable(content){
+  if(App.session?.role !== 'teacher') return;
+  content.appendChild(el('h1', null, '🗓 課表'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '點空格新增課程；點已有的可編輯或刪除。可切換顯示「全部老師」或「我的課」。'));
+
+  // 班級 / 顯示模式選擇
+  const classes = Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))).sort();
+  App._ttClass = App._ttClass || classes[0] || '';
+  App._ttMode = App._ttMode || 'all';  // all | mine
+
+  const tool = el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap',marginBottom:'12px'} });
+  if(classes.length){
+    const sCls = el('select', { class:'select' });
+    classes.forEach(c => sCls.appendChild(el('option', { value:c, selected: c===App._ttClass }, c)));
+    sCls.addEventListener('change', ()=> { App._ttClass = sCls.value; rerender(); });
+    tool.appendChild(sCls);
+  } else {
+    tool.appendChild(el('span', { class:'small muted' }, '尚未有班級資料'));
+  }
+  const sMode = el('select', { class:'select' });
+  [['all','全部老師'],['mine','我的課']].forEach(([v,l]) =>
+    sMode.appendChild(el('option', { value:v, selected: v===App._ttMode }, l)));
+  sMode.addEventListener('change', ()=> { App._ttMode = sMode.value; rerender(); });
+  tool.appendChild(sMode);
+  tool.appendChild(el('button', { class:'btn btn-sm', onclick: openPeriodsEditor }, '⏰ 編輯節次'));
+  content.appendChild(tool);
+
+  // 矩陣
+  const periods = getPeriods();
+  const days = [1,2,3,4,5];                  // 週一~週五
+  const dayLabels = ['','一','二','三','四','五','六','日'];
+  const wrap = el('div', { class:'scroll-x', style:{border:'1px solid var(--border)',borderRadius:'8px'} });
+  const tbl = el('table', { class:'matrix' });
+
+  const thead = el('thead');
+  const trh = el('tr');
+  trh.appendChild(el('th', null, '節次'));
+  days.forEach(d => trh.appendChild(el('th', null, '週' + dayLabels[d])));
+  thead.appendChild(trh); tbl.appendChild(thead);
+
+  const tbody = el('tbody');
+  periods.forEach(p => {
+    const tr = el('tr');
+    tr.appendChild(el('td', { style:{minWidth:'90px',background:'var(--surface-2)'} },
+      el('div', { style:{fontWeight:'700'} }, p.name || ('第'+p.period+'節')),
+      el('div', { class:'tiny muted' }, (p.startTime||'') + '~' + (p.endTime||''))
+    ));
+    days.forEach(d => {
+      const cells = (App.db.timetable||[]).filter(t => t.dayOfWeek===d && t.period===p.period
+        && (App._ttMode === 'mine' ? t.teacherId === App.session?.id : (!App._ttClass || t.classId===App._ttClass))
+      );
+      const td = el('td', {
+        style:{minWidth:'130px',cursor:'pointer',padding:'6px',verticalAlign:'top'},
+        onclick:()=> cells.length ? openTimetableEdit(cells[0]) : openTimetableEdit(null, { dayOfWeek:d, period:p.period, classId: App._ttClass })
+      });
+      cells.forEach(c => {
+        const color = c.subjectId ? getSubjectColor(c.subjectId) : 'var(--surface-2)';
+        const tName = (App.db.accounts||[]).find(a => a.id === c.teacherId)?.name
+                   || (App.db.teachers||[]).find(t => t.id === c.teacherId)?.name
+                   || '';
+        td.appendChild(el('div', {
+          style:{background:color, color:'#fff', padding:'4px 6px', borderRadius:'6px', marginBottom:'2px', fontSize:'12px'}
+        },
+          el('div', { style:{fontWeight:'700'} }, getSubjectName(c.subjectId) || '(未設科目)'),
+          el('div', { class:'tiny' }, (c.room?'🚪'+c.room+' ':'') + (tName ? '· '+tName : ''))
+        ));
+      });
+      if(!cells.length){
+        td.appendChild(el('div', { class:'tiny muted', style:{textAlign:'center',padding:'8px 0'} }, '＋'));
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrap.appendChild(tbl);
+  content.appendChild(wrap);
+}
+
+function openTimetableEdit(rec, defaults){
+  const isNew = !rec;
+  rec = rec || Object.assign({ id:'tt_' + nid().slice(0,8), dayOfWeek:1, period:1, subjectId:'', classId:'', teacherId:'', room:'', note:'' }, defaults || {});
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew ? '新增課程' : '編輯課程'));
+
+  const row1 = el('div', { class:'row' });
+  const fD = el('div', { class:'field' });
+  fD.appendChild(el('label', { class:'label' }, '星期'));
+  const iD = el('select', { class:'select' });
+  ['', '週一','週二','週三','週四','週五','週六','週日'].forEach((lab, i) => {
+    if(i === 0) return;
+    iD.appendChild(el('option', { value:i, selected: i===rec.dayOfWeek }, lab));
+  });
+  fD.appendChild(iD); row1.appendChild(fD);
+
+  const fP = el('div', { class:'field' });
+  fP.appendChild(el('label', { class:'label' }, '節次'));
+  const iP = el('select', { class:'select' });
+  getPeriods().forEach(p => iP.appendChild(el('option', { value:p.period, selected: p.period===rec.period }, (p.name||'') + ' (' + (p.startTime||'') + ')')));
+  fP.appendChild(iP); row1.appendChild(fP);
+  m.root.appendChild(row1);
+
+  const fSubj = el('div', { class:'field' });
+  fSubj.appendChild(el('label', { class:'label' }, '科目'));
+  const iSubj = subjectSelect(rec.subjectId);
+  fSubj.appendChild(iSubj); m.root.appendChild(fSubj);
+
+  const fCls = el('div', { class:'field' });
+  fCls.appendChild(el('label', { class:'label' }, '班級'));
+  const iCls = el('select', { class:'select' });
+  const classes = Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))).sort();
+  iCls.appendChild(el('option', { value:'' }, '— 未指定 —'));
+  classes.forEach(c => iCls.appendChild(el('option', { value:c, selected: c===rec.classId }, c)));
+  fCls.appendChild(iCls); m.root.appendChild(fCls);
+
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '老師'));
+  const iT = el('select', { class:'select' });
+  iT.appendChild(el('option', { value:'' }, '— 未指定 —'));
+  (App.db.accounts||[]).forEach(a => iT.appendChild(el('option', { value:a.id, selected: a.id===rec.teacherId }, a.name + ' (主)')));
+  (App.db.teachers||[]).forEach(t => iT.appendChild(el('option', { value:t.id, selected: t.id===rec.teacherId }, t.name + ' (副)')));
+  fT.appendChild(iT); m.root.appendChild(fT);
+
+  const fR = el('div', { class:'field' });
+  fR.appendChild(el('label', { class:'label' }, '教室'));
+  const iR = el('input', { class:'input', value: rec.room||'' });
+  fR.appendChild(iR); m.root.appendChild(fR);
+
+  const fNote = el('div', { class:'field' });
+  fNote.appendChild(el('label', { class:'label' }, '備註'));
+  const iNote = el('input', { class:'input', value: rec.note||'' });
+  fNote.appendChild(iNote); m.root.appendChild(fNote);
+
+  const actions = el('div', { class:'modal-actions' });
+  if(!isNew){
+    actions.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+      if(!requirePerm('canEditSettings','刪除課表')) return;
+      const ok = await confirmDlg('刪除此節課？', { danger:true });
+      if(!ok) return;
+      App.db.timetable = (App.db.timetable||[]).filter(x => x.id !== rec.id);
+      saveDB(); try { Sync.setMap('timetable', App.db.timetable); } catch(_) {}
+      toast('已刪除', 'warn');
+      m.close(); rerender();
+    }}, '🗑 刪除'));
+  }
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    if(!requirePerm('canEditSettings','編輯課表')) return;
+    rec.dayOfWeek = parseInt(iD.value,10);
+    rec.period = parseInt(iP.value,10);
+    rec.subjectId = iSubj.value || '';
+    rec.classId = iCls.value || '';
+    rec.teacherId = iT.value || '';
+    rec.room = iR.value.trim();
+    rec.note = iNote.value.trim();
+    if(!Array.isArray(App.db.timetable)) App.db.timetable = [];
+    if(isNew){
+      App.db.timetable.push(rec);
+    } else {
+      const idx = App.db.timetable.findIndex(x => x.id === rec.id);
+      if(idx >= 0) App.db.timetable[idx] = rec;
+      else App.db.timetable.push(rec);
+    }
+    saveDB(); try { Sync.setMap('timetable', App.db.timetable); } catch(_) {}
+    toast(isNew ? '已新增' : '已更新', 'success');
+    m.close(); rerender();
+  }}, isNew ? '新增' : '儲存'));
+  m.root.appendChild(actions);
+}
+
+/* 節次編輯 modal */
+function openPeriodsEditor(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '⏰ 編輯節次'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '管理每節課的起訖時間；課表會用這份節次定義。'));
+
+  const list = getPeriods().slice();
+  const box = el('div');
+  function refresh(){
+    box.innerHTML = '';
+    list.forEach((p, idx) => {
+      const row = el('div', { class:'flex', style:{gap:'6px',padding:'4px 0',alignItems:'center'} });
+      const iName = el('input', { class:'input', style:{flex:'2'}, value: p.name||('第'+p.period+'節') });
+      iName.addEventListener('input', e => { p.name = e.target.value; });
+      const iS = el('input', { class:'input', type:'time', style:{flex:'1'}, value: p.startTime||'' });
+      iS.addEventListener('input', e => { p.startTime = e.target.value; });
+      const iE = el('input', { class:'input', type:'time', style:{flex:'1'}, value: p.endTime||'' });
+      iE.addEventListener('input', e => { p.endTime = e.target.value; });
+      const bDel = el('button', { class:'btn btn-sm btn-danger', onclick:()=> { list.splice(idx,1); refresh(); }}, '🗑');
+      row.appendChild(el('span', { class:'tiny', style:{minWidth:'40px'} }, '第' + p.period + '節'));
+      row.appendChild(iName); row.appendChild(iS); row.appendChild(iE); row.appendChild(bDel);
+      box.appendChild(row);
+    });
+  }
+  refresh();
+  m.root.appendChild(box);
+
+  const addBtn = el('button', { class:'btn btn-sm', style:{marginTop:'8px'}, onclick:()=> {
+    const next = list.reduce((m,x)=> Math.max(m, x.period||0), 0) + 1;
+    list.push({ period: next, name: '第' + next + '節', startTime:'', endTime:'' });
+    refresh();
+  }}, '＋ 新增節次');
+  m.root.appendChild(addBtn);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    if(!requirePerm('canEditSettings','編輯節次')) return;
+    App.db.periods = list.slice().sort((a,b)=> (a.period||0)-(b.period||0));
+    saveDB(); try { Sync.setMap('periods', App.db.periods); } catch(_) {}
+    toast('已儲存', 'success');
+    m.close(); rerender();
+  }}, '儲存'));
+  m.root.appendChild(actions);
+}
+
+/* 學生端：我的課表 */
+function rMyTimetable(content){
+  const me = currentStudent(); if(!me) return;
+  content.appendChild(el('h1', null, '📅 我的課表'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '班級：' + (me.cls || '（未分班）') + ' · 當前節次會自動高亮'));
+
+  if(!me.cls){
+    content.appendChild(el('div', { class:'empty card' }, '尚未設定班級，請聯絡老師'));
+    return;
+  }
+
+  const periods = getPeriods();
+  const days = [1,2,3,4,5];
+  const dayLabels = ['','一','二','三','四','五','六','日'];
+  const todayDow = (function(){
+    const d = new Date().getDay();
+    return d === 0 ? 7 : d;
+  })();
+  const curP = getCurrentPeriod();
+
+  const wrap = el('div', { class:'scroll-x', style:{border:'1px solid var(--border)',borderRadius:'8px'} });
+  const tbl = el('table', { class:'matrix' });
+  const thead = el('thead');
+  const trh = el('tr');
+  trh.appendChild(el('th', null, '節次'));
+  days.forEach(d => trh.appendChild(el('th', {
+    style: d === todayDow ? { background:'var(--primary-soft)', color:'var(--primary)' } : {}
+  }, '週' + dayLabels[d] + (d === todayDow ? ' (今)' : ''))));
+  thead.appendChild(trh); tbl.appendChild(thead);
+
+  const tbody = el('tbody');
+  periods.forEach(p => {
+    const tr = el('tr');
+    const isCurP = curP && curP.period === p.period;
+    tr.appendChild(el('td', { style:{minWidth:'80px',background:isCurP?'var(--accent-soft)':'var(--surface-2)'} },
+      el('div', { style:{fontWeight:'700'} }, p.name || ('第'+p.period+'節')),
+      el('div', { class:'tiny muted' }, (p.startTime||'') + '~' + (p.endTime||''))
+    ));
+    days.forEach(d => {
+      const cell = (App.db.timetable||[]).find(t => t.dayOfWeek===d && t.period===p.period && t.classId===me.cls);
+      const isToday = (d === todayDow);
+      const highlight = isToday && isCurP;
+      const td = el('td', {
+        style:{
+          minWidth:'110px', padding:'6px', verticalAlign:'top',
+          background: isToday ? 'var(--primary-soft)' : '',
+          outline: highlight ? '2px solid var(--accent)' : ''
+        }
+      });
+      if(cell){
+        const color = cell.subjectId ? getSubjectColor(cell.subjectId) : 'var(--surface-2)';
+        const tName = (App.db.accounts||[]).find(a => a.id === cell.teacherId)?.name
+                   || (App.db.teachers||[]).find(t => t.id === cell.teacherId)?.name
+                   || '';
+        td.appendChild(el('div', {
+          style:{background:color, color:'#fff', padding:'6px', borderRadius:'6px', fontSize:'12px'}
+        },
+          el('div', { style:{fontWeight:'700'} }, getSubjectName(cell.subjectId) || '(未設科目)'),
+          el('div', { class:'tiny' }, (cell.room?'🚪'+cell.room:'') + (tName ? ' · '+tName:''))
+        ));
+      } else {
+        td.appendChild(el('div', { class:'tiny muted', style:{textAlign:'center',padding:'12px 0'} }, '—'));
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrap.appendChild(tbl);
+  content.appendChild(wrap);
+}
+
+/* 學生簽到頁：今日課表小卡片（render hook，掛在簽到頁尾） */
+function renderTodayTimetableCard(){
+  const me = currentStudent(); if(!me || !me.cls) return null;
+  const list = getTodayTimetable(me.cls);
+  if(!list.length) return null;
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('div', { class:'flex-between' },
+    el('h3', null, '📅 今日課表'),
+    el('button', { class:'btn btn-sm', onclick:()=> go('mytimetable') }, '查看完整 →')
+  ));
+  const curP = getCurrentPeriod();
+  list.slice(0, 6).forEach(t => {
+    const p = getPeriods().find(x => x.period === t.period);
+    const isCur = curP && curP.period === t.period;
+    const color = t.subjectId ? getSubjectColor(t.subjectId) : 'var(--text-faint)';
+    card.appendChild(el('div', { class:'list-row', style:{borderLeft:'4px solid '+color, background: isCur?'var(--accent-soft)':''} },
+      el('div', { class:'info' },
+        el('div', { class:'name' }, (p?.name || ('第'+t.period+'節')) + (isCur ? ' · 進行中' : '')),
+        el('div', { class:'sub' }, (p?.startTime||'') + '~' + (p?.endTime||'') + (t.room ? ' · 🚪' + t.room : ''))
+      ),
+      el('span', { class:'tag', style:{background:color, color:'#fff'} }, getSubjectName(t.subjectId) || '(未設)')
+    ));
+  });
+  return card;
+}
+
+/* 老師總覽：我今日教學小卡片 */
+function renderMyTeachingTodayCard(){
+  if(!App.session || App.session.role !== 'teacher') return null;
+  const list = getMyTeachingToday(App.session.id);
+  if(!list.length) return null;
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('div', { class:'flex-between' },
+    el('h3', null, '🗓 我今日教學'),
+    el('button', { class:'btn btn-sm', onclick:()=> go('timetable') }, '完整課表 →')
+  ));
+  const curP = getCurrentPeriod();
+  list.forEach(t => {
+    const p = getPeriods().find(x => x.period === t.period);
+    const isCur = curP && curP.period === t.period;
+    const color = t.subjectId ? getSubjectColor(t.subjectId) : 'var(--text-faint)';
+    card.appendChild(el('div', { class:'list-row', style:{borderLeft:'4px solid '+color, background: isCur?'var(--accent-soft)':''} },
+      el('div', { class:'info' },
+        el('div', { class:'name' }, (p?.name||('第'+t.period+'節')) + ' · ' + (t.classId || '(未指定班)') + (isCur ? ' · 進行中' : '')),
+        el('div', { class:'sub' }, (p?.startTime||'') + '~' + (p?.endTime||'') + (t.room ? ' · 🚪' + t.room : ''))
+      ),
+      el('span', { class:'tag', style:{background:color, color:'#fff'} }, getSubjectName(t.subjectId) || '(未設)')
+    ));
+  });
+  return card;
+}
+
+/* 把今日課表 hook 進 rCheckIn / rOv（在 render 完之後 append；用 MutationObserver 或直接 monkey-patch） */
+(function _bInjectTimetableHooks(){
+  // 老師總覽：在 rOv 結尾 append 我今日教學
+  if(typeof rOv === 'function' && !rOv._bHooked){
+    const origOv = rOv;
+    window.rOv = function(content){
+      origOv(content);
+      try {
+        const c = renderMyTeachingTodayCard();
+        if(c) content.appendChild(c);
+      } catch(e){ _swallow('bTtHook',e); }
+    };
+    window.rOv._bHooked = true;
+  }
+  // 學生簽到：在 rCheckIn 結尾 append 今日課表
+  if(typeof rCheckIn === 'function' && !rCheckIn._bHooked){
+    const origCi = rCheckIn;
+    window.rCheckIn = function(content){
+      origCi(content);
+      try {
+        const c = renderTodayTimetableCard();
+        if(c) content.appendChild(c);
+      } catch(e){ _swallow('bTtHook',e); }
+    };
+    window.rCheckIn._bHooked = true;
+  }
+})();
+
+/* ────── B-3：學期切換 / 學年封存精靈 ────── */
+
+/* 取得當前學期：若 semesters 已存在且有 current → 用之；否則 fallback 把 DB.semester 轉成一個臨時學期物件 */
+function getCurrentSemester(){
+  if(!App.db) return null;
+  if(Array.isArray(App.db.semesters) && App.db.semesters.length){
+    const cur = App.db.semesters.find(s => s.current);
+    if(cur) return cur;
+    // 沒有 current 但有資料 → 取最新
+    return App.db.semesters.slice().sort((a,b)=> (b.startDate||'').localeCompare(a.startDate||''))[0];
+  }
+  // fallback：用 DB.semester 包成一個臨時學期
+  const sem = App.db.semester;
+  if(sem && (sem.startDate || sem.endDate)){
+    return {
+      id: 'legacy', name: '本學期', startDate: sem.startDate||'',
+      endDate: sem.endDate||'', weekDays: sem.weekDays||[1,2,3,4,5],
+      holidays: sem.holidays||[], current: true
+    };
+  }
+  return null;
+}
+function getSemesterById(id){
+  if(!Array.isArray(App.db.semesters)) return null;
+  return App.db.semesters.find(s => s.id === id) || null;
+}
+function getAllSemesters(){
+  return Array.isArray(App.db.semesters) ? App.db.semesters.slice().sort((a,b)=> (b.startDate||'').localeCompare(a.startDate||'')) : [];
+}
+
+/* 遷移：若 DB.semesters 為空但 DB.semester 有資料 → 自動轉成 semesters[0] */
+function _bMigrateSemester(){
+  if(!App.db) return;
+  if(!Array.isArray(App.db.semesters)) App.db.semesters = [];
+  if(App.db.semesters.length > 0) return;
+  const sem = App.db.semester || {};
+  // 即使沒設定 startDate 也建立一個預設「本學期」，否則寫入新資料時 semesterId 永遠是 null
+  App.db.semesters.push({
+    id: 'sem_' + nid().slice(0,8),
+    name: (function(){
+      if(sem.startDate){
+        const d = new Date(sem.startDate + 'T00:00:00');
+        const y = d.getFullYear();
+        const m = d.getMonth()+1;
+        return y + (m >= 2 && m <= 7 ? ' 上學期' : ' 下學期');
+      }
+      // 沒設日期：以當前年份 + 月份推導
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = now.getMonth()+1;
+      return y + (m >= 2 && m <= 7 ? ' 上學期' : ' 下學期');
+    })(),
+    startDate: sem.startDate || '',
+    endDate: sem.endDate || '',
+    weekDays: sem.weekDays || [1,2,3,4,5],
+    holidays: sem.holidays || [],
+    current: true,
+    archivedAt: null,
+    summary: null
+  });
+  try { saveDB(); } catch(_) {}
+}
+// 在 boot 後（App.db 已載入）自動 migrate
+try {
+  setTimeout(()=> { try { _bMigrateSemester(); } catch(_) {} }, 500);
+} catch(_) {}
+
+/* 老師端：學期管理頁（只 admin） */
+function rSemesterMgr(content){
+  if(App.session?.role !== 'teacher' || !isAdmin()){
+    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--danger)'} }, '🔒 僅主老師可使用'));
+    return;
+  }
+  _bMigrateSemester();
+
+  content.appendChild(el('h1', null, '📅 學期管理'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '管理多學期、查看歷史、結束本學期並開新學期。'));
+
+  const cur = getCurrentSemester();
+  const all = getAllSemesters();
+
+  // 當前學期
+  const curCard = el('div', { class:'card', style:{marginBottom:'12px', borderColor:'var(--primary)', background:'var(--primary-soft)'} });
+  curCard.appendChild(el('h3', null, '🟢 當前學期'));
+  if(cur){
+    curCard.appendChild(el('div', { style:{fontSize:'18px',fontWeight:'700'} }, cur.name || '(未命名)'));
+    curCard.appendChild(el('div', { class:'small' }, '起訖：' + (cur.startDate||'?') + ' ~ ' + (cur.endDate||'?')));
+    // 簡易統計
+    const stuN = (App.db.students||[]).length;
+    const sid = cur.id;
+    const asgN = (App.db.assignments||[]).filter(a => !a.semesterId || a.semesterId === sid).length;
+    const attN = (App.db.attendance||[]).filter(a => _bInSemester(a.date, cur)).length;
+    curCard.appendChild(el('div', { class:'flex', style:{gap:'12px',flexWrap:'wrap',marginTop:'8px'} },
+      el('span', { class:'tag' }, '👥 ' + stuN + ' 學生'),
+      el('span', { class:'tag' }, '📋 ' + asgN + ' 作業'),
+      el('span', { class:'tag' }, '✅ ' + attN + ' 出席紀錄')
+    ));
+  } else {
+    curCard.appendChild(el('div', { class:'small muted' }, '尚未設定學期'));
+  }
+  curCard.appendChild(el('button', {
+    class:'btn btn-primary', style:{marginTop:'10px'},
+    onclick: openSemesterTransitionWizard
+  }, '🔄 結束本學期，開新學期'));
+  content.appendChild(curCard);
+
+  // 歷史學期
+  const histCard = el('div', { class:'card' });
+  histCard.appendChild(el('h3', null, '📚 歷史學期'));
+  const histList = all.filter(s => !s.current);
+  if(!histList.length){
+    histCard.appendChild(el('div', { class:'small muted' }, '尚無歷史學期'));
+  } else {
+    histList.forEach(s => {
+      const row = el('div', { class:'list-row' });
+      row.appendChild(el('div', { class:'info' },
+        el('div', { class:'name' }, s.name + ' '),
+        el('div', { class:'sub' }, (s.startDate||'?') + ' ~ ' + (s.endDate||'?')
+          + (s.archivedAt ? ' · 封存於 ' + new Date(s.archivedAt).toLocaleDateString('zh-TW') : ''))
+      ));
+      const acts = el('div', { class:'actions' });
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> _bShowSemesterSummary(s) }, '📊 摘要'));
+      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> _bSwitchViewSemester(s.id) }, '👁 切換檢視'));
+      row.appendChild(acts);
+      histCard.appendChild(row);
+    });
+  }
+  // 顯示中的學期
+  if(App._viewSemesterId){
+    const v = getSemesterById(App._viewSemesterId);
+    histCard.appendChild(el('div', { class:'card', style:{marginTop:'10px',background:'var(--accent-soft)',borderColor:'var(--accent)'} },
+      el('div', { style:{fontWeight:'700'} }, '🔍 目前正以「' + (v?.name||'?') + '」學期檢視資料'),
+      el('button', { class:'btn btn-sm', style:{marginTop:'6px'}, onclick:()=> { App._viewSemesterId = null; rerender(); } }, '← 回當前學期')
+    ));
+  }
+  content.appendChild(histCard);
+
+  // 安全備份
+  if(Array.isArray(App.db._archives) && App.db._archives.length){
+    const bkCard = el('div', { class:'card', style:{marginTop:'12px'} });
+    bkCard.appendChild(el('h3', null, '💼 切換備份'));
+    bkCard.appendChild(el('div', { class:'small muted' }, '系統會在學期切換時自動保存一份完整 DB 快照，避免誤操作。'));
+    App.db._archives.forEach((bk, i) => {
+      bkCard.appendChild(el('div', { class:'list-row' },
+        el('div', { class:'info' },
+          el('div', { class:'name' }, '快照 #' + (i+1) + ' · ' + (bk.label || '')),
+          el('div', { class:'sub' }, new Date(bk.ts||0).toLocaleString('zh-TW'))
+        ),
+        el('button', { class:'btn btn-sm', onclick:()=> _bDownloadArchive(bk) }, '⬇ 下載')
+      ));
+    });
+    content.appendChild(bkCard);
+  }
+}
+
+function _bDownloadArchive(bk){
+  try {
+    const json = JSON.stringify(bk.data, null, 2);
+    const blob = new Blob([json], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'semester_backup_' + (bk.label||'snap') + '_' + td() + '.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=> { URL.revokeObjectURL(url); a.remove(); }, 500);
+  } catch(e){ toast('下載失敗：' + (e.message||e), 'danger'); }
+}
+
+function _bShowSemesterSummary(s){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '📊 ' + s.name + ' 摘要'));
+  if(s.summary){
+    const sm = s.summary;
+    m.root.appendChild(el('div', { class:'grid grid-2' },
+      el('div', { class:'stat s-primary' }, el('div',{class:'num'},String(sm.studentCount||0)), el('div',{class:'lbl'},'學生')),
+      el('div', { class:'stat s-success' }, el('div',{class:'num'},(sm.attRate||0)+'%'), el('div',{class:'lbl'},'平均出席率')),
+      el('div', { class:'stat s-accent' }, el('div',{class:'num'},String(sm.asgnCount||0)), el('div',{class:'lbl'},'作業數')),
+      el('div', { class:'stat s-warn' }, el('div',{class:'num'},String(sm.avgScore||0)), el('div',{class:'lbl'},'平均分數'))
+    ));
+  } else {
+    m.root.appendChild(el('div', { class:'small muted' }, '此學期沒有保存摘要資料'));
+  }
+  m.root.appendChild(el('div', { class:'small muted', style:{marginTop:'10px'} },
+    '起訖：' + (s.startDate||'') + ' ~ ' + (s.endDate||'')
+  ));
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(actions);
+}
+
+function _bSwitchViewSemester(id){
+  App._viewSemesterId = id;
+  toast('已切換檢視至此學期', 'info');
+  rerender();
+}
+
+/* 判斷 dateStr (YYYY-MM-DD) 是否落在指定學期內 */
+function _bInSemester(dateStr, sem){
+  if(!dateStr || !sem) return false;
+  if(sem.startDate && dateStr < sem.startDate) return false;
+  if(sem.endDate && dateStr > sem.endDate) return false;
+  return true;
+}
+
+/* 學期切換精靈 */
+function openSemesterTransitionWizard(){
+  if(!isAdmin()){ toast('僅主老師可執行', 'danger'); return; }
+  _bMigrateSemester();
+  const cur = getCurrentSemester();
+  if(!cur){
+    toast('請先在「設定」設定學期起訖日', 'warn');
+    return;
+  }
+
+  // 暫存設定（不直接寫入直到 Step 5）
+  const state = {
+    step: 1,
+    summary: _bComputeSemesterSummary(cur),
+    options: {
+      keepStudents: true,
+      resetPasswords: false,
+      clearTodos: true,
+      clearNotes: false
+    },
+    newSem: {
+      id: 'sem_' + nid().slice(0,8),
+      name: '',
+      startDate: '',
+      endDate: '',
+      weekDays: [1,2,3,4,5]
+    }
+  };
+  const m = modal('');
+  render();
+  function render(){
+    m.root.innerHTML = '';
+    m.root.appendChild(el('h2', null, '🔄 學期切換精靈 — 步驟 ' + state.step + ' / 5'));
+    if(state.step === 1) renderStep1();
+    else if(state.step === 2) renderStep2();
+    else if(state.step === 3) renderStep3();
+    else if(state.step === 4) renderStep4();
+    else if(state.step === 5) renderStep5();
+  }
+  function navRow(prevOk, nextLabel, nextOk, finishMode){
+    const row = el('div', { class:'modal-actions' });
+    row.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+    if(prevOk) row.appendChild(el('button', { class:'btn', onclick:()=> { state.step--; render(); } }, '← 上一步'));
+    if(nextOk) row.appendChild(el('button', {
+      class:'btn ' + (finishMode ? 'btn-danger' : 'btn-primary'),
+      onclick:()=> {
+        if(finishMode){
+          _bExecuteSemesterTransition(state, m);
+        } else {
+          state.step++; render();
+        }
+      }
+    }, nextLabel || '下一步 →'));
+    return row;
+  }
+  function renderStep1(){
+    m.root.appendChild(el('div', { class:'card', style:{background:'var(--warn-soft)',borderColor:'var(--warn)'} },
+      el('h3', null, '⚠️ 確認結束學期'),
+      el('div', null, '即將結束學期：'),
+      el('div', { style:{fontSize:'20px',fontWeight:'700',margin:'8px 0'} }, cur.name),
+      el('div', { class:'small muted' }, '起訖：' + (cur.startDate||'?') + ' ~ ' + (cur.endDate||'?')),
+      el('div', { class:'small', style:{marginTop:'8px'} }, '此學期所有資料會封存保留（仍可查詢），但不再列入新學期統計。')
+    ));
+    m.root.appendChild(navRow(false, '下一步：產生摘要 →', true));
+  }
+  function renderStep2(){
+    const sm = state.summary;
+    m.root.appendChild(el('h3', null, '📊 本學期摘要（將存入封存）'));
+    m.root.appendChild(el('div', { class:'grid grid-2' },
+      el('div', { class:'stat s-primary' }, el('div',{class:'num'},String(sm.studentCount)), el('div',{class:'lbl'},'學生')),
+      el('div', { class:'stat s-success' }, el('div',{class:'num'},sm.attRate+'%'), el('div',{class:'lbl'},'平均出席率')),
+      el('div', { class:'stat s-accent' }, el('div',{class:'num'},String(sm.asgnCount)), el('div',{class:'lbl'},'作業數')),
+      el('div', { class:'stat s-warn' }, el('div',{class:'num'},String(sm.avgScore)), el('div',{class:'lbl'},'平均分數'))
+    ));
+    m.root.appendChild(navRow(true, '下一步：清理選項 →', true));
+  }
+  function renderStep3(){
+    m.root.appendChild(el('h3', null, '🧹 切換時的清理選項'));
+    m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+      '勾選的項目會在新學期開始時清空（資料封存於舊學期，不會丟失）。'));
+    const mk = (key, label, hint) => {
+      const row = el('label', { class:'flex', style:{padding:'8px 0',gap:'8px',alignItems:'flex-start'} });
+      const cb = el('input', { type:'checkbox' });
+      if(state.options[key]) cb.checked = true;
+      cb.addEventListener('change', e => { state.options[key] = e.target.checked; });
+      row.appendChild(cb);
+      row.appendChild(el('div', null,
+        el('div', { style:{fontWeight:'600'} }, label),
+        el('div', { class:'tiny muted' }, hint)
+      ));
+      return row;
+    };
+    m.root.appendChild(mk('keepStudents','保留學生名單','取消勾選 → 清空學生（一般不建議）'));
+    m.root.appendChild(mk('resetPasswords','歸零學生密碼','學生需重新設定密碼'));
+    m.root.appendChild(mk('clearTodos','清除學生待辦','建議勾選'));
+    m.root.appendChild(mk('clearNotes','清除學生筆記','預設保留'));
+    m.root.appendChild(navRow(true, '下一步：新學期設定 →', true));
+  }
+  function renderStep4(){
+    m.root.appendChild(el('h3', null, '🎯 設定新學期'));
+    const fN = el('div', { class:'field' });
+    fN.appendChild(el('label', { class:'label' }, '學期名稱 *'));
+    const iN = el('input', { class:'input', value: state.newSem.name, placeholder:'例：2026 上學期' });
+    iN.addEventListener('input', e => { state.newSem.name = e.target.value; });
+    fN.appendChild(iN); m.root.appendChild(fN);
+
+    const row = el('div', { class:'row' });
+    const fS = el('div', { class:'field' });
+    fS.appendChild(el('label', { class:'label' }, '開始日 *'));
+    const iS = el('input', { class:'input', type:'date', value: state.newSem.startDate });
+    iS.addEventListener('input', e => { state.newSem.startDate = e.target.value; });
+    fS.appendChild(iS); row.appendChild(fS);
+
+    const fE = el('div', { class:'field' });
+    fE.appendChild(el('label', { class:'label' }, '結束日 *'));
+    const iE = el('input', { class:'input', type:'date', value: state.newSem.endDate });
+    iE.addEventListener('input', e => { state.newSem.endDate = e.target.value; });
+    fE.appendChild(iE); row.appendChild(fE);
+    m.root.appendChild(row);
+
+    m.root.appendChild(el('div', { class:'label' }, '每週上課日'));
+    const wdSet = new Set(state.newSem.weekDays);
+    const wdLabels = ['日','一','二','三','四','五','六'];
+    const wdBox = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px'} });
+    wdLabels.forEach((lab, i) => {
+      const b = el('button', {
+        class:'btn btn-sm ' + (wdSet.has(i) ? 'btn-primary' : ''),
+        onclick:(e)=> {
+          e.preventDefault();
+          if(wdSet.has(i)) wdSet.delete(i); else wdSet.add(i);
+          state.newSem.weekDays = [...wdSet].sort((a,b)=> a-b);
+          b.className = 'btn btn-sm ' + (wdSet.has(i) ? 'btn-primary' : '');
+        }
+      }, lab);
+      wdBox.appendChild(b);
+    });
+    m.root.appendChild(wdBox);
+
+    m.root.appendChild(navRow(true, '下一步：確認 →', true));
+  }
+  function renderStep5(){
+    m.root.appendChild(el('h3', null, '✅ 最終確認'));
+    m.root.appendChild(el('div', { class:'card', style:{background:'var(--surface-2)'} },
+      el('div', null, el('strong', null, '結束學期：'), cur.name),
+      el('div', null, el('strong', null, '新學期名稱：'), state.newSem.name || '(未填)'),
+      el('div', null, el('strong', null, '新學期起訖：'), (state.newSem.startDate||'?') + ' ~ ' + (state.newSem.endDate||'?')),
+      el('div', null, el('strong', null, '清理選項：'),
+        Object.keys(state.options).filter(k => state.options[k]).join(', ') || '(無)')
+    ));
+    m.root.appendChild(el('div', { class:'small', style:{color:'var(--warn)',marginTop:'8px'} },
+      '⚠ 系統會自動備份完整資料後再切換。執行後仍可在「學期管理 → 切換備份」下載復原。'));
+    if(!state.newSem.name || !state.newSem.startDate || !state.newSem.endDate){
+      m.root.appendChild(el('div', { class:'small', style:{color:'var(--danger)',marginTop:'6px'} },
+        '⚠ 學期名稱 / 起訖日必填，請回上一步補齊'));
+      m.root.appendChild(navRow(true, '完成', false, true));
+    } else {
+      m.root.appendChild(navRow(true, '🚀 確認執行', true, true));
+    }
+  }
+}
+
+function _bComputeSemesterSummary(sem){
+  const stuN = (App.db.students||[]).length;
+  // 出席率
+  const attRecs = (App.db.attendance||[]).filter(a => _bInSemester(a.date, sem));
+  const total = attRecs.length;
+  const present = attRecs.filter(a => a.status === 'present').length;
+  const attRate = total > 0 ? Math.round(present / total * 100) : 0;
+  // 作業數
+  const asgnN = (App.db.assignments||[]).filter(a => !sem.id || !a.semesterId || a.semesterId === sem.id).length;
+  // 平均分數
+  const subs = (App.db.submissions||[]).filter(s => typeof s.score === 'number');
+  let avgScore = 0;
+  if(subs.length){
+    let sum = 0;
+    subs.forEach(s => {
+      const asg = (App.db.assignments||[]).find(a => a.id === s.assignmentId);
+      const max = (asg && asg.points) || 100;
+      sum += (s.score / max * 100);
+    });
+    avgScore = Math.round(sum / subs.length);
+  }
+  return { studentCount: stuN, attRate, asgnCount: asgnN, avgScore };
+}
+
+function _bExecuteSemesterTransition(state, m){
+  try {
+    const cur = getCurrentSemester();
+    if(!cur){ toast('找不到當前學期', 'danger'); return; }
+
+    // 1) 完整備份
+    try {
+      App.db._archives = App.db._archives || [];
+      App.db._archives.unshift({
+        ts: Date.now(),
+        label: cur.name || '舊學期',
+        data: _clone ? _clone(App.db) : JSON.parse(JSON.stringify(App.db))
+      });
+      // 只留最近 5 份
+      if(App.db._archives.length > 5) App.db._archives = App.db._archives.slice(0,5);
+    } catch(e){ dbgWarn('archive failed', e); }
+
+    // 2) 把 cur archive
+    if(Array.isArray(App.db.semesters)){
+      const idx = App.db.semesters.findIndex(s => s.id === cur.id);
+      if(idx >= 0){
+        App.db.semesters[idx].current = false;
+        App.db.semesters[idx].archivedAt = Date.now();
+        App.db.semesters[idx].summary = state.summary;
+      }
+    } else {
+      App.db.semesters = [];
+      App.db.semesters.push(Object.assign({}, cur, { current:false, archivedAt: Date.now(), summary: state.summary }));
+    }
+
+    // 3) push new semester
+    const newRec = Object.assign({}, state.newSem, {
+      current: true,
+      archivedAt: null,
+      summary: null,
+      holidays: []
+    });
+    App.db.semesters.push(newRec);
+
+    // 4) 同步舊 DB.semester（向後相容）→ 改成新學期
+    App.db.semester = {
+      startDate: newRec.startDate,
+      endDate: newRec.endDate,
+      weekDays: newRec.weekDays || [1,2,3,4,5],
+      holidays: []
+    };
+
+    // 5) 套用清理選項
+    const opts = state.options;
+    if(!opts.keepStudents){
+      App.db.students = [];
+      App.db.attendance = [];
+    }
+    if(opts.resetPasswords){
+      (App.db.students||[]).forEach(s => {
+        s.password = '';
+        s.passwordChangedAt = null;
+        s.mustChangePw = true;
+      });
+    }
+    if(opts.clearTodos){
+      App.db.todos = [];
+    }
+    if(opts.clearNotes){
+      App.db.notes = [];
+    }
+
+    saveDB(true);
+    try {
+      Sync.setMap('semesters', App.db.semesters);
+      Sync.setNode('semester', App.db.semester);
+      Sync.setMap('students', App.db.students);
+    } catch(_) {}
+    bcNotify();
+
+    m.close();
+    toast('🎉 學期切換成功！已自動備份舊資料', 'success', 4000);
+    setTimeout(()=> rerender(), 100);
+  } catch(e){
+    toast('切換失敗：' + (e.message||e), 'danger', 5000);
+    console.error('[semester transition]', e);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   包 B end
+   ──────────────────────────────────────────────────────────── */
 </script>
 </body>
 </html>
