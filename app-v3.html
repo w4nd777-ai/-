@@ -21731,45 +21731,116 @@ function renderLoginEditor(content){
     cardSpot.appendChild(fld_em);
   } else if(_curLogoStyle === 'image'){
     // 自訂圖片：上傳或網址（共用既有 lc.logoImage）
-    const fld_im = el('div', { class:'field' });
-    fld_im.appendChild(el('label', { class:'label small' }, '└ 自訂圖片（上傳 或 直接貼網址）'));
-    const imRow = el('div', { class:'flex', style:{gap:'8px',alignItems:'center',flexWrap:'wrap'} });
-    // URL 輸入
-    const urlInp = el('input', { class:'input', placeholder:'https://...（也可下方上傳）',
-      value: (typeof lc.logoImage === 'string' && /^https?:\/\//i.test(lc.logoImage)) ? lc.logoImage : '',
-      style:{flex:'1',minWidth:'180px'} });
-    urlInp.addEventListener('change', ()=> {
-      const v = urlInp.value.trim();
-      if(v){ lc.logoImage = v; saveUiCustom(); toast('Logo 圖片已更新','success'); }
-    });
-    imRow.appendChild(urlInp);
-    // 檔案上傳
-    const fileInp = el('input', { type:'file', accept:'image/*' });
+    const fld_im = el('div', { class:'field', style:{background:'var(--surface-2)',padding:'14px',borderRadius:'10px',marginTop:'8px'} });
+    fld_im.appendChild(el('label', { class:'label', style:{fontSize:'14px',fontWeight:'700',marginBottom:'8px'} }, '🖼 自訂圖片 Logo'));
+    fld_im.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'10px',lineHeight:'1.6'} },
+      '支援 PNG / JPG / SVG / GIF · 建議 < 1MB · 自動縮放為 60×60'));
+
+    // 預覽區
+    const previewBox = el('div', { style:{
+      width:'80px',height:'80px',borderRadius:'12px',
+      background:'var(--surface)',border:'2px dashed var(--border)',
+      display:'flex',alignItems:'center',justifyContent:'center',
+      overflow:'hidden',margin:'0 auto 12px',position:'relative'
+    } });
+    async function refreshPreview(){
+      previewBox.innerHTML = '';
+      if(lc.logoImage){
+        try {
+          let url = lc.logoImage;
+          if(!/^https?:\/\//i.test(String(url)) && !/^data:/i.test(String(url))){
+            url = await attachGetUrl(lc.logoImage);
+          }
+          if(url){
+            previewBox.appendChild(el('img', { src:url, style:{width:'100%',height:'100%',objectFit:'cover'} }));
+            previewBox.style.border = '2px solid var(--success, #22c55e)';
+            return;
+          }
+        } catch(e){ _swallow('logo-preview', e); }
+      }
+      previewBox.style.border = '2px dashed var(--border)';
+      previewBox.appendChild(el('div', { class:'tiny muted', style:{textAlign:'center',padding:'4px'} }, '尚無圖片'));
+    }
+    refreshPreview();
+    fld_im.appendChild(previewBox);
+
+    // 上傳按鈕 (明顯)
+    const fileInp = el('input', { type:'file', accept:'image/*', style:{display:'none'}, id:'_logo_upload_inp' });
     fileInp.addEventListener('change', async e => {
       const f = e.target.files && e.target.files[0];
       if(!f) return;
       if(f.size > 1024*1024){ toast('圖片不能超過 1 MB','danger'); fileInp.value=''; return; }
       try {
-        // 若舊值是 attach id（非 URL）→ 刪舊
-        if(lc.logoImage && !/^https?:\/\//i.test(String(lc.logoImage))){
+        if(lc.logoImage && !/^https?:\/\//i.test(String(lc.logoImage)) && !/^data:/i.test(String(lc.logoImage))){
           try { await attachDelete(lc.logoImage); } catch(_){_swallow('auto',_)}
         }
         lc.logoImage = await attachUpload(f);
         saveUiCustom();
-        toast('Logo 圖片已上傳','success');
+        toast('✅ Logo 圖片已上傳','success');
+        await refreshPreview();
         rerender();
       } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
     });
-    imRow.appendChild(fileInp);
-    fld_im.appendChild(imRow);
+    fld_im.appendChild(fileInp);
+    fld_im.appendChild(el('button', { class:'btn btn-primary', style:{width:'100%',marginBottom:'8px'},
+      onclick: ()=> fileInp.click()
+    }, '📁 從電腦選擇圖片上傳'));
+
+    // 拖放區域
+    previewBox.addEventListener('dragover', e => { e.preventDefault(); previewBox.style.background = 'var(--primary-soft)'; });
+    previewBox.addEventListener('dragleave', e => { previewBox.style.background = 'var(--surface)'; });
+    previewBox.addEventListener('drop', async e => {
+      e.preventDefault(); previewBox.style.background = 'var(--surface)';
+      const f = e.dataTransfer?.files?.[0];
+      if(!f) return;
+      if(!/^image\//.test(f.type)){ toast('請拖入圖片檔','warning'); return; }
+      if(f.size > 1024*1024){ toast('圖片不能超過 1 MB','danger'); return; }
+      try {
+        if(lc.logoImage && !/^https?:\/\//i.test(String(lc.logoImage)) && !/^data:/i.test(String(lc.logoImage))){
+          try { await attachDelete(lc.logoImage); } catch(_){_swallow('auto',_)}
+        }
+        lc.logoImage = await attachUpload(f);
+        saveUiCustom();
+        toast('✅ Logo 圖片已上傳','success');
+        await refreshPreview();
+        rerender();
+      } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
+    });
+    fld_im.appendChild(el('div', { class:'tiny muted', style:{textAlign:'center',marginBottom:'10px'} },
+      '💡 提示：也可以直接把圖片拖到上方預覽框'));
+
+    // 分隔線
+    fld_im.appendChild(el('div', { style:{height:'1px',background:'var(--border)',margin:'12px 0'} }));
+
+    // URL 輸入 (次要選項)
+    fld_im.appendChild(el('label', { class:'tiny muted', style:{display:'block',marginBottom:'4px'} }, '或 貼上圖片網址'));
+    const urlRow = el('div', { class:'flex', style:{gap:'6px'} });
+    const urlInp = el('input', { class:'input', placeholder:'https://example.com/logo.png',
+      value: (typeof lc.logoImage === 'string' && /^https?:\/\//i.test(lc.logoImage)) ? lc.logoImage : '',
+      style:{flex:'1'} });
+    urlRow.appendChild(urlInp);
+    urlRow.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+      const v = urlInp.value.trim();
+      if(!v){ toast('請輸入網址','warning'); return; }
+      if(!/^https?:\/\//i.test(v)){ toast('網址須以 http:// 或 https:// 開頭','warning'); return; }
+      lc.logoImage = v;
+      saveUiCustom();
+      toast('✅ Logo 網址已套用','success');
+      await refreshPreview();
+      rerender();
+    }}, '套用'));
+    fld_im.appendChild(urlRow);
+
     if(lc.logoImage){
-      fld_im.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'},
+      fld_im.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{width:'100%',marginTop:'10px'},
         onclick: async ()=> {
-          if(lc.logoImage && !/^https?:\/\//i.test(String(lc.logoImage))){
+          if(!await confirmDlg('確定移除自訂圖片?', { title:'確認' })) return;
+          if(lc.logoImage && !/^https?:\/\//i.test(String(lc.logoImage)) && !/^data:/i.test(String(lc.logoImage))){
             try { await attachDelete(lc.logoImage); } catch(_){_swallow('auto',_)}
           }
           lc.logoImage = null;
           saveUiCustom();
+          await refreshPreview();
           rerender();
         }}, '🗑 移除自訂圖片'));
     }
