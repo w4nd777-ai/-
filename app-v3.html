@@ -5273,35 +5273,16 @@ function saveLoginStep(step){
 
 // Try one-click continue from saved last user.
 // H2: 改為「驗證 token」而非單純「rem 有 ts 就免密」
+// 修：使用者抱怨「按一次直接登入無法切換帳號」
+// → 「一鍵繼續使用」不再做 token 自動登入,
+//   改為跳到對應的登入 stage + pre-fill 帳號, 仍需手動輸入密碼按登入。
+//   token 邏輯保留但只用於 stage 內密碼自動帶入 (現已停用)。
 async function quickContinueAsLast(){
   const lu = loadLastUser();
   if(!lu) return toast('沒有上次登入紀錄','danger');
   if(lu.role === 'teacher'){
     const a = App.db.accounts.find(x => x.id === lu.id || x.username === lu.username);
     if(!a) return toast('帳號已被刪除，請重新登入','danger');
-    // H2: 必須有 token 且能在 account 找到 hash 配對
-    const rem = loadRemember();
-    let remOk = false;
-    if(rem && rem.username === a.username && rem.token && (Date.now() - (rem.ts||0)) < LOGIN_TOKEN_TTL_MS){
-      try { remOk = await _verifyLoginToken(a, rem.token); } catch(e){ _swallow('teacher-quick-token', e); }
-    }
-    if(remOk){
-      App.session = { role:'teacher', id:a.id, name:a.name, username:a.username, subRole: a.subRole || null };
-      saveSession();
-      saveLastUser({ role:'teacher', id:a.id, username:a.username, name:a.name, ts:Date.now() });
-      saveDB(true);  // 更新 loginTokens 內 ts
-      toast('歡迎回來，' + a.name + '！','success');
-      go('overview');
-      // batch 1：仍要檢查老師是否標記為 mustChangePw
-      try {
-        if(a.mustChangePw){
-          setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){_swallow('auto',_)} }, 500);
-        }
-      } catch(_){_swallow('auto',_)}
-      return;
-    }
-    // token 不存在 / 過期 / 不匹配 → 清掉 LS，要求重新輸入密碼
-    if(rem) saveRemember(null);
     App._loginStage = 'teacher';
     App._loginPrefill = { username: a.username };
     rerender();
@@ -5310,7 +5291,11 @@ async function quickContinueAsLast(){
   if(lu.role === 'student'){
     const s = App.db.students.find(x => x.id === lu.id);
     if(!s) return toast('學生已不存在','danger');
-    studentTapToLogin(s.id);
+    // 跳到學生 stage + pre-fill 班級/姓名
+    App._loginStage = 'student';
+    App._loginCls = s.cls || '未分班';
+    App._loginStuId = s.id;
+    rerender();
   }
 }
 
@@ -5320,60 +5305,63 @@ async function quickContinueAsLast(){
 // 互動吉祥物 SVG — 純手寫 + CSS 動畫驅動
 // opts.color  — 主色 (耳/臉/手 fill，預設 #f4a76a)
 // opts.onDark — 暗色卡片內 (眼/嘴 stroke 改亮色)，預設 false
+// Rilakkuma 風格小熊：淺米黃身體 + 大頭小耳 + 簡單黑點眼 + 小 ω 嘴
+// 重點：頭大身小、眼睛小且間距開、淺色調、無強烈線條
 function buildMascotSVG(opts){
   const o = opts || {};
-  // 預設改為標準小熊棕色
-  const color = o.color || '#b88560';
-  const darkColor = o.darkColor || '#8a5d3a';      // 耳輪 / 鼻子
-  const innerEar = '#f4c5b8';                       // 粉嫩內耳
-  const muzzle = '#f9e2c8';                          // 鼻吻區（淺米色）
+  const color = o.color || '#e9c89d';         // 淺米黃 (Rilakkuma 經典色)
+  const dark = '#7a4a26';                      // 鼻子 + 眉
+  const innerEar = '#c89770';                  // 深一點點的米色內耳
+  const cheek = '#ffb8c8';                     // 粉嫩腮紅
   const onDark = o.onDark ? 'true' : 'false';
   const svg =
     '<svg class="mascot-svg" data-state="idle" data-mascot-on-dark="' + onDark + '" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-      // 兩隻圓圓的耳朵
-      '<circle cx="32" cy="36" r="12" fill="' + color + '"/>' +
-      '<circle cx="88" cy="36" r="12" fill="' + color + '"/>' +
-      // 內耳粉色
-      '<circle cx="32" cy="38" r="6" fill="' + innerEar + '"/>' +
-      '<circle cx="88" cy="38" r="6" fill="' + innerEar + '"/>' +
-      // 圓圓的臉（main body）
-      '<circle cx="60" cy="66" r="34" fill="' + color + '"/>' +
-      // 鼻吻區（突出的淺色橢圓）
-      '<ellipse cx="60" cy="78" rx="18" ry="14" fill="' + muzzle + '"/>' +
-      // 紅暈腮紅（focus 時顯示）
-      '<ellipse class="m-blush" cx="32" cy="74" r="5" rx="6" ry="4" fill="#ff9eb5" opacity="0"/>' +
-      '<ellipse class="m-blush" cx="88" cy="74" r="5" rx="6" ry="4" fill="#ff9eb5" opacity="0"/>' +
-      // 預設眼睛（小黑點，可愛關鍵）
+      // 兩隻小小圓耳朵（位置高、貼頭頂）
+      '<circle cx="34" cy="32" r="11" fill="' + color + '"/>' +
+      '<circle cx="86" cy="32" r="11" fill="' + color + '"/>' +
+      '<circle cx="34" cy="33" r="5" fill="' + innerEar + '"/>' +
+      '<circle cx="86" cy="33" r="5" fill="' + innerEar + '"/>' +
+      // 大圓臉（往下放、佔比大）
+      '<ellipse cx="60" cy="68" rx="40" ry="36" fill="' + color + '"/>' +
+      // 鼻吻區（更扁、更淺）
+      '<ellipse cx="60" cy="78" rx="20" ry="13" fill="#fff5e6"/>' +
+      // 永久腮紅（不需 focus 也顯示, 可愛重點）
+      '<ellipse class="m-blush m-blush-perm" cx="28" cy="74" rx="6" ry="4" fill="' + cheek + '" opacity="0.65"/>' +
+      '<ellipse class="m-blush m-blush-perm" cx="92" cy="74" rx="6" ry="4" fill="' + cheek + '" opacity="0.65"/>' +
+      // focus 時加深的腮紅
+      '<ellipse class="m-blush" cx="28" cy="74" rx="7" ry="5" fill="' + cheek + '" opacity="0"/>' +
+      '<ellipse class="m-blush" cx="92" cy="74" rx="7" ry="5" fill="' + cheek + '" opacity="0"/>' +
+      // 簡單黑點眼睛（間距開、放高一點、小一號）
       '<g class="m-eye m-eye-l">' +
-        '<circle class="m-pupil" cx="48" cy="64" r="3.2" fill="#2a1810"/>' +
-        '<circle cx="49" cy="63" r="1" fill="#fff"/>' +
+        '<ellipse class="m-pupil" cx="45" cy="65" rx="3" ry="3.6" fill="#2a1810"/>' +
+        '<circle cx="46" cy="63.5" r="0.9" fill="#fff"/>' +
       '</g>' +
       '<g class="m-eye m-eye-r">' +
-        '<circle class="m-pupil" cx="72" cy="64" r="3.2" fill="#2a1810"/>' +
-        '<circle cx="73" cy="63" r="1" fill="#fff"/>' +
+        '<ellipse class="m-pupil" cx="75" cy="65" rx="3" ry="3.6" fill="#2a1810"/>' +
+        '<circle cx="76" cy="63.5" r="0.9" fill="#fff"/>' +
       '</g>' +
-      // 失敗 X 眼，預設隱藏
-      '<g class="m-x-eye" opacity="0" stroke="#d33" stroke-width="1.8" stroke-linecap="round">' +
-        '<line x1="44" y1="60" x2="52" y2="68"/>' +
-        '<line x1="52" y1="60" x2="44" y2="68"/>' +
-        '<line x1="68" y1="60" x2="76" y2="68"/>' +
-        '<line x1="76" y1="60" x2="68" y2="68"/>' +
+      // 失敗 X 眼
+      '<g class="m-x-eye" opacity="0" stroke="#d33" stroke-width="1.6" stroke-linecap="round">' +
+        '<line x1="42" y1="62" x2="48" y2="68"/>' +
+        '<line x1="48" y1="62" x2="42" y2="68"/>' +
+        '<line x1="72" y1="62" x2="78" y2="68"/>' +
+        '<line x1="78" y1="62" x2="72" y2="68"/>' +
       '</g>' +
-      // 成功 ^_^ 眯眼，預設隱藏
-      '<g class="m-happy-eye" opacity="0" stroke="#2a1810" stroke-width="2" stroke-linecap="round" fill="none">' +
-        '<path d="M44 64 Q48 60 52 64"/>' +
-        '<path d="M68 64 Q72 60 76 64"/>' +
+      // 成功 ^_^ 眯眼（更細更可愛）
+      '<g class="m-happy-eye" opacity="0" stroke="#2a1810" stroke-width="1.6" stroke-linecap="round" fill="none">' +
+        '<path d="M41 66 Q45 62 49 66"/>' +
+        '<path d="M71 66 Q75 62 79 66"/>' +
       '</g>' +
-      // 小三角形鼻子（可愛重點）
-      '<path class="m-nose" d="M57 75 L63 75 L60 79 Z" fill="' + darkColor + '"/>' +
-      // 嘴巴（預設小微笑，細線, 偏短）
-      '<path class="m-mouth" d="M55 84 Q60 87 65 84" stroke="' + darkColor + '" stroke-width="1.6" fill="none" stroke-linecap="round"/>' +
-      // 兩隻圓圓的手（預設隱藏在臉下方，cover/typing/peek 才舉起來遮眼）
-      '<circle class="m-hand m-hand-l" cx="40" cy="110" r="11" fill="' + color + '"/>' +
-      '<circle class="m-hand m-hand-r" cx="80" cy="110" r="11" fill="' + color + '"/>' +
-      // 手的肉墊（一旦舉起來可以看到）
-      '<circle class="m-paw m-paw-l" cx="40" cy="113" r="4" fill="' + innerEar + '" opacity="0"/>' +
-      '<circle class="m-paw m-paw-r" cx="80" cy="113" r="4" fill="' + innerEar + '" opacity="0"/>' +
+      // 橢圓小鼻子（不是三角形, 比較可愛）
+      '<ellipse class="m-nose" cx="60" cy="76" rx="2.6" ry="1.8" fill="' + dark + '"/>' +
+      // ω 形小嘴巴（Rilakkuma 經典）
+      '<path class="m-mouth" d="M55 82 Q57.5 84 60 82 Q62.5 84 65 82" stroke="' + dark + '" stroke-width="1.4" fill="none" stroke-linecap="round"/>' +
+      // 兩隻圓圓的手（預設隱藏在臉下方）
+      '<circle class="m-hand m-hand-l" cx="38" cy="112" r="10" fill="' + color + '"/>' +
+      '<circle class="m-hand m-hand-r" cx="82" cy="112" r="10" fill="' + color + '"/>' +
+      // 手的肉墊
+      '<circle class="m-paw m-paw-l" cx="38" cy="115" r="3.5" fill="' + innerEar + '" opacity="0"/>' +
+      '<circle class="m-paw m-paw-r" cx="82" cy="115" r="3.5" fill="' + innerEar + '" opacity="0"/>' +
     '</svg>';
   const wrap = document.createElement('div');
   wrap.className = 'mascot-wrap';
@@ -5892,11 +5880,12 @@ function renderLogin(root){
       );
       lub.appendChild(row);
       lub.appendChild(el('button', { class:'last-user-quick', onclick: quickContinueAsLast },
-        '🚀 一鍵繼續使用'
+        '👉 以此帳號繼續（需輸入密碼）'
       ));
       lub.appendChild(el('button', { class:'last-user-clear', onclick: ()=> {
         saveLastUser(null); saveRemember(null); rerender();
-      }}, '清除登入紀錄'));
+        toast('已清除登入紀錄','info');
+      }}, '🔄 切換其他帳號'));
       card.appendChild(lub);
     }
   }
@@ -7282,31 +7271,21 @@ function renderLoginStudentStage(){
   stuRemLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
   stage.appendChild(stuRemLabel);
 
-  // 自動回填上次記住的學生（H2: 只回填班級+姓名，不帶入密碼；若 token 有效則 quickLogin）
+  // 自動回填上次記住的學生（只回填班級+姓名 + 顯示「上次：XXX」提示，不自動登入）
+  // 修：使用者抱怨「再按一次直接登入無法切換帳號」→ 移除 token 自動登入,
+  //     永遠要按「登入」按鈕才會登入,讓使用者隨時能切換
   if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId){
     const lastStu = App.db.students.find(x => x.id === _stuRem.studentId);
     if(lastStu){
       App._loginCls = lastStu.cls || '未分班';
       App._loginStuId = lastStu.id;
-      // 同步下拉
-      setTimeout(async ()=> {
+      setTimeout(()=> {
         try {
           selCls.value = App._loginCls;
           refreshNameList();
           selName.value = String(lastStu.id);
-          // H2: 嘗試 token 自動登入
-          if(_stuRem.token && (Date.now() - (_stuRem.ts||0)) < LOGIN_TOKEN_TTL_MS){
-            const ok = await _verifyLoginToken(lastStu, _stuRem.token);
-            if(ok){
-              saveDB(true);
-              finishStudentLogin(lastStu);
-              return;
-            } else {
-              // token 無效 → 清掉
-              saveRemember(null);
-            }
-          }
-        } catch(e){ _swallow('stu-quick-token', e); }
+          iPw.focus();
+        } catch(e){ _swallow('stu-prefill', e); }
       }, 0);
     }
   }
