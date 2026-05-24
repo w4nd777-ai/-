@@ -5303,65 +5303,230 @@ async function quickContinueAsLast(){
    LOGIN V3 — 分割布局 + 互動吉祥物
    ──────────────────────────────────────────────────────────── */
 // 互動吉祥物 SVG — 純手寫 + CSS 動畫驅動
-// opts.color  — 主色 (耳/臉/手 fill，預設 #f4a76a)
+// opts.animal — 動物種類 (預設 'bear')，支援 11 種：
+//               bear / shiba / cat / rabbit / panda / penguin
+//               hamster / fox / pikachu / doraemon / kirby
+//               （動漫角色僅供示範，純手寫近似形狀無外部資源）
+// opts.color  — 覆寫主色 (耳/臉/手 fill)；不傳則用該動物預設色
 // opts.onDark — 暗色卡片內 (眼/嘴 stroke 改亮色)，預設 false
-// Rilakkuma 風格小熊：淺米黃身體 + 大頭小耳 + 簡單黑點眼 + 小 ω 嘴
-// 重點：頭大身小、眼睛小且間距開、淺色調、無強烈線條
+// 共同：所有動物用相同 class (.m-eye / .m-pupil / .m-mouth / .m-hand /
+//      .m-blush / .m-x-eye / .m-happy-eye)，讓既有 7 state 動畫 CSS 全部生效
+// 變化：顏色 / 耳朵形狀 / 是否有鼻子 / 嘴形 / 特殊裝飾 (鬍鬚/黑眼圈/紅腮等)
+const ANIMAL_PRESETS = {
+  bear:     { name:'🐻 小熊',     color:'#e9c89d', innerEar:'#c89770', earShape:'round',         earCx:[34,86], earR:11, hasNose:true,  noseColor:'#7a4a26', mouth:'omega',  cheek:'#ffb8c8' },
+  shiba:    { name:'🐶 柴犬',     color:'#e8a865', innerEar:'#ffffff', earShape:'triangle',      earCx:[30,90], earR:13, hasNose:true,  noseColor:'#2a1810', mouth:'smile',  cheek:'#ffa9b8', faceMark:true },
+  cat:      { name:'🐱 貓咪',     color:'#f5b287', innerEar:'#ffc0d0', earShape:'triangle',      earCx:[32,88], earR:14, hasNose:true,  noseColor:'#cc6688', mouth:'omega',  cheek:'#ffb8c8', whiskers:true },
+  rabbit:   { name:'🐰 兔子',     color:'#fff5e6', innerEar:'#ffd1dc', earShape:'long',          earCx:[44,76], earR:8,  hasNose:true,  noseColor:'#cc6688', mouth:'smile',  cheek:'#ffc0c0' },
+  panda:    { name:'🐼 熊貓',     color:'#ffffff', innerEar:'#2a1810', earShape:'round',         earCx:[30,90], earR:13, earColor:'#2a1810', hasNose:true, noseColor:'#2a1810', mouth:'smile', cheek:'#ffb8c8', eyePatches:true },
+  penguin:  { name:'🐧 企鵝',     color:'#2d3540', innerEar:'#2d3540', earShape:'none',          bellyColor:'#ffffff', hasNose:false, hasBeak:true, mouth:'smile', cheek:'#ffa0a0' },
+  hamster:  { name:'🐹 倉鼠',     color:'#f5d29d', innerEar:'#ffd1dc', earShape:'round',         earCx:[32,88], earR:10, hasNose:true,  noseColor:'#7a4a26', mouth:'omega', cheek:'#ff9eb5', bigCheek:true },
+  fox:      { name:'🦊 狐狸',     color:'#e88858', innerEar:'#ffffff', earShape:'triangle',      earCx:[28,92], earR:14, earColor:'#e88858', earTip:'#2a1810', hasNose:true, noseColor:'#2a1810', mouth:'smile', cheek:'#ffb8c8', whiteMuzzle:true },
+  pikachu:  { name:'⚡ 皮卡丘',    color:'#ffd83d', innerEar:'#2a1810', earShape:'long-pointed', earColor:'#ffd83d', earTip:'#2a1810', earCx:[30,90], hasNose:false, mouth:'omega', cheek:'#ff4d4d', cheekSize:'big' },
+  doraemon: { name:'🤖 多啦A夢',   color:'#3aa6e6', innerEar:'#3aa6e6', earShape:'none',          bellyColor:'#ffffff', hasNose:true, noseColor:'#cc2244', mouth:'smile', cheek:null, whiskers:true, headBand:true },
+  kirby:    { name:'💖 卡比',     color:'#ffb8d1', innerEar:'none',    earShape:'none',          hasNose:false, mouth:'omega', cheek:'#ff6090', cheekSize:'big', simple:true }
+};
+
 function buildMascotSVG(opts){
   const o = opts || {};
-  const color = o.color || '#e9c89d';         // 淺米黃 (Rilakkuma 經典色)
-  const dark = '#7a4a26';                      // 鼻子 + 眉
-  const innerEar = '#c89770';                  // 深一點點的米色內耳
-  const cheek = '#ffb8c8';                     // 粉嫩腮紅
+  const animalKey = o.animal || 'bear';
+  const a = ANIMAL_PRESETS[animalKey] || ANIMAL_PRESETS.bear;
+  // 顏色：opts.color 只在「明確且非預設 bear 色」時覆寫，避免品牌 preset 殘留 #e9c89d/#f4a76a 把其他動物染色
+  const _bearDefaultColors = ['#e9c89d','#f4a76a','#b88560'];
+  const useCustomColor = o.color && _bearDefaultColors.indexOf(String(o.color).toLowerCase()) < 0;
+  const color = useCustomColor ? o.color : a.color;
+  const innerEar = a.innerEar || color;
+  const earColor = a.earColor || color;
+  const cheek = a.cheek;                       // 可能 null (多啦A夢)
+  const cheekSize = a.cheekSize === 'big' ? 9 : 7;
+  const dark = '#2a1810';                      // 嘴/眼線通用深色
+  const noseColor = a.noseColor || '#7a4a26';
   const onDark = o.onDark ? 'true' : 'false';
+
+  // ── 動態組裝 SVG 各 layer ────────────────────────────────
+  let svgParts = '';
+
+  // 1) 耳朵（penguin/doraemon/kirby = none，不畫）
+  if(a.earShape === 'round'){
+    // 圓耳：外圈大圓 + 內圈小圓
+    svgParts +=
+      '<circle cx="' + a.earCx[0] + '" cy="32" r="' + a.earR + '" fill="' + earColor + '"/>' +
+      '<circle cx="' + a.earCx[1] + '" cy="32" r="' + a.earR + '" fill="' + earColor + '"/>';
+    if(a.innerEar && a.innerEar !== 'none'){
+      svgParts +=
+        '<circle cx="' + a.earCx[0] + '" cy="33" r="' + Math.max(3, a.earR-6) + '" fill="' + innerEar + '"/>' +
+        '<circle cx="' + a.earCx[1] + '" cy="33" r="' + Math.max(3, a.earR-6) + '" fill="' + innerEar + '"/>';
+    }
+  } else if(a.earShape === 'triangle'){
+    // 三角耳（柴犬/貓/狐狸）
+    const e0 = a.earCx[0], e1 = a.earCx[1], er = a.earR;
+    svgParts +=
+      '<polygon points="' + (e0-er) + ',38 ' + (e0+er) + ',38 ' + e0 + ',' + (38-er-4) + '" fill="' + earColor + '"/>' +
+      '<polygon points="' + (e1-er) + ',38 ' + (e1+er) + ',38 ' + e1 + ',' + (38-er-4) + '" fill="' + earColor + '"/>';
+    // 內耳（小三角）
+    if(a.innerEar && a.innerEar !== 'none'){
+      svgParts +=
+        '<polygon points="' + (e0-er+3) + ',37 ' + (e0+er-3) + ',37 ' + e0 + ',' + (38-er+1) + '" fill="' + innerEar + '"/>' +
+        '<polygon points="' + (e1-er+3) + ',37 ' + (e1+er-3) + ',37 ' + e1 + ',' + (38-er+1) + '" fill="' + innerEar + '"/>';
+    }
+    // 黑尖耳（狐狸）
+    if(a.earTip){
+      svgParts +=
+        '<polygon points="' + (e0-4) + ',30 ' + (e0+4) + ',30 ' + e0 + ',' + (38-er-4) + '" fill="' + a.earTip + '"/>' +
+        '<polygon points="' + (e1-4) + ',30 ' + (e1+4) + ',30 ' + e1 + ',' + (38-er-4) + '" fill="' + a.earTip + '"/>';
+    }
+  } else if(a.earShape === 'long'){
+    // 長耳（兔子）
+    svgParts +=
+      '<ellipse cx="' + a.earCx[0] + '" cy="20" rx="' + a.earR + '" ry="20" fill="' + earColor + '"/>' +
+      '<ellipse cx="' + a.earCx[1] + '" cy="20" rx="' + a.earR + '" ry="20" fill="' + earColor + '"/>' +
+      '<ellipse cx="' + a.earCx[0] + '" cy="22" rx="' + Math.max(3, a.earR-3) + '" ry="15" fill="' + innerEar + '"/>' +
+      '<ellipse cx="' + a.earCx[1] + '" cy="22" rx="' + Math.max(3, a.earR-3) + '" ry="15" fill="' + innerEar + '"/>';
+  } else if(a.earShape === 'long-pointed'){
+    // 皮卡丘式長尖耳（黑尖）
+    const e0 = a.earCx[0], e1 = a.earCx[1];
+    svgParts +=
+      '<polygon points="' + (e0-7) + ',38 ' + (e0+7) + ',38 ' + (e0-4) + ',8" fill="' + earColor + '"/>' +
+      '<polygon points="' + (e1-7) + ',38 ' + (e1+7) + ',38 ' + (e1+4) + ',8" fill="' + earColor + '"/>' +
+      '<polygon points="' + (e0-5) + ',18 ' + (e0+2) + ',18 ' + (e0-4) + ',8" fill="' + (a.earTip || '#2a1810') + '"/>' +
+      '<polygon points="' + (e1-2) + ',18 ' + (e1+5) + ',18 ' + (e1+4) + ',8" fill="' + (a.earTip || '#2a1810') + '"/>';
+  }
+
+  // 2) 臉（圓臉；卡比/企鵝/多啦A夢身體一體 → 改用較大橢圓）
+  if(a.earShape === 'none'){
+    // 一體圓身（penguin/doraemon/kirby）
+    svgParts += '<ellipse cx="60" cy="64" rx="44" ry="42" fill="' + color + '"/>';
+    // 肚子（白）
+    if(a.bellyColor){
+      svgParts += '<ellipse cx="60" cy="76" rx="28" ry="26" fill="' + a.bellyColor + '"/>';
+    }
+  } else {
+    svgParts += '<ellipse cx="60" cy="68" rx="40" ry="36" fill="' + color + '"/>';
+  }
+
+  // 2.5) 熊貓黑眼圈（在臉之上、眼睛之下）
+  if(a.eyePatches){
+    svgParts +=
+      '<ellipse cx="45" cy="65" rx="9" ry="11" fill="#2a1810"/>' +
+      '<ellipse cx="75" cy="65" rx="9" ry="11" fill="#2a1810"/>';
+  }
+
+  // 2.6) 狐狸白下半臉
+  if(a.whiteMuzzle){
+    svgParts += '<ellipse cx="60" cy="82" rx="22" ry="14" fill="#ffffff"/>';
+  }
+
+  // 2.7) 鼻吻區（bear/hamster/shiba 等有圓臉動物的淺色嘴部）
+  if(a.earShape !== 'none' && !a.whiteMuzzle && !a.eyePatches && (animalKey === 'bear' || animalKey === 'hamster' || animalKey === 'shiba')){
+    svgParts += '<ellipse cx="60" cy="78" rx="20" ry="13" fill="#fff5e6"/>';
+  }
+
+  // 2.8) 倉鼠鼓鼓臉頰
+  if(a.bigCheek){
+    svgParts +=
+      '<ellipse cx="22" cy="80" rx="10" ry="8" fill="' + color + '"/>' +
+      '<ellipse cx="98" cy="80" rx="10" ry="8" fill="' + color + '"/>';
+  }
+
+  // 2.9) 柴犬白色眉毛/額紋（faceMark）
+  if(a.faceMark){
+    svgParts +=
+      '<ellipse cx="40" cy="58" rx="5" ry="3" fill="#ffffff" opacity="0.7"/>' +
+      '<ellipse cx="80" cy="58" rx="5" ry="3" fill="#ffffff" opacity="0.7"/>';
+  }
+
+  // 3) 永久腮紅 + focus 加深腮紅（cheek 可能 null = 不畫）
+  if(cheek){
+    const cy = a.cheekSize === 'big' ? 76 : 74;
+    const cxL = a.cheekSize === 'big' ? 26 : 28;
+    const cxR = a.cheekSize === 'big' ? 94 : 92;
+    svgParts +=
+      '<ellipse class="m-blush m-blush-perm" cx="' + cxL + '" cy="' + cy + '" rx="' + (cheekSize-1) + '" ry="' + (cheekSize-3) + '" fill="' + cheek + '" opacity="0.65"/>' +
+      '<ellipse class="m-blush m-blush-perm" cx="' + cxR + '" cy="' + cy + '" rx="' + (cheekSize-1) + '" ry="' + (cheekSize-3) + '" fill="' + cheek + '" opacity="0.65"/>' +
+      '<ellipse class="m-blush" cx="' + cxL + '" cy="' + cy + '" rx="' + cheekSize + '" ry="' + (cheekSize-2) + '" fill="' + cheek + '" opacity="0"/>' +
+      '<ellipse class="m-blush" cx="' + cxR + '" cy="' + cy + '" rx="' + cheekSize + '" ry="' + (cheekSize-2) + '" fill="' + cheek + '" opacity="0"/>';
+  }
+
+  // 4) 眼睛（熊貓的瞳孔在黑眼圈內，要用白色才看得到 → 改高光）
+  const pupilColor = a.eyePatches ? '#ffffff' : '#2a1810';
+  const pupilHighlight = a.eyePatches ? '#2a1810' : '#ffffff';
+  svgParts +=
+    '<g class="m-eye m-eye-l">' +
+      '<ellipse class="m-pupil" cx="45" cy="65" rx="3" ry="3.6" fill="' + pupilColor + '"/>' +
+      '<circle cx="46" cy="63.5" r="0.9" fill="' + pupilHighlight + '"/>' +
+    '</g>' +
+    '<g class="m-eye m-eye-r">' +
+      '<ellipse class="m-pupil" cx="75" cy="65" rx="3" ry="3.6" fill="' + pupilColor + '"/>' +
+      '<circle cx="76" cy="63.5" r="0.9" fill="' + pupilHighlight + '"/>' +
+    '</g>';
+
+  // 5) 失敗 X 眼
+  svgParts +=
+    '<g class="m-x-eye" opacity="0" stroke="#d33" stroke-width="1.6" stroke-linecap="round">' +
+      '<line x1="42" y1="62" x2="48" y2="68"/>' +
+      '<line x1="48" y1="62" x2="42" y2="68"/>' +
+      '<line x1="72" y1="62" x2="78" y2="68"/>' +
+      '<line x1="78" y1="62" x2="72" y2="68"/>' +
+    '</g>';
+
+  // 6) 成功 ^_^ 眯眼
+  svgParts +=
+    '<g class="m-happy-eye" opacity="0" stroke="' + dark + '" stroke-width="1.6" stroke-linecap="round" fill="none">' +
+      '<path d="M41 66 Q45 62 49 66"/>' +
+      '<path d="M71 66 Q75 62 79 66"/>' +
+    '</g>';
+
+  // 7) 鼻子
+  if(a.hasNose){
+    svgParts += '<ellipse class="m-nose" cx="60" cy="76" rx="2.6" ry="1.8" fill="' + noseColor + '"/>';
+  }
+
+  // 7.5) 企鵝橘嘴 (beak)
+  if(a.hasBeak){
+    svgParts +=
+      '<polygon points="54,76 66,76 60,84" fill="#ffa84d" stroke="#cc7722" stroke-width="0.5"/>';
+  }
+
+  // 8) 嘴巴：'omega' (ω 形, Rilakkuma 風) / 'smile' (大笑 U 形)
+  const mouthPath = a.mouth === 'smile'
+    ? 'M53 82 Q60 90 67 82'
+    : 'M55 82 Q57.5 84 60 82 Q62.5 84 65 82';
+  // 企鵝/卡比/多啦A夢嘴巴下移避開肚子白色
+  const mouthYAdj = (animalKey === 'penguin') ? 4 : 0;
+  const mouthFinal = mouthYAdj ? mouthPath.replace(/82/g, String(82+mouthYAdj)).replace(/84/g, String(84+mouthYAdj)).replace(/90/g, String(90+mouthYAdj)) : mouthPath;
+  svgParts += '<path class="m-mouth" d="' + mouthFinal + '" stroke="' + dark + '" stroke-width="1.4" fill="none" stroke-linecap="round"/>';
+
+  // 9) 鬍鬚 (貓/狐狸/多啦A夢) — 三條細線左右各 3
+  if(a.whiskers){
+    const wColor = (animalKey === 'doraemon') ? '#2a1810' : '#888';
+    svgParts +=
+      '<g stroke="' + wColor + '" stroke-width="0.8" stroke-linecap="round" fill="none" opacity="0.7">' +
+        '<line x1="20" y1="76" x2="38" y2="74"/>' +
+        '<line x1="20" y1="80" x2="38" y2="80"/>' +
+        '<line x1="20" y1="84" x2="38" y2="86"/>' +
+        '<line x1="82" y1="74" x2="100" y2="76"/>' +
+        '<line x1="82" y1="80" x2="100" y2="80"/>' +
+        '<line x1="82" y1="86" x2="100" y2="84"/>' +
+      '</g>';
+  }
+
+  // 9.5) 多啦A夢紅項圈 + 鈴鐺
+  if(a.headBand){
+    svgParts +=
+      '<rect x="20" y="98" width="80" height="6" fill="#cc2244"/>' +
+      '<circle cx="60" cy="105" r="4" fill="#ffd700" stroke="#7a4a26" stroke-width="0.6"/>' +
+      '<line x1="60" y1="103" x2="60" y2="107" stroke="#7a4a26" stroke-width="0.5"/>';
+  }
+
+  // 10) 雙手（預設隱藏在臉下方；CSS 控 cover/typing/peek 上移）
+  svgParts +=
+    '<circle class="m-hand m-hand-l" cx="38" cy="112" r="10" fill="' + color + '"/>' +
+    '<circle class="m-hand m-hand-r" cx="82" cy="112" r="10" fill="' + color + '"/>' +
+    '<circle class="m-paw m-paw-l" cx="38" cy="115" r="3.5" fill="' + (innerEar !== 'none' ? innerEar : color) + '" opacity="0"/>' +
+    '<circle class="m-paw m-paw-r" cx="82" cy="115" r="3.5" fill="' + (innerEar !== 'none' ? innerEar : color) + '" opacity="0"/>';
+
   const svg =
-    '<svg class="mascot-svg" data-state="idle" data-mascot-on-dark="' + onDark + '" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-      // 兩隻小小圓耳朵（位置高、貼頭頂）
-      '<circle cx="34" cy="32" r="11" fill="' + color + '"/>' +
-      '<circle cx="86" cy="32" r="11" fill="' + color + '"/>' +
-      '<circle cx="34" cy="33" r="5" fill="' + innerEar + '"/>' +
-      '<circle cx="86" cy="33" r="5" fill="' + innerEar + '"/>' +
-      // 大圓臉（往下放、佔比大）
-      '<ellipse cx="60" cy="68" rx="40" ry="36" fill="' + color + '"/>' +
-      // 鼻吻區（更扁、更淺）
-      '<ellipse cx="60" cy="78" rx="20" ry="13" fill="#fff5e6"/>' +
-      // 永久腮紅（不需 focus 也顯示, 可愛重點）
-      '<ellipse class="m-blush m-blush-perm" cx="28" cy="74" rx="6" ry="4" fill="' + cheek + '" opacity="0.65"/>' +
-      '<ellipse class="m-blush m-blush-perm" cx="92" cy="74" rx="6" ry="4" fill="' + cheek + '" opacity="0.65"/>' +
-      // focus 時加深的腮紅
-      '<ellipse class="m-blush" cx="28" cy="74" rx="7" ry="5" fill="' + cheek + '" opacity="0"/>' +
-      '<ellipse class="m-blush" cx="92" cy="74" rx="7" ry="5" fill="' + cheek + '" opacity="0"/>' +
-      // 簡單黑點眼睛（間距開、放高一點、小一號）
-      '<g class="m-eye m-eye-l">' +
-        '<ellipse class="m-pupil" cx="45" cy="65" rx="3" ry="3.6" fill="#2a1810"/>' +
-        '<circle cx="46" cy="63.5" r="0.9" fill="#fff"/>' +
-      '</g>' +
-      '<g class="m-eye m-eye-r">' +
-        '<ellipse class="m-pupil" cx="75" cy="65" rx="3" ry="3.6" fill="#2a1810"/>' +
-        '<circle cx="76" cy="63.5" r="0.9" fill="#fff"/>' +
-      '</g>' +
-      // 失敗 X 眼
-      '<g class="m-x-eye" opacity="0" stroke="#d33" stroke-width="1.6" stroke-linecap="round">' +
-        '<line x1="42" y1="62" x2="48" y2="68"/>' +
-        '<line x1="48" y1="62" x2="42" y2="68"/>' +
-        '<line x1="72" y1="62" x2="78" y2="68"/>' +
-        '<line x1="78" y1="62" x2="72" y2="68"/>' +
-      '</g>' +
-      // 成功 ^_^ 眯眼（更細更可愛）
-      '<g class="m-happy-eye" opacity="0" stroke="#2a1810" stroke-width="1.6" stroke-linecap="round" fill="none">' +
-        '<path d="M41 66 Q45 62 49 66"/>' +
-        '<path d="M71 66 Q75 62 79 66"/>' +
-      '</g>' +
-      // 橢圓小鼻子（不是三角形, 比較可愛）
-      '<ellipse class="m-nose" cx="60" cy="76" rx="2.6" ry="1.8" fill="' + dark + '"/>' +
-      // ω 形小嘴巴（Rilakkuma 經典）
-      '<path class="m-mouth" d="M55 82 Q57.5 84 60 82 Q62.5 84 65 82" stroke="' + dark + '" stroke-width="1.4" fill="none" stroke-linecap="round"/>' +
-      // 兩隻圓圓的手（預設隱藏在臉下方）
-      '<circle class="m-hand m-hand-l" cx="38" cy="112" r="10" fill="' + color + '"/>' +
-      '<circle class="m-hand m-hand-r" cx="82" cy="112" r="10" fill="' + color + '"/>' +
-      // 手的肉墊
-      '<circle class="m-paw m-paw-l" cx="38" cy="115" r="3.5" fill="' + innerEar + '" opacity="0"/>' +
-      '<circle class="m-paw m-paw-r" cx="82" cy="115" r="3.5" fill="' + innerEar + '" opacity="0"/>' +
+    '<svg class="mascot-svg" data-state="idle" data-mascot-on-dark="' + onDark + '" data-animal="' + animalKey + '" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      svgParts +
     '</svg>';
   const wrap = document.createElement('div');
   wrap.className = 'mascot-wrap';
@@ -5630,19 +5795,34 @@ function buildImageLogo(url){
   return wrap;
 }
 
-// 11 個 logo 樣式對映：name 用於 UI 下拉；build(opts) 回 wrapper 節點；interactive=true 代表需要 bindMascotInteractions
+// LOGIN_LOGOS — 互動吉祥物 (11 動物) + 7 品牌 + emoji/圖片 (共 20 選 1)
+// name 用於 UI 網格；build(opts) 回 wrapper 節點；interactive=true 代表需要 bindMascotInteractions
+// 動漫角色 (皮卡丘/多啦A夢/卡比) 為純手寫近似形狀，僅供示範
 const LOGIN_LOGOS = {
-  bear:      { name:'🐻 互動小熊（預設）', build: (opts)=> buildMascotSVG(opts), interactive:true },
-  school:    { name:'🎓 學校 emoji',     build: ()=> buildEmojiLogo('🎓') },
-  spotify:   { name:'🎵 Spotify',        build: ()=> buildBrandLogo('spotify') },
-  instagram: { name:'📷 Instagram',      build: ()=> buildBrandLogo('instagram') },
-  apple:     { name:'🍎 Apple',          build: ()=> buildBrandLogo('apple') },
-  google:    { name:'🔍 Google',         build: ()=> buildBrandLogo('google') },
-  notion:    { name:'📝 Notion',         build: ()=> buildBrandLogo('notion') },
-  discord:   { name:'🎮 Discord',        build: ()=> buildBrandLogo('discord') },
-  x:         { name:'🐦 X (Twitter)',    build: ()=> buildBrandLogo('x') },
-  emoji:     { name:'😊 自訂 emoji',     build: (opts)=> buildEmojiLogo(opts && opts.emoji) },
-  image:     { name:'🖼 自訂上傳圖片',   build: (opts)=> buildImageLogo(opts && opts.url) }
+  // === 11 種互動動物 / 角色 ===
+  bear:      { name:'🐻 互動小熊（預設）', build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'bear'})),     interactive:true, group:'animal' },
+  shiba:     { name:'🐶 柴犬',           build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'shiba'})),    interactive:true, group:'animal' },
+  cat:       { name:'🐱 貓咪',           build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'cat'})),      interactive:true, group:'animal' },
+  rabbit:    { name:'🐰 兔子',           build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'rabbit'})),   interactive:true, group:'animal' },
+  panda:     { name:'🐼 熊貓',           build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'panda'})),    interactive:true, group:'animal' },
+  penguin:   { name:'🐧 企鵝',           build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'penguin'})),  interactive:true, group:'animal' },
+  hamster:   { name:'🐹 倉鼠',           build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'hamster'})),  interactive:true, group:'animal' },
+  fox:       { name:'🦊 狐狸',           build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'fox'})),      interactive:true, group:'animal' },
+  pikachu:   { name:'⚡ 皮卡丘 (示範)',   build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'pikachu'})),  interactive:true, group:'anime' },
+  doraemon:  { name:'🤖 多啦A夢 (示範)', build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'doraemon'})), interactive:true, group:'anime' },
+  kirby:     { name:'💖 卡比 (示範)',    build: (opts)=> buildMascotSVG(Object.assign({}, opts, {animal:'kirby'})),    interactive:true, group:'anime' },
+  // === 學校 / 品牌 LOGO ===
+  school:    { name:'🎓 學校 emoji',     build: ()=> buildEmojiLogo('🎓'),                       group:'brand' },
+  spotify:   { name:'🎵 Spotify',        build: ()=> buildBrandLogo('spotify'),                   group:'brand' },
+  instagram: { name:'📷 Instagram',      build: ()=> buildBrandLogo('instagram'),                 group:'brand' },
+  apple:     { name:'🍎 Apple',          build: ()=> buildBrandLogo('apple'),                     group:'brand' },
+  google:    { name:'🔍 Google',         build: ()=> buildBrandLogo('google'),                    group:'brand' },
+  notion:    { name:'📝 Notion',         build: ()=> buildBrandLogo('notion'),                    group:'brand' },
+  discord:   { name:'🎮 Discord',        build: ()=> buildBrandLogo('discord'),                   group:'brand' },
+  x:         { name:'🐦 X (Twitter)',    build: ()=> buildBrandLogo('x'),                         group:'brand' },
+  // === 自訂 ===
+  emoji:     { name:'😊 自訂 emoji',     build: (opts)=> buildEmojiLogo(opts && opts.emoji),      group:'custom' },
+  image:     { name:'🖼 自訂上傳圖片',   build: (opts)=> buildImageLogo(opts && opts.url),        group:'custom' }
 };
 
 // 把 preset 內容套到 lc（保留使用者已輸入的標題/Logo/welcome 等內容欄位）
@@ -21453,35 +21633,88 @@ function renderLoginEditor(content){
   fld_r.appendChild(rRow);
   cardSpot.appendChild(fld_r);
 
-  // ── 控制 6.5：Logo 樣式（11 選 1） ──
-  // 預設 'bear' 互動小熊；可選 7 個品牌 LOGO / 自訂 emoji / 自訂圖片
+  // ── 控制 6.5：Logo 樣式（20 選 1，網格顯示） ──
+  // 11 個互動吉祥物 (動物 + 動漫角色)、7 個品牌 LOGO、自訂 emoji / 圖片
   const fld_logoStyle = el('div', { class:'field' });
-  fld_logoStyle.appendChild(el('label', { class:'label' }, '7. Logo 樣式（卡片頂部 60×60）'));
-  const logoStyleSel = el('select', { class:'input', style:{maxWidth:'320px'} });
+  fld_logoStyle.appendChild(el('label', { class:'label' }, '7. Logo 樣式（卡片頂部 60×60，點圖示選用）'));
   const _curLogoStyle = lc.logoStyle || 'bear';
+
+  // 分組標題渲染
+  const GROUP_TITLES = { animal:'🐾 可愛動物', anime:'✨ 動漫角色（僅供示範）', brand:'🏷 品牌 LOGO', custom:'🎨 自訂' };
+  // 把 keys 依 group 分組
+  const _grouped = { animal:[], anime:[], brand:[], custom:[] };
   Object.keys(LOGIN_LOGOS).forEach(k => {
-    const o = el('option', { value:k }, LOGIN_LOGOS[k].name);
-    if(k === _curLogoStyle) o.selected = true;
-    logoStyleSel.appendChild(o);
+    const g = LOGIN_LOGOS[k].group || 'brand';
+    if(_grouped[g]) _grouped[g].push(k);
   });
-  logoStyleSel.addEventListener('change', ()=> {
-    lc.logoStyle = logoStyleSel.value;
-    saveUiCustom();
-    rerender(); // 重繪以顯示對應的子控制
+
+  ['animal','anime','brand','custom'].forEach(grp => {
+    if(!_grouped[grp].length) return;
+    // 分組標題
+    fld_logoStyle.appendChild(el('div', { class:'tiny muted', style:{margin:'8px 0 4px',fontWeight:'600'} }, GROUP_TITLES[grp]));
+    // 網格容器
+    const grid = el('div', { style:{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(78px, 1fr))', gap:'8px'} });
+    _grouped[grp].forEach(k => {
+      const isSel = (k === _curLogoStyle);
+      const cell = el('div', {
+        style:{
+          display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+          gap:'4px', padding:'6px 4px',
+          border: isSel ? '2px solid var(--primary, #1db954)' : '2px solid var(--border, #e5e7eb)',
+          borderRadius:'8px', cursor:'pointer', userSelect:'none',
+          background: isSel ? 'var(--surface-2, #f5f5f5)' : 'transparent',
+          transition:'transform .15s ease, border-color .15s ease'
+        },
+        title: LOGIN_LOGOS[k].name
+      });
+      // 60×60 預覽
+      const iconBox = el('div', { style:{width:'60px', height:'60px', display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none'} });
+      try {
+        const previewOpts = { color: lc.mascotColor, emoji: lc.logoEmoji || '🎓', url: lc.logoImage, onDark: false };
+        const node = LOGIN_LOGOS[k].build(previewOpts);
+        if(node){
+          // 縮小到 60×60
+          const svg = node.querySelector && node.querySelector('svg');
+          if(svg){ svg.style.width = '60px'; svg.style.height = '60px'; svg.style.filter = 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))'; }
+          node.style.transform = 'scale(0.95)';
+          iconBox.appendChild(node);
+        } else {
+          iconBox.textContent = '?';
+        }
+      } catch(_){ iconBox.textContent = '?'; }
+      cell.appendChild(iconBox);
+      // 名稱（去掉 emoji 前綴可能太長，直接全顯）
+      cell.appendChild(el('div', { class:'tiny', style:{textAlign:'center', lineHeight:'1.1', wordBreak:'keep-all'} }, LOGIN_LOGOS[k].name));
+      cell.addEventListener('click', ()=> {
+        lc.logoStyle = k;
+        saveUiCustom();
+        rerender();
+      });
+      cell.addEventListener('mouseenter', ()=> { if(!isSel) cell.style.transform = 'scale(1.04)'; });
+      cell.addEventListener('mouseleave', ()=> { cell.style.transform = 'scale(1)'; });
+      grid.appendChild(cell);
+    });
+    fld_logoStyle.appendChild(grid);
   });
-  fld_logoStyle.appendChild(logoStyleSel);
   cardSpot.appendChild(fld_logoStyle);
 
   // 條件子控制：依 logoStyle 顯示對應設定
-  if(_curLogoStyle === 'bear'){
-    // 互動小熊：顯示主色
+  const _interactiveAnimals = ['bear','shiba','cat','rabbit','panda','penguin','hamster','fox','pikachu','doraemon','kirby'];
+  if(_interactiveAnimals.indexOf(_curLogoStyle) >= 0){
+    // 互動吉祥物：顯示主色（覆寫該動物預設色，留白則回該動物預設）
     const fld_mColor = el('div', { class:'field' });
-    fld_mColor.appendChild(el('label', { class:'label small' }, '└ 小熊主色'));
-    const mColorInp = el('input', { type:'color', value: lc.mascotColor || '#f4a76a',
+    const animalName = (LOGIN_LOGOS[_curLogoStyle] && LOGIN_LOGOS[_curLogoStyle].name) || _curLogoStyle;
+    fld_mColor.appendChild(el('label', { class:'label small' }, '└ ' + animalName + ' 主色（可選，留空 = 該動物預設色）'));
+    const mColorInp = el('input', { type:'color', value: lc.mascotColor || ((ANIMAL_PRESETS[_curLogoStyle] && ANIMAL_PRESETS[_curLogoStyle].color) || '#e9c89d'),
       style:{width:'60px',height:'36px',padding:'2px',cursor:'pointer'} });
     mColorInp.addEventListener('input', ()=> { lc.mascotColor = mColorInp.value; saveUiCustom(); });
     fld_mColor.appendChild(mColorInp);
-    fld_mColor.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '預設 #f4a76a (米黃熊)'));
+    const _defaultColor = (ANIMAL_PRESETS[_curLogoStyle] && ANIMAL_PRESETS[_curLogoStyle].color) || '#e9c89d';
+    fld_mColor.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '預設 ' + _defaultColor));
+    // 重置按鈕
+    const resetBtn = el('button', { class:'btn btn-sm', style:{marginLeft:'8px'},
+      onclick:()=> { delete lc.mascotColor; saveUiCustom(); rerender(); } }, '↺ 用預設色');
+    fld_mColor.appendChild(resetBtn);
     cardSpot.appendChild(fld_mColor);
   } else if(_curLogoStyle === 'emoji'){
     // 自訂 emoji：輸入框
