@@ -2171,6 +2171,18 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 }
 .sidebar.collapsed .side-expand-row{ display:none; }
 
+/* ---- 介面編輯器內項目拖拉視覺指示（同 sidebar 模式） ---- */
+.sortable-row{ position:relative; }
+.sortable-row.dragging{ opacity:.45; }
+.sortable-row.drag-over-top{
+  border-top:2px solid var(--primary) !important;
+  background:var(--primary-soft) !important;
+}
+.sortable-row.drag-over-bottom{
+  border-bottom:2px solid var(--primary) !important;
+  background:var(--primary-soft) !important;
+}
+
 /* ---- 局部 loading 遮罩（withLoading helper 使用） ---- */
 .loading-local{
   position:absolute; inset:0; z-index:5;
@@ -6025,24 +6037,48 @@ function renderLogin(root){
     }
   }
 
-  // Logo + 系統名 (橫排)
+  // Logo + 系統名 (橫排) — 小 Logo 獨立於大 Logo
   const logoRow = el('div', { class:'lsc-logo-row' });
-  const logoEl = el('div', { class:'lsc-logo' });
-  if(lc.logoImage){
-    logoEl.textContent = lc.logoEmoji || '🎓';
-    (async ()=>{
-      try {
-        const url = await attachGetUrl(lc.logoImage);
-        if(url){
-          logoEl.innerHTML = '';
-          logoEl.appendChild(el('img', { src:url }));
-        }
-      } catch(e){_swallow('auto',e)}
-    })();
-  } else {
-    logoEl.textContent = lc.logoEmoji || '🎓';
+  const _smallStyle = lc.smallLogoStyle || 'emoji';   // emoji | image | inherit | none
+  if(_smallStyle !== 'none'){
+    const logoEl = el('div', { class:'lsc-logo' });
+    if(_smallStyle === 'inherit'){
+      // 繼承大 Logo：跟大 Logo 走（用 lc.logoImage / lc.logoEmoji）
+      if(lc.logoImage){
+        logoEl.textContent = lc.logoEmoji || '🎓';
+        (async ()=>{
+          try {
+            const url = await attachGetUrl(lc.logoImage);
+            if(url){
+              logoEl.innerHTML = '';
+              logoEl.appendChild(el('img', { src:url }));
+            }
+          } catch(e){_swallow('auto',e)}
+        })();
+      } else {
+        logoEl.textContent = lc.logoEmoji || '🎓';
+      }
+    } else if(_smallStyle === 'image' && lc.smallLogoImage){
+      // 自訂圖片：吃 smallLogoImage（attach id 或 URL）
+      logoEl.textContent = lc.smallLogoEmoji || lc.logoEmoji || '🎓';
+      (async ()=>{
+        try {
+          let url = lc.smallLogoImage;
+          if(!/^https?:\/\//i.test(String(url)) && !/^data:/i.test(String(url))){
+            url = await attachGetUrl(lc.smallLogoImage);
+          }
+          if(url){
+            logoEl.innerHTML = '';
+            logoEl.appendChild(el('img', { src:url }));
+          }
+        } catch(e){_swallow('auto',e)}
+      })();
+    } else {
+      // emoji 模式：smallLogoEmoji → fallback logoEmoji → 🎓
+      logoEl.textContent = lc.smallLogoEmoji || lc.logoEmoji || '🎓';
+    }
+    logoRow.appendChild(logoEl);
   }
-  logoRow.appendChild(logoEl);
   logoRow.appendChild(el('div', { class:'lsc-title' }, heroTitle));
   top.appendChild(logoRow);
   top.appendChild(el('div', { class:'lsc-sub' }, heroSub));
@@ -21188,26 +21224,45 @@ function renderSidebarEditor(content){
       row.appendChild(editBox);
 
       // ─── HTML5 拖曳（桌面） ─────────────────────────
+      // 整 row 都是 drag target（不限制只能從 handle 拖）→ 編輯器內項目沒有 click 跳轉需求
+      // 與 sidebar 一致：依 cursor Y 位置決定插入到目標上方或下方
+      const _clearDragOver = () => {
+        row.classList.remove('drag-over-top','drag-over-bottom');
+        row.style.borderColor = 'var(--border)';
+      };
       row.addEventListener('dragstart', e => {
         row.style.opacity = '0.4';
+        row.classList.add('dragging');
         try {
           e.dataTransfer.setData('text/plain', JSON.stringify({sec:secKey, key:it.key}));
           e.dataTransfer.effectAllowed = 'move';
         } catch(err){_swallow('auto',err)}
       });
-      row.addEventListener('dragend', ()=> { row.style.opacity = '1'; });
+      row.addEventListener('dragend', ()=> {
+        row.style.opacity = '1';
+        row.classList.remove('dragging');
+        // 清掉所有 row 的 drag-over 標記
+        itemsList.querySelectorAll('.sortable-row.drag-over-top, .sortable-row.drag-over-bottom')
+          .forEach(n => n.classList.remove('drag-over-top','drag-over-bottom'));
+      });
       row.addEventListener('dragover', e => {
         e.preventDefault();
-        row.style.borderColor = 'var(--primary)';
+        try { e.dataTransfer.dropEffect = 'move'; } catch(_){}
+        // 依 Y 位置決定 top / bottom
+        const rect = row.getBoundingClientRect();
+        const isTop = (e.clientY - rect.top) < rect.height / 2;
+        row.classList.remove(isTop ? 'drag-over-bottom' : 'drag-over-top');
+        row.classList.add(isTop ? 'drag-over-top' : 'drag-over-bottom');
       });
-      row.addEventListener('dragleave', ()=> { row.style.borderColor = 'var(--border)'; });
+      row.addEventListener('dragleave', ()=> _clearDragOver());
       row.addEventListener('drop', e => {
         e.preventDefault();
-        row.style.borderColor = 'var(--border)';
+        const wasTop = row.classList.contains('drag-over-top');
+        _clearDragOver();
         try {
           const data = JSON.parse(e.dataTransfer.getData('text/plain'));
           if(data.sec !== secKey || data.key === it.key) return;
-          uiEditorReorder(secKey, data.key, it.key, isTeacher);
+          uiEditorReorder(secKey, data.key, it.key, isTeacher, wasTop ? 'before' : 'after');
         } catch(err){_swallow('auto',err)}
       });
 
@@ -21255,17 +21310,19 @@ function renderSidebarEditor(content){
         touchDragging = false;
         const ty = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientY : touchStartY;
         const allRows = itemsList.querySelectorAll('.sortable-row');
-        let targetKey = null;
+        let targetKey = null, targetMode = 'before';
         allRows.forEach(r => {
           r.style.borderColor = 'var(--border)';
+          r.classList.remove('drag-over-top','drag-over-bottom');
           if(r === row) return;
           const rect = r.getBoundingClientRect();
           if(ty >= rect.top && ty <= rect.bottom){
             targetKey = r.getAttribute('data-key');
+            targetMode = (ty - rect.top) < rect.height / 2 ? 'before' : 'after';
           }
         });
         if(targetKey && targetKey !== it.key){
-          uiEditorReorder(secKey, it.key, targetKey, isTeacher);
+          uiEditorReorder(secKey, it.key, targetKey, isTeacher, targetMode);
         }
       });
 
@@ -21659,10 +21716,25 @@ function renderLoginEditor(content){
       backdropFilter: lc.cardBackdrop || 'none'
     } });
     if(lc.showMascot !== false){
-      mini.appendChild(el('div', { style:{fontSize:'28px',lineHeight:'1'} }, '🐻'));
+      // 大 Logo 預覽（簡化：emoji / 自訂 emoji / 圖片預設 🐻）
+      let bigPreview = '🐻';
+      const bigStyle = lc.logoStyle || 'bear';
+      if(bigStyle === 'emoji' && lc.logoEmoji) bigPreview = lc.logoEmoji;
+      else if(bigStyle === 'image') bigPreview = '🖼';
+      mini.appendChild(el('div', { style:{fontSize:'28px',lineHeight:'1'} }, bigPreview));
     }
-    mini.appendChild(el('div', { style:{fontWeight:'700',fontSize:'13px'} },
-      lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統'));
+    // 標題列含小 Logo（獨立於大 Logo）
+    const titleRow = el('div', { style:{display:'flex',alignItems:'center',justifyContent:'center',gap:'4px',fontWeight:'700',fontSize:'13px'} });
+    const smPrevStyle = lc.smallLogoStyle || 'emoji';
+    if(smPrevStyle !== 'none'){
+      let smIcon = '🎓';
+      if(smPrevStyle === 'inherit') smIcon = lc.logoEmoji || '🎓';
+      else if(smPrevStyle === 'image' && lc.smallLogoImage) smIcon = '🖼';
+      else smIcon = lc.smallLogoEmoji || lc.logoEmoji || '🎓';
+      titleRow.appendChild(el('span', { style:{fontSize:'14px'} }, smIcon));
+    }
+    titleRow.appendChild(el('span', null, lc.title || (App.db.branding && App.db.branding.title) || '課程管理系統'));
+    mini.appendChild(titleRow);
     // 假 input
     mini.appendChild(el('div', { style:{
       height:'24px', background: inpBg, borderRadius: irad, margin:'4px 0',
@@ -22054,7 +22126,134 @@ function renderLoginEditor(content){
       '將顯示 ' + brandName + ' 品牌 LOGO（純手寫 SVG 近似形狀，僅供示範）'));
   }
 
-  // ── 控制 8：吉祥物顯示 (是/否) ──
+  // ── 控制 8：小 Logo（標題旁圖示，獨立於大 Logo）──
+  const fld_smallLogo = el('div', { class:'field', style:{background:'var(--surface-2)',padding:'12px',borderRadius:'10px',marginTop:'8px'} });
+  fld_smallLogo.appendChild(el('label', { class:'label', style:{fontWeight:'700'} }, '8. 小 Logo（標題旁圖示，獨立於大 Logo）'));
+  fld_smallLogo.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'8px',lineHeight:'1.6'} },
+    '此圖示顯示在「課程管理系統」標題旁，與上方 60×60 大 Logo 完全分開設定'));
+
+  const _curSmallStyle = lc.smallLogoStyle || 'emoji';
+  // 模式選擇（4 選 1 radio）
+  const smModeWrap = el('div', { class:'flex', style:{gap:'12px',flexWrap:'wrap',marginBottom:'8px'} });
+  const SMALL_MODES = [
+    { v:'emoji',   label:'Emoji' },
+    { v:'image',   label:'上傳圖片' },
+    { v:'inherit', label:'繼承大 Logo' },
+    { v:'none',    label:'隱藏' }
+  ];
+  SMALL_MODES.forEach(m => {
+    const radioLbl = el('label', { class:'small flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} });
+    const r = el('input', { type:'radio', name:'small-logo-mode', value:m.v });
+    if(_curSmallStyle === m.v) r.checked = true;
+    r.addEventListener('change', ()=> {
+      if(r.checked){
+        lc.smallLogoStyle = m.v;
+        saveUiCustom();
+        refreshMiniPreview();
+        rerender();
+      }
+    });
+    radioLbl.appendChild(r);
+    radioLbl.appendChild(el('span', null, m.label));
+    smModeWrap.appendChild(radioLbl);
+  });
+  fld_smallLogo.appendChild(smModeWrap);
+
+  // 依模式顯示子設定
+  if(_curSmallStyle === 'emoji'){
+    const smRow = el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} });
+    smRow.appendChild(el('span', { class:'tiny muted' }, '└ Emoji'));
+    const smEmInp = el('input', { class:'input', placeholder:'🎓',
+      value: lc.smallLogoEmoji || '',
+      style:{maxWidth:'100px',fontSize:'20px',textAlign:'center'} });
+    smEmInp.addEventListener('change', ()=> {
+      lc.smallLogoEmoji = smEmInp.value.trim();
+      saveUiCustom();
+      refreshMiniPreview();
+    });
+    smRow.appendChild(smEmInp);
+    smRow.appendChild(el('span', { class:'tiny muted' }, '建議單一 emoji，預設 🎓'));
+    fld_smallLogo.appendChild(smRow);
+  } else if(_curSmallStyle === 'image'){
+    // 自訂圖片上傳（吃 lc.smallLogoImage，不影響 lc.logoImage）
+    const smImBox = el('div', { style:{marginTop:'4px'} });
+    // 預覽
+    const smPreview = el('div', { style:{
+      width:'60px',height:'60px',borderRadius:'10px',
+      background:'var(--surface)',border:'2px dashed var(--border)',
+      display:'flex',alignItems:'center',justifyContent:'center',
+      overflow:'hidden',margin:'0 0 8px',position:'relative'
+    } });
+    async function refreshSmallPrev(){
+      smPreview.innerHTML = '';
+      if(lc.smallLogoImage){
+        try {
+          let url = lc.smallLogoImage;
+          if(!/^https?:\/\//i.test(String(url)) && !/^data:/i.test(String(url))){
+            url = await attachGetUrl(lc.smallLogoImage);
+          }
+          if(url){
+            smPreview.appendChild(el('img', { src:url, style:{width:'100%',height:'100%',objectFit:'cover'} }));
+            smPreview.style.border = '2px solid var(--success, #22c55e)';
+            return;
+          }
+        } catch(e){ _swallow('small-logo-prev', e); }
+      }
+      smPreview.style.border = '2px dashed var(--border)';
+      smPreview.appendChild(el('div', { class:'tiny muted' }, '無'));
+    }
+    refreshSmallPrev();
+    smImBox.appendChild(smPreview);
+    // 上傳
+    const smFileInp = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
+    smFileInp.addEventListener('change', async e => {
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      if(f.size > 1024*1024){ toast('圖片不能超過 1 MB','danger'); smFileInp.value=''; return; }
+      try {
+        if(lc.smallLogoImage && !/^https?:\/\//i.test(String(lc.smallLogoImage)) && !/^data:/i.test(String(lc.smallLogoImage))){
+          try { await attachDelete(lc.smallLogoImage); } catch(_){_swallow('auto',_)}
+        }
+        lc.smallLogoImage = await attachUpload(f);
+        saveUiCustom();
+        toast('✅ 小 Logo 圖片已上傳','success');
+        await refreshSmallPrev();
+        refreshMiniPreview();
+        rerender();
+      } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
+    });
+    smImBox.appendChild(smFileInp);
+    smImBox.appendChild(el('button', { class:'btn btn-sm btn-primary', style:{marginRight:'6px'},
+      onclick: ()=> smFileInp.click()
+    }, '📁 上傳圖片'));
+    if(lc.smallLogoImage){
+      smImBox.appendChild(el('button', { class:'btn btn-sm btn-danger',
+        onclick: async ()=> {
+          if(!await confirmDlg('確定移除小 Logo 圖片?', { title:'確認' })) return;
+          if(lc.smallLogoImage && !/^https?:\/\//i.test(String(lc.smallLogoImage)) && !/^data:/i.test(String(lc.smallLogoImage))){
+            try { await attachDelete(lc.smallLogoImage); } catch(_){_swallow('auto',_)}
+          }
+          lc.smallLogoImage = null;
+          saveUiCustom();
+          await refreshSmallPrev();
+          refreshMiniPreview();
+          rerender();
+        }}, '🗑 移除'));
+    }
+    fld_smallLogo.appendChild(smImBox);
+  } else if(_curSmallStyle === 'inherit'){
+    fld_smallLogo.appendChild(el('div', { class:'small muted',
+      style:{padding:'6px 10px',background:'var(--surface)',borderRadius:'6px'} },
+      '💡 將使用上方大 Logo 同一張（logoImage / logoEmoji）'));
+  } else {
+    // none
+    fld_smallLogo.appendChild(el('div', { class:'small muted',
+      style:{padding:'6px 10px',background:'var(--surface)',borderRadius:'6px'} },
+      '🚫 不顯示小 Logo（只有大 Logo 與標題文字）'));
+  }
+  cardSpot.appendChild(fld_smallLogo);
+
+  // ── 控制 9：吉祥物顯示 (是/否) ──
   const fld_mShow = el('div', { class:'field' });
   const mShowChk = el('input', { type:'checkbox' });
   mShowChk.checked = (lc.showMascot !== false);
@@ -22063,10 +22262,10 @@ function renderLoginEditor(content){
     saveUiCustom(); refreshMiniPreview();
   });
   fld_mShow.appendChild(el('label', { class:'small flex', style:{gap:'8px',alignItems:'center',cursor:'pointer'} },
-    mShowChk, el('span', null, '8. 顯示頂部 Logo（取消勾選會隱藏整個 60×60 圖示）')));
+    mShowChk, el('span', null, '9. 顯示頂部大 Logo（取消勾選會隱藏整個 60×60 圖示）')));
   cardSpot.appendChild(fld_mShow);
 
-  // ── 控制 9~11：顯示開關 (showRegister / showForgot / showSwitchRoom) ──
+  // ── 控制 10~12：顯示開關 (showRegister / showForgot / showSwitchRoom) ──
   // 這幾個跟既有 hideXxx 共用；為了 UX 採「顯示」正向開關
   const mkInverseChk = (hideKey, label, defaultShow) => {
     const lbl = el('label', { class:'small flex', style:{gap:'8px',alignItems:'center',padding:'6px 0',cursor:'pointer'} });
@@ -22080,9 +22279,9 @@ function renderLoginEditor(content){
     lbl.appendChild(el('span', null, label));
     return lbl;
   };
-  cardSpot.appendChild(mkInverseChk('hideRegister',   '9. 顯示「📤 沒帳號？申請註冊」按鈕（學生 tab）'));
-  cardSpot.appendChild(mkInverseChk('hideForgot',     '10. 顯示「🔑 忘記密碼？」連結'));
-  cardSpot.appendChild(mkInverseChk('hideSwitchRoom', '11. 顯示「← 切換教室」按鈕'));
+  cardSpot.appendChild(mkInverseChk('hideRegister',   '10. 顯示「📤 沒帳號？申請註冊」按鈕（學生 tab）'));
+  cardSpot.appendChild(mkInverseChk('hideForgot',     '11. 顯示「🔑 忘記密碼？」連結'));
+  cardSpot.appendChild(mkInverseChk('hideSwitchRoom', '12. 顯示「← 切換教室」按鈕'));
 
   // ── 重置預設 ──
   cardSpot.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'10px'},
@@ -22093,7 +22292,7 @@ function renderLoginEditor(content){
         'inputStyle','cardWidth','cardRadius','showMascot','mascotColor',
         'layout','cardTone','inputDark','inputBg','inputFg','inputBorder',
         'mascotOnDark','fontStack','cardBackdrop','cardBorder','preset',
-        'logoStyle'].forEach(k => { delete lc[k]; });
+        'logoStyle','smallLogoStyle','smallLogoEmoji','smallLogoImage'].forEach(k => { delete lc[k]; });
       // 回到 Spotify 預設
       applyLoginPreset(lc, 'spotify');
       saveUiCustom();
@@ -22387,8 +22586,9 @@ function renderCustomBlockEditor(content){
   });
 }
 
-/* 將 fromKey 移到 toKey 之前/之後（依目前順序方向） */
-function uiEditorReorder(secKey, fromKey, toKey, isTeacher){
+/* 將 fromKey 移到 toKey 之前/之後（mode='before'|'after'，預設 'before' 兼容舊呼叫） */
+function uiEditorReorder(secKey, fromKey, toKey, isTeacher, mode){
+  mode = mode || 'before';
   const role = isTeacher ? 'teacher' : 'student';
   const all = getSidebarItems(role);
   const sec = all[secKey];
@@ -22407,7 +22607,8 @@ function uiEditorReorder(secKey, fromKey, toKey, isTeacher){
   if(fromIdx < 0 || toIdx < 0) return;
   const [moved] = order.splice(fromIdx, 1);
   // 重新算 toIdx（因 splice 可能位移）
-  const newToIdx = order.indexOf(toKey);
+  let newToIdx = order.indexOf(toKey);
+  if(mode === 'after') newToIdx += 1;
   order.splice(newToIdx, 0, moved);
   App._uiCustom.order[secKey] = order;
   saveUiCustom();
