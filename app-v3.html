@@ -9360,11 +9360,13 @@ function forceChangePassword(studentId){
 }
 
 // 學生首次登入改完密碼後 → 強制設定 email + 安全問題 (簡化版, 無恢復碼)
-function forceSetupStudentRecovery(studentId){
-  const s = App.db.students.find(x => x.id === studentId);
-  if(!s){ go('checkin'); return; }
-  const m = modal('', { dismissable:false });
-  m.root.appendChild(el('h2', null, '🛡️ 設定帳號復原資訊'));
+function forceSetupStudentRecovery(studentId, opts){
+  const o = opts || {};
+  const allowCancel = !!o.allowCancel;  // 學生自願修改時 true, 首登強制時 false
+  const s = (App.db.students || []).find(x => String(x.id) === String(studentId));
+  if(!s){ if(!allowCancel) go('checkin'); return; }
+  const m = modal('', { dismissable: allowCancel });
+  m.root.appendChild(el('h2', null, allowCancel ? '✏️ 修改帳號復原資訊' : '🛡️ 設定帳號復原資訊'));
   m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'14px',lineHeight:'1.6',marginBottom:'12px'} },
     '為了讓你日後忘記密碼時能安全自助重設, 請設定 Email 和一個安全問題。'));
   m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
@@ -9421,7 +9423,9 @@ function forceSetupStudentRecovery(studentId){
       if(typeof logOp === 'function') logOp('studentRecoverySetup', s.name + ' 設定 email + 安全問題');
       m.close();
       toast('✅ 復原資訊已儲存', 'success');
-      go('checkin');
+      // 學生自願修改: 留在當前頁面 (不要跳 checkin); 首登: 跳 checkin
+      if(!allowCancel) go('checkin');
+      else if(typeof rerender === 'function') rerender();
     } catch(e){
       err.textContent = '儲存失敗：' + (e?.message || e);
       err.style.display = 'block';
@@ -9430,7 +9434,12 @@ function forceSetupStudentRecovery(studentId){
   };
 
   const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '✓ 完成設定'));
+  if(allowCancel){
+    actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+    actions.appendChild(el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: submit }, '✓ 儲存修改'));
+  } else {
+    actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '✓ 完成設定'));
+  }
   m.root.appendChild(actions);
 
   setTimeout(()=> iEmail.focus(), 100);
@@ -14398,10 +14407,28 @@ function rMe(content){
   }
   content.appendChild(cardBg);
 
-  // ─── 改密碼 ───
+  // ─── 帳號安全 ───
   const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
-  card3.appendChild(el('h3', null, '🔐 修改密碼'));
-  card3.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'8px'}, onclick: async ()=> {
+  card3.appendChild(el('h3', null, '🔐 帳號安全'));
+
+  // 顯示目前 Email + 安全問題 狀態
+  const infoBox = el('div', { style:{padding:'10px',background:'var(--surface-2)',borderRadius:'8px',marginTop:'8px',fontSize:'13px',lineHeight:'1.8'} });
+  infoBox.appendChild(el('div', null,
+    el('span', { style:{color:'var(--text-muted)'} }, '📧 復原 Email: '),
+    el('strong', null, me.email || '(未設定)')
+  ));
+  infoBox.appendChild(el('div', null,
+    el('span', { style:{color:'var(--text-muted)'} }, '❓ 安全問題: '),
+    el('strong', null, me.securityQ || '(未設定)')
+  ));
+  infoBox.appendChild(el('div', null,
+    el('span', { style:{color:'var(--text-muted)'} }, '🛡 安全答案: '),
+    el('strong', null, me.securityA ? '已設定 (hashed)' : '(未設定)')
+  ));
+  card3.appendChild(infoBox);
+
+  // 三個按鈕
+  card3.appendChild(el('button', { class:'btn btn-primary btn-block', style:{marginTop:'10px'}, onclick: async ()=> {
     const oldpw = await promptDlg('目前密碼', '', { type:'password' });
     if(oldpw === null) return;
     const ok = await verifyPassword(oldpw, me.password);
@@ -14409,12 +14436,19 @@ function rMe(content){
     const newpw = await promptDlg('新密碼', '', { type:'password' });
     if(newpw === null) return;
     if(!newpw) return toast('不可空','danger');
-    me.password = await hashPassword(newpw);  // H5: 自動 per-account salt
+    me.password = await hashPassword(newpw);
     me.passwordChangedAt = Date.now();
-    _clearAllLoginTokens(me);  // H2: 改密碼 → 清掉記住裝置
-    saveDB(true); Sync.setMap('students', App.db.students); bcNotify();  // H3: 立即寫入
-    toast('已更新','success');
+    _clearAllLoginTokens(me);
+    saveDB(true); Sync.setMap('students', App.db.students); bcNotify();
+    toast('密碼已更新','success');
   } }, '🔑 修改密碼'));
+
+  card3.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'6px'}, onclick: ()=> {
+    if(typeof forceSetupStudentRecovery === 'function'){
+      forceSetupStudentRecovery(me.id, { allowCancel: true });
+    } else { toast('系統函式未載入', 'danger'); }
+  } }, '✏️ 修改 Email / 安全問題'));
+
   content.appendChild(card3);
 
   // ─── 登出 ───
