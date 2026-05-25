@@ -3132,6 +3132,275 @@ button:focus-visible,
   animation:skel-shimmer 1.5s ease-in-out infinite;
 }
 
+/* ═══════════════════════════════════════════════
+   POLISH-10 ▒ 全方位打磨樣式 (10 大升級用)
+   ─────────────────────────────────────────────── */
+
+/* 1. 全頁載入骨架 - 整頁佈局 */
+.page-skel{ padding:var(--s-2) 0; }
+.page-skel .skel-row{ display:flex; align-items:center; gap:var(--s-3); padding:var(--s-3) 0; }
+.page-skel .skel-row .skel-avatar{ flex-shrink:0; }
+.page-skel .skel-row .skel-col{ flex:1; }
+
+/* 2. 美麗空狀態 SVG 插畫 */
+.empty-state .es-svg{
+  width:120px; height:120px; margin:0 auto var(--s-4);
+  display:block; opacity:.9;
+}
+.empty-state .es-svg path,.empty-state .es-svg circle,
+.empty-state .es-svg rect,.empty-state .es-svg line{
+  stroke:var(--primary); stroke-width:1.6; fill:none;
+  stroke-linecap:round; stroke-linejoin:round;
+}
+.empty-state .es-svg .filled{
+  fill:var(--primary-soft); stroke:var(--primary);
+}
+.empty-state .es-actions{
+  display:flex; gap:var(--s-2); justify-content:center;
+  flex-wrap:wrap; margin-top:var(--s-3);
+}
+
+/* 3. 慶祝彩屑 - 純 CSS 落下 */
+@keyframes confettiFall{
+  0%{ transform:translateY(0) rotate(0deg); opacity:1; }
+  100%{ transform:translateY(110vh) rotate(720deg); opacity:0; }
+}
+@keyframes celebrateBounceIn{
+  0%{ transform:scale(.5); opacity:0; }
+  60%{ transform:scale(1.1); opacity:1; }
+  100%{ transform:scale(1); opacity:1; }
+}
+.celebrate-host{
+  position:fixed; inset:0; pointer-events:none;
+  z-index:99999; overflow:hidden;
+}
+.celebrate-msg{
+  position:fixed; left:50%; top:32%;
+  transform:translate(-50%,-50%);
+  background:linear-gradient(135deg,#fbbf24,#ec4899,#8b5cf6);
+  color:#fff; font-weight:800; font-size:24px;
+  padding:18px 36px; border-radius:999px;
+  box-shadow:0 20px 50px rgba(0,0,0,.25);
+  pointer-events:none; z-index:100000;
+  animation:celebrateBounceIn .5s var(--ease-out) both;
+  letter-spacing:.02em;
+}
+
+/* 4. 鍵盤快捷鍵說明面板 */
+.kbd-help{ max-width:680px; }
+.kbd-help h3{
+  margin:var(--s-4) 0 var(--s-2);
+  font-size:var(--fs-md); font-weight:var(--fw-bold);
+  color:var(--text); letter-spacing:-.005em;
+}
+.kbd-help h3:first-child{ margin-top:0; }
+.kbd-help .kbd-row{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:var(--s-2) var(--s-3);
+  border-bottom:1px solid var(--gray-100);
+  font-size:var(--fs-sm);
+}
+.kbd-help .kbd-row:last-child{ border-bottom:none; }
+.kbd-help .kbd-row .desc{ color:var(--text); }
+.kbd-help .kbd-row .keys{ display:flex; gap:4px; }
+.kbd{
+  display:inline-block;
+  min-width:24px; padding:2px 8px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12px; font-weight:600;
+  background:var(--gray-50); color:var(--text);
+  border:1px solid var(--gray-200); border-bottom:2px solid var(--gray-300);
+  border-radius:4px; line-height:18px; text-align:center;
+}
+
+/* 5. 即時動態儀表板 */
+.act-feed{ }
+.act-feed .act-item{
+  display:flex; align-items:flex-start; gap:var(--s-3);
+  padding:var(--s-2) 0;
+  border-bottom:1px dashed var(--gray-100);
+  font-size:var(--fs-sm);
+}
+.act-feed .act-item:last-child{ border-bottom:none; }
+.act-feed .act-ico{
+  width:32px; height:32px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--gray-50); border-radius:50%;
+  font-size:16px;
+}
+.act-feed .act-body{ flex:1; min-width:0; }
+.act-feed .act-text{ color:var(--text); line-height:1.5; }
+.act-feed .act-text b{ font-weight:600; }
+.act-feed .act-time{
+  font-size:var(--fs-xs); color:var(--gray-500);
+  margin-top:2px;
+}
+
+/* 6. 智能提醒區 */
+.smart-reminders{
+  background:linear-gradient(135deg,#fef3c7,#fde68a);
+  border:1px solid #f59e0b;
+  border-radius:var(--r-lg);
+  padding:var(--s-3) var(--s-4);
+  margin-bottom:var(--s-4);
+}
+.smart-reminders .sr-head{
+  display:flex; align-items:center; gap:var(--s-2);
+  cursor:pointer; user-select:none;
+}
+.smart-reminders .sr-ico{ font-size:20px; }
+.smart-reminders .sr-title{
+  font-weight:var(--fw-bold); color:#92400e; flex:1;
+  font-size:var(--fs-base);
+}
+.smart-reminders .sr-count{
+  background:#f59e0b; color:#fff;
+  font-size:11px; font-weight:700;
+  padding:2px 8px; border-radius:999px;
+}
+.smart-reminders .sr-toggle{
+  font-size:14px; color:#92400e; padding:0 4px;
+}
+.smart-reminders .sr-list{
+  margin-top:var(--s-3);
+  display:flex; flex-direction:column; gap:var(--s-2);
+}
+.smart-reminders .sr-item{
+  background:rgba(255,255,255,.6);
+  padding:var(--s-2) var(--s-3);
+  border-radius:var(--r-md);
+  font-size:var(--fs-sm);
+  color:#78350f;
+  display:flex; align-items:flex-start; gap:var(--s-2);
+}
+.smart-reminders .sr-item .sr-i{ flex-shrink:0; }
+.smart-reminders .sr-item .sr-t{ flex:1; line-height:1.5; }
+.smart-reminders .sr-item .sr-a{
+  font-size:12px; color:var(--primary);
+  cursor:pointer; font-weight:600; flex-shrink:0;
+  background:none; border:none; padding:2px 6px;
+}
+
+/* 7. 真實進度條 */
+.progress-bar{
+  width:100%; height:8px;
+  background:var(--gray-100);
+  border-radius:999px;
+  overflow:hidden;
+  margin:var(--s-2) 0 var(--s-1);
+}
+.progress-bar .progress-fill{
+  height:100%; background:linear-gradient(90deg,var(--primary),#8b5cf6);
+  border-radius:999px;
+  transition:width .25s ease-out;
+  min-width:2%;
+}
+.progress-text{
+  font-size:var(--fs-xs); color:var(--gray-500);
+  text-align:center; margin-top:4px;
+}
+
+/* 8. Quick Switcher (Ctrl+P) - 既有 cmd palette 已存在, 此處微調 */
+.qsw-host{
+  position:fixed; inset:0;
+  background:rgba(15,23,42,.55);
+  display:flex; align-items:flex-start; justify-content:center;
+  padding-top:14vh; z-index:50000;
+  animation:fadeIn .15s ease-out both;
+}
+.qsw-box{
+  width:min(560px,92vw);
+  background:var(--surface); border-radius:var(--r-lg);
+  box-shadow:var(--shadow-xl-2);
+  overflow:hidden;
+  border:1px solid var(--gray-200);
+}
+.qsw-input{
+  width:100%; padding:var(--s-4) var(--s-5);
+  border:none; outline:none;
+  font-size:var(--fs-md); background:transparent;
+  border-bottom:1px solid var(--gray-100);
+}
+.qsw-list{ max-height:50vh; overflow:auto; }
+.qsw-item{
+  display:flex; align-items:center; gap:var(--s-3);
+  padding:var(--s-3) var(--s-4);
+  cursor:pointer; font-size:var(--fs-sm);
+  border-left:3px solid transparent;
+}
+.qsw-item:hover,.qsw-item.sel{
+  background:var(--gray-50);
+  border-left-color:var(--primary);
+}
+.qsw-item .qsw-ico{ width:24px; text-align:center; font-size:16px; }
+.qsw-item .qsw-text{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.qsw-item .qsw-kind{
+  font-size:11px; color:var(--gray-500);
+  background:var(--gray-100); padding:2px 8px; border-radius:999px;
+}
+.qsw-empty{ padding:var(--s-5); text-align:center; color:var(--gray-500); font-size:var(--fs-sm); }
+.qsw-footer{
+  padding:var(--s-2) var(--s-4);
+  border-top:1px solid var(--gray-100);
+  font-size:11px; color:var(--gray-500);
+  display:flex; gap:var(--s-3); flex-wrap:wrap;
+}
+
+/* 9. 微互動 - 無位移版本 */
+@keyframes flashGreen{
+  0%{ background:var(--success); color:#fff; }
+  100%{ background:; color:; }
+}
+.flash-green{ animation:flashGreen .8s ease-out; }
+@keyframes savedCheck{
+  0%{ opacity:0; transform:scale(.5); }
+  50%{ opacity:1; transform:scale(1.2); }
+  100%{ opacity:1; transform:scale(1); }
+}
+.btn-saved{
+  background:var(--success) !important;
+  color:#fff !important;
+  border-color:var(--success) !important;
+}
+.btn-saved::after{
+  content:'✓'; display:inline-block;
+  margin-left:6px; font-weight:900;
+  animation:savedCheck .35s ease-out both;
+}
+@keyframes fadeOutCollapse{
+  0%{ opacity:1; max-height:500px; }
+  60%{ opacity:0; max-height:500px; }
+  100%{ opacity:0; max-height:0; padding-top:0; padding-bottom:0; margin:0; border-width:0; }
+}
+.fade-collapse{
+  animation:fadeOutCollapse .45s ease-out forwards;
+  overflow:hidden;
+}
+@keyframes bellRing{
+  0%,100%{ transform:rotate(0deg); }
+  20%{ transform:rotate(-12deg); }
+  40%{ transform:rotate(10deg); }
+  60%{ transform:rotate(-8deg); }
+  80%{ transform:rotate(6deg); }
+}
+.bell-ring{
+  animation:bellRing .6s ease-in-out;
+  display:inline-block;
+  transform-origin:50% 0%;
+}
+
+/* 10. 視覺一致性 polish */
+.typography-body{
+  font-size:var(--fs-base);
+  line-height:var(--lh-normal);
+  letter-spacing:0;
+}
+/* 統一標題層級 */
+.h1-tight{ font-size:32px; font-weight:800; letter-spacing:-.02em; line-height:1.15; }
+.h2-tight{ font-size:24px; font-weight:700; letter-spacing:-.015em; line-height:1.2; }
+.h3-tight{ font-size:18px; font-weight:700; letter-spacing:-.01em; line-height:1.3; }
+.h4-tight{ font-size:16px; font-weight:600; letter-spacing:-.005em; line-height:1.35; }
+
 /* ── Toast 升級 ── */
 @media (min-width:900px){
   .toast{
@@ -9826,6 +10095,15 @@ function rOv(content){
     if(j) content.appendChild(j);
   }
 
+  // POLISH-10/6: 智能提醒 (老師端)
+  try {
+    const sr = renderSmartReminders();
+    if(sr) content.appendChild(sr);
+  } catch(e){ _swallow('smart-reminders-rOv', e); }
+
+  // POLISH-10/3: 進入 overview 檢查慶祝事件
+  try { setTimeout(checkCelebrationTriggers, 400); } catch(_){}
+
   const ovTitle = getPageTitle('overview', '今日總覽').replace(/^📊\s*/, '');
   const ovSubDefault = '掌握今天整班的出席狀況 · ' + today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' });
   const ovSub = getPageSub('overview', ovSubDefault);
@@ -9870,7 +10148,24 @@ function rOv(content){
       el('div', { class:'lbl' }, '今日遲到')
     ));
   }
-  if(grid.childNodes.length) content.appendChild(grid);
+  if(grid.childNodes.length){
+    content.appendChild(grid);
+    // POLISH-10/9: 首次進入總覽時數字 tween 從 0 動畫到目標值 (每個 session 只動畫一次)
+    try {
+      if(!App._ovStatsTweened){
+        App._ovStatsTweened = true;
+        setTimeout(()=> {
+          const nums = grid.querySelectorAll('.num');
+          nums.forEach(n => {
+            const target = parseInt(n.textContent, 10);
+            if(isNaN(target)) return;
+            n.textContent = '0';
+            tweenNumber(n, 0, target, 600);
+          });
+        }, 50);
+      }
+    } catch(_){ _swallow('tween-stats',_); }
+  }
 
   // 修 Bug A：今日簽到簽退明細
   try {
@@ -10164,6 +10459,12 @@ function rOv(content){
       content.appendChild(card);
     });
   }
+
+  // POLISH-10/5: 即時動態 (顯示在自訂內容之上)
+  try {
+    const feed = renderActivityFeed();
+    if(feed) content.appendChild(feed);
+  } catch(e){ _swallow('activity-feed-rOv', e); }
 
   // 自訂內容（總覽頁底端）
   content.appendChild(renderCustomBlocks('overview-bottom'));
@@ -10880,8 +11181,12 @@ function openStudentEdit(s=null){
     Sync.setMap('students', App.db.students);
     bcNotify();
     toast(isNew?'已新增':'已更新','success');
-    m.close();
-    rerender();
+    // POLISH-10/9: 儲存按鈕短暫變綠勾 (給使用者明確視覺反饋)
+    try {
+      const btnEl = actions.querySelector('.btn-primary');
+      if(btnEl) btnSavedFlash(btnEl, 700);
+    } catch(_){}
+    setTimeout(()=> { m.close(); rerender(); }, 750);
   } }, isNew?'新增':'儲存'));
   m.root.appendChild(actions);
 }
@@ -10930,24 +11235,45 @@ function openCSVImport(){
       // skip header if first row looks like one
       let start = 0;
       if(/姓名|name/i.test(lines[0])) start = 1;
-      let added = 0;
-      for(let i=start;i<lines.length;i++){
-        const cols = lines[i].split(/,/).map(c=>c.trim().replace(/^"|"$/g,''));
-        if(!cols[0]) continue;
-        App.db.students.push({
-          id: nid(),
-          name: cols[0], cls: cols[1]||'', seat: parseInt(cols[2],10)||0,
-          email: cols[3]||'', phone: cols[4]||'', password: cols[5]||'',
-          note: cols[6]||''
-        });
-        added++;
-      }
-      saveDB();
-      Sync.setMap('students', App.db.students);
-      bcNotify();
-      toast('已匯入 ' + added + ' 位','success');
+      const total = lines.length - start;
+      // POLISH-10/7: 顯示真實進度條 (取代 spinner)
       m.close();
-      rerender();
+      const prog = progressModal('📥 匯入學生中...');
+      let added = 0;
+      let idx = 0;
+      function step(){
+        const batchEnd = Math.min(idx + 10, total); // 一次處理 10 筆
+        for(let j=idx; j<batchEnd; j++){
+          const cols = lines[start + j].split(/,/).map(c=>c.trim().replace(/^"|"$/g,''));
+          if(!cols[0]) continue;
+          App.db.students.push({
+            id: nid(),
+            name: cols[0], cls: cols[1]||'', seat: parseInt(cols[2],10)||0,
+            email: cols[3]||'', phone: cols[4]||'', password: cols[5]||'',
+            note: cols[6]||''
+          });
+          added++;
+        }
+        idx = batchEnd;
+        const pct = total > 0 ? Math.round(idx / total * 100) : 100;
+        prog.update(pct, '處理 ' + idx + ' / ' + total + ' 筆... (已建立 ' + added + ' 位)');
+        if(idx < total){
+          setTimeout(step, 0); // 非阻塞
+        } else {
+          try { saveDB(); Sync.setMap('students', App.db.students); bcNotify(); } catch(_){}
+          prog.update(100, '✅ 完成! 共匯入 ' + added + ' 位學生');
+          setTimeout(()=> {
+            prog.close();
+            toast('已匯入 ' + added + ' 位','success');
+            // POLISH-10/3: 一次匯入超過 10 位 → 慶祝
+            if(added >= 10){
+              try { celebrate({ msg:'🎉 成功匯入 ' + added + ' 位學生!', count:60 }); } catch(_){}
+            }
+            rerender();
+          }, 500);
+        }
+      }
+      step();
     };
     fr.readAsText(file, 'UTF-8');
   });
@@ -14157,11 +14483,14 @@ function rAsgn(content){
     const q = App._asgnSearch || '';
     if(q) list = list.filter(a => (a.title||'').toLowerCase().includes(q) || (a.desc||'').toLowerCase().includes(q));
     if(list.length === 0){
-      listWrap.appendChild(el('div', { class:'empty card' },
-        el('div', { class:'ico' }, '📋'),
-        el('div', null, '沒有作業'),
-        el('button', { class:'btn btn-primary', style:{marginTop:'12px'}, onclick:()=> openAssignmentEdit() }, '＋ 新增第一份作業')
-      ));
+      listWrap.appendChild(renderEmpty({
+        svg:'homework',
+        title:'沒有作業',
+        desc: q ? '試試其他關鍵字, 或切換到其他分頁' : '建立第一份作業, 學生會收到通知並可線上繳交',
+        actions:[
+          { label:'+ 新增第一份作業', primary:true, onclick:()=> openAssignmentEdit() }
+        ]
+      }));
       return;
     }
     list.forEach(a => {
@@ -15245,10 +15574,11 @@ function rAnn(content){
     if(q) list = list.filter(a => (a.title||'').toLowerCase().includes(q) || (a.body||'').toLowerCase().includes(q));
     list.sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (b.ts||0)-(a.ts||0));
     if(list.length === 0){
-      listWrap.appendChild(el('div', { class:'empty card' },
-        el('div', { class:'ico' }, '📢'),
-        el('div', null, '尚無公告')
-      ));
+      listWrap.appendChild(renderEmpty({
+        svg:'announce',
+        title: q ? '查無符合的公告' : '尚無公告',
+        desc: q ? '試試其他關鍵字' : '建立第一份公告, 讓全班看見重要訊息'
+      }));
       return;
     }
     list.forEach(a => {
@@ -15634,10 +15964,11 @@ function rSAsgn(content){
   });
 
   if(list.length === 0){
-    content.appendChild(el('div', { class:'empty card' },
-      el('div', { class:'ico' }, '✨'),
-      el('div', null, '沒有作業')
-    ));
+    content.appendChild(renderEmpty({
+      svg:'homework',
+      title:'沒有作業',
+      desc:'目前沒有需要繳交的作業, 好好放鬆一下吧!'
+    }));
     return;
   }
   list.forEach(a => {
@@ -17723,31 +18054,8 @@ function initKeyShortcuts(){
   });
 }
 
-function openShortcutHelp(){
-  const m = modal('');
-  m.root.appendChild(el('h2', null, '⌨ 鍵盤快捷鍵'));
-  const isT = App.session && App.session.role === 'teacher';
-  const items = isT ? [
-    ['G S','學生名單'], ['G A','作業管理'], ['G O','總覽'],
-    ['G Q','QR 簽到'], ['G G','學期成績'],
-    ['Ctrl/⌘ K','命令面板'], ['/','命令面板'],
-    ['Esc','關閉對話框']
-  ] : [
-    ['C','簽到'], ['L','請假'],
-    ['Ctrl/⌘ K','命令面板'], ['Esc','關閉對話框']
-  ];
-  const tbl = el('table', { style:{width:'100%',fontSize:'13px'} });
-  items.forEach(([k,t]) => {
-    tbl.appendChild(el('tr', null,
-      el('td', { style:{padding:'4px 8px'} }, el('span', { class:'tag', style:{fontFamily:'monospace'} }, k)),
-      el('td', { style:{padding:'4px 8px'} }, t)
-    ));
-  });
-  m.root.appendChild(tbl);
-  const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m.close() }, '了解'));
-  m.root.appendChild(actions);
-}
+/* openShortcutHelp 已在 POLISH-10/4 區塊 (約 line 21046) 重寫為更完整的版本.
+   舊版已移除以避免重複定義. */
 
 /* ════════════════════════════════════════════════════════════
    PHASE 4 ▒▒  NEW ANALYTICS SUBPAGES
@@ -19989,6 +20297,19 @@ function rerender(){
     }
   } catch(e){_swallow('auto',e)}
 
+  // POLISH-10/1: 全頁載入骨架 — 若 App.db 還沒備妥, 顯示骨架而非白屏
+  if(shouldShowSkeleton()){
+    try {
+      const v = App.view || 'overview';
+      let kind = 'list';
+      if(v === 'overview') kind = 'dash';
+      else if(v === 'grades' || v === 'attendance') kind = 'list';
+      else if(v === 'assignments' || v === 'quizzes' || v === 'badges') kind = 'cards';
+      renderPageSkeleton(content, { rows:6, kind:kind });
+    } catch(_){ _swallow('skeleton',_); }
+    return;
+  }
+
   // route
   try {
     if(App.session.role === 'teacher'){
@@ -20364,6 +20685,25 @@ function boot(){
   initCmdPaletteShortcut();
   initKeyShortcuts();
   initDragDrop();
+  // POLISH-10/4: ? 鍵打開鍵盤快捷鍵說明
+  try { initShortcutHelpKey(); } catch(_){ _swallow('init-shortcut-help',_); }
+  // POLISH-10/8: Ctrl+P 開啟 Quick Switcher (補強既有 cmd palette)
+  try {
+    document.addEventListener('keydown', e => {
+      if(!App.session) return;
+      const isMod = e.ctrlKey || e.metaKey;
+      if(isMod && (e.key === 'p' || e.key === 'P')){
+        // 已有 modal / cmdPalette 不再開
+        const t = e.target;
+        const tag = (t && t.tagName||'').toLowerCase();
+        if(tag === 'input' || tag === 'textarea') {
+          // 仍然攔截瀏覽器列印
+        }
+        e.preventDefault();
+        openQuickSwitcher();
+      }
+    });
+  } catch(_){ _swallow('init-qsw',_); }
 
   // Phase 4: auto-backup once per day
   try { backupAutoIfNeeded(); } catch(e){_swallow('auto',e)}
@@ -20488,11 +20828,21 @@ function renderBreadcrumb(items){
 
 /**
  * Render a friendly empty state card.
+ * POLISH-10/2: 支援 svg 圖示 (內建插畫庫 emptySvg(name))
  */
 function renderEmpty(opts){
   const o = opts || {};
   const card = el('div', { class:'empty-state' });
-  card.appendChild(el('div', { class:'es-ico' }, o.icon || '📭'));
+  // 優先使用 svg (內建插畫), 沒指定才退回 emoji
+  if(o.svg){
+    const svg = (typeof o.svg === 'string') ? emptySvg(o.svg) : o.svg;
+    if(svg) card.appendChild(svg);
+    else card.appendChild(el('div', { class:'es-ico' }, o.icon || '📭'));
+  } else if(o.icon){
+    card.appendChild(el('div', { class:'es-ico' }, o.icon));
+  } else {
+    card.appendChild(el('div', { class:'es-ico' }, '📭'));
+  }
   card.appendChild(el('div', { class:'es-title' }, o.title || '尚無資料'));
   if(o.desc) card.appendChild(el('div', { class:'es-desc' }, o.desc));
   if(o.actions && o.actions.length){
@@ -20506,6 +20856,742 @@ function renderEmpty(opts){
     card.appendChild(ac);
   }
   return card;
+}
+
+/* ════════════════════════════════════════════════════════════
+   POLISH-10 ▒ 全方位打磨 helper 函式區
+   ──────────────────────────────────────────────────────────── */
+
+/* ── POLISH-10/2: 空狀態 SVG 插畫庫 (純手寫線條圖, 約 100×100) ── */
+function emptySvg(name){
+  // 用 createElementNS 才能正確產生 svg 命名空間
+  const NS = 'http://www.w3.org/2000/svg';
+  function svg(inner){
+    const s = document.createElementNS(NS, 'svg');
+    s.setAttribute('class', 'es-svg');
+    s.setAttribute('viewBox', '0 0 100 100');
+    s.setAttribute('fill', 'none');
+    s.innerHTML = inner;
+    return s;
+  }
+  const lib = {
+    // 人 (學生) - 圓頭 + 身體輪廓
+    student: '<circle cx="50" cy="35" r="14"/>' +
+             '<path d="M22 84 C22 64 36 56 50 56 C64 56 78 64 78 84"/>' +
+             '<circle class="filled" cx="50" cy="35" r="14"/>',
+    // 紙筆 (作業)
+    homework: '<rect class="filled" x="22" y="18" width="46" height="62" rx="3"/>' +
+              '<line x1="30" y1="32" x2="60" y2="32"/>' +
+              '<line x1="30" y1="42" x2="60" y2="42"/>' +
+              '<line x1="30" y1="52" x2="50" y2="52"/>' +
+              '<path d="M60 70 L78 52 L82 56 L64 74 L58 76 Z"/>',
+    // 信封 (訊息)
+    message: '<rect class="filled" x="14" y="28" width="72" height="48" rx="4"/>' +
+             '<path d="M14 32 L50 56 L86 32"/>',
+    // 出席勾選表
+    attendance: '<rect class="filled" x="20" y="16" width="60" height="68" rx="4"/>' +
+                '<line x1="32" y1="34" x2="38" y2="40"/>' +
+                '<line x1="38" y1="40" x2="48" y2="28"/>' +
+                '<line x1="54" y1="34" x2="70" y2="34"/>' +
+                '<line x1="32" y1="54" x2="38" y2="60"/>' +
+                '<line x1="38" y1="60" x2="48" y2="48"/>' +
+                '<line x1="54" y1="54" x2="70" y2="54"/>' +
+                '<line x1="54" y1="74" x2="70" y2="74"/>',
+    // 成績 / 分數
+    grade: '<circle class="filled" cx="50" cy="50" r="32"/>' +
+           '<path d="M50 32 L54 44 L66 44 L56 52 L60 64 L50 56 L40 64 L44 52 L34 44 L46 44 Z"/>',
+    // 公告小喇叭
+    announce: '<path class="filled" d="M22 42 L52 26 L52 76 L22 60 Z"/>' +
+              '<path d="M60 36 C70 40 70 62 60 66"/>' +
+              '<line x1="14" y1="42" x2="22" y2="42"/>' +
+              '<line x1="14" y1="60" x2="22" y2="60"/>',
+    // 徽章
+    badge: '<path class="filled" d="M30 18 L70 18 L74 46 L50 78 L26 46 Z"/>' +
+           '<circle cx="50" cy="42" r="10"/>',
+    // 搜尋 (找不到結果)
+    search: '<circle class="filled" cx="44" cy="44" r="22"/>' +
+            '<line x1="60" y1="60" x2="80" y2="80"/>',
+    // 行事曆 (課表)
+    calendar: '<rect class="filled" x="18" y="22" width="64" height="60" rx="4"/>' +
+              '<line x1="18" y1="36" x2="82" y2="36"/>' +
+              '<line x1="32" y1="14" x2="32" y2="28"/>' +
+              '<line x1="68" y1="14" x2="68" y2="28"/>' +
+              '<rect x="30" y="48" width="12" height="10"/>' +
+              '<rect x="58" y="48" width="12" height="10"/>' +
+              '<rect x="44" y="64" width="12" height="10"/>',
+    // 鈴鐺
+    bell: '<path class="filled" d="M30 60 C30 38 38 28 50 28 C62 28 70 38 70 60 L76 66 L24 66 Z"/>' +
+          '<path d="M44 72 C44 76 47 78 50 78 C53 78 56 76 56 72"/>',
+    // 預設空盒
+    box: '<path class="filled" d="M18 38 L50 22 L82 38 L82 78 L18 78 Z"/>' +
+         '<path d="M18 38 L50 54 L82 38"/>' +
+         '<line x1="50" y1="54" x2="50" y2="78"/>'
+  };
+  const data = lib[name] || lib.box;
+  return svg(data);
+}
+
+/* ── POLISH-10/1: 整頁載入骨架 (取代 boot 期間白屏) ── */
+function renderPageSkeleton(content, opts){
+  const o = opts || {};
+  const rows = o.rows || 6;
+  const kind = o.kind || 'list'; // list | cards | dash
+  const wrap = el('div', { class:'page-skel' });
+  // 標題佔位
+  wrap.appendChild(el('div', { class:'skel skel-title' }));
+  wrap.appendChild(el('div', { class:'skel skel-text', style:{width:'40%',marginBottom:'20px'} }));
+  if(kind === 'dash'){
+    // 4 個 stat card
+    const grid = el('div', { class:'grid grid-4', style:{marginBottom:'16px'} });
+    for(let i=0;i<4;i++) grid.appendChild(el('div', { class:'skel skel-card', style:{height:'90px'} }));
+    wrap.appendChild(grid);
+  }
+  // 列表 / 卡片骨架
+  for(let i=0;i<rows;i++){
+    if(kind === 'cards'){
+      wrap.appendChild(el('div', { class:'skel skel-card', style:{height:'120px',marginBottom:'12px'} }));
+    } else {
+      const row = el('div', { class:'skel-row' });
+      row.appendChild(el('div', { class:'skel skel-avatar' }));
+      const col = el('div', { class:'skel-col' });
+      col.appendChild(el('div', { class:'skel skel-text', style:{width:'40%'} }));
+      col.appendChild(el('div', { class:'skel skel-text', style:{width:'70%'} }));
+      row.appendChild(col);
+      wrap.appendChild(row);
+    }
+  }
+  content.appendChild(wrap);
+}
+
+/* 判斷此刻是否該顯示骨架 (db 還沒 ready) */
+function shouldShowSkeleton(){
+  return !App || !App.db || !App.db.students;
+}
+
+/* ── POLISH-10/3: 慶祝彩屑動畫 ── */
+function celebrate(opts){
+  try {
+    const o = opts || {};
+    const N = o.count || 60;
+    const msg = o.msg || '🎉 太棒了!';
+    const host = document.createElement('div');
+    host.className = 'celebrate-host';
+    const colors = ['#ef4444','#f59e0b','#eab308','#10b981','#3b82f6','#8b5cf6','#ec4899'];
+    for(let i=0;i<N;i++){
+      const c = document.createElement('div');
+      const color = colors[i % colors.length];
+      const x = Math.random()*100;
+      const delay = Math.random()*400;
+      const dur = 2000 + Math.random()*1500;
+      const rot = Math.random()*720;
+      const size = 8 + Math.random()*6;
+      c.style.cssText =
+        'position:absolute;top:-20px;left:'+x+'%;' +
+        'width:'+size+'px;height:'+size+'px;' +
+        'background:'+color+';' +
+        'border-radius:'+(Math.random()<.5?'50%':'2px')+';' +
+        'animation:confettiFall '+dur+'ms cubic-bezier(.4,0,.2,1) '+delay+'ms forwards;' +
+        'transform:rotate('+rot+'deg);';
+      host.appendChild(c);
+    }
+    document.body.appendChild(host);
+    if(msg){
+      const m = document.createElement('div');
+      m.className = 'celebrate-msg';
+      m.textContent = msg;
+      document.body.appendChild(m);
+      setTimeout(()=> { try { m.remove(); } catch(_){} }, 1800);
+    }
+    setTimeout(()=> { try { host.remove(); } catch(_){} }, 4500);
+  } catch(_){ _swallow('celebrate', _); }
+}
+
+/* 防重複觸發: 同種事件 + 同識別 24h 內只觸發一次 (用 localStorage) */
+function celebrateOnce(key, opts){
+  try {
+    const lsKey = 'cms_v3_celebrated_' + key;
+    const last = localStorage.getItem(lsKey);
+    const now = Date.now();
+    if(last && (now - parseInt(last,10)) < 24*3600*1000) return false;
+    localStorage.setItem(lsKey, String(now));
+    celebrate(opts);
+    return true;
+  } catch(_){ return false; }
+}
+
+/* ── POLISH-10/4: 鍵盤快捷鍵說明面板 ── */
+function openShortcutHelp(){
+  const cats = [
+    { title:'導覽', items:[
+      { keys:['Ctrl','K'], desc:'開啟命令面板 / 快速跳轉' },
+      { keys:['Ctrl','P'], desc:'快速切換 (Quick Switcher)' },
+      { keys:['Ctrl','/'], desc:'全域搜尋 (學生/作業/訊息)' },
+      { keys:['?'], desc:'打開此鍵盤快捷鍵說明' },
+      { keys:['Esc'], desc:'關閉視窗 / 取消操作' }
+    ]},
+    { title:'編輯與儲存', items:[
+      { keys:['Ctrl','S'], desc:'儲存表單 (若於編輯中)' },
+      { keys:['Ctrl','Z'], desc:'復原最近一次刪除 (Undo)' },
+      { keys:['Enter'], desc:'送出表單 / 確認' }
+    ]},
+    { title:'批改 / 簽到', items:[
+      { keys:['1'], desc:'簽到 (批量點名模式)' },
+      { keys:['2'], desc:'請假' },
+      { keys:['3'], desc:'缺席' },
+      { keys:['↑','↓'], desc:'切換上 / 下一位學生' }
+    ]},
+    { title:'其他', items:[
+      { keys:['Ctrl','Shift','D'], desc:'切換深色 / 淺色主題' }
+    ]}
+  ];
+  const body = el('div', { class:'kbd-help' });
+  body.appendChild(el('div', { style:{
+    fontSize:'14px', color:'var(--gray-500)', marginBottom:'12px'
+  } }, '提示: 按下鍵盤上對應的按鍵即可使用該功能。在輸入框內時部分快捷鍵會暫時失效以避免誤觸。'));
+  cats.forEach(cat => {
+    body.appendChild(el('h3', null, cat.title));
+    cat.items.forEach(it => {
+      const r = el('div', { class:'kbd-row' },
+        el('div', { class:'desc' }, it.desc)
+      );
+      const keys = el('div', { class:'keys' });
+      it.keys.forEach((k,i) => {
+        if(i>0) keys.appendChild(el('span', { style:{color:'var(--gray-400)',padding:'0 2px'} }, '+'));
+        keys.appendChild(el('span', { class:'kbd' }, k));
+      });
+      r.appendChild(keys);
+      body.appendChild(r);
+    });
+  });
+  const wrap = el('div', { style:{padding:'20px',maxWidth:'680px'} },
+    el('h2', { style:{margin:'0 0 8px',fontSize:'20px',fontWeight:'700'} }, '⌨️ 鍵盤快捷鍵'),
+    el('div', { class:'small muted', style:{marginBottom:'16px'} }, '加速你的工作流程'),
+    body,
+    el('div', { class:'flex', style:{justifyContent:'flex-end',marginTop:'20px'} },
+      el('button', { class:'btn btn-primary', onclick:()=> { if(_kbdHelpHandle) _kbdHelpHandle.close(); } }, '知道了')
+    )
+  );
+  const _kbdHelpHandle = modal(wrap);
+}
+
+/* 全域 ? 鍵打開快捷鍵說明 (避開輸入框) */
+function initShortcutHelpKey(){
+  if(window._shortcutHelpInited) return;
+  window._shortcutHelpInited = true;
+  document.addEventListener('keydown', e => {
+    if(e.key !== '?' && !(e.key === '/' && e.shiftKey)) return;
+    // 在輸入框 / textarea / contenteditable 內不觸發
+    const t = e.target;
+    if(!t) return;
+    const tag = (t.tagName||'').toLowerCase();
+    if(tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if(t.isContentEditable) return;
+    // 沒登入不觸發
+    if(!App.session) return;
+    // 已開 modal 不觸發
+    if($('#modal-host') && $('#modal-host').firstChild) return;
+    e.preventDefault();
+    openShortcutHelp();
+  });
+}
+
+/* ── POLISH-10/5: 即時動態 (Activity Feed) ── */
+function collectRecentActivities(limit){
+  const out = [];
+  const now = Date.now();
+  const isStu = App.session && App.session.role === 'student';
+  const meId = isStu ? App.session.id : null;
+  // 出席紀錄
+  try {
+    (App.db.attendance || []).slice().sort((a,b)=> (b.ts||0) - (a.ts||0)).slice(0,30).forEach(a => {
+      if(!a.ts) return;
+      if(isStu && a.studentId !== meId) return;
+      const stu = (App.db.students||[]).find(s => s.id === a.studentId);
+      const name = stu ? stu.name : '某位學生';
+      out.push({
+        ico:'✅', ts:a.ts,
+        text: (isStu ? '你' : '<b>'+esc(name)+'</b>') + ' 已簽到 (' + (a.time||'') + ')'
+      });
+    });
+  } catch(_){}
+  // 作業 (建立 / 繳交)
+  try {
+    (App.db.assignments || []).slice().sort((a,b)=> (b.createdAt||0) - (a.createdAt||0)).slice(0,10).forEach(a => {
+      if(!a.createdAt) return;
+      out.push({
+        ico:'📝', ts:a.createdAt,
+        text:'發布作業 <b>' + esc(a.title||'未命名') + '</b>'
+      });
+      // 繳交記錄
+      const subs = a.submissions || {};
+      Object.keys(subs).forEach(sid => {
+        const sub = subs[sid];
+        if(!sub || !sub.submittedAt) return;
+        if(isStu && sid !== meId) return;
+        const stu = (App.db.students||[]).find(s => s.id === sid);
+        out.push({
+          ico:'📤', ts: sub.submittedAt,
+          text: (isStu ? '你' : '<b>'+esc(stu?stu.name:'學生')+'</b>') + ' 繳交了 <b>' + esc(a.title||'') + '</b>'
+        });
+      });
+    });
+  } catch(_){}
+  // 訊息
+  try {
+    (App.db.messages || []).slice().sort((a,b)=> (b.ts||0) - (a.ts||0)).slice(0,15).forEach(m => {
+      if(!m.ts) return;
+      // 學生只看跟自己有關的
+      if(isStu){
+        const to = m.toId || 'all';
+        if(to !== 'all' && to !== meId && m.fromId !== meId) return;
+      }
+      const fromName = m.fromId === 'teacher' ? '老師'
+        : (((App.db.students||[]).find(s => s.id === m.fromId) || {}).name || '某位學生');
+      out.push({
+        ico:'💬', ts:m.ts,
+        text:'<b>' + esc(fromName) + '</b>: ' + esc((m.text||m.body||'').slice(0,40))
+      });
+    });
+  } catch(_){}
+  // 公告
+  try {
+    (App.db.announcements || []).slice().sort((a,b)=> (b.ts||0) - (a.ts||0)).slice(0,5).forEach(a => {
+      if(!a.ts) return;
+      out.push({
+        ico:'📣', ts:a.ts,
+        text:'公告: <b>' + esc(a.title||a.text||'') + '</b>'
+      });
+    });
+  } catch(_){}
+  // 排序 + 限筆
+  out.sort((a,b) => b.ts - a.ts);
+  return out.slice(0, limit || 10);
+}
+
+/* relTime() 已於檔案前段 (約 line 4081) 定義, 此處不再重複 */
+
+function renderActivityFeed(){
+  const acts = collectRecentActivities(10);
+  if(!acts.length) return null;
+  const card = el('div', { class:'card', style:{marginBottom:'16px'} });
+  card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+    el('h3', { style:{margin:0,fontSize:'15px',fontWeight:'700'} }, '📊 即時動態'),
+    el('span', { class:'small muted' }, '最近 ' + acts.length + ' 筆')
+  ));
+  const feed = el('div', { class:'act-feed' });
+  acts.forEach(a => {
+    const item = el('div', { class:'act-item' },
+      el('div', { class:'act-ico' }, a.ico)
+    );
+    const body = el('div', { class:'act-body' });
+    body.appendChild(el('div', { class:'act-text', html: a.text }));
+    body.appendChild(el('div', { class:'act-time' }, relTime(a.ts)));
+    item.appendChild(body);
+    feed.appendChild(item);
+  });
+  card.appendChild(feed);
+  return card;
+}
+
+/* ── POLISH-10/6: 智能提醒 ── */
+function getSmartReminders(){
+  const out = [];
+  if(!App.session || !App.db) return out;
+  const isTea = App.session.role === 'teacher';
+  const today = td();
+  const todayMs = new Date(today).getTime();
+  // 老師端
+  if(isTea){
+    try {
+      // 1. 明天到期的作業 + 未交人數
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
+      const tomorrowStr = tomorrow.toISOString().slice(0,10);
+      const dueTomorrow = (App.db.assignments||[]).filter(a => a.dueDate === tomorrowStr);
+      dueTomorrow.forEach(a => {
+        const subs = a.submissions || {};
+        const total = (App.db.students||[]).length;
+        const submitted = Object.keys(subs).filter(k => subs[k]&&subs[k].submittedAt).length;
+        const remaining = total - submitted;
+        if(remaining > 0){
+          out.push({
+            ico:'📝',
+            text:'作業 <b>' + esc(a.title) + '</b> 明天到期, 還有 <b>' + remaining + '</b> 位學生未繳交',
+            action:{ label:'查看', onclick: ()=> go('assignments') }
+          });
+        }
+      });
+    } catch(_){}
+    try {
+      // 2. 連續 3 天缺席的學生
+      const recent = [];
+      for(let i=0;i<3;i++){
+        const d = new Date(); d.setDate(d.getDate()-i);
+        recent.push(d.toISOString().slice(0,10));
+      }
+      const att = App.db.attendance || [];
+      const absentees = [];
+      (App.db.students||[]).forEach(s => {
+        let allAbsent = true;
+        recent.forEach(date => {
+          if(att.some(a => a.date === date && a.studentId === s.id)) allAbsent = false;
+        });
+        if(allAbsent) absentees.push(s);
+      });
+      if(absentees.length){
+        out.push({
+          ico:'⚠️',
+          text:'有 <b>' + absentees.length + '</b> 位學生連續 3 天缺席' +
+               (absentees.length<=3 ? ' (' + absentees.map(s=>esc(s.name)).join(', ') + ')' : ''),
+          action:{ label:'點名', onclick: ()=> go('attendance') }
+        });
+      }
+    } catch(_){}
+    try {
+      // 3. 明天有小考
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
+      const tStr = tomorrow.toISOString().slice(0,10);
+      const quizzes = (App.db.quizzes || []).filter(q => q.scheduledDate === tStr || q.date === tStr);
+      quizzes.forEach(q => {
+        out.push({
+          ico:'📋',
+          text:'明天有小考 <b>' + esc(q.title||'未命名') + '</b>',
+          action:{ label:'查看', onclick: ()=> go('quizzes') }
+        });
+      });
+    } catch(_){}
+    try {
+      // 4. 跨裝置同步未啟用 (簡短提醒)
+      const hasFb = !!localStorage.getItem(LS_FB);
+      if(!hasFb && App.fbStatus !== 'online'){
+        out.push({
+          ico:'☁️',
+          text:'跨裝置同步未啟用, 學生看不到你的更新',
+          action:{ label:'設定', onclick: ()=> go('firebase') }
+        });
+      }
+    } catch(_){}
+  } else {
+    // 學生端
+    const meId = App.session.id;
+    try {
+      // 1. 即將到期的作業
+      const dueSoon = (App.db.assignments||[]).filter(a => {
+        if(!a.dueDate) return false;
+        const dd = new Date(a.dueDate).getTime();
+        const days = (dd - todayMs) / 86400000;
+        if(days < 0 || days > 2) return false;
+        const sub = (a.submissions||{})[meId];
+        return !sub || !sub.submittedAt;
+      });
+      if(dueSoon.length){
+        const titles = dueSoon.slice(0,3).map(a=>esc(a.title||'')).join(' / ');
+        out.push({
+          ico:'⏰',
+          text:'你有 <b>' + dueSoon.length + '</b> 份作業即將到期 (' + titles + ')',
+          action:{ label:'去寫', onclick: ()=> go('assignments') }
+        });
+      }
+    } catch(_){}
+    try {
+      // 2. 老師新公告 (1 小時內)
+      const recent = (App.db.announcements||[]).filter(a => {
+        if(!a.ts) return false;
+        return (Date.now() - a.ts) < 3600*1000;
+      });
+      if(recent.length){
+        out.push({
+          ico:'📣',
+          text:'老師發了新公告: <b>' + esc(recent[0].title || recent[0].text || '') + '</b>',
+          action:{ label:'查看', onclick: ()=> go('announcements') }
+        });
+      }
+    } catch(_){}
+    try {
+      // 3. 點數 / 徽章進度
+      const me = currentStudent();
+      if(me){
+        const pts = me.points || 0;
+        const tiers = [{p:50,n:'銅牌'},{p:150,n:'白銀'},{p:300,n:'黃金'},{p:500,n:'白金'}];
+        for(const t of tiers){
+          if(pts < t.p){
+            const diff = t.p - pts;
+            if(diff <= 30){
+              out.push({
+                ico:'🏅',
+                text:'你已累積 <b>' + pts + '</b> 點, 還差 <b>' + diff + '</b> 點達 <b>' + t.n + '</b> 徽章',
+                action:{ label:'查看', onclick: ()=> go('badges') }
+              });
+            }
+            break;
+          }
+        }
+      }
+    } catch(_){}
+  }
+  return out;
+}
+
+function renderSmartReminders(){
+  const items = getSmartReminders();
+  if(!items.length) return null;
+  // 收合狀態: localStorage 記
+  const collapsed = localStorage.getItem('cms_v3_sr_collapsed') === '1';
+  const box = el('div', { class:'smart-reminders no-print' });
+  const head = el('div', { class:'sr-head', onclick:()=> {
+    const nowC = box.classList.toggle('collapsed');
+    list.style.display = nowC ? 'none' : '';
+    tog.textContent = nowC ? '▸' : '▾';
+    try { localStorage.setItem('cms_v3_sr_collapsed', nowC?'1':'0'); } catch(_){}
+  }});
+  head.appendChild(el('span', { class:'sr-ico' }, '💡'));
+  head.appendChild(el('span', { class:'sr-title' }, '智能提醒'));
+  head.appendChild(el('span', { class:'sr-count' }, String(items.length)));
+  const tog = el('span', { class:'sr-toggle' }, collapsed ? '▸' : '▾');
+  head.appendChild(tog);
+  box.appendChild(head);
+  const list = el('div', { class:'sr-list' });
+  if(collapsed) list.style.display = 'none';
+  items.forEach(it => {
+    const itemEl = el('div', { class:'sr-item' });
+    itemEl.appendChild(el('span', { class:'sr-i' }, it.ico));
+    itemEl.appendChild(el('span', { class:'sr-t', html: it.text }));
+    if(it.action){
+      itemEl.appendChild(el('button', {
+        class:'sr-a',
+        onclick:(e)=> { e.stopPropagation(); try { it.action.onclick(); } catch(_){} }
+      }, it.action.label + ' →'));
+    }
+    list.appendChild(itemEl);
+  });
+  box.appendChild(list);
+  return box;
+}
+
+/* ── POLISH-10/7: 真實進度條 helper ── */
+function renderProgressBar(initialPct, initialText){
+  const wrap = el('div', null);
+  const bar = el('div', { class:'progress-bar' });
+  const fill = el('div', { class:'progress-fill', style:{width: (initialPct||0) + '%'} });
+  bar.appendChild(fill);
+  const txt = el('div', { class:'progress-text' }, initialText || '');
+  wrap.appendChild(bar);
+  wrap.appendChild(txt);
+  wrap.update = function(pct, text){
+    fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if(text != null) txt.textContent = text;
+  };
+  return wrap;
+}
+
+/* 開啟一個進度 modal, 回傳 { update(pct,text), close() } */
+function progressModal(title){
+  const bar = renderProgressBar(0, '準備中...');
+  const wrap = el('div', { style:{padding:'24px',minWidth:'320px'} },
+    el('h3', { style:{margin:'0 0 12px',fontSize:'16px',fontWeight:'700'} }, title || '處理中...'),
+    bar
+  );
+  const handle = modal(wrap, { dismissable:false });
+  return {
+    update: bar.update,
+    close: ()=> { try { handle.close(true); } catch(_){} }
+  };
+}
+
+/* ── POLISH-10/8: Quick Switcher (Ctrl+P) ── */
+function openQuickSwitcher(){
+  // 已開就不再開
+  if(document.querySelector('.qsw-host')) return;
+  if(!App.session) return;
+  const isTea = App.session.role === 'teacher';
+  // 建立可搜尋的條目集合
+  const items = [];
+  // 頁面
+  const pages = isTea ? [
+    { k:'頁面', i:'🏠', t:'今日總覽', g:'overview' },
+    { k:'頁面', i:'✅', t:'點名', g:'attendance' },
+    { k:'頁面', i:'👥', t:'學生管理', g:'students' },
+    { k:'頁面', i:'📝', t:'作業', g:'assignments' },
+    { k:'頁面', i:'📊', t:'成績', g:'grades' },
+    { k:'頁面', i:'📋', t:'小考', g:'quizzes' },
+    { k:'頁面', i:'📣', t:'公告', g:'announcements' },
+    { k:'頁面', i:'💬', t:'訊息', g:'messages' },
+    { k:'頁面', i:'🏅', t:'徽章與點數', g:'badges' },
+    { k:'頁面', i:'📒', t:'學生筆記', g:'notes' },
+    { k:'頁面', i:'📅', t:'課表', g:'schedule' },
+    { k:'頁面', i:'⚙️', t:'設定', g:'settings' },
+    { k:'頁面', i:'🖨', t:'列印中心', g:'print' },
+    { k:'頁面', i:'☁️', t:'同步設定', g:'firebase' }
+  ] : [
+    { k:'頁面', i:'🏠', t:'我的首頁', g:'overview' },
+    { k:'頁面', i:'✅', t:'簽到', g:'checkin' },
+    { k:'頁面', i:'📝', t:'我的作業', g:'assignments' },
+    { k:'頁面', i:'📊', t:'我的成績', g:'grades' },
+    { k:'頁面', i:'📣', t:'公告', g:'announcements' },
+    { k:'頁面', i:'💬', t:'訊息', g:'messages' },
+    { k:'頁面', i:'🏅', t:'我的徽章', g:'badges' }
+  ];
+  pages.forEach(p => items.push({
+    kind:p.k, ico:p.i, text:p.t,
+    action: ()=> { try { go(p.g); } catch(_){} }
+  }));
+  // 學生 (老師可跳到任何學生 profile)
+  if(isTea){
+    (App.db.students||[]).slice(0,200).forEach(s => {
+      items.push({
+        kind:'學生', ico:'👤',
+        text: s.name + (s.cls?' · '+s.cls:'') + (s.seat?' · '+s.seat+'號':''),
+        action: ()=> {
+          try {
+            App._focusStudentId = s.id;
+            go('students');
+          } catch(_){}
+        }
+      });
+    });
+    // 作業
+    (App.db.assignments||[]).slice(0,80).forEach(a => {
+      items.push({
+        kind:'作業', ico:'📝',
+        text: a.title + (a.dueDate?' · 截止 '+a.dueDate:''),
+        action: ()=> { try { go('assignments'); } catch(_){} }
+      });
+    });
+  }
+  const host = el('div', { class:'qsw-host', onclick: e => { if(e.target === host) close(); } });
+  const box = el('div', { class:'qsw-box' });
+  const inp = el('input', {
+    class:'qsw-input', type:'text',
+    placeholder:'跳到... (頁面 / 學生 / 作業)',
+    autocomplete:'off'
+  });
+  const list = el('div', { class:'qsw-list' });
+  const footer = el('div', { class:'qsw-footer' },
+    el('span', null, el('span', { class:'kbd' }, '↑↓'), ' 選擇'),
+    el('span', null, el('span', { class:'kbd' }, 'Enter'), ' 跳轉'),
+    el('span', null, el('span', { class:'kbd' }, 'Esc'), ' 關閉')
+  );
+  box.appendChild(inp);
+  box.appendChild(list);
+  box.appendChild(footer);
+  host.appendChild(box);
+  document.body.appendChild(host);
+  let sel = 0, filtered = items.slice(0, 30);
+  function close(){
+    try { host.remove(); } catch(_){}
+    document.removeEventListener('keydown', keyHandler, true);
+  }
+  function exec(it){
+    if(!it) return;
+    close();
+    try { it.action(); } catch(_){}
+  }
+  function render(){
+    list.innerHTML = '';
+    if(!filtered.length){
+      list.appendChild(el('div', { class:'qsw-empty' }, '找不到符合的項目'));
+      return;
+    }
+    filtered.forEach((it, i) => {
+      const row = el('div', {
+        class: 'qsw-item' + (i===sel?' sel':''),
+        onclick: ()=> exec(it)
+      },
+        el('div', { class:'qsw-ico' }, it.ico),
+        el('div', { class:'qsw-text' }, it.text),
+        el('div', { class:'qsw-kind' }, it.kind)
+      );
+      list.appendChild(row);
+    });
+  }
+  inp.addEventListener('input', ()=> {
+    const q = inp.value.trim().toLowerCase();
+    if(!q) filtered = items.slice(0,30);
+    else {
+      filtered = items.filter(it =>
+        it.text.toLowerCase().includes(q) || it.kind.toLowerCase().includes(q)
+      ).slice(0,40);
+    }
+    sel = 0;
+    render();
+  });
+  function keyHandler(e){
+    if(e.key === 'Escape'){ e.preventDefault(); close(); }
+    else if(e.key === 'ArrowDown'){ e.preventDefault(); sel=Math.min(filtered.length-1,sel+1); render(); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); sel=Math.max(0,sel-1); render(); }
+    else if(e.key === 'Enter'){ e.preventDefault(); exec(filtered[sel]); }
+  }
+  document.addEventListener('keydown', keyHandler, true);
+  render();
+  setTimeout(()=> inp.focus(), 30);
+}
+
+/* ── POLISH-10/9: 微互動 helper ── */
+/* 數字 tween (300ms 內從 from 滾到 to) */
+function tweenNumber(element, from, to, dur){
+  if(!element) return;
+  const D = dur || 300;
+  const start = performance.now();
+  function step(now){
+    const t = Math.min(1, (now - start) / D);
+    const eased = 1 - Math.pow(1-t, 3); // ease-out cubic
+    const val = Math.round(from + (to-from) * eased);
+    element.textContent = String(val);
+    if(t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+/* 按鈕「儲存成功」短暫變綠勾 */
+function btnSavedFlash(btnEl, durMs){
+  if(!btnEl) return;
+  const orig = btnEl.innerHTML;
+  const dur = durMs || 1500;
+  btnEl.classList.add('btn-saved');
+  setTimeout(()=> {
+    try {
+      btnEl.classList.remove('btn-saved');
+      btnEl.innerHTML = orig;
+    } catch(_){}
+  }, dur);
+}
+/* 通知鈴鐺輕擺 */
+function ringBell(selector){
+  const els = document.querySelectorAll(selector || '.bell-icon');
+  els.forEach(el => {
+    el.classList.remove('bell-ring');
+    // 強制重排再加上 class 才會重播 animation
+    void el.offsetWidth;
+    el.classList.add('bell-ring');
+  });
+}
+/* 卡片淡出收起 (刪除動畫) */
+function fadeCollapseRemove(element, cb){
+  if(!element) return;
+  element.classList.add('fade-collapse');
+  setTimeout(()=> {
+    try { element.remove(); } catch(_){}
+    if(cb) try { cb(); } catch(_){}
+  }, 480);
+}
+
+/* ── POLISH-10/3 觸發點整合 (進入 overview 時檢查) ── */
+function checkCelebrationTriggers(){
+  if(!App.db || !App.session) return;
+  try {
+    const stats = computeTodayStats();
+    // 1. 全班 100% 簽到
+    if(App.session.role === 'teacher' && stats.total > 0 && stats.signed === stats.total){
+      celebrateOnce('all-signed-' + td(), {
+        msg:'🎉 全班 100% 到齊!', count:80
+      });
+    }
+    // 2. 跨裝置同步啟用 (首次)
+    if(App.fbStatus === 'online'){
+      const hasShown = localStorage.getItem('cms_v3_celebrated_fb-online');
+      if(!hasShown){
+        celebrateOnce('fb-online', { msg:'🎉 同步啟用!', count:60 });
+      }
+    }
+  } catch(_){}
 }
 
 /**
@@ -21548,7 +22634,15 @@ function renderAttReportMonthly(content){
 
 function renderAttReportStudents(content){
   if(!App.db.students.length){
-    content.appendChild(renderEmpty({ icon:'👥', title:'尚無學生' }));
+    content.appendChild(renderEmpty({
+      svg:'student',
+      title:'尚無學生',
+      desc:'匯入 CSV 或手動建立第一位學生, 即可開始點名',
+      actions:[
+        { label:'+ 新增第一位學生', primary:true, onclick:()=> { try { go('students'); } catch(_){} } },
+        { label:'查看示範資料', onclick:()=> { try { renderDemoData(); } catch(_){} } }
+      ]
+    }));
     return;
   }
 
@@ -21583,7 +22677,11 @@ function renderAttReportStudents(content){
   });
 
   if(!rows.length){
-    content.appendChild(renderEmpty({ icon:'🔍', title:'查無學生' }));
+    content.appendChild(renderEmpty({
+      svg:'search',
+      title:'查無學生',
+      desc:'試試其他關鍵字, 或檢查篩選條件'
+    }));
     return;
   }
 
@@ -22708,9 +23806,18 @@ function resetTimer(){
    HELP PAGE (使用說明) — 老師端 / 學生端共用
    ──────────────────────────────────────────────────────────── */
 function rHelp(content){
-  content.appendChild(el('h1', null, '📖 使用說明'));
-  content.appendChild(el('p', { class:'muted small', style:{marginBottom:'14px'} },
-    '快速上手指南 · 點各區塊展開'));
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '📖 使用說明'),
+      el('div', { class:'muted small' }, '快速上手指南 · 點各區塊展開')
+    ),
+    el('div', { class:'flex no-print', style:{flexWrap:'wrap',gap:'6px'} },
+      // POLISH-10/4 入口: 鍵盤快捷鍵說明
+      el('button', { class:'btn btn-sm', title:'查看所有快捷鍵 (亦可按 ? 鍵)',
+        onclick:()=> { try { openShortcutHelp(); } catch(_){} } },
+        '⌨️ 鍵盤快捷鍵')
+    )
+  ));
 
   const isTeacher = App.session && App.session.role === 'teacher';
   const sections = [];
@@ -22826,7 +23933,12 @@ function rHelp(content){
   // 聯絡與支援
   content.appendChild(el('div', { class:'card', style:{marginTop:'14px',background:'var(--primary-soft)',borderColor:'var(--primary)'} },
     el('h3', null, '💡 找不到答案？'),
-    el('div', { class:'small' }, '按 Ctrl+K（Mac: Cmd+K）開啟命令面板搜尋任何功能，或聯絡老師詢問')
+    el('div', { class:'small', style:{lineHeight:'1.7'} },
+      '· 按 ', el('span', { class:'kbd' }, 'Ctrl'), ' + ', el('span', { class:'kbd' }, 'K'), ' 開啟命令面板搜尋任何功能', el('br'),
+      '· 按 ', el('span', { class:'kbd' }, 'Ctrl'), ' + ', el('span', { class:'kbd' }, 'P'), ' 開啟 Quick Switcher 快速跳到任何頁面 / 學生', el('br'),
+      '· 按 ', el('span', { class:'kbd' }, '?'), ' 查看所有鍵盤快捷鍵', el('br'),
+      '· 或聯絡老師詢問'
+    )
   ));
 }
 
@@ -25790,11 +26902,14 @@ function rQuiz(content){
 function quizRenderList(c){
   const all = App.db.quizzes || [];
   if(!all.length){
-    c.appendChild(el('div', { class:'card empty' },
-      el('div', { class:'ico' }, '📝'),
-      el('div', null, '尚無小考'),
-      el('button', { class:'btn btn-primary', style:{marginTop:'10px'}, onclick:()=> { App._quizTab='new'; rerender(); } }, '建立第一份')
-    ));
+    c.appendChild(renderEmpty({
+      svg:'homework',
+      title:'尚無小考',
+      desc:'建立第一份小考, 系統會自動計分並產生統計圖表',
+      actions:[
+        { label:'+ 建立第一份小考', primary:true, onclick:()=> { App._quizTab='new'; rerender(); } }
+      ]
+    }));
     return;
   }
   const card = el('div', { class:'card' });
@@ -26880,6 +27995,12 @@ function checkAndAwardBadges(studentId){
   });
   if(awarded > 0){
     try { saveDB(); } catch(_) {_swallow('auto',_)}
+    // POLISH-10/3: 學生本人取得新徽章時灑彩屑
+    try {
+      if(App.session && App.session.role === 'student' && App.session.id === studentId){
+        celebrate({ msg:'🏅 獲得新徽章!', count: 80 });
+      }
+    } catch(_){ _swallow('badge-celebrate',_); }
   }
   return awarded;
 }
@@ -27139,7 +28260,11 @@ function rMyNotes(content){
       return (b.updatedAt||0) - (a.updatedAt||0);
     });
     if(!arr.length){
-      wrap.appendChild(el('div', { class:'card empty' }, '尚無筆記，點右上「＋ 新增筆記」開始'));
+      wrap.appendChild(renderEmpty({
+        svg:'homework',
+        title: st.search ? '查無符合的筆記' : '尚無筆記',
+        desc: st.search ? '試試其他關鍵字或清除篩選' : '建立第一則筆記, 記錄教學心得'
+      }));
       return;
     }
     arr.forEach(n => {
