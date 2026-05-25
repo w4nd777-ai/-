@@ -3603,7 +3603,10 @@ window.DEFAULT_FB_CFG = window.DEFAULT_FB_CFG || {
   storageBucket: "cms-w4nd777.firebasestorage.app",
   messagingSenderId: "833333904571",
   appId: "1:833333904571:web:0e6d36806831bf5e9a959e",
-  measurementId: "G-DCTV4KDPEW"
+  measurementId: "G-DCTV4KDPEW",
+  // F-02: sentinel 標記「已嵌入使用者自己的 Firebase」（不是 placeholder）
+  _embeddedAt: '2026-05-25',
+  _embeddedProject: 'cms-w4nd777'
 };
 
 /* 啟動時若使用者沒設定 Firebase 但有 DEFAULT_FB_CFG → 自動套用 */
@@ -3722,6 +3725,34 @@ function clearManagedTimer(id){
     const i = App._timers.indexOf(id);
     if(i >= 0) App._timers.splice(i, 1);
   }
+}
+
+/* F-03: 表單草稿自動儲存 (用 localStorage)
+   - setupDraftSave(textarea/input, key): 套用後鍵入 500ms 後自動寫入草稿
+   - clearDraft(key): 送出成功後清掉
+   key 建議帶上 user id, 例如 'leave_' + me.id
+*/
+function setupDraftSave(field, key){
+  if(!field || !key) return;
+  const lsKey = 'cms_v3_draft_' + key;
+  try {
+    const saved = localStorage.getItem(lsKey);
+    if(saved && !field.value) field.value = saved;
+  } catch(_){}
+  let t = null;
+  field.addEventListener('input', () => {
+    if(t) clearTimeout(t);
+    t = setTimeout(() => {
+      try {
+        if(field.value) localStorage.setItem(lsKey, field.value);
+        else localStorage.removeItem(lsKey);
+      } catch(_){}
+    }, 500);
+  });
+}
+function clearDraft(key){
+  if(!key) return;
+  try { localStorage.removeItem('cms_v3_draft_' + key); } catch(_){}
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -4666,7 +4697,9 @@ const Sync = (() => {
   const ARRAY_COLLECTIONS = [
     'students','attendance','messages','leaves','pending','announcements',
     'assignments','submissions','evals','peerEvals','selfEvals','feedbacks',
-    'attendanceNotes','passwordResets','accounts','_qrCodes'
+    'attendanceNotes','passwordResets','accounts','_qrCodes',
+    // F-01：補上 behavior + quizSubmissions（之前漏同步）
+    'behavior','quizSubmissions','quizzes','notes','badges','todos'
   ];
   // 物件型（key→value）的 collection
   const OBJ_COLLECTIONS = ['settings','grades','branding'];
@@ -9515,13 +9548,22 @@ function renderTopbar(role){
   else if(App.fbStatus === 'connecting'){ connClass='connecting'; connText='連線中'; }
   else if(App.fbStatus === 'error'){ connClass='error'; connText='錯誤'; }
   else if(App.fbStatus === 'idle'){ connClass='offline'; connText='本機'; }
-  actions.appendChild(el('span', { class:'conn ' + connClass, title:'Firebase 狀態', onclick:()=> go('firebase') },
+  // F-15: aria-label for connection status
+  actions.appendChild(el('span', { class:'conn ' + connClass,
+    title:'Firebase 狀態：' + connText,
+    'aria-label':'同步狀態：' + connText + '，點擊進入設定',
+    role:'button', tabindex:'0',
+    onclick:()=> go('firebase') },
     el('span', { class:'dot' }), connText
   ));
 
   // pending badge (teacher only)
   if(role === 'teacher' && App.db.pending && App.db.pending.length){
-    actions.appendChild(el('button', { class:'btn btn-sm', onclick:()=> go('pending') },
+    // F-15: aria-label
+    actions.appendChild(el('button', { class:'btn btn-sm',
+      title:'有 ' + App.db.pending.length + ' 則註冊申請待審核',
+      'aria-label':'註冊申請待審核：' + App.db.pending.length + ' 則',
+      onclick:()=> go('pending') },
       '📥 ' + App.db.pending.length
     ));
   }
@@ -9795,6 +9837,9 @@ function rOv(content){
     el('div', { class:'flex no-print' },
       el('button', { class:'btn btn-sm', onclick:()=> rerender(), title:'重新載入資料' }, '🔄 重整'),
       el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
+      // F-06: 群發通知未到家長
+      stats.absent > 0 ? el('button', { class:'btn btn-sm', style:{background:'var(--danger-soft)',color:'var(--danger)'},
+        onclick: notifyAbsentParents, title:'用 mailto 寄信給今日缺席學生的家長' }, '📧 通知未到家長') : null,
       el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('attendance'), title:'進入點名頁面' }, '✅ 點名 →')
     )
   ));
@@ -10186,6 +10231,125 @@ function openLeaveDialog(studentId){
 }
 
 /* ════════════════════════════════════════════════════════════
+   F-07：學生整合 Profile 頁
+   - route: 'studentprofile'  (App._spId = studentId 帶入)
+   - 顯示一位學生的所有資料: 基本卡 + 統計 + 時間軸
+   ──────────────────────────────────────────────────────────── */
+function rStudentProfile(content){
+  const sid = App._spId;
+  const s = (App.db.students || []).find(x => x.id === sid);
+  if(!s){
+    content.appendChild(el('div', { class:'card' },
+      el('h3', null, '找不到學生'),
+      el('button', { class:'btn', style:{marginTop:'10px'}, onclick:()=> go('students') }, '← 回學生名單')
+    ));
+    return;
+  }
+  // 副老師班級權限檢查
+  if(!checkStudentClassPerm(s.id)){
+    content.appendChild(el('div', { class:'card', style:{background:'var(--warn-soft)'} },
+      '🔒 你沒有此學生班級的權限',
+      el('div', { style:{marginTop:'10px'} },
+        el('button', { class:'btn', onclick:()=> go('students') }, '← 回學生名單'))
+    ));
+    return;
+  }
+
+  // 頂列
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
+    el('div', { class:'flex', style:{alignItems:'center',gap:'12px'} },
+      s.avatar
+        ? el('img', { src: s.avatar, style:{width:'72px',height:'72px',borderRadius:'50%',objectFit:'cover',border:'3px solid var(--primary)'} })
+        : el('div', { class:'avatar', style:{width:'72px',height:'72px',fontSize:'28px',border:'3px solid var(--primary)'} }, initials(s.name)),
+      el('div', null,
+        el('h1', { style:{margin:'0 0 4px'} }, s.name + (s.seat ? ' (' + s.seat + '號)' : '')),
+        el('div', { class:'muted small' }, (s.cls || '未分班') + (s.sid ? ' · 學號 ' + s.sid : ''))
+      )
+    ),
+    el('div', { class:'flex no-print' },
+      el('button', { class:'btn btn-sm', onclick:()=> go('students') }, '← 回名單'),
+      el('button', { class:'btn btn-sm', onclick:()=> openStudentEdit(s) }, '✏️ 編輯'),
+      el('button', { class:'btn btn-sm', onclick: printCurrent }, '🖨')
+    )
+  ));
+
+  // 統計卡 (出席率/作業繳交率/平均分/行為點數)
+  const att = (App.db.attendance || []).filter(a => a.studentId === s.id);
+  const todayD = new Date();
+  const start = new Date(todayD.getFullYear(), todayD.getMonth() - 1, todayD.getDate()); // 近 30 天
+  const att30 = att.filter(a => new Date(a.date) >= start);
+  // 簡單上學日 = 30
+  const attRate = Math.round(att30.length / 30 * 100);
+  const subs = (App.db.submissions || []).filter(x => x.studentId === s.id);
+  const asgnAll = (App.db.assignments || []).length;
+  const subRate = asgnAll ? Math.round(subs.length / asgnAll * 100) : 0;
+  const scores = subs.filter(x => typeof x.score === 'number').map(x => x.score);
+  const avgScore = scores.length ? Math.round(scores.reduce((a,b)=> a+b, 0) / scores.length) : null;
+  let behTotal = 0;
+  try { behTotal = computeBehaviorPoints(s.id, 'all').total; } catch(_){}
+
+  const statGrid = el('div', { class:'grid grid-4', style:{marginBottom:'14px'} },
+    el('div', { class:'stat s-success' },
+      el('div', { class:'num' }, attRate + '%'),
+      el('div', { class:'lbl' }, '出席率 (近30天)')
+    ),
+    el('div', { class:'stat s-accent' },
+      el('div', { class:'num' }, subRate + '%'),
+      el('div', { class:'lbl' }, '作業繳交率')
+    ),
+    el('div', { class:'stat s-warn' },
+      el('div', { class:'num' }, avgScore == null ? '—' : String(avgScore)),
+      el('div', { class:'lbl' }, '平均分')
+    ),
+    el('div', { class:'stat ' + (behTotal >= 0 ? 's-success' : 's-danger') },
+      el('div', { class:'num' }, (behTotal >= 0 ? '+' : '') + behTotal),
+      el('div', { class:'lbl' }, '行為點數')
+    )
+  );
+  content.appendChild(statGrid);
+
+  // 時間軸
+  const events = [];
+  att30.forEach(a => events.push({ ts: a.ts || new Date(a.date).getTime(), ico:'✅', label:'出席 ' + a.date + (a.time?' · '+a.time:'') + (a.status==='late'?' (遲到)':''), color:'var(--success)' }));
+  subs.slice().sort((a,b)=> (b.ts||0)-(a.ts||0)).slice(0, 30).forEach(sub => {
+    const asg = (App.db.assignments || []).find(x => x.id === sub.assignmentId);
+    events.push({ ts: sub.ts || 0, ico:'📤', label:'繳交「' + (asg?asg.title:'(已刪除作業)') + '」' + (sub.score != null ? ' · ' + sub.score + ' 分' : ' · 未批改'), color:'var(--accent)' });
+  });
+  (App.db.quizSubmissions || []).filter(q => q.studentId === s.id).forEach(qs => {
+    const qz = (App.db.quizzes || []).find(x => x.id === qs.quizId);
+    events.push({ ts: qs.submittedAt || 0, ico:'📝', label:'小考「' + (qz?qz.title:'(已刪)') + '」 ' + (qs.score || 0) + ' 分', color:'var(--warn)' });
+  });
+  (App.db.behavior || []).filter(b => b.studentId === s.id).forEach(b => {
+    const sign = b.type === 'neg' ? '-' : '+';
+    const col = b.type === 'neg' ? 'var(--danger)' : 'var(--success)';
+    events.push({ ts: b.ts || 0, ico: b.type === 'neg' ? '⚠️' : '⭐',
+      label: '行為 ' + (b.category || '其他') + ' ' + sign + Math.abs(b.points || 0) + (b.note ? ' · ' + b.note : ''), color: col });
+  });
+  // 評語
+  (App.db.evals || []).filter(e => e.studentId === s.id).forEach(ev => {
+    events.push({ ts: ev.ts || 0, ico:'💬', label:'評語 ' + (ev.comment || '').slice(0, 60), color:'var(--primary)' });
+  });
+  events.sort((a,b)=> (b.ts || 0) - (a.ts || 0));
+
+  const tl = el('div', { class:'card' });
+  tl.appendChild(el('h3', null, '📜 活動時間軸 (最新 50 筆)'));
+  if(!events.length){
+    tl.appendChild(el('div', { class:'empty' }, '尚無活動'));
+  } else {
+    events.slice(0, 50).forEach(ev => {
+      tl.appendChild(el('div', { class:'list-row', style:{borderLeft:'3px solid '+ev.color, paddingLeft:'10px'} },
+        el('div', { style:{fontSize:'18px',marginRight:'8px'} }, ev.ico),
+        el('div', { class:'info' },
+          el('div', { class:'name', style:{fontSize:'14px'} }, ev.label),
+          el('div', { class:'sub' }, ev.ts ? relTime(ev.ts) : '')
+        )
+      ));
+    });
+  }
+  content.appendChild(tl);
+}
+
+/* ════════════════════════════════════════════════════════════
    TEACHER: STUDENTS (rStu)
    ──────────────────────────────────────────────────────────── */
 function rStu(content){
@@ -10213,6 +10377,20 @@ function rStu(content){
   }});
   if(App._stuSearch) inp.value = App._stuSearch;
   searchBar.appendChild(inp);
+  // F-08: 顯示封存 toggle
+  const archivedCount = (App.db.students || []).filter(s => (s.status || 'active') !== 'active').length;
+  if(archivedCount > 0 || App._stuShowArchived){
+    const tog = el('label', { class:'small', style:{display:'inline-flex',alignItems:'center',gap:'6px',marginTop:'8px',cursor:'pointer'} });
+    const tbox = el('input', { type:'checkbox' });
+    if(App._stuShowArchived) tbox.checked = true;
+    tbox.addEventListener('change', e => {
+      App._stuShowArchived = e.target.checked;
+      renderList();
+    });
+    tog.appendChild(tbox);
+    tog.appendChild(el('span', null, ' 顯示已封存/已轉班學生 (' + archivedCount + ' 人)'));
+    searchBar.appendChild(tog);
+  }
   content.appendChild(searchBar);
 
   const listWrap = el('div', { class:'card' });
@@ -10221,6 +10399,10 @@ function rStu(content){
   function renderList(){
     listWrap.innerHTML = '';
     let students = App.db.students.slice();
+    // F-08: 預設只顯示 active；除非使用者開啟「顯示封存」
+    if(!App._stuShowArchived){
+      students = students.filter(s => (s.status || 'active') === 'active');
+    }
     const q = App._stuSearch || '';
     if(q){
       students = students.filter(s =>
@@ -10308,14 +10490,22 @@ function rStu(content){
             ? el('span', { class:'pill pill-att ok', style:{fontSize:'10px',marginLeft:'6px'}, title:'學生已設定自己的密碼' }, '✅ 已改')
             : el('span', { class:'pill', style:{fontSize:'10px',marginLeft:'6px',background:'var(--surface-2)',color:'var(--text-muted)'}, title:'使用預設密碼' }, '預設'));
 
+      // F-07: 學生姓名 / 整列點擊 → 跳到整合 Profile 頁
+      const nameDiv = el('div', { class:'name', style:{cursor:'pointer'},
+        title:'點此查看完整 profile',
+        onclick: ()=> { App._spId = s.id; go('studentprofile'); }
+      }, [s.name + (s.seat ? ` (${s.seat})` : ''), pwBadge]);
       row.appendChild(el('div', { class:'info' },
-        el('div', { class:'name' }, [s.name + (s.seat ? ` (${s.seat})` : ''), pwBadge]),
+        nameDiv,
         el('div', { class:'sub' }, (s.cls || '無班級')
           + (s.sid ? ' · 學號 ' + s.sid : '')
           + (s.email?' · '+s.email:'')
         )
       ));
       const acts = el('div', { class:'actions' });
+      // F-07: 加個 profile 按鈕（方便點）
+      acts.appendChild(el('button', { class:'btn btn-sm', title:'查看完整 profile',
+        onclick:()=> { App._spId = s.id; go('studentprofile'); } }, '👤'));
       acts.appendChild(el('button', { class:'btn btn-sm', title:'重設密碼為學號末 4 碼', onclick: async ()=> {
         if(!requirePerm('canEditStudents','重設學生密碼')) return;  // H1
         if(!checkStudentClassPerm(s.id)){ toast('您沒有此學生班級的權限','warning'); return; }
@@ -10339,6 +10529,41 @@ function rStu(content){
       } }, '🔑'));
       acts.appendChild(el('button', { class:'btn btn-sm', title:'代下載成績單', onclick:()=> exportStudentReport(s.id) }, '📄'));
       acts.appendChild(el('button', { class:'btn btn-sm', title:'查看徽章', onclick:()=> openStudentBadgesView(s.id) }, '🏅'));
+      // F-08: 封存 / 轉班 / 取消封存
+      const isActive = (s.status || 'active') === 'active';
+      if(isActive){
+        acts.appendChild(el('button', { class:'btn btn-sm', title:'封存學生（隱藏不刪除）', onclick: async ()=> {
+          if(!requirePerm('canEditStudents','封存學生')) return;
+          if(!await confirmDlg('確定封存 ' + s.name + '？\n封存後預設不顯示在名單，可隨時取消封存。\n出席/作業/成績紀錄會保留。')) return;
+          s.status = 'archived';
+          s.archivedAt = Date.now();
+          saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+          toast('已封存 ' + s.name, 'success');
+          rerender();
+        }}, '⏸'));
+        acts.appendChild(el('button', { class:'btn btn-sm', title:'轉班', onclick: async ()=> {
+          if(!requirePerm('canEditStudents','轉班')) return;
+          const newCls = await promptDlg('新班級', s.cls || '', { title:'轉班：' + s.name });
+          if(newCls == null) return;
+          const oldCls = s.cls || '';
+          s.cls = newCls.trim();
+          if(!s.classHistory) s.classHistory = [];
+          s.classHistory.push({ from: oldCls, to: s.cls, at: Date.now() });
+          saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+          toast(s.name + ' 已轉班：' + oldCls + ' → ' + s.cls, 'success');
+          rerender();
+        }}, '↔'));
+      } else {
+        // 已封存 → 顯示「取消封存」按鈕
+        acts.appendChild(el('button', { class:'btn btn-sm btn-success', title:'取消封存', onclick: async ()=> {
+          if(!requirePerm('canEditStudents','取消封存')) return;
+          s.status = 'active';
+          s.archivedAt = null;
+          saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+          toast('已恢復 ' + s.name, 'success');
+          rerender();
+        }}, '▶'));
+      }
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openStudentEdit(s) }, '✏️'));
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         const ok = await confirmDlg('確定刪除 ' + s.name + '？相關出席紀錄會保留', { danger:true });
@@ -10828,7 +11053,25 @@ function rAtt(content){
     const a = att.find(x => x.studentId === stu.id);
     if(!a || !a.time) return false;
     const [h,m] = a.time.split(':').map(Number);
-    return h*60+m > lateThreshold;
+    const stuMin = h*60 + m;
+    // F-18: 若有課表 + 學生班級今日有第一節, 用該節 startTime + lateMinutes 為遲到門檻
+    try {
+      if(stu.cls && typeof getTodayTimetable === 'function'){
+        const tts = getTodayTimetable(stu.cls);
+        if(tts && tts.length){
+          const periods = (typeof getPeriods === 'function') ? getPeriods() : [];
+          // 找出今日第一節（period 最小的）
+          const first = tts.slice().sort((x,y)=> (x.period||0)-(y.period||0))[0];
+          const p = first && periods.find(x => x.period === first.period);
+          if(p && p.startTime){
+            const [ph,pm] = p.startTime.split(':').map(Number);
+            const thr = ph*60 + pm + lateMinSetting;
+            return stuMin > thr;
+          }
+        }
+      }
+    } catch(_){}
+    return stuMin > lateThreshold;
   }
 
   if(filter === 'signed') students = students.filter(s => signedIds.has(s.id));
@@ -11324,7 +11567,10 @@ function renderMsgBubble(m, meId){
 function buildMsgComposer(onSend, _legacy, opts){
   opts = opts || {};
   const inputBar = el('div', { style:{display:'flex',gap:'8px',marginTop:'12px',paddingTop:'12px',borderTop:'1px solid var(--border)',flexWrap:'wrap',alignItems:'center'} });
-  const inp = el('input', { class:'input', placeholder:'輸入訊息...', style:{flex:'1',minWidth:'140px'} });
+  const inp = el('input', { class:'input', placeholder:'輸入訊息...（自動儲存草稿）', style:{flex:'1',minWidth:'140px'} });
+  // F-03: 訊息草稿（用 session id 區分；公開/私訊共用同一個 key 簡化）
+  const _draftKey = 'msg_' + ((App.session && App.session.id) || 'anon');
+  setupDraftSave(inp, _draftKey);
   let pendingAttach = null;
   let anonymous = false;
   const fInp = el('input', { type:'file', style:{display:'none'} });
@@ -11359,6 +11605,8 @@ function buildMsgComposer(onSend, _legacy, opts){
     if(!t && !pendingAttach){ return; }
     onSend(t, pendingAttach, { anonymous });
     inp.value = '';
+    // F-03: 送出後清掉草稿
+    clearDraft(_draftKey);
     pendingAttach = null;
     refreshAttachSlot();
   };
@@ -12559,6 +12807,28 @@ function rSettings(content){
   fLate.appendChild(iLate);
   card.appendChild(fLate);
 
+  // F-11: 簽到時段限制（可選）
+  const sw = App.db.settings.signWindow || { from:'', to:'', strict:false };
+  const fSw = el('div', { class:'field', style:{padding:'10px',background:'var(--surface-2)',borderRadius:'8px',marginTop:'8px'} });
+  fSw.appendChild(el('label', { class:'label' }, '🕐 簽到時段限制（可選）'));
+  fSw.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} },
+    '若開啟「嚴格模式」, 學生只能在指定時段內自助簽到（老師後台補簽不受限）'));
+  const swRow = el('div', { class:'flex', style:{gap:'6px',alignItems:'center',flexWrap:'wrap'} });
+  const iSwFrom = el('input', { class:'input', type:'time', value: sw.from || '', style:{width:'120px'} });
+  const iSwTo = el('input', { class:'input', type:'time', value: sw.to || '', style:{width:'120px'} });
+  swRow.appendChild(el('span', { class:'small' }, '從'));
+  swRow.appendChild(iSwFrom);
+  swRow.appendChild(el('span', { class:'small' }, '到'));
+  swRow.appendChild(iSwTo);
+  const swStrictLab = el('label', { class:'flex', style:{gap:'4px',alignItems:'center',cursor:'pointer'} });
+  const iSwStrict = el('input', { type:'checkbox' });
+  if(sw.strict) iSwStrict.checked = true;
+  swStrictLab.appendChild(iSwStrict);
+  swStrictLab.appendChild(el('span', { class:'small' }, '嚴格模式（時段外阻擋學生簽到）'));
+  swRow.appendChild(swStrictLab);
+  fSw.appendChild(swRow);
+  card.appendChild(fSw);
+
   card.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
     // H1: 副老師寫入權限攔截
     if(!requirePerm('canEditSettings','編輯設定')) return;
@@ -12566,6 +12836,12 @@ function rSettings(content){
     App.db.settings.teacherName = iTeacher.value.trim() || '老師';
     App.db.settings.startTime = iStart.value || '08:00';
     App.db.settings.lateMinutes = parseInt(iLate.value,10) || 10;
+    // F-11: 寫入簽到時段
+    App.db.settings.signWindow = {
+      from: iSwFrom.value || '',
+      to: iSwTo.value || '',
+      strict: !!iSwStrict.checked
+    };
     App.db.branding.title = App.db.settings.schoolName;
     saveDB();
     Sync.setNode('settings', App.db.settings);
@@ -12915,22 +13191,34 @@ function rFirebase(content){
       border:'2px dashed var(--primary)'
     } });
     globalCard.appendChild(el('h3', null, '🌐 全站預設 (推薦) — 所有訪客自動連線'));
+    // F-02: 顯示目前嵌入專案 + 引導使用者換成自己的
     globalCard.appendChild(el('p', { class:'small', style:{lineHeight:'1.7'} },
-      '不想讓學生 / 其他電腦每次都掃 QR Code? 把你的 Firebase 設定「寫進 HTML 檔案」, ' +
-      '推上 GitHub Pages 後, ' +
-      el('strong', null, '所有訪客一打開網站就自動連線你的 Firebase').outerHTML +
-      ', 完全免設定。'));
+      '目前 HTML 已嵌入 ',
+      el('strong', null, (window.DEFAULT_FB_CFG && (window.DEFAULT_FB_CFG._embeddedProject || window.DEFAULT_FB_CFG.projectId)) || '(尚未嵌入)').outerHTML,
+      ' 專案，所有訪客一打開網站就自動連線。如需換成你自己的 Firebase 專案，貼下方程式碼到 HTML 取代即可。'));
 
-    // 已套用偵測
-    const isApplied = !!(window.DEFAULT_FB_CFG && window.DEFAULT_FB_CFG.databaseURL);
+    // F-02: 已套用偵測 — 用 sentinel + placeholder 判斷
+    //   1) DEFAULT_FB_CFG 必須含 _embeddedAt（代表是真正嵌入的，不是空 placeholder）
+    //   2) databaseURL 必須不含 'your-project' 字樣（排除示範值）
+    //   3) 使用者目前的 LS_FB 必須與 DEFAULT_FB_CFG 完全相同（代表本機正在用嵌入版）
+    const _def = window.DEFAULT_FB_CFG || {};
+    const _hasEmbed = !!_def._embeddedAt && !!_def.databaseURL && !String(_def.databaseURL).includes('your-project');
+    let _lsMatches = false;
+    try {
+      const _ls = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+      _lsMatches = !!(_ls && _ls.databaseURL && _ls.databaseURL === _def.databaseURL);
+    } catch(_){}
+    const isApplied = _hasEmbed && _lsMatches;
     globalCard.appendChild(el('div', { style:{
       padding:'10px',marginTop:'8px',borderRadius:'8px',
       background: isApplied ? 'var(--success-soft)' : 'var(--warn-soft)',
       color: isApplied ? 'var(--success)' : 'var(--warn)',
       fontWeight:'600'
     } }, isApplied
-      ? '✅ 全站預設已啟用 (databaseURL: ' + (String(window.DEFAULT_FB_CFG.databaseURL).slice(0,50)) + '...)'
-      : '⚠️ 尚未設定為全站預設 (目前 Firebase 只在你這台裝置生效)'));
+      ? '✅ 全站預設已啟用 · 專案 ' + (_def._embeddedProject || _def.projectId || '(unknown)') + ' · 所有訪客自動連線'
+      : (_hasEmbed
+          ? '⚠️ 已嵌入專案 ' + (_def._embeddedProject || _def.projectId || '') + '，但你本機 Firebase 設定與嵌入值不同（其他訪客會用嵌入值連線）'
+          : '⚠️ 尚未嵌入全站預設 · 目前 Firebase 只在你這台裝置生效，需貼下方程式碼到 HTML')));
 
     // 生成程式碼片段
     const snippet = 'window.DEFAULT_FB_CFG = ' + JSON.stringify(JSON.parse(fbCfgRaw), null, 2) + ';';
@@ -13276,6 +13564,17 @@ function doStudentCheckIn(){
   const me = currentStudent();
   if(!me) return;
   const today = td();
+  // F-11: 簽到時段限制（只對學生自助；老師補簽不受限）
+  try {
+    const sw = (App.db.settings && App.db.settings.signWindow) || null;
+    if(sw && sw.strict && sw.from && sw.to){
+      const now = nt();
+      if(now < sw.from || now > sw.to){
+        toast('尚未到簽到時段 (' + sw.from + ' - ' + sw.to + ')', 'warn', 5000);
+        return;
+      }
+    }
+  } catch(_){}
   if(studentSignedToday(me.id)){
     toast('你今天已經簽到過了','warn');
     return;
@@ -13345,6 +13644,8 @@ function studentCheckOut(){
   saveDB();
   try { Sync.setMap('attendance', App.db.attendance); } catch(e){_swallow('auto',e)}
   bcNotify();
+  // F-25: 簽退 webhook
+  try { triggerWebhook('checkout', { name: me.name, cls: me.cls || '', time: rec.outTime, date: today }); } catch(_){_swallow('webhook-out',_)}
   toast('👋 簽退成功！' + rec.outTime, 'success', 3000);
   setTimeout(()=> rerender(), 600);
 }
@@ -13360,9 +13661,11 @@ function studentRequestLeave(){
   f1.appendChild(i1);
   const f2 = el('div', { class:'field' });
   f2.appendChild(el('label', { class:'label' }, '原因'));
-  const i2 = el('textarea', { class:'textarea', placeholder:'例：身體不適' });
+  const i2 = el('textarea', { class:'textarea', placeholder:'例：身體不適（自動儲存草稿）' });
   f2.appendChild(i2);
   m.root.appendChild(f1); m.root.appendChild(f2);
+  // F-03: 請假原因自動草稿
+  setupDraftSave(i2, 'leave_' + me.id);
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
@@ -13375,6 +13678,8 @@ function studentRequestLeave(){
     App.db.leaves.push(rec);
     saveDB(); Sync.push('leaves', rec); bcNotify();
     triggerWebhook('leave-request', { student: me.name, date: d, reason: r });
+    // F-03: 送出後清草稿
+    clearDraft('leave_' + me.id);
     toast('已送出請假申請，等待老師審核','success', 3000);
     m.close();
     rerender();
@@ -14477,9 +14782,28 @@ function openSubmissionGrade(sub, list=null, idx=0){
 
   actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> saveGrade(false) }, '儲存'));
   if(list && list.length > 1){
-    actions.appendChild(el('button', { class:'btn btn-success', onclick:()=> saveGrade(true) }, '儲存並下一位 →'));
+    actions.appendChild(el('button', { class:'btn btn-success', onclick:()=> saveGrade(true) }, '✓ 存並下一份'));
   }
   m.root.appendChild(actions);
+
+  // F-10: 快速分數鍵盤 — 1~9 = 10~90 分, 0 = 100 分, Enter = 儲存
+  m.root.addEventListener('keydown', e => {
+    const tag = e.target && e.target.tagName;
+    if(tag === 'TEXTAREA' || tag === 'INPUT') return;
+    if(e.ctrlKey || e.altKey || e.metaKey) return;
+    if(/^[0-9]$/.test(e.key)){
+      const n = parseInt(e.key, 10);
+      const score = n === 0 ? 100 : n * 10;
+      iScore.value = Math.min(score, points);
+      e.preventDefault();
+    } else if(e.key === 'Enter' && !e.shiftKey){
+      saveGrade(list && list.length > 1);
+      e.preventDefault();
+    }
+  });
+  // 提示
+  m.root.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px',textAlign:'right'} },
+    '⌨ 快捷鍵：1~9 = 10~90 分 · 0 = 100 分 · Enter = 儲存' + (list && list.length > 1 ? '並下一份' : '')));
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -16340,6 +16664,7 @@ async function triggerWebhook(eventType, payload){
     'attendance-issue':'⚠️ 出席異常',
     'leave-request':'📆 請假申請',
     'checkin':'✅ 學生簽到',
+    'checkout':'👋 學生簽退',  // F-25
     'test':'🧪 測試訊息'
   };
   const title = titleMap[eventType] || '通知';
@@ -16370,6 +16695,52 @@ async function triggerWebhook(eventType, payload){
     }
     await fetch(cfg.url, opts).catch(()=>null);
   } catch(e){ /* CORS may block; user is told in UI */ }
+}
+
+/* F-06: 群發未到家長通知 (mailto 批次)
+   - 找出今日缺席 (沒簽到 + 沒請假) 的學生
+   - 收集 parentEmail / email 欄位
+   - 開 mailto: 用 ; 分隔多收件人
+*/
+function notifyAbsentParents(){
+  const today = td();
+  const stuAll = (App.db.students || []);
+  const signed = new Set((App.db.attendance || []).filter(a => a.date === today).map(a => a.studentId));
+  const leave  = new Set((App.db.leaves || []).filter(l => l.date === today && l.status !== 'rejected').map(l => l.studentId));
+  const absent = stuAll.filter(s => !signed.has(s.id) && !leave.has(s.id));
+  if(!absent.length){
+    toast('今日沒有缺席學生','info');
+    return;
+  }
+  // 收集家長 / 學生 email（家長優先）
+  const emails = [];
+  const noEmail = [];
+  absent.forEach(s => {
+    const e = s.parentEmail || s.email || '';
+    if(e && /\S+@\S+/.test(e)) emails.push(e.trim());
+    else noEmail.push(s.name || '?');
+  });
+  if(!emails.length){
+    toast('缺席學生都沒有 email 可寄送（請先在學生資料填 parentEmail 或 email）','warn', 5000);
+    return;
+  }
+  const subject = '【' + (App.db.branding?.title || '課程') + '】' + today + ' 今日未到課通知';
+  const names = absent.map(s => s.name).join('、');
+  const body = '老師您好,\n\n以下學生今日尚未到課, 請查收:\n  ' + names + '\n\n如有任何狀況請與老師聯繫, 謝謝。\n\n— 自動發送自課程管理系統';
+  // 用 ; 分隔（Outlook / 部分客戶端用 ;；Gmail 用 , — 兼用兩種會壞，挑常見的 ,）
+  const href = 'mailto:' + emails.join(',') +
+    '?subject=' + encodeURIComponent(subject) +
+    '&body=' + encodeURIComponent(body);
+  try {
+    window.location.href = href;
+    let msg = '已開啟郵件 (收件人 ' + emails.length + ' 人)';
+    if(noEmail.length) msg += '；尚有 ' + noEmail.length + ' 人未填 email';
+    toast(msg, 'success', 5000);
+    // 同時觸發 webhook (Discord / Telegram)
+    try { triggerWebhook('attendance-issue', { date: today, absent: names, count: absent.length }); } catch(_){}
+  } catch(e){
+    toast('無法開啟郵件用戶端，請手動寄信','danger');
+  }
 }
 
 function rNotify(content){
@@ -17817,7 +18188,68 @@ function rStorage(content){
         if(n > 0) toast('已移轉 ' + n + ' 個附件到 IDB','success');
         else toast('沒有需要移轉的附件','info');
         rerender();
-      }}, '🔄 移轉舊版附件')
+      }}, '🔄 移轉舊版附件'),
+      // F-14: 清理舊附件 (>90 天)
+      el('button', { class:'btn btn-sm', title:'刪除超過 90 天的繳交附件',
+        onclick: async ()=> {
+          if(!await confirmDlg('確定刪除超過 90 天的舊附件？\n（會掃描繳交紀錄的 ts，舊於 90 天的附件會刪除）', { danger:true })) return;
+          let removed = 0;
+          const cutoff = Date.now() - 90 * 24 * 3600 * 1000;
+          const subs = App.db.submissions || [];
+          for(const sub of subs){
+            if((sub.ts || 0) < cutoff){
+              const arr = sub.attaches || (sub.attach ? [sub.attach] : []);
+              for(const a of arr){
+                try { await attachDelete(a); removed++; } catch(_){}
+              }
+              sub.attaches = [];
+              sub.attach = null;
+            }
+          }
+          saveDB();
+          toast('已清理 ' + removed + ' 個舊附件','success');
+          rerender();
+        }
+      }, '🧹 清理 >90 天舊附件'),
+      // F-14: 壓縮所有圖片到 200KB
+      el('button', { class:'btn btn-sm', title:'把學生上傳的圖片重新壓縮到 200KB 以下',
+        onclick: async ()=> {
+          if(!await confirmDlg('壓縮所有圖片到 200KB 以下？\n會略損畫質但省空間，過程不可逆。')) return;
+          let done = 0, skipped = 0;
+          try {
+            const keys = await idbKeys();
+            for(const k of (keys || [])){
+              if(typeof k !== 'string' || !k.startsWith('attach_')) continue;
+              try {
+                const blob = await idbGet(k);
+                if(!blob || blob.size <= 200 * 1024){ skipped++; continue; }
+                if(!blob.type || !blob.type.startsWith('image/')){ skipped++; continue; }
+                // 用 canvas 重新編碼到 JPEG quality 0.6
+                const url = URL.createObjectURL(blob);
+                const compressed = await new Promise((res, rej) => {
+                  const img = new Image();
+                  img.onload = () => {
+                    const cv = document.createElement('canvas');
+                    cv.width = img.width;
+                    cv.height = img.height;
+                    cv.getContext('2d').drawImage(img, 0, 0);
+                    cv.toBlob(b => res(b), 'image/jpeg', 0.6);
+                  };
+                  img.onerror = rej;
+                  img.src = url;
+                });
+                URL.revokeObjectURL(url);
+                if(compressed && compressed.size < blob.size){
+                  await idbPut(k, compressed);
+                  done++;
+                } else skipped++;
+              } catch(_){ skipped++; }
+            }
+            toast('已壓縮 ' + done + ' 張圖片，' + skipped + ' 張略過','success', 5000);
+            rerender();
+          } catch(e){ toast('壓縮失敗：' + (e.message || e), 'danger'); }
+        }
+      }, '🗜 壓縮所有圖片')
     ));
   })();
   content.appendChild(cardIdb);
@@ -18277,9 +18709,11 @@ function buildSubmissionForm(asg, me, existing){
 
   const fT = el('div', { class:'field' });
   fT.appendChild(el('label', { class:'label' }, '文字內容（可選）'));
-  const iT = el('textarea', { class:'textarea', placeholder:'寫下你的回答...' });
+  const iT = el('textarea', { class:'textarea', placeholder:'寫下你的回答...（自動儲存草稿）' });
   if(existing && existing.text) iT.value = existing.text;
   fT.appendChild(iT); card.appendChild(fT);
+  // F-03: 自動儲存草稿（每位學生 × 每份作業獨立 key）
+  if(!existing) setupDraftSave(iT, 'submit_' + (me?.id || 'x') + '_' + asg.id);
 
   const fL = el('div', { class:'field' });
   fL.appendChild(el('label', { class:'label' }, '連結（可選）'));
@@ -18361,6 +18795,8 @@ function buildSubmissionForm(asg, me, existing){
       App.db.submissions.push(rec);
       logOp('submit','繳交：' + asg.title);
       saveDB(); Sync.push('submissions', rec); bcNotify();
+      // F-03: 送出成功後清掉草稿
+      clearDraft('submit_' + (me?.id || 'x') + '_' + asg.id);
       toast('已繳交！','success');
       try { checkAndAwardBadges(rec.studentId); } catch(_) {_swallow('auto',_)} // batch 5-27
       try { autoFinishAsgnTodo(rec.studentId, rec.assignmentId); } catch(_) {_swallow('auto',_)} // batch 5-29
@@ -19559,6 +19995,7 @@ function rerender(){
       const v = App.view;
       if(v === 'overview' || !v) rOv(content);
       else if(v === 'students') rStu(content);
+      else if(v === 'studentprofile') rStudentProfile(content); // F-07 學生整合 profile
       else if(v === 'attendance') rAtt(content);
       else if(v === 'leave') rLeave(content);
       else if(v === 'messages') rMsg(content);
@@ -19600,6 +20037,7 @@ function rerender(){
       else if(v === 'semestermgr') rSemesterMgr(content); // B-3 學期管理
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
+      else if(v === 'teachernotes') rTeacherNotes(content); // F-16
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -19846,6 +20284,17 @@ function boot(){
   // L10: 防雙觸發（DOMContentLoaded + readyState 兩個入口同時觸發）
   if(App._booted) return;
   App._booted = true;
+
+  // F-23: online / offline 全域事件
+  try {
+    window.addEventListener('online', () => {
+      try { toast('🌐 網路已恢復', 'success', 3000); } catch(_){}
+      try { if(typeof Sync !== 'undefined' && Sync.init) Sync.init(); } catch(_){}
+    });
+    window.addEventListener('offline', () => {
+      try { toast('📴 已離線，資料只存本機', 'warn', 5000); } catch(_){}
+    });
+  } catch(_){_swallow('online-offline',_)}
   try {
     // L8: adminreset 邏輯已抽到 handleAdminResetUrl()
     if(handleAdminResetUrl()) return;
@@ -22492,7 +22941,8 @@ function getSidebarItems(role){
         { key:'announcements', icon:'📢', label:'公告管理' },
         { key:'analytics', icon:'📈', label:'分析工具' },
         { key:'calendar', icon:'📅', label:'行事曆' },
-        { key:'gantt', icon:'📊', label:'作業甘特圖' }
+        { key:'gantt', icon:'📊', label:'作業甘特圖' },
+        { key:'teachernotes', icon:'📓', label:'教案筆記' }  // F-16
       ]},
       tools: { label:'課堂工具', items: [
         { key:'picker', icon:'🎲', label:'隨機抽籤' },
@@ -24894,16 +25344,21 @@ function rBehavior(content){
       row.appendChild(el('div', { style:{fontWeight:'700',fontSize:'18px',color:color,minWidth:'70px',textAlign:'right'} },
         sign + Math.abs(r.points || 0)));
       row.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        // F-05: 副老師需有 canEditAttendance 權限才能刪行為紀錄
+        if(!requirePerm('canEditAttendance','管理行為紀錄')) return;
         const ok = await confirmDlg('刪除此記錄？', { danger:true });
         if(!ok) return;
         // 包 C-4：備份 → 刪 → pushUndo
         const backup = _clone(r);
         App.db.behavior = App.db.behavior.filter(x => x.id !== r.id);
         saveDB();
+        // F-01: 刪除也同步到 Firebase（之前漏了）
+        try { Sync.remove('behavior', r.id); } catch(e){_swallow('sync-beh-del',e)}
         pushUndo('已刪除行為記錄', () => {
           if(!App.db.behavior.find(x => x.id === backup.id)){
             App.db.behavior.push(backup);
             saveDB();
+            try { Sync.push('behavior', backup); } catch(e){_swallow('sync-beh-undo',e)}
           }
           toast('已復原行為記錄', 'success');
           rerender();
@@ -25000,6 +25455,8 @@ function openBehaviorQuickAdd(){
     App.db.behavior = App.db.behavior || [];
     App.db.behavior.push(rec);
     saveDB();
+    // F-01: 行為紀錄推到 Firebase（之前漏了，跨裝置看不到）
+    try { Sync.push('behavior', rec); } catch(e){_swallow('sync-beh',e)}
     m.close();
     toast('已記錄','success');
     try { checkAndAwardBadges(rec.studentId); } catch(_) {_swallow('auto',_)} // batch 5-27
@@ -25030,6 +25487,50 @@ function rMyBehavior(content){
 
   const recs = (App.db.behavior || []).filter(b => b.studentId === me.id)
     .sort((a,b) => (b.ts||0) - (a.ts||0));
+
+  // F-21: 近 30 天行為點數累計趨勢（SVG 手繪）
+  try {
+    const days = 30;
+    const today = new Date(td() + 'T00:00:00');
+    const pts = [];
+    let cum = 0;
+    // 取近 30 天的記錄並按日期排序
+    const sorted = (App.db.behavior || []).filter(b => b.studentId === me.id).slice()
+      .sort((a,b) => (a.ts || 0) - (b.ts || 0));
+    for(let i = days - 1; i >= 0; i--){
+      const d = new Date(today.getTime() - i * 86400000);
+      const ds = d.toISOString().slice(0,10);
+      const dayPts = sorted.filter(b => b.date === ds)
+        .reduce((sum, b) => sum + ((b.type === 'neg' ? -1 : 1) * Math.abs(b.points || 0)), 0);
+      cum += dayPts;
+      pts.push({ date: ds, total: cum, day: dayPts });
+    }
+    if(pts.some(p => p.day !== 0)){
+      const w = 600, h = 140, pad = 30;
+      const vals = pts.map(p => p.total);
+      const max = Math.max(1, ...vals, 0);
+      const min = Math.min(-1, ...vals, 0);
+      const range = max - min || 1;
+      const xs = i => pad + (w - 2*pad) * (i / (pts.length - 1));
+      const ys = v => h - pad - (v - min) / range * (h - 2*pad);
+      const path = pts.map((p, i) => (i ? 'L' : 'M') + xs(i).toFixed(1) + ',' + ys(p.total).toFixed(1)).join(' ');
+      const zeroY = ys(0).toFixed(1);
+      const trendCard = el('div', { class:'card', style:{marginBottom:'10px'} });
+      trendCard.appendChild(el('h3', null, '📈 累計點數趨勢 (近 30 天)'));
+      const svgHtml = '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" preserveAspectRatio="xMidYMid meet" style="max-height:200px">' +
+        '<line x1="' + pad + '" y1="' + zeroY + '" x2="' + (w - pad) + '" y2="' + zeroY + '" stroke="var(--border)" stroke-dasharray="3,3"/>' +
+        '<path d="' + path + '" stroke="var(--primary)" stroke-width="2" fill="none"/>' +
+        pts.map((p, i) => '<circle cx="' + xs(i).toFixed(1) + '" cy="' + ys(p.total).toFixed(1) + '" r="3" fill="var(--primary)"><title>' + p.date + ' 累計 ' + p.total + '</title></circle>').join('') +
+        '<text x="' + pad + '" y="' + (h - 5) + '" font-size="10" fill="var(--text-muted)">' + pts[0].date.slice(5) + '</text>' +
+        '<text x="' + (w - pad - 30) + '" y="' + (h - 5) + '" font-size="10" fill="var(--text-muted)">' + pts[pts.length-1].date.slice(5) + '</text>' +
+        '</svg>';
+      const wrap = el('div');
+      wrap.innerHTML = svgHtml;
+      trendCard.appendChild(wrap);
+      content.appendChild(trendCard);
+    }
+  } catch(e){ _swallow('beh-chart', e); }
+
   const card = el('div', { class:'card' });
   card.appendChild(el('h3', null, '📋 最近 10 筆記錄'));
   if(!recs.length){
@@ -25675,6 +26176,8 @@ function openQuizGradeDetail(sub){
     // 同步寫到 scores
     syncQuizScore(sub, quiz);
     saveDB();
+    // F-01: 老師批改完小考也要同步整個 quizSubmissions（之前漏了）
+    try { Sync.setMap('quizSubmissions', App.db.quizSubmissions); } catch(e){_swallow('sync-qs-grade',e)}
     m.close();
     toast('已儲存','success');
     rerender();
@@ -25812,7 +26315,13 @@ function quizRenderTaking(content){
   if(!q){ App._quizTaking = null; rerender(); return; }
   const me = currentStudent();
 
-  // 倒數計時器（簡單 — 不持續刷新；每次點 prev/next 會更新顯示）
+  // F-04: 進入新一次 render 前清掉舊計時器（避免多重 interval 疊加）
+  if(App._quizTimerInterval){
+    try { clearManagedTimer(App._quizTimerInterval); } catch(_){}
+    App._quizTimerInterval = null;
+  }
+
+  // 倒數計時器
   const remain = t.deadline ? Math.max(0, Math.floor((t.deadline - Date.now())/1000)) : -1;
   if(t.deadline && remain <= 0){
     // 自動交卷
@@ -25820,9 +26329,12 @@ function quizRenderTaking(content){
   }
 
   const card = el('div', { class:'card' });
+  // F-04: 把 tag 拆出來給 .quiz-timer 用，方便每秒重畫
+  const timerTag = el('div', { class:'tag quiz-timer' },
+    (t.cur+1) + ' / ' + t.questions.length + (remain >= 0 ? ' · ⏰ ' + Math.floor(remain/60) + ':' + String(remain%60).padStart(2,'0') : ''));
   card.appendChild(el('div', { class:'flex-between' },
     el('h3', null, q.title),
-    el('div', { class:'tag' }, (t.cur+1) + ' / ' + t.questions.length + (remain >= 0 ? ' · ⏰ ' + Math.floor(remain/60) + ':' + String(remain%60).padStart(2,'0') : ''))
+    timerTag
   ));
 
   const qq = t.questions[t.cur];
@@ -25894,6 +26406,27 @@ function quizRenderTaking(content){
   card.appendChild(btnRow);
 
   content.appendChild(card);
+
+  // F-04: 每秒重畫倒數時間 + 時間到自動交卷
+  if(q.timeLimit && t.deadline){
+    App._quizTimerInterval = setIntervalManaged(() => {
+      // 若 taking 已結束 / DOM 已換 → 自清
+      if(!App._quizTaking || App._quizTaking.quizId !== q.id || !document.body.contains(timerTag)){
+        clearManagedTimer(App._quizTimerInterval);
+        App._quizTimerInterval = null;
+        return;
+      }
+      const newRemain = Math.max(0, Math.floor((t.deadline - Date.now())/1000));
+      timerTag.textContent = (t.cur+1) + ' / ' + t.questions.length +
+        ' · ⏰ ' + Math.floor(newRemain/60) + ':' + String(newRemain%60).padStart(2,'0');
+      if(newRemain <= 10) timerTag.style.color = 'var(--danger)';
+      if(newRemain <= 0){
+        clearManagedTimer(App._quizTimerInterval);
+        App._quizTimerInterval = null;
+        try { finishQuiz(t, q, me, true, content); } catch(_){_swallow('quiz-autosubmit',_)}
+      }
+    }, 1000);
+  }
 }
 
 function finishQuiz(t, quiz, me, timeout, content){
@@ -25923,8 +26456,12 @@ function finishQuiz(t, quiz, me, timeout, content){
   }
   syncQuizScore(sub, quiz);
   saveDB();
+  // F-01: 小考交卷後推到 Firebase（之前漏了，老師看不到學生作答）
+  try { Sync.push('quizSubmissions', sub); } catch(e){_swallow('sync-qs',e)}
   try { checkAndAwardBadges(me.id); } catch(_) {_swallow('auto',_)} // batch 5-27
   App._quizTaking = null;
+  // F-04: 清掉倒數計時器（避免殘留 interval）
+  if(App._quizTimerInterval){ try { clearManagedTimer(App._quizTimerInterval); } catch(_){} App._quizTimerInterval = null; }
   if(timeout) toast('⏰ 時間到，自動交卷！','warn');
   else toast('✅ 已提交，得分 ' + score + ' 分','success', 5000);
   if(content){
@@ -26433,6 +26970,131 @@ function openStudentBadgesView(studentId){
    ──────────────────────────────────────────────────────────── */
 function _b5NotesForStudent(studentId){
   return (App.db.notes || []).filter(n => n.studentId === studentId);
+}
+
+/* F-16: 老師教案筆記區 — 用 App.db.teacherNotes (各老師私有)
+   結構: { id, teacherId, title, content, category, pinned, createdAt, updatedAt }
+*/
+function rTeacherNotes(content){
+  if(!App.session || App.session.role !== 'teacher'){
+    content.appendChild(el('div', { class:'card' }, '需要老師身分'));
+    return;
+  }
+  if(!Array.isArray(App.db.teacherNotes)) App.db.teacherNotes = [];
+  const tid = App.session.id || 'admin';
+
+  content.appendChild(el('h1', null, '📓 教案筆記'));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'12px'} },
+    '此區為老師私有筆記，可記教學設計、課程心得、待改進事項；學生看不到。'));
+
+  App._tnState = App._tnState || { search:'', cat:'' };
+  const st = App._tnState;
+
+  const tool = el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',marginBottom:'10px'} });
+  const iSearch = el('input', { class:'input', placeholder:'🔍 搜尋筆記...', style:{flex:'1',minWidth:'140px'} });
+  iSearch.value = st.search;
+  iSearch.addEventListener('input', e => { st.search = e.target.value; renderList(); });
+  tool.appendChild(iSearch);
+  const sCat = el('select', { class:'select', style:{maxWidth:'140px'} });
+  const cats = ['', '教案', '課程心得', '待改進', '教學資源', '其他'];
+  cats.forEach(c => sCat.appendChild(el('option', { value:c, selected: c===st.cat }, c || '全部分類')));
+  sCat.addEventListener('change', ()=> { st.cat = sCat.value; renderList(); });
+  tool.appendChild(sCat);
+  tool.appendChild(el('button', { class:'btn btn-primary', onclick:()=> openTeacherNoteEditor(null) }, '＋ 新增筆記'));
+  content.appendChild(tool);
+
+  const wrap = el('div');
+  content.appendChild(wrap);
+
+  function renderList(){
+    wrap.innerHTML = '';
+    let arr = (App.db.teacherNotes || []).filter(n => n.teacherId === tid);
+    if(st.search){
+      const q = st.search.toLowerCase();
+      arr = arr.filter(n => (n.title||'').toLowerCase().includes(q) || (n.content||'').toLowerCase().includes(q));
+    }
+    if(st.cat) arr = arr.filter(n => n.category === st.cat);
+    arr.sort((a,b) => {
+      if(!!a.pinned !== !!b.pinned) return b.pinned - a.pinned;
+      return (b.updatedAt||0) - (a.updatedAt||0);
+    });
+    if(!arr.length){
+      wrap.appendChild(el('div', { class:'card empty' }, '尚無教案筆記，點右上「＋ 新增筆記」開始'));
+      return;
+    }
+    arr.forEach(n => {
+      const card = el('div', { class:'card', style:{marginBottom:'8px',cursor:'pointer'},
+        onclick:()=> openTeacherNoteEditor(n) });
+      card.appendChild(el('div', { class:'flex-between' },
+        el('div', { style:{fontWeight:'700',fontSize:'15px'} },
+          (n.pinned ? '📌 ' : '') + (n.title || '（無標題）')),
+        el('span', { class:'tiny muted' }, n.updatedAt ? new Date(n.updatedAt).toISOString().slice(0,10) : '')
+      ));
+      if(n.category) card.appendChild(el('div', { class:'tiny', style:{marginTop:'2px'} }, '🏷️ ' + n.category));
+      const preview = (n.content || '').slice(0, 160);
+      if(preview) card.appendChild(el('div', { class:'small muted', style:{marginTop:'6px',whiteSpace:'pre-wrap'} },
+        preview + (n.content.length > 160 ? '...' : '')));
+      wrap.appendChild(card);
+    });
+  }
+  renderList();
+}
+function openTeacherNoteEditor(note){
+  const tid = App.session.id || 'admin';
+  const isNew = !note;
+  const data = note ? Object.assign({}, note) : {
+    id: nid(), teacherId: tid, title:'', content:'', category:'', pinned:false,
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  const m = modal('');
+  m.root.appendChild(el('h2', null, isNew ? '📝 新增教案筆記' : '📝 編輯教案筆記'));
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '標題'));
+  const iT = el('input', { class:'input', value: data.title || '' });
+  fT.appendChild(iT); m.root.appendChild(fT);
+  const fC = el('div', { class:'field' });
+  fC.appendChild(el('label', { class:'label' }, '分類'));
+  const sC = el('select', { class:'select' });
+  ['', '教案', '課程心得', '待改進', '教學資源', '其他'].forEach(c =>
+    sC.appendChild(el('option', { value:c, selected:c===data.category }, c || '（無分類）')));
+  fC.appendChild(sC); m.root.appendChild(fC);
+  const fCt = el('div', { class:'field' });
+  fCt.appendChild(el('label', { class:'label' }, '內容'));
+  const iCt = el('textarea', { class:'textarea', rows:'10', value: data.content || '' });
+  iCt.value = data.content || '';
+  fCt.appendChild(iCt); m.root.appendChild(fCt);
+  // F-03: 教案內容自動草稿
+  setupDraftSave(iCt, 'tnote_' + tid + '_' + data.id);
+  const fP = el('label', { class:'flex', style:{gap:'8px',alignItems:'center',cursor:'pointer',padding:'8px',background:'var(--surface-2)',borderRadius:'8px'} });
+  const iP = el('input', { type:'checkbox' });
+  if(data.pinned) iP.checked = true;
+  fP.appendChild(iP); fP.appendChild(el('span', null, '📌 釘選'));
+  m.root.appendChild(fP);
+  const actions = el('div', { class:'modal-actions' });
+  if(!isNew){
+    actions.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+      if(!await confirmDlg('確定刪除此筆記？', { danger:true })) return;
+      App.db.teacherNotes = (App.db.teacherNotes || []).filter(x => x.id !== data.id);
+      saveDB(); clearDraft('tnote_' + tid + '_' + data.id);
+      m.close(); toast('已刪除','success'); rerender();
+    }}, '🗑 刪除'));
+  }
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    data.title = iT.value.trim();
+    data.content = iCt.value;
+    data.category = sC.value;
+    data.pinned = !!iP.checked;
+    data.updatedAt = Date.now();
+    if(!Array.isArray(App.db.teacherNotes)) App.db.teacherNotes = [];
+    const idx = App.db.teacherNotes.findIndex(x => x.id === data.id);
+    if(idx >= 0) App.db.teacherNotes[idx] = data;
+    else App.db.teacherNotes.push(data);
+    saveDB();
+    clearDraft('tnote_' + tid + '_' + data.id);
+    m.close(); toast('已儲存','success'); rerender();
+  }}, '💾 儲存'));
+  m.root.appendChild(actions);
 }
 
 function rMyNotes(content){
@@ -28391,7 +29053,9 @@ function globalSearch(query){
   const out = {
     students:[], attendance:[], scores:[], submissions:[],
     assignments:[], messages:[], feedbacks:[], behaviors:[],
-    badges:[], notes:[]
+    badges:[], notes:[],
+    // F-24: 新增 quizzes + announcements (notifications)
+    quizzes:[], announcements:[]
   };
   const q = (query||'').trim().toLowerCase();
   if(!q || q.length < 1) return out;
@@ -28559,6 +29223,24 @@ function globalSearch(query){
     }
   });
 
+  // F-24: 11. quizzes — 小考標題 / 描述
+  const quizAll = Array.isArray(db.quizzes) ? db.quizzes : [];
+  quizAll.slice().sort((a,b)=> (b.createdAt||0)-(a.createdAt||0)).forEach(qz => {
+    if(out.quizzes.length >= LIMIT) return;
+    const t = (qz.title || '').toLowerCase();
+    const d = (qz.description || qz.desc || '').toLowerCase();
+    if(t.includes(q) || d.includes(q)) out.quizzes.push(qz);
+  });
+
+  // F-24: 12. announcements (公告)
+  const annAll = Array.isArray(db.announcements) ? db.announcements : [];
+  annAll.slice().sort((a,b)=> (b.ts||0)-(a.ts||0)).forEach(a => {
+    if(out.announcements.length >= LIMIT) return;
+    const t = (a.title || '').toLowerCase();
+    const b = (a.body || '').toLowerCase();
+    if(t.includes(q) || b.includes(q)) out.announcements.push(a);
+  });
+
   return out;
 }
 
@@ -28590,7 +29272,10 @@ function openGlobalSearch(){
     { key:'feedbacks',   ico:'🗳️', label:'回饋' },
     { key:'behaviors',   ico:'⭐', label:'行為' },
     { key:'badges',      ico:'🏅', label:'徽章' },
-    { key:'notes',       ico:'📒', label:'筆記' }
+    { key:'notes',       ico:'📒', label:'筆記' },
+    // F-24: 新增 quizzes + announcements
+    { key:'quizzes',     ico:'📝', label:'小考' },
+    { key:'announcements', ico:'📢', label:'公告' }
   ];
 
   // 預設每組摺疊狀態：有結果 → 展開
@@ -28697,6 +29382,17 @@ function openGlobalSearch(){
           r2 = row('📒', (stu?stu.name+'：':'') + (rec.title||'(無標題)'),
             relTime(rec.updatedAt || rec.createdAt || 0),
             () => { if(App.session.role==='student') go('mynotes'); });
+        } else if(sect.key === 'quizzes'){
+          // F-24
+          const qz = item;
+          r2 = row('📝', qz.title || '(無標題)', (qz.status || '') + (qz.dueAt ? ' · 截止 ' + qz.dueAt : ''),
+            () => { go(App.session.role === 'teacher' ? 'quiz' : 'squiz'); });
+        } else if(sect.key === 'announcements'){
+          // F-24
+          const a = item;
+          const preview = (a.body || '').slice(0, 40);
+          r2 = row('📢', a.title || '(無標題)', preview + (a.expireAt ? ' · 截至 ' + a.expireAt : ''),
+            () => { go(App.session.role === 'teacher' ? 'announcements' : 'sann'); });
         }
         if(r2) section.appendChild(r2);
       });
@@ -28736,13 +29432,14 @@ function rPrintCenter(content){
     )
   ));
 
-  // 4 個模板選擇卡
+  // 4 個模板選擇卡 + F-22 家長報告書
   App._pcTpl = App._pcTpl || 'attsheet';
   const TPLS = [
     { k:'attsheet', ico:'📋', t:'空白點名單', d:'依班級印出簽到欄' },
     { k:'seatchart', ico:'🪑', t:'座位表', d:'視覺座位佈局' },
     { k:'infocard', ico:'👤', t:'學生資料卡', d:'每人一張 A4' },
-    { k:'gradesheet', ico:'📊', t:'學期成績單', d:'整合成績匯總' }
+    { k:'gradesheet', ico:'📊', t:'學期成績單', d:'整合成績匯總' },
+    { k:'parentreport', ico:'📧', t:'家長報告書', d:'大字彩色 · A4 一張 · 給家長帶回家' }  // F-22
   ];
   const grid = el('div', { class:'pc-grid' });
   TPLS.forEach(tpl => {
@@ -28840,7 +29537,7 @@ function rPrintCenter(content){
     ctrls.appendChild(lblStu);
   }
 
-  if(App._pcTpl === 'gradesheet'){
+  if(App._pcTpl === 'gradesheet' || App._pcTpl === 'parentreport'){
     const lblStu = el('label', { class:'small' }, '學生 ');
     const selStu = el('select', { class:'input', style:{width:'auto',maxWidth:'180px'} });
     selStu.appendChild(el('option', { value:'' }, '全班（每人一張）'));
@@ -28887,7 +29584,116 @@ function rPrintCenter(content){
       if(stus.length > 20) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 20 張，列印時全數輸出)'));
     }
   }
+  // F-22 家長報告書
+  else if(App._pcTpl === 'parentreport'){
+    if(opts.studentId){
+      preview.appendChild(buildParentReport(opts.studentId));
+    } else {
+      const stus = (App.db.students||[]).filter(s => !opts.cls || s.cls === opts.cls)
+        .sort((a,b)=> (a.seat||0)-(b.seat||0));
+      if(!stus.length) preview.appendChild(el('div', null, '（無學生）'));
+      else stus.slice(0, 10).forEach(s => preview.appendChild(buildParentReport(s.id)));
+      if(stus.length > 10) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 10 張，列印時全數輸出)'));
+    }
+  }
   content.appendChild(preview);
+}
+
+/* F-22: 家長報告書（大字 / 彩色 / A4 一張） */
+function buildParentReport(studentId){
+  const s = (App.db.students || []).find(x => x.id === studentId);
+  if(!s){
+    return el('div', { class:'pc-page' }, '找不到學生');
+  }
+  const school = (App.db.settings && App.db.settings.schoolName) || '我的課程';
+  const teacherName = (App.db.settings && App.db.settings.teacherName) || '老師';
+  const semLabel = (App.db.semester && App.db.semester.startDate)
+    ? (App.db.semester.startDate + ' ~ ' + (App.db.semester.endDate || '?'))
+    : '本學期';
+  const today = td();
+  // 統計
+  let attRate = 0, subRate = 0, avgScore = 0, behTotal = 0;
+  try {
+    attRate = (typeof attendanceRate === 'function') ? Math.round(attendanceRate(s.id)) : 0;
+    subRate = (typeof submissionRate === 'function') ? Math.round(submissionRate(s.id)) : 0;
+    const g = (typeof calcGrade === 'function') ? calcGrade(s.id) : { total: 0 };
+    avgScore = g.total || 0;
+    behTotal = computeBehaviorPoints(s.id, 'all').total;
+  } catch(_){}
+  // 評語
+  const evals = (App.db.evals || []).filter(e => e.studentId === s.id).slice(-3);
+
+  const page = el('div', { class:'pc-page parent-report-page', style:{
+    padding:'30mm 20mm', minHeight:'260mm', pageBreakAfter:'always',
+    fontFamily:'"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif',
+    background:'#fff'
+  }});
+  // 頂部 banner
+  page.appendChild(el('div', { style:{
+    background:'linear-gradient(135deg,#2563eb,#8b5cf6)',
+    color:'#fff', padding:'20px 24px', borderRadius:'16px', marginBottom:'24px'
+  }},
+    el('div', { style:{fontSize:'28px',fontWeight:'800'} }, '📧 家長報告書'),
+    el('div', { style:{fontSize:'16px',marginTop:'4px',opacity:'.9'} }, school + ' · ' + semLabel),
+    el('div', { style:{fontSize:'12px',marginTop:'8px',opacity:'.8'} }, '報告日期：' + today + ' · ' + teacherName)
+  ));
+  // 學生資料
+  page.appendChild(el('div', { style:{
+    fontSize:'40px',fontWeight:'700',marginBottom:'8px',color:'#1e293b',
+    borderLeft:'8px solid #2563eb',paddingLeft:'16px'
+  }}, '親愛的 ' + s.name + ' 同學家長您好'));
+  page.appendChild(el('div', { style:{fontSize:'14px',color:'#64748b',marginBottom:'24px',paddingLeft:'24px'} },
+    (s.cls || '無班級') + (s.seat ? ' · ' + s.seat + ' 號' : '') + (s.sid ? ' · 學號 ' + s.sid : '')));
+  // 統計四象限
+  const statRow = el('div', { style:{
+    display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'24px'
+  }});
+  function statBox(ico, label, value, color){
+    return el('div', { style:{
+      background:color + '15', border:'2px solid '+color, borderRadius:'12px',
+      padding:'16px', textAlign:'center'
+    }},
+      el('div', { style:{fontSize:'24px',marginBottom:'4px'} }, ico),
+      el('div', { style:{fontSize:'42px',fontWeight:'800',color:color,lineHeight:'1'} }, value),
+      el('div', { style:{fontSize:'14px',color:'#475569',marginTop:'6px',fontWeight:'600'} }, label)
+    );
+  }
+  statRow.appendChild(statBox('✅', '出席率', attRate + '%', '#16a34a'));
+  statRow.appendChild(statBox('📤', '作業繳交率', subRate + '%', '#2563eb'));
+  statRow.appendChild(statBox('🎯', '學期成績', String(avgScore), '#ea580c'));
+  statRow.appendChild(statBox(behTotal >= 0 ? '⭐' : '⚠️', '行為點數',
+    (behTotal >= 0 ? '+' : '') + behTotal, behTotal >= 0 ? '#8b5cf6' : '#dc2626'));
+  page.appendChild(statRow);
+  // 老師評語
+  const cmt = el('div', { style:{
+    background:'#fef3c7',border:'2px dashed #ea580c',borderRadius:'12px',
+    padding:'16px 20px',marginBottom:'24px'
+  }});
+  cmt.appendChild(el('div', { style:{fontSize:'18px',fontWeight:'700',color:'#7c2d12',marginBottom:'8px'} }, '💬 老師的話'));
+  if(evals.length){
+    evals.forEach(ev => {
+      cmt.appendChild(el('div', { style:{fontSize:'15px',lineHeight:'1.8',color:'#451a03',marginBottom:'6px'} },
+        '「' + (ev.comment || '(無評語)') + '」'));
+    });
+  } else {
+    cmt.appendChild(el('div', { style:{fontSize:'14px',color:'#64748b',fontStyle:'italic'} },
+      '（尚無書面評語，老師將與您口頭交流）'));
+  }
+  page.appendChild(cmt);
+  // 結尾
+  page.appendChild(el('div', { style:{
+    fontSize:'14px',color:'#475569',lineHeight:'1.9',marginTop:'24px',
+    borderTop:'1px solid #e2e8f0',paddingTop:'16px'
+  }},
+    '如有任何疑問請主動與老師聯繫。',
+    el('br'),
+    '感謝您的關心與配合！',
+    el('br'),
+    el('br'),
+    el('div', { style:{textAlign:'right',fontSize:'18px',fontWeight:'700',marginTop:'24px'} },
+      teacherName + ' 敬上')
+  ));
+  return page;
 }
 
 function doPrintPrintCenter(){

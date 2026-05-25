@@ -1,9 +1,13 @@
 /* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
 // M3: CACHE_NAME 動態化 — 每次部署 bump BUILD 字串即可強制取得新版資源
-const BUILD = '2026-05-25-fb-embedded';
+const BUILD = '2026-05-25-r4-25fixes';
 const CACHE_NAME = 'cms-v3-' + BUILD;
 const CORE_ASSETS = [
   'manifest.json',
+  // F-19：把主 HTML 預載到 cache → 離線首訪也能開
+  './app-v3.html',
+  './index.html',
+  './',
   'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js'
 ];
@@ -41,15 +45,22 @@ self.addEventListener('fetch', e => {
 
   if(isHTML){
     // 對 HTML 一律 network-first：永遠抓最新，避免使用者看到舊版
-    e.respondWith(
-      fetch(e.request).then(resp => {
+    // F-12: 5 秒 timeout — 網路慢時自動回 cache，不要讓使用者一直白屏
+    e.respondWith((() => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => { try { controller.abort(); } catch(_){} }, 5000);
+      return fetch(e.request, { signal: controller.signal }).then(resp => {
+        clearTimeout(timeoutId);
         if(resp && resp.status === 200){
           const clone = resp.clone();
           caches.open(CACHE_NAME).then(c => { try { c.put(e.request, clone); } catch(_){} });
         }
         return resp;
-      }).catch(() => caches.match(e.request).then(hit => hit || new Response('Offline', {status:503})))
-    );
+      }).catch(() => {
+        clearTimeout(timeoutId);
+        return caches.match(e.request).then(hit => hit || new Response('Offline', {status:503}));
+      });
+    })());
     return;
   }
 
