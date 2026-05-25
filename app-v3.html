@@ -19157,11 +19157,32 @@ function buildSubmissionForm(asg, me, existing){
   if(!existing) setupDraftSave(iT, 'submit_' + (me?.id || 'x') + '_' + asg.id);
 
   const fL = el('div', { class:'field' });
-  fL.appendChild(el('label', { class:'label' }, '🔗 連結 (可貼 Google Drive 分享連結)'));
-  const iL = el('input', { class:'input', placeholder:'https://drive.google.com/file/d/...', value: (existing && existing.link) || '' });
+  fL.appendChild(el('label', { class:'label' }, '🔗 連結 (大檔推薦, 不占老師容量)'));
+  const iL = el('input', { class:'input', placeholder:'https://drive.google.com/... 或 https://wetransfer.com/...', value: (existing && existing.link) || '' });
   fL.appendChild(iL);
-  fL.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px',lineHeight:'1.6'} },
-    '💡 提示: 把檔案上傳到自己的 Google Drive → 右鍵「取得連結」→ 改成「知道連結的任何人」→ 複製貼上'));
+
+  // 「沒空間怎麼辦」可展開的免費方案說明
+  const helpBox = el('details', { style:{marginTop:'6px',background:'var(--surface-2)',padding:'8px 10px',borderRadius:'8px',fontSize:'12px'} });
+  const summary = el('summary', { style:{cursor:'pointer',fontWeight:'600',color:'var(--primary)'} }, '📚 不會上傳大檔? 點我看 5 種免費方案');
+  helpBox.appendChild(summary);
+  helpBox.appendChild(el('div', { style:{marginTop:'8px',lineHeight:'1.8'} },
+    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟢 推薦 1: 自己的 Google Drive (15GB 免費)'),
+    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
+      'Gmail 登入 drive.google.com → 上傳 → 檔案右鍵「取得連結」→ 改「知道連結的任何人」→ 複製貼上'),
+    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟢 推薦 2: WeTransfer (2GB / 次, 不用註冊)'),
+    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
+      '到 wetransfer.com → 拖檔案 → 選「取得轉發連結」(免註冊) → 複製貼上 (7 天有效)'),
+    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🔵 OneDrive (學校微軟帳號, 通常 1TB)'),
+    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
+      'onedrive.live.com → 上傳 → 右鍵「分享」→ 「複製連結」'),
+    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟣 MEGA (20GB 免費)'),
+    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
+      'mega.nz 註冊 → 上傳 → 「取得連結」'),
+    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟡 YouTube (影片無限, 不公開可選)'),
+    el('div', { style:{paddingLeft:'14px',color:'var(--text-muted)'} },
+      'youtube.com → 上傳 → 「不公開」→ 取得連結')
+  ));
+  fL.appendChild(helpBox);
   card.appendChild(fL);
 
   // multi-file
