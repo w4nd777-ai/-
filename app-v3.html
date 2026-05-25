@@ -3890,6 +3890,32 @@ try {
   }
 } catch(_){}
 
+/* ═══════════════════════════════════════════════════════════════════
+   🌐 全站預設 Google Drive 設定 (大檔附件自動上 Drive 跨裝置同步)
+   ───────────────────────────────────────────────────────────────────
+   只用 Client ID (browser OAuth 不需 secret).
+   首次上傳大檔時, Google 會跳出授權視窗讓老師同意連接 Drive.
+   ═══════════════════════════════════════════════════════════════════ */
+window.DEFAULT_GD_CFG = window.DEFAULT_GD_CFG || {
+  enabled: true,
+  clientId: '805278389047-ptftk27vqie72i9ielohiuimfq9qom3p.apps.googleusercontent.com',
+  folderId: '',           // 留空 = 上傳到 Drive 根目錄
+  mode: 'overflow',       // overflow = IndexedDB 滿才用 Drive; always = 大檔一律 Drive
+  overflowThreshold: 80   // IndexedDB 用量 >= 80% 切換到 Drive
+};
+/* 自動套用 Drive 設定到 db.settings.googleDrive (若使用者沒手動設) */
+window._applyDefaultGDOnLoad = function(){
+  try {
+    if(!window.DEFAULT_GD_CFG || !window.DEFAULT_GD_CFG.clientId) return;
+    if(!App.db || !App.db.settings) return;
+    const cur = App.db.settings.googleDrive;
+    if(!cur || !cur.clientId){
+      App.db.settings.googleDrive = JSON.parse(JSON.stringify(window.DEFAULT_GD_CFG));
+      console.log('[cms] 已套用全站預設 Google Drive 設定');
+    }
+  } catch(_){}
+};
+
 /* 預設學生名單 (159 位真實學生, 7 個班級) — 來自 V1 系統匯入
    首次部署若 db.students 為空, ensureDefaultsAndDemo 會自動載入並同步到 Firebase
 */
@@ -20805,6 +20831,9 @@ function boot(){
 
   // Round 2 M1：一次性清掉「最近使用」舊 localStorage key
   try { localStorage.removeItem('cms_v3_recent_pages'); } catch(_){_swallow('m1-rmkey',_)}
+
+  // 套用全站預設 Google Drive (Client ID 已嵌入)
+  try { if(typeof _applyDefaultGDOnLoad === 'function') _applyDefaultGDOnLoad(); } catch(_){_swallow('default-gd',_)}
 
   // ★ 一次性 migration: 強制以 DEFAULT_STUDENTS (159 位真實學生) 取代舊資料,
   //   並清掉之前 E2E 測試殘留的「同步測試生」
