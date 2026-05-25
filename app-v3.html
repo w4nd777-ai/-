@@ -5963,7 +5963,8 @@ async function attachUpload(file){
   const FB_STORAGE_MAX = 50 * 1024 * 1024; // 50 MB (Storage 單檔上限, 超過走 Drive)
 
   // ★ 優先 Firebase Storage (跨裝置 + 共用同一專案 5GB 免費)
-  if(typeof firebase !== 'undefined' && firebase.storage && file.size < FB_STORAGE_MAX){
+  //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 10 秒 timeout fallback
+  if(typeof firebase !== 'undefined' && firebase.storage && file.size < FB_STORAGE_MAX && !App._fbStorageDisabled){
     try {
       const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
       if(fbCfg && fbCfg.databaseURL){
@@ -5972,23 +5973,27 @@ async function attachUpload(file){
         const key = _newAttachKey();
         const path = 'cms-v3/' + roomCode + '/attachments/' + key + '_' + file.name.replace(/[^\w.-]/g,'_');
         const ref = storage.ref(path);
-        const snap = await ref.put(file);
-        const url = await snap.ref.getDownloadURL();
+        // 包 10 秒 timeout 避免 Storage 未啟用時無限等待
+        const uploadPromise = ref.put(file).then(snap => snap.ref.getDownloadURL());
+        const timeoutPromise = new Promise((_, rej) => setTimeout(()=> rej(new Error('Firebase Storage 超時 (可能尚未啟用)')), 10000));
+        const url = await Promise.race([uploadPromise, timeoutPromise]);
         dbg('[v3] 已上傳 Firebase Storage:', file.name, Math.round(file.size/1024)+'KB');
         return {
-          name: file.name,
-          type: file.type || '',
-          size: file.size,
-          storage: 'fbstorage',
-          fbPath: path,
-          fbUrl: url,
+          name: file.name, type: file.type || '', size: file.size,
+          storage: 'fbstorage', fbPath: path, fbUrl: url,
           storedAt: Date.now()
         };
       }
     } catch(e){
       _swallow('fb-storage-upload', e);
-      dbgWarn('[fb storage upload failed]', e);
-      // fallback 走原本邏輯
+      dbgWarn('[fb storage upload failed, fallback]', e);
+      // 若是 storage 未啟用相關錯誤, 整個 session 不再嘗試 fb storage 避免每次都等 10 秒
+      const msg = String(e?.message || '');
+      if(msg.includes('超時') || msg.includes('storage/unknown') || msg.includes('not found') || msg.includes('storage/object-not-found') || msg.includes('storage/unauthorized')){
+        App._fbStorageDisabled = true;
+        try { toast('⚠️ Firebase Storage 未啟用, 改用本機儲存. 請到 Firebase Console 啟用 Storage', 'warn', 6000); } catch(_){}
+      }
+      // 繼續 fallback 走 Drive / IDB
     }
   }
 
@@ -6025,7 +6030,10 @@ async function attachUpload(file){
 
   if(target === 'drive'){
     try {
-      const data = await gdUpload(file, cfg.folderId);
+      // 加 60 秒 timeout 避免使用者沒按 OAuth popup 時無限等待
+      const driveUploadPromise = gdUpload(file, cfg.folderId);
+      const driveTimeout = new Promise((_, rej) => setTimeout(()=> rej(new Error('Drive 上傳超時 (請按授權視窗或檢查網路)')), 60000));
+      const data = await Promise.race([driveUploadPromise, driveTimeout]);
       return {
         name: file.name,
         type: file.type || '',
