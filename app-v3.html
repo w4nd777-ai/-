@@ -5469,7 +5469,7 @@ function currentStudent(){
   if(!App.session || App.session.role !== 'student') return null;
   return App.db.students.find(s => s.id === App.session.id) || null;
 }
-function findStudent(id){ return App.db.students.find(s => s.id === id); }
+function findStudent(id){ if(!App.db?.students) return null; return App.db.students.find(s => String(s.id) === String(id)); }
 
 function todayAttendance(){
   const today = td();
@@ -9067,13 +9067,15 @@ function renderLoginStudentStage(){
 
   // 登入函式
   async function attemptLogin(){
-    const sid = parseInt(selName.value);
+    // 修: 不要 parseInt — students[].id 可能是字串 (內建 159 學生) 或 nid() 產的字串
+    //     需用寬鬆比較 (String 對 String) 才不會找不到
+    const sidRaw = selName.value;
     if(!selCls.value){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請先選擇班級', 'warning'); }
-    if(!sid){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請選擇你的姓名', 'warning'); }
+    if(!sidRaw){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請選擇你的姓名', 'warning'); }
     const pw = iPw.value;
     if(!pw){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請輸入密碼', 'warning'); }
-    // L1: 學生 lockout key 用 'stu:' + cls + ':' + sid（避免和老師帳號互相干擾）
-    const lockKey = 'stu:' + selCls.value + ':' + sid;
+    // L1: 學生 lockout key
+    const lockKey = 'stu:' + selCls.value + ':' + sidRaw;
     if(isForgotLocked(lockKey)){
       const l = getForgotLock(lockKey);
       const left = Math.max(0, l.lockedUntil - Date.now());
@@ -9081,7 +9083,8 @@ function renderLoginStudentStage(){
       try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return;
     }
-    const s = App.db.students.find(x => x.id === sid);
+    // 寬鬆比對 (字串對字串) — 容納 id 可能是 number/string 混用
+    const s = App.db.students.find(x => String(x.id) === String(sidRaw));
     if(!s){
       incForgotLock(lockKey);
       try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
@@ -10669,7 +10672,7 @@ function openLeaveDialog(studentId){
    ──────────────────────────────────────────────────────────── */
 function rStudentProfile(content){
   const sid = App._spId;
-  const s = (App.db.students || []).find(x => x.id === sid);
+  const s = (App.db.students || []).find(x => String(x.id) === String(sid));
   if(!s){
     content.appendChild(el('div', { class:'card' },
       el('h3', null, '找不到學生'),
