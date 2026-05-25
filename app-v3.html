@@ -5991,17 +5991,41 @@ async function attachUpload(file){
   // IDB 儲存（預設路徑）
   const key = _newAttachKey();
   await idbPut(key, file);
+
+  // ★ 跨裝置同步: 小檔 (< 500KB) 自動轉 base64 存到 Firebase
+  //   讓老師其他裝置打開時, 從 Firebase 拉回再寫入本地 IDB
+  let dataUri = null;
+  if(file.size < 500 * 1024){
+    try {
+      dataUri = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      // 寫到 Firebase 的 attachments node
+      if(typeof Sync !== 'undefined' && Sync.setNode){
+        Sync.setNode('attachments/' + key, {
+          name: file.name, type: file.type||'', size: file.size,
+          dataUri: dataUri, ts: Date.now()
+        });
+        dbg('[v3] 小檔自動同步 Firebase: ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)');
+      }
+    } catch(e){ _swallow('attach-fb-sync', e); }
+  }
+
   return {
     name: file.name,
     type: file.type || '',
     size: file.size,
     storage: 'idb',
     key: key,
+    fbSynced: !!dataUri,  // 標記是否已同步到 Firebase
     storedAt: Date.now()
   };
 }
 
-// 取得附件的可訪問 URL（IDB → blob: URL；Drive → webViewLink）
+// 取得附件的可訪問 URL（IDB → blob: URL；Drive → webViewLink；FB → 自動拉回）
 async function attachGetUrl(meta){
   if(!meta) return null;
   // Drive 檔案：直接回 webViewLink（公開連結）
@@ -6012,8 +6036,27 @@ async function attachGetUrl(meta){
   if(meta.key){
     try {
       const blob = await idbGet(meta.key);
-      if(!blob) return null;
-      return URL.createObjectURL(blob);
+      if(blob) return URL.createObjectURL(blob);
+      // ★ 本機沒檔但被標記為 fbSynced → 從 Firebase 拉回
+      if(meta.fbSynced){
+        try {
+          const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+          if(fbCfg && fbCfg.databaseURL && typeof firebase !== 'undefined'){
+            const snap = await firebase.app().database().ref('cms-v3/' + App.cfg.roomCode + '/attachments/' + meta.key).once('value');
+            const data = snap.val();
+            if(data && data.dataUri){
+              // 寫回本地 IDB 給下次用
+              try {
+                const resp = await fetch(data.dataUri);
+                const blob2 = await resp.blob();
+                await idbPut(meta.key, blob2);
+                return URL.createObjectURL(blob2);
+              } catch(e){ _swallow('attach-restore', e); return data.dataUri; }
+            }
+          }
+        } catch(e){ _swallow('attach-fb-fetch', e); }
+      }
+      return null;
     } catch(e){ return null; }
   }
   // 舊版：base64 data URL
@@ -20762,6 +20805,56 @@ function boot(){
 
   // Round 2 M1：一次性清掉「最近使用」舊 localStorage key
   try { localStorage.removeItem('cms_v3_recent_pages'); } catch(_){_swallow('m1-rmkey',_)}
+
+  // ★ 一次性 migration: 強制以 DEFAULT_STUDENTS (159 位真實學生) 取代舊資料,
+  //   並清掉之前 E2E 測試殘留的「同步測試生」
+  //   執行條件: 有 DEFAULT_STUDENTS, 旗標未設, Firebase 已就緒
+  try {
+    const MIGRATION_KEY = 'cms_v3_real_students_v1_done';
+    const done = localStorage.getItem(MIGRATION_KEY);
+    if(!done && window.DEFAULT_STUDENTS && Array.isArray(window.DEFAULT_STUDENTS) && window.DEFAULT_STUDENTS.length){
+      setTimeout(()=> {
+        try {
+          const real = window.DEFAULT_STUDENTS.map(s => ({
+            id: String(s.id || nid()),
+            name: s.name || '',
+            sid: String(s.sid || ''),
+            cls: s.cls || '',
+            seat: s.seat || 0,
+            email: s.email || '',
+            phone: '', parentName:'', parentPhone:'', parentEmail:'',
+            password: s.password || (String(s.sid||'').slice(-4) || '0000'),
+            mustChangePw: !!s.mustChangePw
+          }));
+          // 偵測「需要 migration」的狀況:
+          // 1) 學生數 < 100 (絕對是 demo 或測試殘留)
+          // 2) 含 sync_test_ id 開頭的測試生
+          const curStudents = App.db.students || [];
+          const hasTestStudents = curStudents.some(s => String(s.id||'').startsWith('sync_test_') || s.name === '同步測試生');
+          const tooFew = curStudents.length < 100;
+          if(tooFew || hasTestStudents){
+            dbg('[v3] migration: 用 159 真實學生取代舊資料 (原 ' + curStudents.length + ' 位)');
+            App.db.students = real;
+            saveDB(true);
+            // 推到 Firebase 覆蓋 (用 setNode 完全取代, 不是 merge)
+            try {
+              if(typeof Sync !== 'undefined' && Sync.setNode){
+                Sync.setNode('students', real);
+                dbg('[v3] 已推送 159 學生覆蓋 Firebase');
+              } else if(typeof Sync !== 'undefined' && Sync.setMap){
+                Sync.setMap('students', real, true);
+              }
+            } catch(e){ _swallow('migration-push', e); }
+            setTimeout(()=> {
+              try { toast('✅ 已載入 159 位學生並同步到所有裝置', 'success', 5000); } catch(_){}
+              try { if(App.view === 'students' || App.view === 'overview') rerender(); } catch(_){}
+            }, 2000);
+          }
+          localStorage.setItem(MIGRATION_KEY, '1');
+        } catch(e){ _swallow('migration-159', e); }
+      }, 3500); // 等 Sync.init 完成才執行
+    }
+  } catch(_){_swallow('migration-outer',_)}
 
   // Round 2 M2：一次性清掉 parents 集合（local + 同步 Firebase 節點）
   try {
