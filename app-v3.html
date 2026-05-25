@@ -3595,7 +3595,16 @@ const LS_APPEARANCE = LS_KEY + '_appearance';
    ⚠️ 此設定會被所有訪客使用, 請務必同步部署 Firebase 安全規則
       (限制只能讀寫 cms-v3 路徑, 詳見「☁️ 同步設定」頁的範例)。
    ═══════════════════════════════════════════════════════════════════ */
-window.DEFAULT_FB_CFG = window.DEFAULT_FB_CFG || null;
+window.DEFAULT_FB_CFG = window.DEFAULT_FB_CFG || {
+  apiKey: "AIzaSyCtQSuH3OzkjXsIS0BE7enHelqE5rgli7U",
+  authDomain: "cms-w4nd777.firebaseapp.com",
+  databaseURL: "https://cms-w4nd777-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "cms-w4nd777",
+  storageBucket: "cms-w4nd777.firebasestorage.app",
+  messagingSenderId: "833333904571",
+  appId: "1:833333904571:web:0e6d36806831bf5e9a959e",
+  measurementId: "G-DCTV4KDPEW"
+};
 
 /* 啟動時若使用者沒設定 Firebase 但有 DEFAULT_FB_CFG → 自動套用 */
 try {
