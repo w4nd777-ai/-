@@ -8819,6 +8819,18 @@ function finishStudentLogin(s){
   }
   toast('歡迎回來，' + s.name + '！','success');
   go('checkin');
+  // 若已改過密碼但缺 email / 安全問題 → 延遲 1.5 秒提示設定 (一天內不重複)
+  setTimeout(()=> {
+    try {
+      if(!s.email || !s.securityQ || !s.securityA){
+        const LS_HINT = 'cms_v3_stu_recov_hint_' + s.id;
+        const last = parseInt(localStorage.getItem(LS_HINT) || '0', 10);
+        if(Date.now() - last < 24*3600*1000) return;
+        localStorage.setItem(LS_HINT, String(Date.now()));
+        forceSetupStudentRecovery(s.id);
+      }
+    } catch(e){ _swallow('stu-recov-prompt', e); }
+  }, 1500);
 }
 
 // 強制改密碼（無法關閉的 modal）— batch 1 強化：複雜度檢查
@@ -8888,8 +8900,17 @@ function forceChangePassword(studentId){
     if(typeof logOp === 'function') logOp('passwordChange', s.name + ' 完成首次密碼設定');
     if(typeof Sync !== 'undefined' && Sync.push) Sync.push('students');
     m.close();
-    toast('✅ 密碼設定成功，歡迎使用！','success');
-    go('checkin');
+    toast('✅ 密碼設定成功','success');
+    // 接續強制設定 email + 安全問題 (若還沒設)
+    setTimeout(()=> {
+      try {
+        if(!s.email || !s.securityQ || !s.securityA){
+          forceSetupStudentRecovery(s.id);
+        } else {
+          go('checkin');
+        }
+      } catch(e){ _swallow('stu-recov-chain', e); go('checkin'); }
+    }, 400);
   };
 
   i1.addEventListener('keydown', e => { if(e.key === 'Enter') i2.focus(); });
@@ -8900,6 +8921,83 @@ function forceChangePassword(studentId){
   m.root.appendChild(actions);
 
   setTimeout(()=> i1.focus(), 100);
+}
+
+// 學生首次登入改完密碼後 → 強制設定 email + 安全問題 (簡化版, 無恢復碼)
+function forceSetupStudentRecovery(studentId){
+  const s = App.db.students.find(x => x.id === studentId);
+  if(!s){ go('checkin'); return; }
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '🛡️ 設定帳號復原資訊'));
+  m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'14px',lineHeight:'1.6',marginBottom:'12px'} },
+    '為了讓你日後忘記密碼時能安全自助重設, 請設定 Email 和一個安全問題。'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
+    '🧑‍🎓 ' + s.name + (s.sid ? '（學號 ' + s.sid + '）' : '')));
+
+  // Email
+  const f1 = el('div', { class:'field' });
+  f1.appendChild(el('label', { class:'label' }, '📧 復原 Email'));
+  const iEmail = el('input', { class:'input', type:'email', placeholder:'name@example.com',
+    value: s.email || '' });
+  f1.appendChild(iEmail);
+  f1.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '忘記密碼時, 系統會請你輸入此 Email 進行驗證'));
+  m.root.appendChild(f1);
+
+  // Security question
+  const f2 = el('div', { class:'field' });
+  f2.appendChild(el('label', { class:'label' }, '❓ 安全問題'));
+  const sel = el('select', { class:'select input' });
+  const Qs = [
+    '你媽媽的名字？',
+    '你就讀的小學名稱？',
+    '你最好的朋友姓名？',
+    '你最喜歡的食物？',
+    '你的綽號？',
+    '你出生的城市？'
+  ];
+  Qs.forEach(q => sel.appendChild(el('option', { value:q }, q)));
+  f2.appendChild(sel);
+  m.root.appendChild(f2);
+
+  // Answer
+  const f3 = el('div', { class:'field' });
+  f3.appendChild(el('label', { class:'label' }, '答案（不分大小寫, 僅雜湊存放）'));
+  const iAns = el('input', { class:'input', placeholder:'輸入你的答案' });
+  f3.appendChild(iAns);
+  m.root.appendChild(f3);
+
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
+  m.root.appendChild(err);
+
+  const submit = async ()=> {
+    err.style.display = 'none';
+    const em = iEmail.value.trim();
+    const ans = iAns.value.trim();
+    if(!em || !/.+@.+\..+/.test(em)){ err.textContent='請輸入正確的 Email 格式'; err.style.display='block'; return; }
+    if(!ans || ans.length < 2){ err.textContent='答案至少 2 個字元'; err.style.display='block'; return; }
+    try {
+      s.email = em;
+      s.securityQ = sel.value;
+      s.securityA = await (typeof hashAnswer === 'function' ? hashAnswer(ans) : hashPassword(ans.toLowerCase()));
+      saveDB(true);
+      if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('students', App.db.students, true);
+      if(typeof logOp === 'function') logOp('studentRecoverySetup', s.name + ' 設定 email + 安全問題');
+      m.close();
+      toast('✅ 復原資訊已儲存', 'success');
+      go('checkin');
+    } catch(e){
+      err.textContent = '儲存失敗：' + (e?.message || e);
+      err.style.display = 'block';
+      _swallow('stu-recov-save', e);
+    }
+  };
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '✓ 完成設定'));
+  m.root.appendChild(actions);
+
+  setTimeout(()=> iEmail.focus(), 100);
 }
 
 // batch 1：老師首次以預設密碼 admin/admin123 登入時，強制改密碼
