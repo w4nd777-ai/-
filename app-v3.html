@@ -387,6 +387,27 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   .grid-2,.grid-3,.grid-4{ grid-template-columns:1fr; }
 }
 
+/* 📱 行動裝置防溢出：操作列 / flex 按鈕列在窄螢幕自動換行 */
+@media (max-width:480px){
+  /* .list-row 內的 .actions 太多按鈕會撐破父層 → 強制換行到下方 */
+  .list-row{ flex-wrap:wrap; }
+  .list-row .actions{
+    flex-basis:100%;
+    width:100%;
+    margin-top:6px;
+    flex-wrap:wrap;
+    flex-shrink:1;
+    justify-content:flex-start;
+  }
+  .actions{
+    flex-wrap:wrap;
+    flex-shrink:1;
+  }
+  .flex.no-print{ flex-wrap:wrap; }
+  .flex-between{ flex-wrap:wrap; gap:8px; }
+  .actions .btn-sm{ min-width:36px; }
+}
+
 /* stat tiles */
 .stat{
   display:flex; flex-direction:column; gap:4px;
@@ -5467,7 +5488,8 @@ window.addEventListener('storage', e => {
    ──────────────────────────────────────────────────────────── */
 function currentStudent(){
   if(!App.session || App.session.role !== 'student') return null;
-  return App.db.students.find(s => s.id === App.session.id) || null;
+  if(!App.db?.students) return null;
+  return App.db.students.find(s => String(s.id) === String(App.session.id)) || null;
 }
 function findStudent(id){ if(!App.db?.students) return null; return App.db.students.find(s => String(s.id) === String(id)); }
 
@@ -10729,8 +10751,9 @@ function rStudentProfile(content){
   const todayD = new Date();
   const start = new Date(todayD.getFullYear(), todayD.getMonth() - 1, todayD.getDate()); // 近 30 天
   const att30 = att.filter(a => new Date(a.date) >= start);
-  // 簡單上學日 = 30
-  const attRate = Math.round(att30.length / 30 * 100);
+  // 同一天可能因為跨裝置同步出現重複紀錄 → 用 date 去重避免出席率 >100%
+  const att30Unique = Array.from(new Set(att30.map(a => a.date)));
+  const attRate = Math.min(100, Math.round(att30Unique.length / 30 * 100));
   const subs = (App.db.submissions || []).filter(x => x.studentId === s.id);
   const asgnAll = (App.db.assignments || []).length;
   const subRate = asgnAll ? Math.round(subs.length / asgnAll * 100) : 0;
@@ -10770,12 +10793,26 @@ function rStudentProfile(content){
           el('div', { class:'sub', style:{fontSize:'12px',color:'var(--muted)'} }, label),
           el('div', { class:'name', style:{fontSize:'14px',wordBreak:'break-all'} }, String(val))
         ),
-        // 點擊可複製
-        el('button', { class:'btn btn-sm', style:{marginLeft:'8px'}, onclick: () => {
+        // 點擊可複製（含 fallback：非 https / 舊瀏覽器用 execCommand）
+        el('button', { class:'btn btn-sm', style:{marginLeft:'8px'}, onclick: async () => {
+          const s = String(val);
+          let ok = false;
           try {
-            navigator.clipboard.writeText(String(val));
-            toast('已複製：' + String(val).slice(0, 40));
-          } catch(_) { toast('複製失敗'); }
+            if(navigator.clipboard && navigator.clipboard.writeText){
+              await navigator.clipboard.writeText(s);
+              ok = true;
+            }
+          } catch(_){}
+          if(!ok){
+            try {
+              const ta = document.createElement('textarea');
+              ta.value = s; ta.style.position='fixed'; ta.style.left='-9999px';
+              document.body.appendChild(ta); ta.select();
+              ok = document.execCommand('copy');
+              document.body.removeChild(ta);
+            } catch(_){}
+          }
+          toast(ok ? ('已複製：' + s.slice(0, 40)) : '複製失敗，請手動複製');
         }}, '📋')
       )
     );
@@ -21762,12 +21799,12 @@ function openQuickSwitcher(){
     { k:'頁面', i:'👥', t:'學生管理', g:'students' },
     { k:'頁面', i:'📝', t:'作業', g:'assignments' },
     { k:'頁面', i:'📊', t:'成績', g:'grades' },
-    { k:'頁面', i:'📋', t:'小考', g:'quizzes' },
+    { k:'頁面', i:'📋', t:'小考', g:'quiz' },
     { k:'頁面', i:'📣', t:'公告', g:'announcements' },
     { k:'頁面', i:'💬', t:'訊息', g:'messages' },
     { k:'頁面', i:'🏅', t:'徽章與點數', g:'badges' },
     { k:'頁面', i:'📒', t:'學生筆記', g:'notes' },
-    { k:'頁面', i:'📅', t:'課表', g:'schedule' },
+    { k:'頁面', i:'📅', t:'課表', g:'timetable' },
     { k:'頁面', i:'⚙️', t:'設定', g:'settings' },
     { k:'頁面', i:'🖨', t:'列印中心', g:'print' },
     { k:'頁面', i:'☁️', t:'同步設定', g:'firebase' }
