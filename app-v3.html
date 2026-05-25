@@ -10759,6 +10759,58 @@ function rStudentProfile(content){
   );
   content.appendChild(statGrid);
 
+  // 📞 聯絡資訊 (老師可看學生信箱、電話、家長聯絡方式)
+  const contactRows = [];
+  const addContactRow = (icon, label, val) => {
+    if(val == null || val === '') return;
+    contactRows.push(
+      el('div', { class:'list-row', style:{padding:'8px 0',borderBottom:'1px solid var(--border-soft)'} },
+        el('div', { style:{fontSize:'18px',marginRight:'10px',minWidth:'28px'} }, icon),
+        el('div', { class:'info' },
+          el('div', { class:'sub', style:{fontSize:'12px',color:'var(--muted)'} }, label),
+          el('div', { class:'name', style:{fontSize:'14px',wordBreak:'break-all'} }, String(val))
+        ),
+        // 點擊可複製
+        el('button', { class:'btn btn-sm', style:{marginLeft:'8px'}, onclick: () => {
+          try {
+            navigator.clipboard.writeText(String(val));
+            toast('已複製：' + String(val).slice(0, 40));
+          } catch(_) { toast('複製失敗'); }
+        }}, '📋')
+      )
+    );
+  };
+  addContactRow('📧', '學生 Email', s.email);
+  addContactRow('📱', '學生電話', s.phone);
+  addContactRow('👨‍👩', '家長姓名', s.parentName);
+  addContactRow('📱', '家長電話', s.parentPhone);
+  addContactRow('📧', '家長 Email', s.parentEmail);
+  // 安全資訊狀態（不顯示答案/恢復碼明文）
+  const secStatus = [];
+  if(s.securityQ) secStatus.push('安全問題：' + s.securityQ);
+  if(s.securityA) secStatus.push('答案：已設定');
+  if(s.recoveryCode) secStatus.push('恢復碼：已設定');
+
+  const contactCard = el('div', { class:'card', style:{marginBottom:'14px'} },
+    el('div', { class:'flex-between', style:{marginBottom:'8px'} },
+      el('h3', { style:{margin:0} }, '📞 聯絡資訊'),
+      el('button', { class:'btn btn-sm no-print', onclick:()=> openStudentEdit(s) }, '✏️ 編輯')
+    )
+  );
+  if(contactRows.length === 0){
+    contactCard.appendChild(el('div', { class:'empty', style:{padding:'12px 0'} }, '尚未填寫任何聯絡資訊'));
+  } else {
+    contactRows.forEach(r => contactCard.appendChild(r));
+  }
+  if(secStatus.length){
+    contactCard.appendChild(
+      el('div', { style:{marginTop:'10px',padding:'8px 10px',background:'var(--surface-2)',borderRadius:'6px',fontSize:'12px',color:'var(--muted)'} },
+        '🛡 ' + secStatus.join(' · ')
+      )
+    );
+  }
+  content.appendChild(contactCard);
+
   // 時間軸
   const events = [];
   att30.forEach(a => events.push({ ts: a.ts || new Date(a.date).getTime(), ico:'✅', label:'出席 ' + a.date + (a.time?' · '+a.time:'') + (a.status==='late'?' (遲到)':''), color:'var(--success)' }));
