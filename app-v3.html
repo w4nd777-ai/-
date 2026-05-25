@@ -5941,7 +5941,9 @@ function go(view, subview=null){
 window.addEventListener('hashchange', () => {
   const h = location.hash.slice(1);
   if(!h) return;
-  if(h.startsWith('att=') || h.startsWith('join=')){
+  // 支援 att/join/fb 三種參數（順序不限，只要開頭有其中之一）
+  if(h.startsWith('att=') || h.startsWith('join=') || h.startsWith('fb=') ||
+     /(^|&)(att|join|fb)=/.test(h)){
     handleQrJoinHash();
     return;
   }
@@ -9582,6 +9584,31 @@ function rOv(content){
   const stats = computeTodayStats();
   const today = td();
 
+  // 跨裝置同步未啟用 → 顯眼提示橫條（可一鍵跳到設定 / 永久關閉）
+  try {
+    const dismissed = localStorage.getItem('cms_v3_sync_warn_dismissed') === '1';
+    const hasFb = !!localStorage.getItem(LS_FB);
+    if(!dismissed && (App.fbStatus !== 'online' || !hasFb)){
+      const banner = el('div', { class:'card', style:{
+        background:'var(--warn-soft)', borderColor:'var(--warn)',
+        marginBottom:'12px', padding:'12px 14px'
+      }});
+      banner.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} },
+        '⚠️ 跨裝置同步未啟用'));
+      banner.appendChild(el('div', { class:'small', style:{lineHeight:'1.6',marginBottom:'10px'} },
+        '你的資料目前只存在這台裝置，其他電腦 / 平板 / 手機看不到，學生也無法即時收到你的更新。建議現在設定 Firebase 同步（免費）。'));
+      banner.appendChild(el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap'} },
+        el('button', { class:'btn btn-primary btn-sm', onclick:()=> go('firebase') }, '⚙️ 去設定'),
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          try { localStorage.setItem('cms_v3_sync_warn_dismissed', '1'); } catch(e){}
+          toast('已關閉提醒，可至「同步設定」隨時開啟','info');
+          rerender();
+        }}, '我知道了，不再提醒')
+      ));
+      content.appendChild(banner);
+    }
+  } catch(e){ _swallow('sync-warn-banner', e); }
+
   // 自訂內容（總覽頁頂端）
   content.appendChild(renderCustomBlocks('overview-top'));
 
@@ -12677,12 +12704,66 @@ function rFirebase(content){
   ));
   content.appendChild(card);
 
-  // teacher's instructions to share with students
-  const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
-  card2.appendChild(el('h3', null, '📲 分享給學生'));
-  card2.appendChild(el('p', { class:'small muted' }, '學生請開啟同樣的網址，選「我是學生」，輸入下方教室代碼：'));
-  card2.appendChild(el('div', { class:'mono', style:{padding:'12px',background:'var(--surface-2)',borderRadius:'8px',fontSize:'18px',textAlign:'center'} }, App.cfg?.roomCode || '—'));
-  card2.appendChild(el('div', { class:'small muted', style:{marginTop:'8px'} }, '提示：學生也要設定相同的 Firebase（或老師可分享連結）'));
+  // teacher's instructions to share with students — 強化：產生「分享連結 + QR」
+  const card2 = el('div', { class:'card', style:{marginTop:'12px',background:'var(--success-soft)',borderColor:'var(--success)'} });
+  card2.appendChild(el('h3', null, '📲 分享給學生 / 其他裝置'));
+  card2.appendChild(el('p', { class:'small' },
+    '把下方連結傳給學生，或用 QR Code 讓他們掃。打開後會自動設定好 Firebase 同步，無需手動貼設定。'));
+
+  const fbCfgRaw = localStorage.getItem(LS_FB);
+  let shareUrl = '';
+  if(fbCfgRaw){
+    try {
+      // base64 編碼 + 對中文友善
+      const b64 = btoa(unescape(encodeURIComponent(fbCfgRaw)));
+      const roomQ = App.cfg && App.cfg.roomCode ? ('&join=' + encodeURIComponent(App.cfg.roomCode)) : '';
+      shareUrl = location.origin + location.pathname + '#fb=' + b64 + roomQ;
+    } catch(e){ _swallow('build-share-url', e); }
+  }
+
+  if(!fbCfgRaw){
+    card2.appendChild(el('div', { class:'small', style:{color:'var(--warn)',padding:'10px',background:'var(--warn-soft)',borderRadius:'8px',marginTop:'8px'} },
+      '⚠️ 請先在上方貼上 Firebase 設定並按「套用」後，才能產生分享連結'));
+  } else {
+    // URL 顯示框 + 複製按鈕
+    const urlBox = el('input', {
+      class:'input', value: shareUrl, readonly:true,
+      style:{fontSize:'12px',fontFamily:'monospace',marginTop:'4px'},
+      onclick: function(){ try { this.select(); } catch(e){} }
+    });
+    card2.appendChild(urlBox);
+    card2.appendChild(el('div', { class:'flex', style:{marginTop:'8px',gap:'8px',flexWrap:'wrap'} },
+      el('button', { class:'btn btn-primary', onclick: ()=> {
+        try {
+          if(navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(shareUrl).then(
+              ()=> toast('✅ 已複製分享連結', 'success'),
+              ()=> { try { urlBox.select(); document.execCommand('copy'); toast('✅ 已複製','success'); } catch(e){ toast('複製失敗','warn'); } }
+            );
+          } else {
+            urlBox.select(); document.execCommand('copy');
+            toast('✅ 已複製','success');
+          }
+        } catch(e){ toast('複製失敗：' + (e && e.message || ''),'warn'); }
+      }}, '📋 複製連結'),
+      el('button', { class:'btn', onclick: ()=> showQrCodeModal(shareUrl) }, '📱 顯示 QR Code'),
+      el('button', { class:'btn', onclick: async ()=> {
+        if(navigator.share){
+          try { await navigator.share({ title:'課程管理系統 - 加入教室', text:'點連結加入教室', url: shareUrl }); }
+          catch(e){ _swallow('share', e); }
+        } else {
+          toast('此瀏覽器不支援系統分享，請改用「複製連結」', 'info');
+        }
+      }}, '🔗 系統分享')
+    ));
+
+    // 教室代碼大字顯示（保留原有資訊）
+    card2.appendChild(el('div', { class:'mono', style:{padding:'12px',background:'var(--surface-2)',borderRadius:'8px',fontSize:'18px',textAlign:'center',marginTop:'10px'} },
+      '教室代碼：' + (App.cfg?.roomCode || '—')));
+
+    card2.appendChild(el('div', { class:'tiny muted', style:{marginTop:'8px',lineHeight:'1.6'} },
+      '💡 連結內含你的 Firebase 設定，請只傳給信任的對象。學生點開後會自動寫入設定並切換到此教室。'));
+  }
   content.appendChild(card2);
 
   /* ── batch 1 安全強化：Firebase Rules 範本與一鍵套用 ── */
@@ -12819,6 +12900,30 @@ function rCheckIn(content){
 
   // 自訂內容（學生簽到頁）
   content.appendChild(renderCustomBlocks('student-checkin'));
+
+  // 跨裝置同步未啟用提示（學生版：訊息較溫和，但仍要讓他知道資料可能不新）
+  try {
+    const dismissed = localStorage.getItem('cms_v3_sync_warn_dismissed') === '1';
+    const hasFb = !!localStorage.getItem(LS_FB);
+    if(!dismissed && (App.fbStatus !== 'online' || !hasFb)){
+      const banner = el('div', { class:'card', style:{
+        background:'var(--warn-soft)', borderColor:'var(--warn)',
+        marginBottom:'12px', padding:'12px 14px'
+      }});
+      banner.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} },
+        '⚠️ 你看到的資料可能是離線快取'));
+      banner.appendChild(el('div', { class:'small', style:{lineHeight:'1.6',marginBottom:'10px'} },
+        '這台裝置尚未設定跨裝置同步，老師端的更新（新作業、公告、出席記錄）可能還沒同步進來。請向老師索取「分享連結 / QR Code」，掃一下就會自動設定好。'));
+      banner.appendChild(el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap'} },
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          try { localStorage.setItem('cms_v3_sync_warn_dismissed', '1'); } catch(e){}
+          toast('已關閉提醒','info');
+          rerender();
+        }}, '我知道了，不再提醒')
+      ));
+      content.appendChild(banner);
+    }
+  } catch(e){ _swallow('sync-warn-banner-student', e); }
 
   // hello bar (time-aware)
   const hb = renderHelloBar();
@@ -15684,6 +15789,7 @@ function qrRegenerate(notify){
 /* QR auto-checkin from URL hash */
 function handleQrJoinHash(){
   // accept #join=ROOM&att=CODE  (also #att=CODE alone for already-joined students)
+  // NEW: 也接受 #fb=BASE64(json) 自動套用老師端的 Firebase 設定
   const h = location.hash.slice(1);
   if(!h) return false;
   const params = {};
@@ -15692,9 +15798,26 @@ function handleQrJoinHash(){
     if(i > 0) params[p.slice(0,i)] = decodeURIComponent(p.slice(i+1));
     else params[p] = '';
   });
-  if(!params.att && !params.join) return false;
+
+  // 新增 fb 處理：自動寫入 Firebase 設定（在 join 之前，避免換房後再重新 init）
+  let fbApplied = false;
+  if(params.fb){
+    try {
+      // 解碼：對應 btoa(unescape(encodeURIComponent(str)))
+      const fbJson = decodeURIComponent(escape(atob(params.fb)));
+      const fbCfg = JSON.parse(fbJson);
+      if(fbCfg && fbCfg.databaseURL){
+        localStorage.setItem(LS_FB, JSON.stringify(fbCfg));
+        fbApplied = true;
+        // Sync.init 將在後面（switch room 後）統一觸發；若沒換房，這裡也要重 init
+      }
+    } catch(e){ _swallow('apply-fb-from-url', e); }
+  }
+
+  if(!params.att && !params.join && !params.fb) return false;
 
   // if a room is requested AND it differs from current, switch
+  let roomSwitched = false;
   if(params.join && (!App.cfg || App.cfg.roomCode !== params.join)){
     if(App.cfg && App.cfg.roomCode){
       // already in different room: prompt
@@ -15707,6 +15830,24 @@ function handleQrJoinHash(){
     loadDB();
     initBC();
     Sync.init();
+    roomSwitched = true;
+  }
+
+  // 若只有 fb（沒換房），也要重 init 讓新設定生效
+  if(fbApplied && !roomSwitched){
+    try { Sync.detachAll(); } catch(e){_swallow('fb-detach',e)}
+    try { Sync.init(); } catch(e){_swallow('fb-init',e)}
+  }
+
+  // 顯示 toast 提示已自動設定
+  if(fbApplied){
+    setTimeout(()=> {
+      try {
+        const txt = '✅ 已自動設定跨裝置同步'
+          + (params.join ? '（教室：' + params.join + '）' : '');
+        toast(txt, 'success', 5000);
+      } catch(e){_swallow('fb-toast',e)}
+    }, 1000);
   }
 
   if(params.att){
@@ -15717,7 +15858,27 @@ function handleQrJoinHash(){
     setTimeout(()=> tryAutoCheckin(), 300);
     return true;
   }
-  return false;
+
+  // 只有 fb（無 att）也要清掉 hash，避免重整時又跑一次
+  if(fbApplied && !params.att){
+    try { location.hash = ''; } catch(e){_swallow('fb-hash-clear',e)}
+  }
+  return fbApplied || false;
+}
+
+/* 顯示 Firebase 分享連結的 QR Code modal（用 api.qrserver.com 線上產生） */
+function showQrCodeModal(url){
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, '📱 掃描 QR Code 加入'));
+  m.root.appendChild(el('p', { class:'small muted' }, '學生用手機相機 / LINE / Instagram 掃下方 QR Code 即可自動設定同步'));
+  const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(url);
+  m.root.appendChild(el('div', { style:{textAlign:'center',padding:'20px'} },
+    el('img', { src: qrUrl, alt:'QR Code', style:{maxWidth:'100%',width:'300px',height:'auto',border:'1px solid var(--border)',borderRadius:'8px',background:'#fff'} })
+  ));
+  m.root.appendChild(el('div', { class:'tiny muted', style:{textAlign:'center',marginBottom:'8px'} },
+    '使用手機相機 / LINE / Instagram 等掃描'));
+  m.root.appendChild(el('div', { class:'modal-actions' },
+    el('button', { class:'btn btn-primary btn-block', onclick:()=> m.close() }, '關閉')));
 }
 
 function tryAutoCheckin(){
