@@ -3900,8 +3900,8 @@ window.DEFAULT_GD_CFG = window.DEFAULT_GD_CFG || {
   enabled: true,
   clientId: '805278389047-ptftk27vqie72i9ielohiuimfq9qom3p.apps.googleusercontent.com',
   folderId: '',           // 留空 = 上傳到 Drive 根目錄
-  mode: 'overflow',       // overflow = IndexedDB 滿才用 Drive; always = 大檔一律 Drive
-  overflowThreshold: 80   // IndexedDB 用量 >= 80% 切換到 Drive
+  mode: 'always',         // always = 所有檔案一律 Drive (跨裝置)
+  overflowThreshold: 80
 };
 /* 自動套用 Drive 設定到 db.settings.googleDrive (若使用者沒手動設) */
 window._applyDefaultGDOnLoad = function(){
@@ -14746,6 +14746,16 @@ function openAssignmentEdit(asg){
   fSubj.appendChild(iSubj);
   m.root.appendChild(fSubj);
 
+  // Google 表單繳交連結 (學生點此用 Google 表單繳交, 檔案存到老師 Drive)
+  const fGF = el('div', { class:'field', style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px'} });
+  fGF.appendChild(el('label', { class:'label', style:{fontSize:'14px',fontWeight:'700'} }, '📝 Google 表單繳交連結 (選填)'));
+  fGF.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px',lineHeight:'1.6'} },
+    '若你建了 Google 表單收作業 (含檔案上傳欄位), 把連結貼這裡. 學生作業頁會出現「📝 用 Google 表單繳交」按鈕直接跳轉, 不需在本系統上傳. 適合大檔/影片.'));
+  const iGF = el('input', { class:'input', type:'url', placeholder:'https://docs.google.com/forms/d/e/.../viewform',
+    value: asg?.googleFormUrl || '' });
+  fGF.appendChild(iGF);
+  m.root.appendChild(fGF);
+
   // class picker (only when target=class)
   const fCls = el('div', { class:'field', style:{display:'none'} });
   fCls.appendChild(el('label', { class:'label' }, '班級'));
@@ -14831,6 +14841,8 @@ function openAssignmentEdit(asg){
     rec.createdBy = App.session?.name || '老師';
     // 包 B-1：科目
     try { rec.subjectId = iSubj.value || ''; } catch(_){ /* fallback */ }
+    // Google 表單繳交連結 (選填)
+    rec.googleFormUrl = (iGF.value || '').trim();
     // 包 B-3：自動帶入當前學期
     try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_) {}
     if(isNew) App.db.assignments.push(rec);
@@ -19102,6 +19114,22 @@ function buildSubmissionForm(asg, me, existing){
   const card = el('div', { class:'card', style:{marginTop:'10px'} });
   card.appendChild(el('h3', null, '📤 ' + (overdue?'(已逾期) ':'') + (existing?'修改繳交':'繳交作業')));
 
+  // Google 表單繳交 (若老師有設定 → 顯眼大按鈕)
+  if(asg.googleFormUrl){
+    const gfCard = el('div', { style:{
+      background: 'linear-gradient(135deg, #4285f4, #34a853)',
+      color:'#fff', padding:'14px', borderRadius:'10px', marginBottom:'14px'
+    }});
+    gfCard.appendChild(el('div', { style:{fontWeight:'700',fontSize:'15px',marginBottom:'4px'} }, '📝 老師建議用 Google 表單繳交'));
+    gfCard.appendChild(el('div', { style:{fontSize:'13px',opacity:'0.9',marginBottom:'10px',lineHeight:'1.5'} },
+      '點下方按鈕跳轉到老師的 Google 表單上傳作業 (檔案會自動存到老師的 Google Drive). 完成後記得回來這裡點「✅ 我已用 Google 表單繳交」標記.'));
+    gfCard.appendChild(el('a', {
+      href: asg.googleFormUrl, target:'_blank', rel:'noopener',
+      style:{display:'inline-block',background:'#fff',color:'#4285f4',padding:'10px 20px',borderRadius:'8px',fontWeight:'700',textDecoration:'none',marginRight:'8px'}
+    }, '📝 開啟 Google 表單'));
+    card.appendChild(gfCard);
+  }
+
   const fT = el('div', { class:'field' });
   fT.appendChild(el('label', { class:'label' }, '文字內容（可選）'));
   const iT = el('textarea', { class:'textarea', placeholder:'寫下你的回答...（自動儲存草稿）' });
@@ -19111,9 +19139,12 @@ function buildSubmissionForm(asg, me, existing){
   if(!existing) setupDraftSave(iT, 'submit_' + (me?.id || 'x') + '_' + asg.id);
 
   const fL = el('div', { class:'field' });
-  fL.appendChild(el('label', { class:'label' }, '連結（可選）'));
-  const iL = el('input', { class:'input', placeholder:'https://...', value: (existing && existing.link) || '' });
-  fL.appendChild(iL); card.appendChild(fL);
+  fL.appendChild(el('label', { class:'label' }, '🔗 連結 (可貼 Google Drive 分享連結)'));
+  const iL = el('input', { class:'input', placeholder:'https://drive.google.com/file/d/...', value: (existing && existing.link) || '' });
+  fL.appendChild(iL);
+  fL.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px',lineHeight:'1.6'} },
+    '💡 提示: 把檔案上傳到自己的 Google Drive → 右鍵「取得連結」→ 改成「知道連結的任何人」→ 複製貼上'));
+  card.appendChild(fL);
 
   // multi-file
   const fF = el('div', { class:'field' });
