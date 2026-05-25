@@ -1,6 +1,6 @@
 /* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
 // M3: CACHE_NAME 動態化 — 每次部署 bump BUILD 字串即可強制取得新版資源
-const BUILD = '2026-05-26-drive-always+gform';
+const BUILD = '2026-05-26-fb-storage';
 const CACHE_NAME = 'cms-v3-' + BUILD;
 const CORE_ASSETS = [
   'manifest.json',
@@ -9,7 +9,8 @@ const CORE_ASSETS = [
   './index.html',
   './',
   'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
-  'https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js'
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js',
+  'https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js'
 ];
 
 self.addEventListener('install', e => {
