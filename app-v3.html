@@ -8775,11 +8775,13 @@ function _runForgotFlow(opts){
 /* ════════════════════════════════════════════════════════════
    forceSetupRecovery — 老師首次登入若缺 recovery 欄位則強制設定
    ──────────────────────────────────────────────────────────── */
-function forceSetupRecovery(accountId){
+function forceSetupRecovery(accountId, opts){
+  const o = opts || {};
+  const allowCancel = !!o.allowCancel;  // 老師自願修改時 true
   const a = (App.db.accounts || []).find(x => x.id === accountId);
   if(!a) return;
-  // 已完整設定 → 跳過
-  if(a.email && a.securityQ && a.securityA && a.recoveryCode) return;
+  // 首登模式: 已完整設定就跳過; 自願修改: 一定彈出
+  if(!allowCancel && a.email && a.securityQ && a.securityA && a.recoveryCode) return;
 
   const SECURITY_QUESTIONS = [
     '你媽媽的名字？',
@@ -8790,8 +8792,8 @@ function forceSetupRecovery(accountId){
     '你最好的童年朋友姓名？'
   ];
 
-  const m = modal('', { dismissable:false });
-  m.root.appendChild(el('h2', null, '🛡️ 設定帳號復原資訊（首次必填）'));
+  const m = modal('', { dismissable: allowCancel });
+  m.root.appendChild(el('h2', null, allowCancel ? '✏️ 修改帳號復原資訊' : '🛡️ 設定帳號復原資訊（首次必填）'));
   m.root.appendChild(el('p', { style:{lineHeight:'1.7',fontSize:'14px',color:'var(--text-muted)'} },
     '為了讓您日後忘記密碼時能安全地自助重設，請設定 Email、安全問題與恢復碼。' +
     '完成後請務必妥善保存「恢復碼」，這是您忘記 Email 或安全問題時的最後備援。'));
@@ -8936,7 +8938,12 @@ function forceSetupRecovery(accountId){
   };
 
   const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '產生並儲存恢復碼'));
+  if(allowCancel){
+    actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+    actions.appendChild(el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: submit }, allowCancel ? '✓ 儲存修改 (產生新恢復碼)' : '產生並儲存恢復碼'));
+  } else {
+    actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '產生並儲存恢復碼'));
+  }
   m.root.appendChild(actions);
   setTimeout(()=> iEmail.focus(), 100);
 }
@@ -23278,6 +23285,27 @@ function openTeacherProfile(){
   const i3 = el('input', { class:'input', type:'password' });
   f3.appendChild(i3);
   m.root.appendChild(f3);
+
+  // 帳號復原資訊 (Email + 安全問題 + 恢復碼) — 可修改
+  const fRecov = el('div', { class:'field', style:{marginTop:'8px',padding:'10px',background:'var(--surface-2)',borderRadius:'8px'} });
+  fRecov.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '🛡 帳號復原資訊'));
+  fRecov.appendChild(el('div', { style:{fontSize:'13px',lineHeight:'1.7'} },
+    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'📧 Email: '), el('strong',null,me.email || '(未設定)')),
+    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'❓ 問題: '), el('strong',null,me.securityQ || '(未設定)')),
+    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'🛡 答案: '), el('strong',null,me.securityA ? '已設定 (hashed)' : '(未設定)')),
+    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'🔑 恢復碼: '), el('strong',null,me.recoveryCode ? '已設定 (hashed, 共 ' + Math.round(((Date.now()-(me.recoveryCodeSetAt||0))/86400000)) + ' 天前)' : '(未設定)'))
+  ));
+  fRecov.appendChild(el('button', { type:'button', class:'btn btn-sm', style:{marginTop:'8px'},
+    onclick:()=> {
+      m.close(); // 先關目前 modal
+      setTimeout(()=> {
+        if(typeof forceSetupRecovery === 'function'){
+          forceSetupRecovery(me.id, { allowCancel:true });
+        }
+      }, 200);
+    }
+  }, '✏️ 修改 Email / 安全問題 / 重新產生恢復碼'));
+  m.root.appendChild(fRecov);
 
   // H2: 登出所有裝置（清空所有 loginTokens）
   const f4 = el('div', { class:'field', style:{marginTop:'8px'} });
