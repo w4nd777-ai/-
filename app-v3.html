@@ -7401,12 +7401,12 @@ function renderLoginTeacherStage(){
    原有實作允許任何人「一鍵重設為 admin/admin123」或任意改密碼，
    完全沒有驗證。重寫為多步驗證流程：
      帳號 → Email → 6 位數 OTP（mailto:）→ 安全問題 → 新密碼
-   並提供「恢復碼」替代路徑、3 次失敗 60 分鐘鎖定機制。
+   並提供「恢復碼」替代路徑、10 次失敗 60 分鐘鎖定機制。
    ──────────────────────────────────────────────────────────── */
 
 // ── 忘記密碼鎖定 helper（共用：老師、學生、恢復碼皆計入同一帳號計數）
 const FORGOT_LOCK_KEY_PREFIX = 'cms_v3_forgot_lock_';
-const FORGOT_LOCK_MAX = 3;                    // 最多失敗次數
+const FORGOT_LOCK_MAX = 10;                   // 最多失敗次數 (以 10 為單位)
 const FORGOT_LOCK_DURATION = 60 * 60 * 1000;  // 60 分鐘
 const FORGOT_OTP_KEY = 'cms_v3_otp';
 const FORGOT_OTP_TTL = 10 * 60 * 1000;        // 驗證碼 10 分鐘有效
@@ -7679,7 +7679,7 @@ function _runForgotFlow(opts){
     f.appendChild(inp);
     stage.appendChild(f);
     stage.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} },
-      '🛡️ 安全機制：3 次失敗將鎖定 60 分鐘'));
+      '🛡️ 安全機制：10 次失敗將鎖定 60 分鐘'));
 
     const next = ()=> {
       const u = inp.value.trim();
@@ -8083,7 +8083,7 @@ function _runForgotFlow(opts){
     stage.appendChild(f2);
 
     stage.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} },
-      '🛡️ 安全機制：3 次失敗將鎖定 60 分鐘'));
+      '🛡️ 安全機制：10 次失敗將鎖定 60 分鐘'));
 
     const next = ()=> {
       const sid = iSid.value.trim();
