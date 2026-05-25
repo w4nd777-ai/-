@@ -3574,6 +3574,40 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 
+/* ═══════════════════════════════════════════════════════════════════
+   🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
+   ───────────────────────────────────────────────────────────────────
+   把你的 Firebase config 物件貼到下方 DEFAULT_FB_CFG 內,
+   推送到 GitHub Pages 後, 所有訪客 (學生/其他電腦) 開啟網頁就自動連線你的 Firebase,
+   再也不必個別貼設定或掃 QR Code。
+
+   範例:
+     window.DEFAULT_FB_CFG = {
+       apiKey: "AIzaSy...",
+       authDomain: "your-project.firebaseapp.com",
+       databaseURL: "https://your-project-default-rtdb.firebaseio.com",
+       projectId: "your-project",
+       storageBucket: "your-project.appspot.com",
+       messagingSenderId: "...",
+       appId: "..."
+     };
+
+   ⚠️ 此設定會被所有訪客使用, 請務必同步部署 Firebase 安全規則
+      (限制只能讀寫 cms-v3 路徑, 詳見「☁️ 同步設定」頁的範例)。
+   ═══════════════════════════════════════════════════════════════════ */
+window.DEFAULT_FB_CFG = window.DEFAULT_FB_CFG || null;
+
+/* 啟動時若使用者沒設定 Firebase 但有 DEFAULT_FB_CFG → 自動套用 */
+try {
+  if(window.DEFAULT_FB_CFG && window.DEFAULT_FB_CFG.databaseURL){
+    const existing = localStorage.getItem(LS_FB);
+    if(!existing){
+      localStorage.setItem(LS_FB, JSON.stringify(window.DEFAULT_FB_CFG));
+      console.log('[cms] 已套用全站預設 Firebase 設定');
+    }
+  }
+} catch(_){}
+
 /* font presets — Google Fonts loaded lazily on first use */
 const FONT_PRESETS = [
   { key:'system',  label:'系統預設', stack:'-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif' },
@@ -12765,6 +12799,81 @@ function rFirebase(content){
       '💡 連結內含你的 Firebase 設定，請只傳給信任的對象。學生點開後會自動寫入設定並切換到此教室。'));
   }
   content.appendChild(card2);
+
+  // ── 🌐 全站預設 Firebase: 一次設定, 所有訪客自動套用 ──────────
+  if(fbCfgRaw){
+    const globalCard = el('div', { class:'card', style:{
+      marginTop:'12px',
+      background:'linear-gradient(135deg, color-mix(in srgb, var(--primary) 6%, var(--surface)), var(--surface))',
+      border:'2px dashed var(--primary)'
+    } });
+    globalCard.appendChild(el('h3', null, '🌐 全站預設 (推薦) — 所有訪客自動連線'));
+    globalCard.appendChild(el('p', { class:'small', style:{lineHeight:'1.7'} },
+      '不想讓學生 / 其他電腦每次都掃 QR Code? 把你的 Firebase 設定「寫進 HTML 檔案」, ' +
+      '推上 GitHub Pages 後, ' +
+      el('strong', null, '所有訪客一打開網站就自動連線你的 Firebase').outerHTML +
+      ', 完全免設定。'));
+
+    // 已套用偵測
+    const isApplied = !!(window.DEFAULT_FB_CFG && window.DEFAULT_FB_CFG.databaseURL);
+    globalCard.appendChild(el('div', { style:{
+      padding:'10px',marginTop:'8px',borderRadius:'8px',
+      background: isApplied ? 'var(--success-soft)' : 'var(--warn-soft)',
+      color: isApplied ? 'var(--success)' : 'var(--warn)',
+      fontWeight:'600'
+    } }, isApplied
+      ? '✅ 全站預設已啟用 (databaseURL: ' + (String(window.DEFAULT_FB_CFG.databaseURL).slice(0,50)) + '...)'
+      : '⚠️ 尚未設定為全站預設 (目前 Firebase 只在你這台裝置生效)'));
+
+    // 生成程式碼片段
+    const snippet = 'window.DEFAULT_FB_CFG = ' + JSON.stringify(JSON.parse(fbCfgRaw), null, 2) + ';';
+
+    globalCard.appendChild(el('div', { class:'small', style:{fontWeight:'600',marginTop:'12px',marginBottom:'4px'} }, '📝 設定步驟:'));
+    globalCard.appendChild(el('ol', { class:'small', style:{paddingLeft:'20px',lineHeight:'1.8'} },
+      el('li', null, '複製下方那段 JavaScript 程式碼'),
+      el('li', null, '打開你的 app-v3.html 找到 ',
+        el('code', { style:{background:'var(--surface-2)',padding:'1px 4px',borderRadius:'3px'} }, 'window.DEFAULT_FB_CFG = window.DEFAULT_FB_CFG || null;'),
+        ' 那一行 (約在第 3600 行附近)'),
+      el('li', null, '把那一行整段取代成你複製的內容, 存檔'),
+      el('li', null, 'git push 推上 GitHub Pages'),
+      el('li', null, '從此所有訪客打開網站就自動連線, 學生再也不用掃 QR ✨')
+    ));
+
+    const snippetTa = el('textarea', { class:'textarea', readonly:true,
+      style:{minHeight:'180px',fontFamily:'monospace',fontSize:'12px',marginTop:'8px'},
+      value: snippet
+    });
+    globalCard.appendChild(snippetTa);
+
+    globalCard.appendChild(el('div', { class:'flex', style:{marginTop:'8px',gap:'8px',flexWrap:'wrap'} },
+      el('button', { class:'btn btn-primary', onclick: ()=> {
+        try {
+          navigator.clipboard.writeText(snippet);
+          toast('✅ 已複製程式碼, 請貼到你的 app-v3.html', 'success', 4000);
+        } catch(e){ snippetTa.select(); document.execCommand('copy'); toast('已複製', 'success'); }
+      }}, '📋 複製程式碼'),
+      el('button', { class:'btn', onclick: ()=> {
+        // 下載 .txt 包含程式碼 + 教學
+        const content = '// === 課程管理系統 全站 Firebase 預設設定 ===\n' +
+          '// 請把下方整段取代你 app-v3.html 內的:\n' +
+          '//   window.DEFAULT_FB_CFG = window.DEFAULT_FB_CFG || null;\n' +
+          '// 然後 git push 即可\n\n' +
+          snippet + '\n';
+        const blob = new Blob([content], { type:'text/javascript;charset=utf-8' });
+        const u = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = u; a.download = 'DEFAULT_FB_CFG.js'; a.click();
+        setTimeout(()=> URL.revokeObjectURL(u), 1000);
+        toast('已下載 DEFAULT_FB_CFG.js', 'success');
+      }}, '⬇ 下載 .js 檔')
+    ));
+
+    globalCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'10px',lineHeight:'1.6'} },
+      '⚠️ 這會把 Firebase API key 公開在 HTML 內 (任何人 view source 都看得到)。' +
+      '請務必同時部署下方的 Firebase 安全規則, 限制只有特定 roomCode 可讀寫。'));
+
+    content.appendChild(globalCard);
+  }
 
   /* ── batch 1 安全強化：Firebase Rules 範本與一鍵套用 ── */
   const warnCard = el('div', { class:'card', style:{marginTop:'12px',background:'var(--warn-soft)',borderColor:'var(--warn)'} });
