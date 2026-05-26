@@ -11466,6 +11466,144 @@ function openStudentEdit(s=null){
 /* ════════════════════════════════════════════════════════════
    🔄 批量重設學生（密碼 / Email / 安全問題 / 恢復碼）
    ──────────────────────────────────────────────────────────── */
+/* ════════════════════════════════════════════════════════════
+   🔄 批量重設老師帳號（密碼 / Email / 安全問題 / 恢復碼）
+   ──────────────────────────────────────────────────────────── */
+function openBulkResetTeachers(){
+  if(!requirePerm('canManageTeachers','批量重設老師')) return;
+  const m = modal('', { dismissable:false });
+  m.root.style.maxWidth = '600px';
+  m.root.appendChild(el('h2', null, '🔄 批量重設老師帳號'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
+    '選擇要重設的老師 + 項目。重設後該老師下次登入會被要求重新設定。'));
+
+  // ── 老師複選 ──
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '👨‍🏫 選擇老師'));
+  const teaCtrls = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} },
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { teaChecks.forEach(cb=>cb.checked=true); refreshSummary(); }}, '全選'),
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { teaChecks.forEach(cb=>cb.checked=false); refreshSummary(); }}, '全清')
+  );
+  fT.appendChild(teaCtrls);
+  const teaBox = el('div', { style:{maxHeight:'200px',overflow:'auto',padding:'8px',border:'1px solid var(--border)',borderRadius:'8px'} });
+  const teaChecks = [];
+  const meId = App.session?.id;  // 自己的帳號標示一下，避免不小心鎖住自己
+  App.db.accounts.forEach(a => {
+    const lbl = el('label', { style:{display:'flex',alignItems:'center',gap:'8px',padding:'4px 6px',cursor:'pointer',borderRadius:'4px'} });
+    const cb = el('input', { type:'checkbox', value:a.id });
+    cb.addEventListener('change', refreshSummary);
+    teaChecks.push(cb);
+    lbl.appendChild(cb);
+    const isSelf = a.id === meId;
+    lbl.appendChild(el('span', null, ' ' + a.name + ' @' + a.username + (isSelf ? ' (你自己)' : '')));
+    if(isSelf){
+      lbl.style.background = 'var(--warn-soft)';
+      lbl.title = '小心：包含自己的話，重設後也要重新設定自己的密碼/復原資訊';
+    }
+    teaBox.appendChild(lbl);
+  });
+  if(!App.db.accounts.length) teaBox.appendChild(el('div', {class:'muted small'}, '尚無老師帳號'));
+  fT.appendChild(teaBox);
+  m.root.appendChild(fT);
+
+  // ── 要重設的項目 ──
+  m.root.appendChild(el('h3', { style:{marginTop:'14px',marginBottom:'6px',fontSize:'14px'} }, '⚙️ 要重設的項目（可複選）'));
+  const items = [
+    { key:'password', label:'🔑 密碼（重設為 帳號名+123）', danger:true, default:true },
+    { key:'mustChangePw', label:'⏰ 強制下次登入改密碼', default:true },
+    { key:'email', label:'📧 清空 Email', default:false },
+    { key:'security', label:'❓ 清空安全問題 + 答案', default:false },
+    { key:'recovery', label:'🛡 清空恢復碼', default:false }
+  ];
+  const itemChecks = {};
+  items.forEach(it => {
+    const lbl = el('label', { style:{display:'flex',alignItems:'center',gap:'8px',padding:'8px 10px',background: it.danger?'var(--danger-soft)':'var(--surface-2)',borderRadius:'6px',marginBottom:'6px',cursor:'pointer'} });
+    const cb = el('input', { type:'checkbox' });
+    if(it.default) cb.checked = true;
+    cb.addEventListener('change', refreshSummary);
+    itemChecks[it.key] = cb;
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', null, ' ' + it.label));
+    m.root.appendChild(lbl);
+  });
+
+  // 預覽 / 統計
+  const summary = el('div', { class:'small muted', style:{marginTop:'10px',padding:'10px',background:'var(--surface-2)',borderRadius:'6px'} }, '請選擇老師與項目');
+  m.root.appendChild(summary);
+
+  function getScopedAccounts(){
+    const set = new Set(teaChecks.filter(cb=>cb.checked).map(cb=>cb.value));
+    return App.db.accounts.filter(a => set.has(a.id));
+  }
+  function refreshSummary(){
+    const list = getScopedAccounts();
+    const itemCount = Object.values(itemChecks).filter(cb=>cb.checked).length;
+    const includeSelf = list.some(a => a.id === meId);
+    summary.innerHTML = '';
+    summary.appendChild(el('div', null, '將對 ' + list.length + ' 位老師重設 ' + itemCount + ' 個項目'));
+    if(includeSelf){
+      summary.appendChild(el('div', { style:{color:'var(--warn)',marginTop:'4px',fontWeight:'700'} },
+        '⚠️ 包含你自己，重設後你也要重新設定密碼/復原資訊'));
+    }
+  }
+  refreshSummary();
+
+  // ── 動作 ──
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-danger', onclick: async (ev)=> {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      const list = getScopedAccounts();
+      const picked = Object.entries(itemChecks).filter(([_,cb])=>cb.checked).map(([k])=>k);
+      if(!list.length){ btn.disabled = false; return toast('沒選到任何老師','warning'); }
+      if(!picked.length){ btn.disabled = false; return toast('沒選任何要重設的項目','warning'); }
+
+      const ok = await confirmDlg(
+        '確定要對 ' + list.length + ' 位老師重設這 ' + picked.length + ' 個項目嗎？\n此操作會立即生效並同步到雲端。',
+        { danger:true }
+      );
+      if(!ok){ btn.disabled = false; return; }
+
+      let resetCount = 0;
+      const resetSummary = [];
+      for(const a of list){
+        if(picked.includes('password')){
+          const defPw = (a.username || 'teacher') + '123';
+          try { a.password = await hashPassword(defPw); } catch(e){ continue; }
+          a.passwordChangedAt = Date.now();
+          _clearAllLoginTokens(a);
+          resetSummary.push(a.username + ' → ' + defPw);
+        }
+        if(picked.includes('mustChangePw')) a.mustChangePw = true;
+        if(picked.includes('email')) a.email = '';
+        if(picked.includes('security')){ a.securityQ = ''; a.securityA = ''; }
+        if(picked.includes('recovery')){ a.recoveryCode = ''; a.recoveryCodeSetAt = 0; }
+        resetCount++;
+      }
+
+      saveDB(true);
+      try { Sync.setMap('accounts', App.db.accounts); } catch(e){ _swallow('sync-bulk-reset-tea', e); }
+      try { bcNotify(); } catch(_){}
+
+      const msg = '✅ 已重設 ' + resetCount + ' 位老師' + (resetSummary.length ? '\n新密碼：\n' + resetSummary.join('\n') : '');
+      toast(msg.split('\n')[0],'success', 5000);
+      m.close();
+      // 若重設了密碼，跳一個顯眼 dialog 提示新密碼
+      if(resetSummary.length){
+        confirmDlg(msg, { title:'重設完成 — 請記下新密碼' });
+      }
+      rerender();
+    } catch(err){
+      console.error('[bulk reset teachers]', err);
+      btn.disabled = false;
+      toast('重設失敗：' + (err.message||err), 'danger', 5000);
+    }
+  }}, '🔄 執行重設'));
+  m.root.appendChild(actions);
+}
+
 function openBulkResetStudents(){
   if(!requirePerm('canEditStudents','批量重設學生')) return;
   const m = modal('', { dismissable:false });
@@ -13759,7 +13897,10 @@ function rSettings(content){
 
   // account
   const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
-  card3.appendChild(el('h3', null, '🔐 老師帳號'));
+  card3.appendChild(el('div', { class:'flex-between', style:{flexWrap:'wrap',gap:'8px',marginBottom:'10px'} },
+    el('h3', { style:{margin:0} }, '🔐 老師帳號'),
+    el('button', { class:'btn btn-sm btn-warn', onclick: openBulkResetTeachers, title:'批量重設所有老師的密碼/Email/安全問題' }, '🔄 批量重設')
+  ));
   App.db.accounts.forEach(a => {
     const row = el('div', { class:'list-row' });
     row.appendChild(el('div', { class:'avatar' }, initials(a.name)));
@@ -13773,23 +13914,72 @@ function rSettings(content){
       }
       return '✅ 已設定';
     })();
+    // 顯示 email + 安全問題 + 恢復碼狀態
+    const _recoveryStatus = (function(){
+      const parts = [];
+      parts.push(a.email ? '📧 ' + a.email : '📧 (無)');
+      parts.push(a.securityQ ? '❓ 已設定' : '❓ (無)');
+      parts.push(a.recoveryCode ? '🛡 已設定' : '🛡 (無)');
+      return parts.join(' · ');
+    })();
     row.appendChild(el('div', { class:'info' },
-      el('div', { class:'name' }, a.name + '  @' + a.username),
-      el('div', { class:'sub' }, _pwSubText)
+      el('div', { class:'name' }, a.name + '  @' + a.username + (a.mustChangePw ? '  ' : '')),
+      el('div', { class:'sub' }, _pwSubText),
+      el('div', { class:'sub', style:{fontSize:'11px',color:'var(--text-muted)'} }, _recoveryStatus),
+      a.mustChangePw ? el('div', { class:'sub', style:{color:'var(--warn)',fontSize:'11px'} }, '⏰ 下次登入須改密碼') : null
     ));
     const acts = el('div', { class:'actions' });
-    acts.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
-      if(!requirePerm('canManageTeachers','改老師密碼')) return;  // H1
+    // 🔑 改密碼（指定新密碼）
+    acts.appendChild(el('button', { class:'btn btn-sm', title:'指定新密碼', onclick: async ()=> {
+      if(!requirePerm('canManageTeachers','改老師密碼')) return;
       const newpw = await promptDlg('新密碼', '', { type:'password' });
       if(newpw === null) return;
       if(!newpw) return toast('不可空','danger');
-      a.password = await hashPassword(newpw);  // H5: 自動 per-account salt
+      a.password = await hashPassword(newpw);
       a.passwordChangedAt = Date.now();
-      _clearAllLoginTokens(a);  // H2
-      saveDB(true);  // H3: 立即寫入
+      a.mustChangePw = false;
+      _clearAllLoginTokens(a);
+      saveDB(true);
       try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
       toast('已更新（已加密儲存）','success');
+      rerender();
     } }, '🔑 改密碼'));
+    // 🔄 重設預設密碼 (帳號名稱 + 123)
+    acts.appendChild(el('button', { class:'btn btn-sm', title:'重設為預設密碼，下次登入須改', onclick: async ()=> {
+      if(!requirePerm('canManageTeachers','重設老師密碼')) return;
+      const defPw = (a.username || 'teacher') + '123';
+      const ok = await confirmDlg(
+        '確定重設 ' + a.name + ' 的密碼？\n\n新密碼將為「' + defPw + '」\n該老師下次登入時必須改密碼',
+        { title:'重設密碼' }
+      );
+      if(!ok) return;
+      a.password = await hashPassword(defPw);
+      a.passwordChangedAt = Date.now();
+      a.mustChangePw = true;
+      _clearAllLoginTokens(a);
+      saveDB(true);
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      toast('✅ 已重設為 ' + defPw + '，請告知 ' + a.name,'success', 5000);
+      rerender();
+    }}, '🔄 重設'));
+    // 📧 重設復原資訊 (清 email / 安全問題 / 恢復碼)
+    acts.appendChild(el('button', { class:'btn btn-sm', title:'清空 Email / 安全問題 / 恢復碼', onclick: async ()=> {
+      if(!requirePerm('canManageTeachers','重設老師復原資訊')) return;
+      const ok = await confirmDlg(
+        '清空 ' + a.name + ' 的 Email、安全問題、恢復碼？\n\n下次該老師登入會被要求重新設定。',
+        { danger:true, title:'重設復原資訊' }
+      );
+      if(!ok) return;
+      a.email = '';
+      a.securityQ = '';
+      a.securityA = '';
+      a.recoveryCode = '';
+      a.recoveryCodeSetAt = 0;
+      saveDB(true);
+      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      toast('✅ 已清空 ' + a.name + ' 的復原資訊','success');
+      rerender();
+    }}, '📧 清復原'));
     if(App.db.accounts.length > 1){
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         const ok = await confirmDlg('刪除帳號 ' + a.username + '？', { danger:true });
