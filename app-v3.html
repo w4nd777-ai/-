@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-final-polish-round';
+const APP_BUILD = '2026-05-26-overview-search-avatar';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10514,7 +10514,7 @@ function rOv(content){
     } catch(_){ _swallow('tween-stats',_); }
   }
 
-  // 修 Bug A：今日簽到簽退明細
+  // 今日簽到簽退明細 — 加搜尋 + 班級篩選 + 頭像（點擊放大下載）
   try {
     const todayStr = td();
     const todayAtt = (App.db.attendance || []).filter(a => a.date === todayStr);
@@ -10524,10 +10524,33 @@ function rOv(content){
         el('h3', null, '🕒 今日簽到 / 簽退明細'),
         el('button', { class:'btn btn-sm', onclick:()=> go('attendance'), title:'進入出席管理' }, '管理 →')
       ));
+
+      // 工具列：搜尋 + 班級篩選 + 狀態
+      const allClasses = Array.from(new Set((App.db.students||[]).map(s=>s.cls).filter(Boolean))).sort();
+      const toolbar = el('div', { class:'flex no-print', style:{gap:'6px',flexWrap:'wrap',margin:'8px 0',alignItems:'center'} });
+      const searchInp = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號', style:{flex:'1',minWidth:'140px'},
+        autocapitalize:'off', spellcheck:'false' });
+      if(App._ovAttSearch) searchInp.value = App._ovAttSearch;
+      const clsSel = el('select', { class:'select', style:{width:'auto'} });
+      clsSel.appendChild(el('option', { value:'' }, '全部班級'));
+      allClasses.forEach(c => clsSel.appendChild(el('option', { value:c }, c)));
+      if(App._ovAttCls) clsSel.value = App._ovAttCls;
+      const statSel = el('select', { class:'select', style:{width:'auto'} },
+        el('option', { value:'' }, '全部狀態'),
+        el('option', { value:'in' }, '🟢 上課中'),
+        el('option', { value:'out' }, '✅ 已簽退')
+      );
+      if(App._ovAttStat) statSel.value = App._ovAttStat;
+      toolbar.appendChild(searchInp);
+      toolbar.appendChild(clsSel);
+      toolbar.appendChild(statSel);
+      detailCard.appendChild(toolbar);
+
       const wrap = el('div', { style:{overflowX:'auto'} });
       const tbl = el('table', { class:'rep-table', style:{width:'100%',marginTop:'8px'} });
       const th = el('thead');
       th.appendChild(el('tr', null,
+        el('th', { style:{width:'40px'} }, ''),
         el('th', null, '姓名'),
         el('th', null, '班級'),
         el('th', null, '簽到時間'),
@@ -10537,44 +10560,89 @@ function rOv(content){
       ));
       tbl.appendChild(th);
       const tb = el('tbody');
-      // 按簽到時間排序
-      const rows = todayAtt.slice().sort((x,y)=> (x.time||'').localeCompare(y.time||''));
-      rows.forEach(a => {
-        const s = (App.db.students||[]).find(x => x.id === a.studentId);
-        if(!s) return;
-        let dur = '—';
-        if(a.time && a.outTime){
-          try {
-            const [h1,m1] = a.time.split(':').map(Number);
-            const [h2,m2] = a.outTime.split(':').map(Number);
-            const min = (h2*60+m2)-(h1*60+m1);
-            if(min > 0){
-              const hr = Math.floor(min/60);
-              const mn = min%60;
-              dur = (hr?hr+'h':'') + (mn?mn+'m':'') || '0m';
-            }
-          } catch(e){_swallow('auto',e)}
-        }
-        const stTxt = a.outTime ? '✅ 已簽退' : '🟢 上課中';
-        const stColor = a.outTime ? 'var(--muted)' : 'var(--success)';
-        tb.appendChild(el('tr', null,
-          el('td', null, s.name || ''),
-          el('td', null, s.cls || ''),
-          el('td', { class:'mono' }, a.time || '—'),
-          el('td', { class:'mono', style:{color: a.outTime?'var(--accent)':'var(--muted)',fontWeight: a.outTime?'700':'normal'} },
-            a.outTime || '尚未簽退'),
-          el('td', { class:'mono' }, dur),
-          el('td', { style:{color:stColor,fontWeight:'600'} }, stTxt)
-        ));
-      });
       tbl.appendChild(tb);
       wrap.appendChild(tbl);
       detailCard.appendChild(wrap);
-      // 統計：已簽退 / 上課中
-      const signedOut = todayAtt.filter(a => a.outTime).length;
-      const stillIn = todayAtt.length - signedOut;
-      detailCard.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} },
-        '已簽到 ' + todayAtt.length + ' 人 · 上課中 ' + stillIn + ' · 已簽退 ' + signedOut));
+      const summary = el('div', { class:'small muted', style:{marginTop:'6px'} });
+      detailCard.appendChild(summary);
+
+      function renderRows(){
+        tb.innerHTML = '';
+        const q = (searchInp.value||'').trim().toLowerCase();
+        const cFilter = clsSel.value;
+        const sFilter = statSel.value;
+        App._ovAttSearch = q;
+        App._ovAttCls = cFilter;
+        App._ovAttStat = sFilter;
+        const rows = todayAtt.slice().sort((x,y)=> (x.time||'').localeCompare(y.time||''));
+        let shown = 0, signedOut = 0;
+        rows.forEach(a => {
+          const s = (App.db.students||[]).find(x => x.id === a.studentId);
+          if(!s) return;
+          // filter
+          if(cFilter && s.cls !== cFilter) return;
+          if(sFilter === 'in' && a.outTime) return;
+          if(sFilter === 'out' && !a.outTime) return;
+          if(q){
+            const hit = (s.name||'').toLowerCase().includes(q) ||
+                        String(s.sid||'').toLowerCase().includes(q) ||
+                        String(s.seat||'').includes(q);
+            if(!hit) return;
+          }
+          let dur = '—';
+          if(a.time && a.outTime){
+            try {
+              const [h1,m1] = a.time.split(':').map(Number);
+              const [h2,m2] = a.outTime.split(':').map(Number);
+              const min = (h2*60+m2)-(h1*60+m1);
+              if(min > 0){
+                const hr = Math.floor(min/60), mn = min%60;
+                dur = (hr?hr+'h':'') + (mn?mn+'m':'') || '0m';
+              }
+            } catch(_){}
+          }
+          const stTxt = a.outTime ? '✅ 已簽退' : '🟢 上課中';
+          const stColor = a.outTime ? 'var(--muted)' : 'var(--success)';
+          if(a.outTime) signedOut++;
+          // 頭像 cell（點擊：有頭像 → 放大；沒頭像 → 跳到 profile）
+          const avCell = el('td', { style:{padding:'4px'} });
+          if(s.avatar){
+            avCell.appendChild(el('img', {
+              src: s.avatar, title:'點擊放大下載原圖',
+              style:{width:'32px',height:'32px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',display:'block'},
+              onclick: ()=> openAvatarViewer(s)
+            }));
+          } else {
+            avCell.appendChild(el('div', { class:'avatar', style:{width:'32px',height:'32px',fontSize:'13px',cursor:'pointer'}, title:'點此看個人檔案', onclick:()=> { App._spId = s.id; go('studentprofile'); }}, initials(s.name)));
+          }
+          tb.appendChild(el('tr', null,
+            avCell,
+            el('td', null, el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'none'}, onclick: ()=> { App._spId = s.id; go('studentprofile'); }}, s.name || '')),
+            el('td', null, s.cls || ''),
+            el('td', { class:'mono' }, a.time || '—'),
+            el('td', { class:'mono', style:{color: a.outTime?'var(--accent)':'var(--muted)',fontWeight: a.outTime?'700':'normal'} },
+              a.outTime || '尚未簽退'),
+            el('td', { class:'mono' }, dur),
+            el('td', { style:{color:stColor,fontWeight:'600'} }, stTxt)
+          ));
+          shown++;
+        });
+        const total = todayAtt.length;
+        const totalSignedOut = todayAtt.filter(a=>a.outTime).length;
+        const stillIn = total - totalSignedOut;
+        summary.innerHTML = '';
+        summary.appendChild(el('span', null, '今日已簽到 ' + total + ' 人 · 上課中 ' + stillIn + ' · 已簽退 ' + totalSignedOut));
+        if(q || cFilter || sFilter){
+          summary.appendChild(el('span', { style:{marginLeft:'8px',color:'var(--primary)'} }, '· 篩選後顯示 ' + shown + ' 筆'));
+        }
+        if(shown === 0){
+          tb.appendChild(el('tr', null, el('td', { colspan:'7', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)'} }, '🔍 沒有符合條件的紀錄')));
+        }
+      }
+      searchInp.addEventListener('input', renderRows);
+      clsSel.addEventListener('change', renderRows);
+      statSel.addEventListener('change', renderRows);
+      renderRows();
       content.appendChild(detailCard);
     }
   } catch(e){ dbgWarn('[overview today detail]', e); }
@@ -11243,7 +11311,16 @@ function rStu(content){
     // 共用：學生 row 渲染
     function renderStudentRow(s){
       const row = el('div', { class:'list-row' });
-      row.appendChild(el('div', { class:'avatar' }, initials(s.name)));
+      // 學生大頭照（有頭像點擊放大下載；沒頭像顯示 initials）
+      if(s.avatar){
+        row.appendChild(el('img', {
+          src: s.avatar, title:'點擊放大下載',
+          style:{width:'40px',height:'40px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',flexShrink:'0'},
+          onclick: (ev)=> { ev.stopPropagation(); openAvatarViewer(s); }
+        }));
+      } else {
+        row.appendChild(el('div', { class:'avatar' }, initials(s.name)));
+      }
 
       const pwBadge = s.mustChangePw
         ? el('span', { class:'pill pill-att warn', style:{fontSize:'10px',marginLeft:'6px'}, title:'學生尚未首次登入或老師已重設密碼' }, '🔐 未改密碼')
