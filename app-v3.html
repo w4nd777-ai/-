@@ -15280,12 +15280,40 @@ function rSub(content){
         )
       ));
       const acts = el('div', { class:'actions' });
-      if(typeof s.score === 'number'){
+      if(s.returned){
+        acts.appendChild(el('span', { class:'tag t-warn', title:'已退回給學生重做' }, '↩ 已退回'));
+      } else if(typeof s.score === 'number'){
         acts.appendChild(el('span', { class:'tag t-success' }, '✓ 已批'));
       } else {
         acts.appendChild(el('span', { class:'tag t-warn' }, '待批'));
       }
-      acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openSubmissionGrade(s, list, i) }, '批改'));
+      acts.appendChild(el('button', { class:'btn btn-sm btn-primary', onclick:()=> openSubmissionGrade(s, list, i), title:'批改 / 退回 / 刪除' }, '✏️ 批改'));
+      // 快速刪除按鈕
+      acts.appendChild(el('button', { class:'btn btn-sm btn-danger', title:'刪除這份繳交', onclick: async (ev)=> {
+        ev.stopPropagation();
+        if(!requirePerm('canEditGrades','刪除繳交')) return;
+        const stu = findStudent(s.studentId);
+        const ok = await confirmDlg('刪除 ' + (stu?.name||'學生') + ' 的這份繳交？6 秒內可復原', { danger:true });
+        if(!ok) return;
+        const backup = _clone(s);
+        const keysToFree = [];
+        if(s.attach && s.attach.key) keysToFree.push(s.attach.key);
+        if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
+        App.db.submissions = App.db.submissions.filter(x => x.id !== s.id);
+        saveDB();
+        Sync.setMap('submissions', App.db.submissions);
+        bcNotify();
+        pushUndo('已刪除繳交', () => {
+          if(!App.db.submissions.find(x => x.id === backup.id)) App.db.submissions.push(backup);
+          saveDB(); Sync.setMap('submissions', App.db.submissions); bcNotify();
+          toast('已復原','success'); rerender();
+        });
+        setTimeout(() => {
+          const gone = !App.db.submissions.find(x => x.id === backup.id);
+          if(gone) keysToFree.forEach(k => { try { attachDelete({key:k, storage:'idb'}); } catch(_){} });
+        }, 6500);
+        rerender();
+      }}, '🗑'));
       row.appendChild(acts);
       return row;
     }
@@ -15444,6 +15472,15 @@ function openSubmissionGrade(sub, list=null, idx=0){
     }}, '📝 範本評語')
   ));
 
+  // 若已被退回 → 顯示退回原因
+  if(sub.returned){
+    m.root.appendChild(el('div', { class:'card', style:{background:'var(--warn-soft)',marginBottom:'10px',padding:'10px',borderLeft:'4px solid var(--warn)'} },
+      el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '↩ 此繳交已退回'),
+      el('div', { class:'small' }, '退回時間：' + relTime(sub.returnedAt||0)),
+      sub.returnReason ? el('div', { class:'small', style:{marginTop:'4px'} }, '原因：' + sub.returnReason) : null
+    ));
+  }
+
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
 
@@ -15461,6 +15498,8 @@ function openSubmissionGrade(sub, list=null, idx=0){
     sub.comment = iCmt.value;
     sub.gradedAt = Date.now();
     sub.gradedBy = App.session?.name || '老師';
+    // 一旦批改 → 取消退回狀態
+    if(sub.returned){ sub.returned = false; }
     saveDB();
     Sync.push('submissions', sub);
     bcNotify();
@@ -15480,6 +15519,84 @@ function openSubmissionGrade(sub, list=null, idx=0){
     }
   }
 
+  // ↩ 退回作業（要求學生重做）
+  async function returnSubmission(){
+    if(!requirePerm('canEditGrades','退回作業')) return;
+    const reason = prompt('退回原因（會顯示給學生）：', sub.returnReason || '請補充內容後再繳交');
+    if(reason === null) return; // user cancelled
+    sub.returned = true;
+    sub.returnedAt = Date.now();
+    sub.returnReason = (reason || '').trim();
+    sub.returnedBy = App.session?.name || '老師';
+    // 取消已批分數讓學生重新繳交後才有分
+    sub.score = null;
+    sub.rawScore = null;
+    saveDB();
+    Sync.push('submissions', sub);
+    // 通知學生
+    try {
+      if(!App.db.notifications) App.db.notifications = [];
+      App.db.notifications.push({
+        id: nid(),
+        studentId: sub.studentId,
+        type: 'submission_returned',
+        text: '老師退回「' + (asg.title||'作業') + '」: ' + (sub.returnReason||'請補充後重交'),
+        ts: Date.now(),
+        read: false
+      });
+      saveDB();
+      Sync.setMap('notifications', App.db.notifications);
+    } catch(_){}
+    bcNotify();
+    toast('已退回給 ' + stu.name + '，學生會看到通知','success');
+    m.close();
+    rerender();
+  }
+
+  // 🗑 刪除繳交
+  async function deleteSubmission(){
+    if(!requirePerm('canEditGrades','刪除繳交')) return;
+    const ok = await confirmDlg(
+      '確定刪除「' + stu.name + '」的這份繳交嗎？\n附件也會一起清除，此操作可在 6 秒內復原。',
+      { danger:true }
+    );
+    if(!ok) return;
+    const subBackup = _clone(sub);
+    // 先記錄要清理的附件 key，6 秒後若沒復原才真的釋放
+    const keysToFree = [];
+    if(sub.attach && sub.attach.key) keysToFree.push(sub.attach.key);
+    if(Array.isArray(sub.attaches)){
+      sub.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
+    }
+    App.db.submissions = App.db.submissions.filter(x => x.id !== sub.id);
+    saveDB();
+    Sync.setMap('submissions', App.db.submissions);
+    bcNotify();
+    m.close();
+    pushUndo('已刪除 ' + stu.name + ' 的繳交', () => {
+      // 復原
+      if(!App.db.submissions.find(x => x.id === subBackup.id)){
+        App.db.submissions.push(subBackup);
+      }
+      saveDB();
+      Sync.setMap('submissions', App.db.submissions);
+      bcNotify();
+      toast('已復原繳交', 'success');
+      rerender();
+    });
+    // 6.5 秒後若沒復原 → sweep
+    setTimeout(() => {
+      const stillGone = !App.db.submissions.find(x => x.id === subBackup.id);
+      if(stillGone){
+        keysToFree.forEach(k => { try { attachDelete({key:k, storage:'idb'}); } catch(_){} });
+      }
+    }, 6500);
+    rerender();
+  }
+
+  // 危險動作（左側）
+  actions.appendChild(el('button', { class:'btn btn-warn', onclick: returnSubmission, style:{marginRight:'auto'} }, '↩ 退回'));
+  actions.appendChild(el('button', { class:'btn btn-danger', onclick: deleteSubmission }, '🗑 刪除'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> saveGrade(false) }, '儲存'));
   if(list && list.length > 1){
     actions.appendChild(el('button', { class:'btn btn-success', onclick:()=> saveGrade(true) }, '✓ 存並下一份'));
@@ -19309,8 +19426,24 @@ function rSAsgnDetailV2(content, asg, me){
 
   const existing = App.db.submissions.find(s => s.studentId === me.id && s.assignmentId === asg.id);
 
-  // already graded
-  if(existing && typeof existing.score === 'number'){
+  // 老師退回 → 顯眼提示學生重做
+  if(existing && existing.returned){
+    const retCard = el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'10px',borderLeft:'4px solid var(--warn)'} });
+    retCard.appendChild(el('h3', null, '↩ 老師退回了這份作業'));
+    retCard.appendChild(el('div', { class:'small', style:{marginTop:'4px'} }, '退回時間：' + relTime(existing.returnedAt||0)));
+    if(existing.returnReason){
+      retCard.appendChild(el('div', { style:{marginTop:'8px',padding:'10px',background:'var(--surface)',borderRadius:'8px'} },
+        el('div', { class:'small', style:{fontWeight:'700',marginBottom:'4px'} }, '💬 老師說：'),
+        el('div', { class:'small', style:{whiteSpace:'pre-wrap'} }, existing.returnReason)
+      ));
+    }
+    retCard.appendChild(el('div', { class:'small muted', style:{marginTop:'8px'} }, '請依老師建議修改後，重新繳交即可'));
+    content.appendChild(retCard);
+    // 不 return，往下走「修改繳交」流程
+  }
+
+  // already graded (排除已退回的——已退回 score 會被清掉)
+  if(existing && typeof existing.score === 'number' && !existing.returned){
     const card = el('div', { class:'card', style:{borderColor:'var(--success)',background:'var(--success-soft)'} });
     card.appendChild(el('h3', null, '✅ 已批改'));
     card.appendChild(el('div', { class:'huge', style:{color:'var(--success)',textAlign:'center',marginTop:'4px'} }, existing.score + ' / ' + (asg.points||100)));
