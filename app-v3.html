@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-mobile-logout';
+const APP_BUILD = '2026-05-26-remove-default-hint';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -7722,7 +7722,6 @@ function renderLoginTeacherStage(){
   // Spotify 版：tab 已標示「老師」，stage 內不再放 H3
   const stage = el('div', { class:'login-stage' });
 
-  const hasDefault = App.db.accounts.some(a => a.username === 'admin' && a.password === 'admin123');
   const prefill = App._loginPrefill || {};
   const rememberSaved = loadRemember();
 
@@ -7766,17 +7765,7 @@ function renderLoginTeacherStage(){
   stage.appendChild(rememberLabel);
 
   const _lcT = (App._uiCustom && App._uiCustom.login) || {};
-  if(hasDefault && !_lcT.hideDefaultHint){
-    const hint = el('div', { class:'default-hint' },
-      el('span', null, '💡 預設帳號：'),
-      el('code', { style:{fontSize:'12px'} }, 'admin / admin123'),
-      el('div', { class:'dh-actions' },
-        el('button', { onclick: e => { e.preventDefault(); i1.value='admin'; i2.value='admin123'; }}, '使用預設'),
-        el('button', { onclick: e => { e.preventDefault(); i1.value=''; i2.value=''; i1.focus(); }}, '清除')
-      )
-    );
-    stage.appendChild(hint);
-  }
+  // 已移除「預設帳號 admin/admin123」提示（資安顧慮 + 使用者要求）
 
   const submit = async ()=>{
     // 修手機登入：username 小寫 + 清掉隱藏空白字元（手機 IME 可能注入零寬字元 / 雙向控制符 / BOM）
