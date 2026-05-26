@@ -1,6 +1,6 @@
 /* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
 // M3: CACHE_NAME 動態化 — 每次部署 bump BUILD 字串即可強制取得新版資源
-const BUILD = '2026-05-26-teacher-reset-buttons';
+const BUILD = '2026-05-26-stuck-cache-fix';
 const CACHE_NAME = 'cms-v3-' + BUILD;
 const CORE_ASSETS = [
   'manifest.json',
@@ -22,12 +22,16 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   // 清掉所有非當前版本的 cache（避免舊版資源殘留）
-  e.waitUntil(
-    caches.keys().then(keys => Promise.all(
-      keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-    ))
-  );
-  self.clients.claim();
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)));
+    await self.clients.claim();
+    // 告知所有開著的頁面：有新版了，請考慮重新整理
+    try {
+      const list = await self.clients.matchAll({ type:'window', includeUncontrolled:true });
+      list.forEach(c => { try { c.postMessage({ type:'NEW_VERSION', build: BUILD }); } catch(_){} });
+    } catch(_) {}
+  })());
 });
 
 self.addEventListener('fetch', e => {
