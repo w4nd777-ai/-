@@ -3893,7 +3893,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-sprint1-security';
+const APP_BUILD = '2026-05-26-sprint2-200users';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5153,11 +5153,23 @@ const Sync = (() => {
     }, debounceMs);
   }
 
+  // 🚀 Sprint 2 — 200 人優化：學生端只訂閱實際需要的 collection
+  //   省下 ~30% listener / bandwidth
+  //   老師 = 全訂閱；學生 = 只訂閱與自己有關的
+  function _shouldSubscribe(node){
+    // session 不存在（登入頁）→ 訂閱必要 collection 才能 ensureDefaults
+    if(!App.session || App.session.role === 'teacher') return true;
+    // 學生：跳過老師專用 collection
+    const studentSkip = ['accounts','teachers','feedbacks','passwordResets','peerEvals'];
+    return !studentSkip.includes(node);
+  }
+
   function attachListeners(){
     if(!App.fbRef) return;
 
     // ── Array collections：child-level listener ──
     ARRAY_COLLECTIONS.forEach(node => {
+      if(!_shouldSubscribe(node)) return;
       const ref = App.fbRef.child(node);
 
       const addCb = ref.on('child_added', snap => {
@@ -5214,6 +5226,7 @@ const Sync = (() => {
 
     // ── 物件型 collections：仍用 value listener（settings/grades/branding）──
     OBJ_COLLECTIONS.forEach(node => {
+      if(!_shouldSubscribe(node)) return;
       const ref = App.fbRef.child(node);
       const cb = ref.on('value', snap => {
         const v = snap.val();
