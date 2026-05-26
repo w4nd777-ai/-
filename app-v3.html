@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-modal-race-logout-fix';
+const APP_BUILD = '2026-05-26-final-qa-fixes';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4411,7 +4411,13 @@ function modal(content, opts={}){
 function closeModal(){
   // Round 2 M8：closeModal 也要清掉 stack（避免 ESC 對著已不存在的 modal 觸發）
   try { if(App._openModals) App._openModals.length = 0; } catch(_){_swallow('closeModal-stack',_)}
-  $('#modal-host').innerHTML = '';
+  const host = $('#modal-host');
+  // QA: 同步取消任何 pending fade timer，避免 leak
+  if(host && host._pendingClearTimer){
+    try { clearTimeout(host._pendingClearTimer); } catch(_){}
+    host._pendingClearTimer = null;
+  }
+  host.innerHTML = '';
 }
 
 function confirmDlg(msg, opts={}){
@@ -7782,7 +7788,7 @@ function renderLoginTeacherStage(){
 
   const submit = async ()=>{
     // 修手機登入：username 小寫 + 清掉隱藏空白字元（手機 IME 可能注入零寬字元 / 雙向控制符 / BOM）
-    const _stripHidden = s => String(s||'').replace(/[​-‏‪-‮⁠-⁯﻿]/g, '');
+    const _stripHidden = s => String(s||'').replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '');
     const u = _stripHidden((i1.value || '').trim()).toLowerCase();
     // 密碼：去除兩端空白（含全形）+ 隱藏字元（中間半形空白保留）
     let pw = _stripHidden(i2.value || '').replace(/^[\s　]+|[\s　]+$/g, '');
@@ -11597,11 +11603,24 @@ function openBulkResetTeachers(){
       if(!list.length){ btn.disabled = false; return toast('沒選到任何老師','warning'); }
       if(!picked.length){ btn.disabled = false; return toast('沒選任何要重設的項目','warning'); }
 
+      // 第一道確認
       const ok = await confirmDlg(
         '確定要對 ' + list.length + ' 位老師重設這 ' + picked.length + ' 個項目嗎？\n此操作會立即生效並同步到雲端。',
         { danger:true }
       );
       if(!ok){ btn.disabled = false; return; }
+
+      // 第二道：包含自己 + 要重設密碼時必須再確認
+      const includeSelf = list.some(a => a.id === meId);
+      if(includeSelf && picked.includes('password')){
+        const selfAcc = list.find(a => a.id === meId);
+        const myNewPw = (selfAcc.username || 'admin') + '123';
+        const ok2 = await confirmDlg(
+          '⚠️ 你選擇了自己 + 重設密碼！\n\n你的新密碼將會是：\n\n        ' + myNewPw + '\n\n請現在抄下來。重設後你需要用這組密碼重新登入。\n\n確定繼續？',
+          { danger:true, title:'⚠️ 自己也會被重設' }
+        );
+        if(!ok2){ btn.disabled = false; return; }
+      }
 
       let resetCount = 0;
       const resetSummary = [];
@@ -13487,7 +13506,11 @@ function rPending(content){
       row.appendChild(info);
       const acts = el('div', { class:'actions' },
         el('button', { class:'btn btn-sm', title:'核准前先修改資料', onclick:()=> openPendingEdit(p) }, '✏️ 修改'),
-        el('button', { class:'btn btn-sm btn-success', onclick:()=> approveStudent(p.id) }, '✓ 接受'),
+        el('button', { class:'btn btn-sm btn-success', onclick: async (ev)=> {
+          // 防止連點 race：approveStudent 是 async (含 hashPassword)
+          ev.currentTarget.disabled = true;
+          try { await approveStudent(p.id); } catch(e){ _swallow('approve-single', e); ev.currentTarget.disabled = false; }
+        }}, '✓ 接受'),
         el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectStudent(p.id) }, '✗ 拒絕')
       );
       row.appendChild(acts);
@@ -13532,14 +13555,15 @@ function openPendingEdit(p){
     m.close();
     rerender();
   }}, '💾 儲存'));
-  actions.appendChild(el('button', { class:'btn btn-success', onclick: async ()=> {
+  actions.appendChild(el('button', { class:'btn btn-success', onclick: async (ev)=> {
+    ev.currentTarget.disabled = true;
     p.name = inps.name.value.trim() || p.name;
     p.sid = inps.sid.value.trim();
     p.cls = inps.cls.value.trim();
     p.seat = parseInt(inps.seat.value,10) || 0;
     p.email = inps.email.value.trim();
     m.close();
-    approveStudent(p.id);
+    try { await approveStudent(p.id); } catch(e){ _swallow('approve-edit', e); }
   }}, '✓ 儲存並核准'));
   m.root.appendChild(actions);
 }
@@ -21288,6 +21312,16 @@ function _showSwUpdateBanner(beforeReload){
    注意：不會清掉 cms_v3_db / cms_v3_fb_cfg / cms_v3_session 等使用者資料 */
 async function forceCacheReset(){
   try {
+    // 0. 詢問是否同時登出（強制清快取後，多半使用者也想換帳號重新登入）
+    let alsoLogout = false;
+    try {
+      if(typeof confirmDlg === 'function' && (App.session || localStorage.getItem('cms_v3_session'))){
+        alsoLogout = await confirmDlg(
+          '同時登出目前帳號嗎？\n\n• 是：清掉登入狀態，下次重新輸入帳密\n• 否：保留登入狀態（只清快取/SW）',
+          { title:'強制清快取', okText:'是，同時登出', cancelText:'否，只清快取' }
+        );
+      }
+    } catch(_){}
     // 1. unregister 所有 SW
     if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
       const regs = await navigator.serviceWorker.getRegistrations();
@@ -21302,6 +21336,12 @@ async function forceCacheReset(){
     Object.keys(localStorage).forEach(k => {
       if(k.indexOf('cms_v3_forgot_') === 0 || k.indexOf('cms_v3_lock_') === 0) localStorage.removeItem(k);
     });
+    // 3b. 若使用者選擇也登出 → 清掉 session + remember
+    if(alsoLogout){
+      try { localStorage.removeItem('cms_v3_session'); } catch(_){}
+      try { localStorage.removeItem('cms_v3_remember'); } catch(_){}
+      try { App.session = null; } catch(_){}
+    }
     // 4. 用 timestamp query 強制 reload 跳過 HTTP cache
     const url = location.origin + location.pathname + '?_v=' + Date.now();
     try { toast('🔄 已清快取，重新載入中...', 'success', 2000); } catch(_){}
