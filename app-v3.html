@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-overview-search-avatar';
+const APP_BUILD = '2026-05-26-matrix-flicker-avatar-prof';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11033,15 +11033,41 @@ function rStudentProfile(content){
     return;
   }
 
-  // 頂列
-  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
-    el('div', { class:'flex', style:{alignItems:'center',gap:'12px'} },
-      s.avatar
-        ? el('img', { src: s.avatar, title:'點擊放大', style:{width:'72px',height:'72px',borderRadius:'50%',objectFit:'cover',border:'3px solid var(--primary)',cursor:'zoom-in'}, onclick: ()=> openAvatarViewer(s) })
-        : el('div', { class:'avatar', style:{width:'72px',height:'72px',fontSize:'28px',border:'3px solid var(--primary)'} }, initials(s.name)),
+  // 頂列 — 頭像放大到 100x100，且加「📷 查看 / 下載」按鈕
+  const avatarBlock = s.avatar
+    ? el('div', { style:{position:'relative'} },
+        el('img', { src: s.avatar, title:'點擊放大下載原圖', style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',border:'3px solid var(--primary)',cursor:'zoom-in',display:'block'}, onclick: ()=> openAvatarViewer(s) }),
+        // 小角標：明示可放大
+        el('div', { style:{position:'absolute',right:'-2px',bottom:'-2px',background:'var(--primary)',color:'#fff',width:'28px',height:'28px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'14px',cursor:'zoom-in',boxShadow:'0 2px 6px rgba(0,0,0,0.3)'}, title:'點擊放大下載', onclick: ()=> openAvatarViewer(s) }, '🔍')
+      )
+    : el('div', { class:'avatar', style:{width:'100px',height:'100px',fontSize:'36px',border:'3px solid var(--primary)'} }, initials(s.name));
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'12px'} },
+    el('div', { class:'flex', style:{alignItems:'center',gap:'14px'} },
+      avatarBlock,
       el('div', null,
         el('h1', { style:{margin:'0 0 4px'} }, s.name + (s.seat ? ' (' + s.seat + '號)' : '')),
-        el('div', { class:'muted small' }, (s.cls || '未分班') + (s.sid ? ' · 學號 ' + s.sid : ''))
+        el('div', { class:'muted small' }, (s.cls || '未分班') + (s.sid ? ' · 學號 ' + s.sid : '')),
+        // 頭像快捷按鈕 — 老師最常用，放這裡最直覺
+        s.avatar
+          ? el('div', { class:'flex no-print', style:{gap:'6px',marginTop:'8px',flexWrap:'wrap'} },
+              el('button', { class:'btn btn-sm btn-primary', onclick:()=> openAvatarViewer(s) }, '🔍 查看大圖'),
+              el('button', { class:'btn btn-sm', onclick:()=> {
+                // 直接下載（不開 modal）
+                try {
+                  const a = document.createElement('a');
+                  a.href = s.avatar;
+                  let ext = 'jpg';
+                  const m1 = /^data:image\/(\w+)/i.exec(s.avatar || '');
+                  if(m1) ext = m1[1].toLowerCase().replace('jpeg','jpg');
+                  a.download = (s.cls || '') + '_' + (s.seat ? s.seat + '號_' : '') + s.name + '_頭像.' + ext;
+                  document.body.appendChild(a); a.click();
+                  setTimeout(()=> a.remove(), 0);
+                  toast('已下載 ' + s.name + ' 的頭像', 'success');
+                } catch(e){ toast('下載失敗', 'danger'); }
+              }}, '⬇ 下載')
+            )
+          : el('div', { class:'tiny muted no-print', style:{marginTop:'6px'} }, '尚未上傳頭像')
       )
     ),
     el('div', { class:'flex no-print' },
@@ -21184,6 +21210,11 @@ function rMatrix(content){
     el('div', null,
       el('h1', null, '🪑 座位矩陣'),
       el('div', { class:'small muted' }, '點座位切換出席狀態 · 拖放可換位')
+    ),
+    // 修：明顯的返回按鈕，方便從矩陣回到出席頁/總覽
+    el('div', { class:'flex no-print', style:{gap:'6px',flexWrap:'wrap'} },
+      el('button', { class:'btn btn-sm', onclick:()=> go('attendance'), title:'返回出席管理' }, '← 出席管理'),
+      el('button', { class:'btn btn-sm', onclick:()=> go('overview'), title:'返回總覽' }, '🏠 總覽')
     )
   ));
 
@@ -21291,7 +21322,29 @@ function rMatrix(content){
       const cycle = { absent:'present', present:'late', late:'leave', leave:'absent' };
       const next = cycle[cur] || 'present';
       matrixSetStatus(s.id, next);
-      rerender();
+      // 修閃爍：只更新這一格的 class + icon，不要 full rerender 整個頁面
+      cell.className = 'matrix-seat s-' + next;
+      const stMap = { present:'✅', late:'🟡', leave:'📆', absent:'❌' };
+      const stIcon = cell.querySelector('.seat-st');
+      if(stIcon) stIcon.textContent = stMap[next] || '⬜';
+      // 更新底部統計（找出統計卡只重畫數字）
+      try {
+        const counts = { present:0, late:0, leave:0, absent:0 };
+        const maps = buildTodayMaps();
+        students.forEach(x => { counts[matrixCurrentStatus(x.id, maps)]++; });
+        const statNums = content.querySelectorAll('.matrix-grid ~ .card div[style*="fontWeight:\'700\'"]');
+        // fallback: 完整 rerender 統計區塊
+        const summaryCard = content.querySelectorAll('.card');
+        // 簡單做法：用 textContent 直接更新（避免重畫）
+        const summCard = [...content.querySelectorAll('.card')].slice(-1)[0];
+        if(summCard){
+          const nums = summCard.querySelectorAll('div[style*="font-weight"]');
+          nums[0] && (nums[0].textContent = counts.present);
+          nums[1] && (nums[1].textContent = counts.late);
+          nums[2] && (nums[2].textContent = counts.leave);
+          nums[3] && (nums[3].textContent = counts.absent);
+        }
+      } catch(_){}
     });
 
     // drag-and-drop seat swap
