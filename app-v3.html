@@ -12591,7 +12591,7 @@ function rSFeedback(content){
   if(myAll.length > 0){
     content.appendChild(el('div', { class:'card', style:{marginBottom:'14px',padding:'10px 14px'} },
       el('div', { class:'small' },
-        '📜 你過去共填過 ', el('b', null, String(myAll.length)), ' 次回饋（內容不公開以避免想起來改）'
+        '📜 你過去共填過 ', el('b', null, String(myAll.length)), ' 次回饋'
       )
     ));
   }
@@ -14937,13 +14937,11 @@ function openAssignmentEdit(asg){
   fTgt.appendChild(iTgt); row2.appendChild(fTgt);
   m.root.appendChild(row2);
 
-  // batch 1：加權倍數
+  // 加權倍數
   const fWeight = el('div', { class:'field' });
-  fWeight.appendChild(el('label', { class:'label' }, '加權倍數（1 ~ 10，預設 1）'));
+  fWeight.appendChild(el('label', { class:'label' }, '加權倍數 (1~10)'));
   const iWeight = el('input', { class:'input', type:'number', value: (asg && Number(asg.weight) > 0) ? asg.weight : 1, min:'1', max:'10', step:'0.5' });
   fWeight.appendChild(iWeight);
-  fWeight.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
-    '此作業在「平均分」計算中佔的權重（例：期末報告設 3，等同 3 份普通作業）'));
   m.root.appendChild(fWeight);
 
   // 包 B-1：科目下拉
@@ -14953,18 +14951,10 @@ function openAssignmentEdit(asg){
   fSubj.appendChild(iSubj);
   m.root.appendChild(fSubj);
 
-  // 外部繳交連結 (選填) — 可貼任何 URL: Google 表單 / Drive 資料夾 / Dropbox / 學校平台
-  const fGF = el('div', { class:'field', style:{background:'var(--surface-2)',padding:'12px',borderRadius:'8px',marginBottom:'10px'} });
-  fGF.appendChild(el('label', { class:'label', style:{fontSize:'14px',fontWeight:'700'} }, '🔗 外部繳交連結 (選填)'));
-  fGF.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px',lineHeight:'1.6'} },
-    '若你想讓學生直接在外部系統繳交 (不用本系統內建上傳), 把連結貼這裡. 學生作業頁會出現大顯眼按鈕跳轉. 適用:'));
-  fGF.appendChild(el('ul', { class:'tiny muted', style:{margin:'0 0 6px 18px',lineHeight:'1.7'} },
-    el('li', null, '📝 Google 表單 (含「上傳檔案」題, 最推薦, 學生不能看別人的)'),
-    el('li', null, '📁 Google Drive 共用資料夾 (設「編輯者」可上傳, 但學生能看/刪別人的檔案, 風險高)'),
-    el('li', null, '☁️ Dropbox 檔案要求 / OneDrive 共用 / 學校教學平台'),
-    el('li', null, '🌐 任何外部 URL')
-  ));
-  const iGF = el('input', { class:'input', type:'url', placeholder:'https://...',
+  // 外部繳交連結 (選填) — 可貼 Google 表單 / Drive / Dropbox 等 URL
+  const fGF = el('div', { class:'field' });
+  fGF.appendChild(el('label', { class:'label' }, '🔗 外部繳交連結 (選填)'));
+  const iGF = el('input', { class:'input', type:'url', placeholder:'https://... (Google 表單 / Drive / Dropbox 等)',
     value: asg?.googleFormUrl || '' });
   fGF.appendChild(iGF);
   m.root.appendChild(fGF);
@@ -19519,31 +19509,23 @@ function buildSubmissionForm(asg, me, existing){
   const card = el('div', { class:'card', style:{marginTop:'10px'} });
   card.appendChild(el('h3', null, '📤 ' + (overdue?'(已逾期) ':'') + (existing?'修改繳交':'繳交作業')));
 
-  // 外部繳交連結 (若老師有設定 → 顯眼大按鈕)
+  // 外部繳交連結 (若老師有設定 → 顯眼按鈕)
   if(asg.googleFormUrl){
-    // 偵測連結類型決定圖示 / 描述
     const url = asg.googleFormUrl;
-    let icon = '🔗', title = '老師建議的繳交連結', desc = '點下方按鈕跳轉到老師指定的繳交位置上傳作業.';
-    if(url.includes('docs.google.com/forms')){
-      icon = '📝'; title = '老師建議用 Google 表單繳交';
-      desc = '點下方按鈕跳轉到老師的 Google 表單上傳作業 (檔案會自動存到老師的 Google Drive).';
-    } else if(url.includes('drive.google.com')){
-      icon = '📁'; title = '老師開了 Google Drive 共用資料夾';
-      desc = '點下方按鈕跳到老師的共用資料夾, 直接拖檔案進去上傳.';
-    } else if(url.includes('dropbox.com')){
-      icon = '☁️'; title = '老師用 Dropbox 收件';
-      desc = '點下方按鈕跳到 Dropbox 上傳檔案.';
-    }
+    let icon = '🔗';
+    if(url.includes('docs.google.com/forms')) icon = '📝';
+    else if(url.includes('drive.google.com')) icon = '📁';
+    else if(url.includes('dropbox.com')) icon = '☁️';
     const gfCard = el('div', { style:{
       background: 'linear-gradient(135deg, #4285f4, #34a853)',
-      color:'#fff', padding:'14px', borderRadius:'10px', marginBottom:'14px'
+      color:'#fff', padding:'12px', borderRadius:'10px', marginBottom:'14px',
+      display:'flex',alignItems:'center',justifyContent:'space-between',gap:'8px',flexWrap:'wrap'
     }});
-    gfCard.appendChild(el('div', { style:{fontWeight:'700',fontSize:'15px',marginBottom:'4px'} }, icon + ' ' + title));
-    gfCard.appendChild(el('div', { style:{fontSize:'13px',opacity:'0.9',marginBottom:'10px',lineHeight:'1.5'} }, desc));
+    gfCard.appendChild(el('div', { style:{fontWeight:'700',fontSize:'14px'} }, icon + ' 老師指定外部繳交連結'));
     gfCard.appendChild(el('a', {
       href: url, target:'_blank', rel:'noopener',
-      style:{display:'inline-block',background:'#fff',color:'#4285f4',padding:'10px 20px',borderRadius:'8px',fontWeight:'700',textDecoration:'none',marginRight:'8px'}
-    }, icon + ' 開啟連結'));
+      style:{display:'inline-block',background:'#fff',color:'#4285f4',padding:'8px 16px',borderRadius:'8px',fontWeight:'700',textDecoration:'none'}
+    }, '開啟連結 →'));
     card.appendChild(gfCard);
   }
 
@@ -19556,32 +19538,9 @@ function buildSubmissionForm(asg, me, existing){
   if(!existing) setupDraftSave(iT, 'submit_' + (me?.id || 'x') + '_' + asg.id);
 
   const fL = el('div', { class:'field' });
-  fL.appendChild(el('label', { class:'label' }, '🔗 連結 (大檔推薦, 不占老師容量)'));
+  fL.appendChild(el('label', { class:'label' }, '🔗 連結 (大檔推薦)'));
   const iL = el('input', { class:'input', placeholder:'https://drive.google.com/... 或 https://wetransfer.com/...', value: (existing && existing.link) || '' });
   fL.appendChild(iL);
-
-  // 「沒空間怎麼辦」可展開的免費方案說明
-  const helpBox = el('details', { style:{marginTop:'6px',background:'var(--surface-2)',padding:'8px 10px',borderRadius:'8px',fontSize:'12px'} });
-  const summary = el('summary', { style:{cursor:'pointer',fontWeight:'600',color:'var(--primary)'} }, '📚 不會上傳大檔? 點我看 5 種免費方案');
-  helpBox.appendChild(summary);
-  helpBox.appendChild(el('div', { style:{marginTop:'8px',lineHeight:'1.8'} },
-    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟢 推薦 1: 自己的 Google Drive (15GB 免費)'),
-    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
-      'Gmail 登入 drive.google.com → 上傳 → 檔案右鍵「取得連結」→ 改「知道連結的任何人」→ 複製貼上'),
-    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟢 推薦 2: WeTransfer (2GB / 次, 不用註冊)'),
-    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
-      '到 wetransfer.com → 拖檔案 → 選「取得轉發連結」(免註冊) → 複製貼上 (7 天有效)'),
-    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🔵 OneDrive (學校微軟帳號, 通常 1TB)'),
-    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
-      'onedrive.live.com → 上傳 → 右鍵「分享」→ 「複製連結」'),
-    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟣 MEGA (20GB 免費)'),
-    el('div', { style:{paddingLeft:'14px',marginBottom:'8px',color:'var(--text-muted)'} },
-      'mega.nz 註冊 → 上傳 → 「取得連結」'),
-    el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, '🟡 YouTube (影片無限, 不公開可選)'),
-    el('div', { style:{paddingLeft:'14px',color:'var(--text-muted)'} },
-      'youtube.com → 上傳 → 「不公開」→ 取得連結')
-  ));
-  fL.appendChild(helpBox);
   card.appendChild(fL);
 
   // multi-file
