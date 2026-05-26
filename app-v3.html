@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#2563eb">
 <!-- 🔒 CSP — 限制可載入的資源來源，防止 XSS 注入 (含 'unsafe-inline' 因為大量 inline style/event)
      允許：本站、Firebase、Google Drive、Anthropic、QR 服務 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app wss://*.firebaseio.com https://api.anthropic.com https://discord.com; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com; media-src 'self' blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app wss://*.firebaseio.com https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com; media-src 'self' blob: data:;">
 <!-- 🔒 防 clickjacking -->
 <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
 <!-- 🔒 不發送 referrer 給其他網站 -->
@@ -37,6 +37,43 @@
       try { localStorage.setItem('cms_v3_last_error', JSON.stringify(info)); } catch(_){}
     } catch(_){}
   });
+</script>
+
+<!-- 🩺 Sentry 錯誤監控 (loader script — 自動載入 SDK，不影響首頁速度)
+     發生錯誤時自動上報到 Sentry Dashboard，老師不用做任何事
+     設定 (取樣率/環境) 都從 Sentry Dashboard 控制 -->
+<script src="https://js.sentry-cdn.com/114d05cf641ed89dc242bb28663f03bb.min.js" crossorigin="anonymous"></script>
+<script>
+  // 額外配置：過濾敏感字串、設定環境，並確保 Sentry 載入失敗時不影響系統
+  try {
+    if (window.Sentry && typeof window.Sentry.onLoad === 'function') {
+      window.Sentry.onLoad(function() {
+        try {
+          window.Sentry.init({
+            // 學校用不需要 performance / replay (省額度也保護隱私)
+            tracesSampleRate: 0,
+            replaysSessionSampleRate: 0,
+            replaysOnErrorSampleRate: 0,
+            environment: location.hostname.includes('github.io') ? 'production' : 'dev',
+            // 🔒 過濾敏感字串避免把密碼/token 送出去
+            beforeSend: function(event) {
+              try {
+                var blob = (event.message || '') + ' ' + JSON.stringify(event.exception || '') + ' ' + JSON.stringify(event.breadcrumbs || '');
+                if (/password|密碼|secret|api[_-]?key|access[_-]?token|authorization/i.test(blob)) return null;
+              } catch(_) {}
+              return event;
+            }
+          });
+          // 把先前 buffer 的 early errors 補送
+          try {
+            (window.__earlyErrors || []).forEach(function(info) {
+              window.Sentry.captureMessage('[early] ' + (info.msg || '') + (info.file ? ' @ ' + info.file + ':' + info.line : ''), 'error');
+            });
+          } catch(_) {}
+        } catch(_) {}
+      });
+    }
+  } catch(_) {}
 </script>
 
 <style>
@@ -3893,7 +3930,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-health-dashboard';
+const APP_BUILD = '2026-05-26-sentry';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
