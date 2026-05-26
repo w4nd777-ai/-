@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-stuck-cache-fix';
+const APP_BUILD = '2026-05-26-mobile-logout';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10136,7 +10136,7 @@ function openMoreMenuTeacher(){
   const m = modal('');
   m.root.appendChild(el('h2', null, '更多'));
   const items = [
-    ['students','👥 學生名單'],['matrix','🪑 座位矩陣'],['qr','📱 QR 簽到'],
+    ['students','👥 學生名單'],['pending','📥 註冊審核'],['matrix','🪑 座位矩陣'],['qr','📱 QR 簽到'],
     ['groups','👥 分組管理'],['attreport','📊 出席報表'],
     ['leave','📆 請假管理'],['messages','💬 訊息'],
     ['grades','🎯 學期成績'],['evals','💬 課程評價'],
@@ -10159,6 +10159,11 @@ function openMoreMenuTeacher(){
     el('button', { class:'btn', style:{flex:'1'}, onclick:()=> { m.close(); openEmailComposer(); }}, '📧 寄送 Email'),
     el('button', { class:'btn', style:{flex:'1'}, onclick:()=> { m.close(); openCmdPalette(); }}, '⚡ 命令面板')
   ));
+  // ⎋ 登出 (放在顯眼位置，手機側邊欄收起時的備援)
+  m.root.appendChild(el('button', {
+    class:'btn btn-block btn-danger', style:{marginTop:'14px'},
+    onclick:()=> { m.close(); doLogout(); }
+  }, '⎋ 登出'));
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
   m.root.appendChild(actions);
@@ -10169,10 +10174,11 @@ function openMoreMenuStudent(){
   m.root.appendChild(el('h2', null, '更多'));
   const items = [
     ['myatt','📅 出席紀錄'],['myleave','📆 請假'],
-    ['messages','💬 訊息'],['sev','⭐ 課程評價'],
-    ['sfeedback','📝 課程回饋'],
+    ['messages','💬 訊息'],['mynotifs','🔔 我的通知'],
+    ['sev','⭐ 課程評價'],['sfeedback','📝 課程回饋'],
     ['speer','⭐ 我的互評'],
     ['sgroups','👥 我的小組'],['selfeval','✍️ 學期自評'],
+    ['mybadges','🏅 我的徽章'],['mynotes','📒 我的筆記'],
     ['me','👤 個人']
   ];
   const grid = el('div', { class:'grid grid-2' });
@@ -10184,6 +10190,11 @@ function openMoreMenuStudent(){
     el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick:()=> { m.close(); openAIAssistant(); }}, '🤖 AI 助教'),
     el('button', { class:'btn', style:{flex:'1'}, onclick:()=> { m.close(); openCmdPalette(); }}, '⚡ 命令面板')
   ));
+  // ⎋ 登出 (放在顯眼位置)
+  m.root.appendChild(el('button', {
+    class:'btn btn-block btn-danger', style:{marginTop:'14px'},
+    onclick:()=> { m.close(); doLogout(); }
+  }, '⎋ 登出'));
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
   m.root.appendChild(actions);
@@ -10701,6 +10712,16 @@ function rOv(content){
 
   // 自訂內容（總覽頁底端）
   content.appendChild(renderCustomBlocks('overview-bottom'));
+
+  // ⎋ 登出按鈕（手機版側邊欄常收起，這裡放一個顯眼的登出鍵）
+  const logoutCard = el('div', { class:'card no-print', style:{marginTop:'14px',textAlign:'center',background:'transparent',borderColor:'var(--border-soft)'} });
+  logoutCard.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} },
+    '目前登入：' + (App.session?.name || '老師') + ' @' + (App.session?.username || '')));
+  logoutCard.appendChild(el('button', {
+    class:'btn btn-block', style:{background:'var(--surface-2)',color:'var(--text-muted)'},
+    onclick: doLogout, title:'登出此帳號'
+  }, '⎋ 登出'));
+  content.appendChild(logoutCard);
 }
 
 function markPresent(studentId, options={}){
