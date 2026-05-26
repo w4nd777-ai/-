@@ -3922,7 +3922,9 @@ window.DEFAULT_GD_CFG = window.DEFAULT_GD_CFG || {
   enabled: true,
   clientId: '805278389047-ptftk27vqie72i9ielohiuimfq9qom3p.apps.googleusercontent.com',
   folderId: '',           // 留空 = 上傳到 Drive 根目錄
-  mode: 'always',         // always = 所有檔案一律 Drive (跨裝置)
+  // ⚠️ 改用 overflow：只有大檔（>50MB Firebase Storage 上限）才走 Drive
+  //    避免每個學生繳交時都觸發 OAuth popup（會被瀏覽器擋掉，導致上傳卡住）
+  mode: 'overflow',
   overflowThreshold: 80
 };
 /* 自動套用 Drive 設定到 db.settings.googleDrive (若使用者沒手動設) */
@@ -5661,8 +5663,11 @@ function assignmentTargets(asg){
   const set = new Set();
   if(!asg || !asg.target || asg.target === 'all'){
     App.db.students.forEach(s => set.add(s.id));
-  } else if(asg.target === 'class' && asg.targetCls){
-    App.db.students.filter(s => s.cls === asg.targetCls).forEach(s => set.add(s.id));
+  } else if(asg.target === 'class'){
+    // 支援多班級：targetClsList (新) + targetCls (舊)
+    const clsList = (asg.targetClsList && asg.targetClsList.length) ? asg.targetClsList : (asg.targetCls ? [asg.targetCls] : []);
+    const clsSet = new Set(clsList);
+    App.db.students.filter(s => clsSet.has(s.cls)).forEach(s => set.add(s.id));
   } else if(asg.target === 'students' && Array.isArray(asg.targetIds)){
     asg.targetIds.forEach(id => set.add(id));
   } else {
@@ -5984,8 +5989,14 @@ async function attachUpload(file){
   const DRIVE_MAX = 1024 * 1024 * 1024; // 1 GB（單檔 Drive 限制；Drive 本身允許更大但保守）
   const FB_STORAGE_MAX = 50 * 1024 * 1024; // 50 MB (Storage 單檔上限, 超過走 Drive)
 
+  // 立即顯示「上傳中」toast 讓使用者知道在處理（避免「按了沒反應」誤會）
+  try { toast('📤 正在上傳 ' + file.name + '...', 'info', 2400); } catch(_){}
+  const _doneProgress = (msg, type) => {
+    if(msg){ try { toast(msg, type||'success', 3000); } catch(_){} }
+  };
+
   // ★ 優先 Firebase Storage (跨裝置 + 共用同一專案 5GB 免費)
-  //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 10 秒 timeout fallback
+  //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 5 秒 timeout fallback
   if(typeof firebase !== 'undefined' && firebase.storage && file.size < FB_STORAGE_MAX && !App._fbStorageDisabled){
     try {
       const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
@@ -5995,11 +6006,12 @@ async function attachUpload(file){
         const key = _newAttachKey();
         const path = 'cms-v3/' + roomCode + '/attachments/' + key + '_' + file.name.replace(/[^\w.-]/g,'_');
         const ref = storage.ref(path);
-        // 包 10 秒 timeout 避免 Storage 未啟用時無限等待
+        // 包 5 秒 timeout 避免 Storage 未啟用時無限等待（縮短：10s→5s 加快 fallback）
         const uploadPromise = ref.put(file).then(snap => snap.ref.getDownloadURL());
-        const timeoutPromise = new Promise((_, rej) => setTimeout(()=> rej(new Error('Firebase Storage 超時 (可能尚未啟用)')), 10000));
+        const timeoutPromise = new Promise((_, rej) => setTimeout(()=> rej(new Error('Firebase Storage 超時 (可能尚未啟用)')), 5000));
         const url = await Promise.race([uploadPromise, timeoutPromise]);
         dbg('[v3] 已上傳 Firebase Storage:', file.name, Math.round(file.size/1024)+'KB');
+        _doneProgress('✅ 已上傳到雲端：' + file.name, 'success');
         return {
           name: file.name, type: file.type || '', size: file.size,
           storage: 'fbstorage', fbPath: path, fbUrl: url,
@@ -6021,15 +6033,15 @@ async function attachUpload(file){
 
   const cfg = gdConfig();
   const driveEnabled = !!(cfg && cfg.enabled && cfg.clientId);
-  const useDriveForAll = driveEnabled && cfg.mode === 'always';
-  const useDriveOverflow = driveEnabled && cfg.mode === 'overflow';
+  // 只有老師手動授權過 Drive (拿到 token) 才允許自動走 Drive，
+  // 沒授權就 fallback IDB，避免 popup 被擋住造成上傳卡死
+  const driveAuthed = driveEnabled && (typeof gdIsAuthed === 'function' ? gdIsAuthed() : false);
+  const useDriveOverflow = driveAuthed && cfg.mode === 'overflow';
   const overflowThreshold = ((cfg && cfg.overflowThreshold) || 80) / 100;
 
-  // 決定儲存目標
+  // 決定儲存目標：預設 IDB（永遠有效，無需 OAuth）
   let target = 'idb';
-  if(useDriveForAll){
-    target = 'drive';
-  } else if(useDriveOverflow){
+  if(useDriveOverflow){
     try {
       const usage = await idbUsage();
       const pct = usage.quota ? (usage.usage / usage.quota) : 0;
@@ -6039,14 +6051,20 @@ async function attachUpload(file){
 
   // 強制 Drive：超過 IDB 單檔上限
   if(file.size > ATTACH_MAX_SIZE){
-    if(driveEnabled){
+    if(driveAuthed){
       target = 'drive';
+    } else if(driveEnabled){
+      // 雖然 Drive 啟用但尚未授權 → 提示但不卡上傳
+      _doneProgress(null);
+      throw new Error('檔案太大（' + Math.round(file.size/1024/1024) + ' MB），請先到「設定 → Google Drive」按一次「授權 Drive」再上傳，或請學生改貼雲端連結');
     } else {
-      throw new Error('檔案太大（' + Math.round(file.size/1024/1024) + ' MB），請啟用 Google Drive 儲存');
+      _doneProgress(null);
+      throw new Error('檔案太大（' + Math.round(file.size/1024/1024) + ' MB），請學生改貼雲端連結 (Google Drive / Dropbox / WeTransfer)');
     }
   }
 
   if(file.size > DRIVE_MAX){
+    _doneProgress(null);
     throw new Error('檔案超過 1 GB');
   }
 
@@ -6056,6 +6074,7 @@ async function attachUpload(file){
       const driveUploadPromise = gdUpload(file, cfg.folderId);
       const driveTimeout = new Promise((_, rej) => setTimeout(()=> rej(new Error('Drive 上傳超時 (請按授權視窗或檢查網路)')), 60000));
       const data = await Promise.race([driveUploadPromise, driveTimeout]);
+      _doneProgress('✅ 已上傳到 Google Drive：' + file.name, 'success');
       return {
         name: file.name,
         type: file.type || '',
@@ -6069,6 +6088,7 @@ async function attachUpload(file){
     } catch(e){
       dbgWarn('[Drive upload failed, fallback to IDB]', e);
       if(file.size > ATTACH_MAX_SIZE){
+        _doneProgress(null);
         throw new Error('Drive 上傳失敗且本機容量不足：' + e.message);
       }
       try { toast('Drive 上傳失敗，改用本機儲存：' + friendlyError(e), 'warn', 5000); } catch(_){_swallow('auto',_)}
@@ -6102,6 +6122,7 @@ async function attachUpload(file){
     } catch(e){ _swallow('attach-fb-sync', e); }
   }
 
+  _doneProgress('✅ 已儲存：' + file.name + (dataUri ? ' (已同步雲端)' : ' (本機)'), 'success');
   return {
     name: file.name,
     type: file.type || '',
@@ -7944,11 +7965,20 @@ function genRecoveryCode(){
   return s.slice(0,4) + '-' + s.slice(4);
 }
 
-// 簡單字串雜湊（給安全問題答案 / 恢復碼用，sha-256 + salt）
+// 簡單字串雜湊（給安全問題答案 / 恢復碼用，sha-256 + per-account salt 走 v2$ 格式）
+// ⚠️ hashAnswer 每次呼叫會產生隨機 salt → 不能用 === 直接比對；驗證一律走 verifyAnswer()
 async function hashAnswer(plain){
   if(plain == null) return '';
   // 把答案統一轉小寫、去前後空白後雜湊（安全問題答案不分大小寫）
   return hashPassword('cms-v3-ans-' + String(plain).trim().toLowerCase());
+}
+// 驗證：用 verifyPassword 拆 v2$salt$hash，不分大小寫
+async function verifyAnswer(plain, stored){
+  if(!stored) return false;
+  if(plain == null) return false;
+  const norm = 'cms-v3-ans-' + String(plain).trim().toLowerCase();
+  try { return await verifyPassword(norm, stored); }
+  catch(e){ return false; }
 }
 
 // 寄出 OTP — 優先用 Webhook (Discord/Telegram/LINE)，沒設定才 fallback 到 mailto:
@@ -8385,8 +8415,8 @@ function _runForgotFlow(opts){
       if(isForgotLocked(st.username)){ render(); return; }
       const v = inp.value.trim();
       if(!v){ toast('請輸入答案','warning'); return; }
-      const hashed = await hashAnswer(v);
-      if(hashed !== st.account.securityA){
+      const ok = await verifyAnswer(v, st.account.securityA);
+      if(!ok){
         failGeneric(st.username, '答案錯誤');
         return;
       }
@@ -8498,8 +8528,8 @@ function _runForgotFlow(opts){
           toast('帳號或恢復碼錯誤（剩餘 ' + left + ' 次嘗試）','danger', 3500);
           return;
         }
-        const hashed = await hashAnswer(code);
-        if(hashed !== acc.recoveryCode){
+        const ok = await verifyAnswer(code, acc.recoveryCode);
+        if(!ok){
           const l = incForgotLock(u);
           const left = Math.max(0, FORGOT_LOCK_MAX - l.count);
           toast('帳號或恢復碼錯誤（剩餘 ' + left + ' 次嘗試）','danger', 3500);
@@ -9201,7 +9231,7 @@ function showForgotPassword(){
    STUDENT TAP-TO-LOGIN — pick name → enter password modal
    ──────────────────────────────────────────────────────────── */
 function studentTapToLogin(studentId){
-  const s = App.db.students.find(x => x.id === studentId);
+  const s = App.db.students.find(x => String(x.id) === String(studentId));
   if(!s) return toast('找不到學生','danger');
 
   // If no password set on this student, log them in directly.
@@ -14939,30 +14969,84 @@ function openAssignmentEdit(asg){
   fGF.appendChild(iGF);
   m.root.appendChild(fGF);
 
-  // class picker (only when target=class)
+  // class picker (only when target=class) — 多班級 checkbox + 全選/全清
   const fCls = el('div', { class:'field', style:{display:'none'} });
-  fCls.appendChild(el('label', { class:'label' }, '班級'));
-  const iCls = el('select', { class:'select' });
-  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean)));
-  classes.forEach(c => iCls.appendChild(el('option', { value:c }, c)));
-  iCls.value = asg?.targetCls || (classes[0]||'');
-  fCls.appendChild(iCls); m.root.appendChild(fCls);
+  fCls.appendChild(el('label', { class:'label' }, '選擇班級（可複選）'));
+  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean))).sort();
+  const clsControls = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} },
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { clsChecks.forEach(cb=> cb.checked=true); }}, '全選'),
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { clsChecks.forEach(cb=> cb.checked=false); }}, '全清')
+  );
+  fCls.appendChild(clsControls);
+  const clsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px',maxHeight:'150px',overflow:'auto'} });
+  const clsChecks = [];
+  // 保留向下相容：舊資料 asg.targetCls 是單值，新資料 asg.targetClsList 是陣列
+  const preSelectedCls = new Set(asg?.targetClsList || (asg?.targetCls ? [asg.targetCls] : []));
+  classes.forEach(c => {
+    const lbl = el('label', { style:{display:'inline-flex',alignItems:'center',gap:'4px',padding:'4px 10px',background:'var(--surface-2)',borderRadius:'6px',cursor:'pointer'} });
+    const cb = el('input', { type:'checkbox', value:c });
+    if(preSelectedCls.has(c)) cb.checked = true;
+    clsChecks.push(cb);
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', null, ' ' + c));
+    clsBox.appendChild(lbl);
+  });
+  if(!classes.length) clsBox.appendChild(el('div', {class:'muted small'}, '尚無班級資料'));
+  fCls.appendChild(clsBox); m.root.appendChild(fCls);
 
-  // student multi-select (when target=students)
+  // student multi-select (when target=students) — 加搜尋 + 班級篩選 + 全選/全清
   const fStu = el('div', { class:'field', style:{display:'none'} });
-  fStu.appendChild(el('label', { class:'label' }, '選擇學生'));
-  const stuBox = el('div', { style:{maxHeight:'160px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
+  fStu.appendChild(el('label', { class:'label' }, '選擇學生（可複選）'));
+  const stuToolbar = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px',flexWrap:'wrap'} });
+  const stuSearch = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號 / 班級', style:{flex:'1',minWidth:'160px'} });
+  const stuClsFilter = el('select', { class:'select', style:{width:'auto'} });
+  stuClsFilter.appendChild(el('option', { value:'' }, '全部班級'));
+  classes.forEach(c => stuClsFilter.appendChild(el('option', { value:c }, c)));
+  stuToolbar.appendChild(stuSearch);
+  stuToolbar.appendChild(stuClsFilter);
+  fStu.appendChild(stuToolbar);
+  const stuActions = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} });
+  const stuCountLbl = el('span', { class:'tiny muted', style:{marginLeft:'auto',alignSelf:'center'} }, '');
+  stuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _visibleStuChecks().forEach(cb=> cb.checked=true); _updateStuCount(); }}, '全選可見'));
+  stuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _visibleStuChecks().forEach(cb=> cb.checked=false); _updateStuCount(); }}, '全清可見'));
+  stuActions.appendChild(stuCountLbl);
+  fStu.appendChild(stuActions);
+  const stuBox = el('div', { style:{maxHeight:'260px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
   const stuChecks = {};
+  const stuRows = {};
   App.db.students.forEach(s => {
-    const row = el('label', { class:'flex', style:{padding:'4px'} });
+    const row = el('label', { class:'flex', style:{padding:'4px',cursor:'pointer',borderRadius:'4px'}, 'data-stuid': String(s.id) });
     const cb = el('input', { type:'checkbox' });
     if(asg?.targetIds && asg.targetIds.includes(s.id)) cb.checked = true;
+    cb.addEventListener('change', _updateStuCount);
     stuChecks[s.id] = cb;
+    stuRows[s.id] = row;
     row.appendChild(cb);
-    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + s.name));
+    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + (s.seat?s.seat+'號 ':'') + s.name + (s.sid?' ('+s.sid+')':'')));
     stuBox.appendChild(row);
   });
   fStu.appendChild(stuBox); m.root.appendChild(fStu);
+
+  function _visibleStuChecks(){
+    return Object.entries(stuChecks).filter(([id]) => stuRows[id].style.display !== 'none').map(([_,cb])=>cb);
+  }
+  function _updateStuCount(){
+    const total = Object.keys(stuChecks).length;
+    const sel = Object.values(stuChecks).filter(cb=>cb.checked).length;
+    stuCountLbl.textContent = '已選 ' + sel + ' / ' + total + ' 人';
+  }
+  function _filterStu(){
+    const q = (stuSearch.value||'').trim().toLowerCase();
+    const cFilter = stuClsFilter.value;
+    App.db.students.forEach(s => {
+      const matchQ = !q || (s.name||'').toLowerCase().includes(q) || String(s.sid||'').toLowerCase().includes(q) || String(s.cls||'').toLowerCase().includes(q);
+      const matchC = !cFilter || s.cls === cFilter;
+      stuRows[s.id].style.display = (matchQ && matchC) ? '' : 'none';
+    });
+  }
+  stuSearch.addEventListener('input', _filterStu);
+  stuClsFilter.addEventListener('change', _filterStu);
+  _updateStuCount();
 
   function syncTgt(){
     fCls.style.display = iTgt.value === 'class' ? '' : 'none';
@@ -15018,8 +15102,13 @@ function openAssignmentEdit(asg){
     rec.latePenalty = parseInt(iLate.value,10) || 0;
     rec.weight = Math.max(1, Math.min(10, parseFloat(iWeight.value) || 1));
     rec.target = iTgt.value;
-    rec.targetCls = iCls.value;
+    // 多班級 (新) — 同時寫 targetCls (相容舊資料 / isAssignmentForStudent)
+    const selectedClsList = clsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
+    rec.targetClsList = selectedClsList;
+    rec.targetCls = selectedClsList[0] || '';
     rec.targetIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
+    if(iTgt.value === 'class' && !selectedClsList.length) return toast('請至少選一個班級', 'warning');
+    if(iTgt.value === 'students' && !rec.targetIds.length) return toast('請至少選一個學生', 'warning');
     rec.attach = attached;
     rec.createdBy = App.session?.name || '老師';
     // 包 B-1：科目
