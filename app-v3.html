@@ -3893,7 +3893,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-sprint2-200users';
+const APP_BUILD = '2026-05-26-health-dashboard';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11025,6 +11025,12 @@ function rOv(content){
   // 自訂內容（總覽頁底端）
   content.appendChild(renderCustomBlocks('overview-bottom'));
 
+  // 🩺 健康儀表板（讓老師一眼看到系統狀態）
+  try {
+    const healthCard = renderHealthDashboard();
+    if(healthCard) content.appendChild(healthCard);
+  } catch(e){ _swallow('health-dashboard', e); }
+
   // ⎋ 登出按鈕（手機版側邊欄常收起，這裡放一個顯眼的登出鍵）
   const logoutCard = el('div', { class:'card no-print', style:{marginTop:'14px',textAlign:'center',background:'transparent',borderColor:'var(--border-soft)'} });
   logoutCard.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} },
@@ -11034,6 +11040,145 @@ function rOv(content){
     onclick: doLogout, title:'登出此帳號'
   }, '⎋ 登出'));
   content.appendChild(logoutCard);
+}
+
+/* ════════════════════════════════════════════════════════════
+   🩺 健康儀表板 — 老師總覽頁底部，一眼看系統狀態
+   ──────────────────────────────────────────────────────────── */
+function renderHealthDashboard(){
+  const card = el('div', { class:'card no-print', style:{marginTop:'14px'} });
+  card.appendChild(el('h3', null, '🩺 系統健康狀態'));
+
+  // DB 大小
+  let dbSize = 0;
+  try { dbSize = JSON.stringify(App.db).length; } catch(_){}
+  const dbKB = Math.round(dbSize / 1024);
+  // localStorage 5MB 上限；超過 70% 警告
+  const dbPercent = (dbSize / (5 * 1024 * 1024)) * 100;
+  const dbStatus = dbPercent > 90 ? '🔴 接近上限' : dbPercent > 70 ? '🟡 注意' : '🟢 正常';
+  const dbColor = dbPercent > 90 ? 'var(--danger)' : dbPercent > 70 ? 'var(--warn)' : 'var(--success)';
+
+  // Firebase 連線
+  const fbStatus = App.fbStatus === 'online' ? '🟢 正常' : App.fbStatus === 'connecting' ? '🟡 連線中' : '🔴 離線';
+  const fbColor = App.fbStatus === 'online' ? 'var(--success)' : 'var(--warn)';
+
+  // 上次備份
+  let lastBackup = '從未';
+  let backupColor = 'var(--danger)';
+  try {
+    const lastTs = parseInt(localStorage.getItem('cms_v3_last_backup_ts') || '0', 10);
+    if(lastTs){
+      const days = Math.floor((Date.now() - lastTs) / 86400000);
+      if(days === 0) { lastBackup = '今天'; backupColor = 'var(--success)'; }
+      else if(days <= 7) { lastBackup = days + ' 天前'; backupColor = 'var(--success)'; }
+      else if(days <= 30) { lastBackup = days + ' 天前'; backupColor = 'var(--warn)'; }
+      else { lastBackup = days + ' 天前'; backupColor = 'var(--danger)'; }
+    }
+  } catch(_){}
+
+  // 24h 錯誤數（從 LS 暫存）
+  let errCount = 0;
+  try {
+    const errs = JSON.parse(localStorage.getItem('cms_v3_recent_errors') || '[]');
+    const cutoff = Date.now() - 86400000;
+    errCount = errs.filter(e => e.ts >= cutoff).length;
+  } catch(_){}
+  const errColor = errCount > 10 ? 'var(--danger)' : errCount > 3 ? 'var(--warn)' : 'var(--success)';
+
+  // 學生數 / 出席紀錄數
+  const stuCount = (App.db.students || []).filter(s => (s.status||'active') === 'active').length;
+  const attTotal = (App.db.attendance || []).length;
+  const subTotal = (App.db.submissions || []).length;
+
+  const grid = el('div', { class:'grid grid-4', style:{marginTop:'10px',gap:'8px'} });
+
+  grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+dbColor,padding:'8px 12px'} },
+    el('div', { class:'lbl', style:{fontSize:'11px'} }, '📦 資料庫'),
+    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, dbKB + ' KB / 5 MB'),
+    el('div', { class:'tiny', style:{color:dbColor} }, dbStatus)
+  ));
+
+  grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+fbColor,padding:'8px 12px'} },
+    el('div', { class:'lbl', style:{fontSize:'11px'} }, '🔌 Firebase'),
+    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, App.fbStatus || '未連線'),
+    el('div', { class:'tiny', style:{color:fbColor} }, fbStatus)
+  ));
+
+  grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+backupColor,padding:'8px 12px',cursor:'pointer'},
+    onclick: ()=> go('backup'), title:'點此前往備份頁面'
+  },
+    el('div', { class:'lbl', style:{fontSize:'11px'} }, '💾 上次備份'),
+    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, lastBackup),
+    el('div', { class:'tiny', style:{color:backupColor} }, lastBackup === '從未' ? '點此設定' : '點此手動備份')
+  ));
+
+  grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+errColor,padding:'8px 12px'} },
+    el('div', { class:'lbl', style:{fontSize:'11px'} }, '⚠️ 24h 錯誤'),
+    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, errCount + ' 件'),
+    el('div', { class:'tiny', style:{color:errColor} }, errCount > 10 ? '🔴 異常' : errCount > 3 ? '🟡 觀察中' : '🟢 健康')
+  ));
+  card.appendChild(grid);
+
+  // 統計列
+  card.appendChild(el('div', { class:'small muted', style:{marginTop:'8px',padding:'8px 12px',background:'var(--surface-2)',borderRadius:'6px'} },
+    '📊 ' + stuCount + ' 位學生 · ' + attTotal + ' 筆出席 · ' + subTotal + ' 筆繳交 · 版本 ' + (typeof APP_BUILD !== 'undefined' ? APP_BUILD : '?')
+  ));
+
+  // 容量過高的警告 + 行動建議
+  if(dbPercent > 70){
+    card.appendChild(el('div', { class:'card', style:{marginTop:'8px',padding:'10px',background:'var(--warn-soft)',borderColor:'var(--warn)'} },
+      el('div', { style:{fontWeight:'700',color:'var(--warn)'} }, '⚠️ 資料庫即將達上限'),
+      el('div', { class:'small', style:{marginTop:'4px'} },
+        '建議：1) 立即下載備份 2) 學期末歸檔舊資料 3) 清理 _errors 節點')
+    ));
+  }
+  if(errCount > 10){
+    card.appendChild(el('div', { class:'card', style:{marginTop:'8px',padding:'10px',background:'var(--danger-soft)',borderColor:'var(--danger)'} },
+      el('div', { style:{fontWeight:'700',color:'var(--danger)'} }, '🔴 過去 24 小時錯誤異常多'),
+      el('div', { class:'small', style:{marginTop:'4px'} },
+        '建議：點下方按鈕查看詳情，或登出後再登入。'),
+      el('button', { class:'btn btn-sm', style:{marginTop:'6px'}, onclick:()=> showRecentErrors() }, '🔍 查看錯誤詳情')
+    ));
+  }
+
+  return card;
+}
+
+// 顯示近期錯誤紀錄
+function showRecentErrors(){
+  let errs = [];
+  try { errs = JSON.parse(localStorage.getItem('cms_v3_recent_errors') || '[]'); } catch(_){}
+  const m = modal('', { dismissable:true });
+  m.root.style.maxWidth = '700px';
+  m.root.appendChild(el('h2', null, '🔍 近期錯誤紀錄 (' + errs.length + ' 筆)'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '錯誤資料保留在本機，最多 100 筆。可截圖傳給維護者協助診斷。'));
+  if(!errs.length){
+    m.root.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '✨'),
+      el('div', null, '太棒了！沒有錯誤紀錄')
+    ));
+  } else {
+    const list = el('div', { class:'card', style:{maxHeight:'60vh',overflow:'auto'} });
+    errs.slice().reverse().slice(0, 50).forEach(e => {
+      list.appendChild(el('div', { style:{padding:'8px',borderBottom:'1px solid var(--border)'} },
+        el('div', { class:'small', style:{color:'var(--danger)'} }, e.msg || '(無訊息)'),
+        el('div', { class:'tiny muted' },
+          (e.file ? e.file + ':' + e.line : '') +
+          ' · ' + new Date(e.ts).toLocaleString('zh-TW'))
+      ));
+    });
+    m.root.appendChild(list);
+  }
+  const ax = el('div', { class:'modal-actions' });
+  ax.appendChild(el('button', { class:'btn btn-danger', onclick: ()=> {
+    try { localStorage.removeItem('cms_v3_recent_errors'); } catch(_){}
+    toast('已清空錯誤紀錄','success');
+    m.close();
+    rerender();
+  }}, '🗑 清空錯誤'));
+  ax.appendChild(el('button', { class:'btn btn-primary', onclick:()=> m.close() }, '關閉'));
+  m.root.appendChild(ax);
 }
 
 function markPresent(studentId, options={}){
@@ -19166,8 +19311,10 @@ function exportFullJSON(){
   downloadDataUrl(url, 'cms-v3-backup-' + td() + '.json');
   setTimeout(()=> URL.revokeObjectURL(url), 1000);
   logOp('export','匯出完整 JSON');
+  // 記錄備份時間給健康儀表板用
+  try { localStorage.setItem('cms_v3_last_backup_ts', String(Date.now())); } catch(_){}
   saveDB();
-  toast('已下載完整 JSON','success');
+  toast('✅ 已下載完整 JSON 備份','success');
 }
 async function importFullJSON(file){
   try {
@@ -22416,6 +22563,30 @@ function boot(){
   initPWA();
   initCmdPaletteShortcut();
 
+  // 🔔 7 天備份提醒 — 老師登入時顯眼提示
+  try {
+    setTimeout(() => {
+      if(App.session?.role !== 'teacher') return;
+      const lastBackup = parseInt(localStorage.getItem('cms_v3_last_backup_ts') || '0', 10);
+      const daysSince = lastBackup ? Math.floor((Date.now() - lastBackup) / 86400000) : 999;
+      if(daysSince >= 7){
+        const lastWarnTs = parseInt(sessionStorage.getItem('cms_v3_backup_warn_shown') || '0', 10);
+        // 同一個 session 只提醒一次
+        if(Date.now() - lastWarnTs > 12 * 60 * 60 * 1000){
+          try {
+            const msg = daysSince >= 30
+              ? '🔴 已超過 30 天沒備份！強烈建議現在備份'
+              : daysSince === 999
+              ? '⚠️ 從未備份過資料庫！建議現在備份'
+              : '🟡 已 ' + daysSince + ' 天沒備份，建議下載最新版';
+            toast(msg + ' （設定 → 💼 備份）', 'warning', 8000);
+            sessionStorage.setItem('cms_v3_backup_warn_shown', String(Date.now()));
+          } catch(_){}
+        }
+      }
+    }, 3000);
+  } catch(_){}
+
   // 🆕 Sprint 1：上傳 early errors（在主腳本載入前發生的）到 Firebase logs
   //    讓老師端看 Firebase Console → Realtime Database → /cms-v3/$room/_errors 可看到
   try {
@@ -22436,31 +22607,36 @@ function boot(){
         } catch(_){}
       });
     }
-    // 持續監控
-    window.addEventListener('error', e => {
+    // 持續監控 — 同步寫 Firebase + localStorage (給健康儀表板讀)
+    function _recordErrorLocally(info){
       try {
-        if(App.fbRef){
-          App.fbRef.child('_errors').push({
-            type:'error', msg: e.message?.slice(0,300),
-            file: e.filename, line: e.lineno, col: e.colno,
-            ua: navigator.userAgent.slice(0,200),
-            role: App.session?.role||'guest',
-            ts: Date.now()
-          });
-        }
+        const errs = JSON.parse(localStorage.getItem('cms_v3_recent_errors') || '[]');
+        errs.push(info);
+        // 保留最近 100 筆
+        if(errs.length > 100) errs.splice(0, errs.length - 100);
+        localStorage.setItem('cms_v3_recent_errors', JSON.stringify(errs));
       } catch(_){}
+    }
+    window.addEventListener('error', e => {
+      const info = {
+        type:'error', msg: e.message?.slice(0,300),
+        file: e.filename, line: e.lineno, col: e.colno,
+        ua: navigator.userAgent.slice(0,200),
+        role: App.session?.role||'guest',
+        ts: Date.now()
+      };
+      _recordErrorLocally(info);
+      try { if(App.fbRef) App.fbRef.child('_errors').push(info); } catch(_){}
     });
     window.addEventListener('unhandledrejection', e => {
-      try {
-        if(App.fbRef){
-          App.fbRef.child('_errors').push({
-            type:'rejection', msg: String(e.reason).slice(0,300),
-            ua: navigator.userAgent.slice(0,200),
-            role: App.session?.role||'guest',
-            ts: Date.now()
-          });
-        }
-      } catch(_){}
+      const info = {
+        type:'rejection', msg: String(e.reason).slice(0,300),
+        ua: navigator.userAgent.slice(0,200),
+        role: App.session?.role||'guest',
+        ts: Date.now()
+      };
+      _recordErrorLocally(info);
+      try { if(App.fbRef) App.fbRef.child('_errors').push(info); } catch(_){}
     });
   } catch(_){}
   initKeyShortcuts();

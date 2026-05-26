@@ -1,0 +1,87 @@
+name: 每日自動備份 Firebase RTDB
+
+# 每天台灣時間凌晨 2:00 自動執行 (UTC 18:00 前一天)
+# 也可以手動觸發 (Actions → Run workflow)
+on:
+  schedule:
+    - cron: '0 18 * * *'  # UTC 18:00 = 台灣 02:00
+  workflow_dispatch:  # 允許手動觸發
+
+permissions:
+  contents: write  # 允許 push backup 到此 repo
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch Firebase RTDB snapshot
+        env:
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_AUTH: ${{ secrets.FIREBASE_DB_SECRET }}
+        run: |
+          # 取得 RTDB 全部資料
+          # URL 格式：https://YOUR-PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app/cms-v3.json
+          # 若沒設 secret 就用公開 read（前提：Firebase Rules 允許 .read: true）
+          if [ -n "$FIREBASE_AUTH" ]; then
+            URL="${FIREBASE_DB_URL}/cms-v3.json?auth=${FIREBASE_AUTH}"
+          else
+            URL="${FIREBASE_DB_URL}/cms-v3.json"
+          fi
+
+          mkdir -p backups
+          DATE=$(TZ='Asia/Taipei' date +%Y-%m-%d)
+          TIMESTAMP=$(TZ='Asia/Taipei' date +%Y-%m-%d_%H%M)
+          FILENAME="backups/backup-${DATE}.json"
+
+          echo "📥 抓取 Firebase 資料..."
+          curl -s --max-time 60 -o "$FILENAME" "$URL"
+
+          # 驗證下載成功 (檔案非空 + 是 JSON)
+          if [ ! -s "$FILENAME" ]; then
+            echo "❌ 備份失敗：檔案為空"
+            exit 1
+          fi
+
+          # 簡單驗證是 JSON
+          node -e "JSON.parse(require('fs').readFileSync('$FILENAME','utf8'))" || (echo "❌ 備份失敗：非有效 JSON" && exit 1)
+
+          SIZE=$(stat -c%s "$FILENAME" 2>/dev/null || stat -f%z "$FILENAME")
+          KB=$((SIZE / 1024))
+          echo "✅ 備份完成: $FILENAME ($KB KB)"
+
+          # 順便產生最新版的 latest.json (永遠是最新)
+          cp "$FILENAME" "backups/latest.json"
+
+      - name: Cleanup old backups (keep 90 days)
+        run: |
+          # 保留最近 90 天的備份
+          if [ -d backups ]; then
+            find backups -name 'backup-*.json' -type f -mtime +90 -delete
+          fi
+
+      - name: Commit & push backup
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add backups/
+          if git diff --staged --quiet; then
+            echo "ℹ️ 資料沒變化，無需 commit"
+          else
+            DATE=$(TZ='Asia/Taipei' date +%Y-%m-%d)
+            git commit -m "🤖 每日自動備份 ${DATE}"
+            git push
+            echo "✅ 已 push backup 到 repo"
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::每日備份失敗！請至 Firebase Console 手動匯出"
