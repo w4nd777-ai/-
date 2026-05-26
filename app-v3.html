@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#2563eb">
+<!-- 🔒 CSP — 限制可載入的資源來源，防止 XSS 注入 (含 'unsafe-inline' 因為大量 inline style/event)
+     允許：本站、Firebase、Google Drive、Anthropic、QR 服務 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app wss://*.firebaseio.com https://api.anthropic.com https://discord.com; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com; media-src 'self' blob: data:;">
+<!-- 🔒 防 clickjacking -->
+<meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
+<!-- 🔒 不發送 referrer 給其他網站 -->
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>課程管理系統 v3</title>
 <link rel="manifest" href="manifest.json">
 
@@ -11,6 +18,26 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+
+<!-- 🔧 早期錯誤捕捉 (在主腳本載入前 enable，以免 SyntaxError 等漏掉) -->
+<script>
+  window.__earlyErrors = [];
+  window.addEventListener('error', e => {
+    try {
+      const info = { type:'error', msg: e.message, file: e.filename, line: e.lineno, col: e.colno, ts: Date.now() };
+      window.__earlyErrors.push(info);
+      // 寫到 Firebase / localStorage (主腳本載入後會撈走上報)
+      try { localStorage.setItem('cms_v3_last_error', JSON.stringify(info)); } catch(_){}
+    } catch(_){}
+  });
+  window.addEventListener('unhandledrejection', e => {
+    try {
+      const info = { type:'unhandledrejection', msg: String(e.reason).slice(0,300), ts: Date.now() };
+      window.__earlyErrors.push(info);
+      try { localStorage.setItem('cms_v3_last_error', JSON.stringify(info)); } catch(_){}
+    } catch(_){}
+  });
+</script>
 
 <style>
 /* ════════════════════════════════════════════════════════════
@@ -3866,7 +3893,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-print-csv-polish';
+const APP_BUILD = '2026-05-26-sprint1-security';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -22361,10 +22388,68 @@ function boot(){
       App.view = v; App.subview = sv || null;
     }
   }
+  // 🆕 PWA shortcuts：?view=checkin / ?view=submissions / ?view=pending / ?view=qr
+  try {
+    const params = new URLSearchParams(location.search || '');
+    const initView = params.get('view');
+    if(initView && /^[a-z]+$/.test(initView)){
+      App.view = initView;
+      // 清掉 query 避免重整再執行
+      try { history.replaceState(null, '', location.pathname); } catch(_){}
+    }
+  } catch(_){}
 
   // PWA + shortcuts
   initPWA();
   initCmdPaletteShortcut();
+
+  // 🆕 Sprint 1：上傳 early errors（在主腳本載入前發生的）到 Firebase logs
+  //    讓老師端看 Firebase Console → Realtime Database → /cms-v3/$room/_errors 可看到
+  try {
+    const earlyErrs = (window.__earlyErrors || []).concat(
+      (function(){
+        try {
+          const stored = localStorage.getItem('cms_v3_last_error');
+          if(stored){ localStorage.removeItem('cms_v3_last_error'); return [JSON.parse(stored)]; }
+        } catch(_){}
+        return [];
+      })()
+    );
+    if(earlyErrs.length && App.fbRef){
+      const r = App.fbRef.child('_errors');
+      earlyErrs.forEach(e => {
+        try {
+          r.push({ ...e, ua: navigator.userAgent.slice(0,200), role: App.session?.role||'guest', clientTs: Date.now() });
+        } catch(_){}
+      });
+    }
+    // 持續監控
+    window.addEventListener('error', e => {
+      try {
+        if(App.fbRef){
+          App.fbRef.child('_errors').push({
+            type:'error', msg: e.message?.slice(0,300),
+            file: e.filename, line: e.lineno, col: e.colno,
+            ua: navigator.userAgent.slice(0,200),
+            role: App.session?.role||'guest',
+            ts: Date.now()
+          });
+        }
+      } catch(_){}
+    });
+    window.addEventListener('unhandledrejection', e => {
+      try {
+        if(App.fbRef){
+          App.fbRef.child('_errors').push({
+            type:'rejection', msg: String(e.reason).slice(0,300),
+            ua: navigator.userAgent.slice(0,200),
+            role: App.session?.role||'guest',
+            ts: Date.now()
+          });
+        }
+      } catch(_){}
+    });
+  } catch(_){}
   initKeyShortcuts();
   initDragDrop();
   // POLISH-10/4: ? 鍵打開鍵盤快捷鍵說明

@@ -1,0 +1,172 @@
+{
+  "rules": {
+    "cms-v3": {
+      "$room": {
+        "// 全部節點預設拒絕 (任何沒下面規則的路徑都讀不到/寫不到)": null,
+        ".read": false,
+        ".write": false,
+
+        "students": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()",
+          "$studentId": {
+            ".validate": "newData.hasChildren(['id', 'name'])",
+            "password": {
+              ".read": "auth != null && auth.token.role === 'teacher'",
+              "// 只有老師能讀其他學生的 password hash; 學生自己端絕不應該看到": null
+            }
+          }
+        },
+
+        "accounts": {
+          ".read": "auth != null && auth.token.role === 'teacher'",
+          ".write": "auth != null && auth.token.role === 'teacher'",
+          "// 老師帳號表完全不對學生開放": null
+        },
+
+        "attendance": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()",
+          "$rec": {
+            ".validate": "newData.hasChildren(['studentId', 'date'])"
+          }
+        },
+
+        "submissions": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "assignments": {
+          ".read": true,
+          ".write": "auth != null && auth.token.role === 'teacher'",
+          "// 只有老師能改作業內容": null
+        },
+
+        "messages": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "announcements": {
+          ".read": true,
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "leaves": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "pending": {
+          ".read": "auth != null && auth.token.role === 'teacher'",
+          ".write": true,
+          "// 學生可送註冊申請 (write)，但只有老師看得到名單": null
+        },
+
+        "passwordResets": {
+          ".read": "auth != null && auth.token.role === 'teacher'",
+          ".write": true
+        },
+
+        "notifications": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "behavior": {
+          ".read": true,
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "quizzes": {
+          ".read": true,
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "quizSubmissions": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "settings": {
+          ".read": true,
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "branding": {
+          ".read": true,
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "grades": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "evals": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "peerEvals": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "selfEvals": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "feedbacks": {
+          ".read": "auth != null && auth.token.role === 'teacher'",
+          ".write": true
+        },
+
+        "todos": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "notes": {
+          ".read": "auth != null && auth.token.role === 'teacher'",
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "badges": {
+          ".read": true,
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "teachers": {
+          ".read": "auth != null && auth.token.role === 'teacher'",
+          ".write": "auth != null && auth.token.role === 'teacher'"
+        },
+
+        "_qrCodes": {
+          ".read": true,
+          ".write": "auth != null || newData.exists()"
+        },
+
+        "attachments": {
+          ".read": true,
+          ".write": true,
+          "// 附件 base64 mirror (size < 1.5MB)": null
+        },
+
+        "_e2eTest": {
+          ".read": true,
+          ".write": true,
+          "// E2E 測試用,可隨時刪除": null
+        },
+
+        "_errors": {
+          ".read": "auth != null && auth.token.role === 'teacher'",
+          ".write": true,
+          "// 客戶端錯誤上報；學生 / 訪客都可 push，但只有老師能讀": null
+        }
+      }
+    }
+  }
+}
