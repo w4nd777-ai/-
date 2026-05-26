@@ -11006,32 +11006,18 @@ function rStu(content){
       return;
     }
 
-    // batch 2: 分頁（超過 perPage 自動啟用）
+    // 不分頁：一次顯示所有學生，依班級分組（可展開收合）
+    //   159 學生 → 7 個摺疊區塊，DOM 成本很低；老師一眼看全班結構
     const totalFiltered = students.length;
-    const perPage = App._stuPerPage || 50;
-    let page = App._stuPage || 1;
-    const totalPages = Math.max(1, Math.ceil(totalFiltered / perPage));
-    if(page > totalPages) page = totalPages;
-    const startIdx = (page - 1) * perPage;
-    const pagedStudents = students.slice(startIdx, startIdx + perPage);
 
-    // 班級分組可摺疊（基於 pagedStudents）
+    // 班級分組可摺疊
     App._stuExpandedCls = App._stuExpandedCls || {};
-    const classes = [...new Set(pagedStudents.map(s => s.cls || '未分班'))].sort();
+    const classes = [...new Set(students.map(s => s.cls || '未分班'))].sort();
 
-    // 工具列：每頁筆數 + 全展開/收合
+    // 工具列：總數 + 全展開/全收合
     const headerBar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'space-between',flexWrap:'wrap',alignItems:'center'} });
-    const leftBar = el('div', { class:'flex', style:{gap:'6px',alignItems:'center',flexWrap:'wrap'} });
-    if(totalFiltered > 30){
-      leftBar.appendChild(renderPerPageSelect(perPage, [30, 50, 100], v => {
-        App._stuPerPage = v;
-        App._stuPage = 1;
-        renderList();
-      }));
-      leftBar.appendChild(el('span', { class:'small muted' },
-        '顯示 ' + (startIdx + 1) + '–' + Math.min(startIdx + perPage, totalFiltered) + ' / 共 ' + totalFiltered + ' 位'));
-    }
-    headerBar.appendChild(leftBar);
+    headerBar.appendChild(el('span', { class:'small muted' },
+      '共 ' + totalFiltered + ' 位 · ' + classes.length + ' 班'));
     if(classes.length > 1){
       const ctrl = el('div', { class:'flex', style:{gap:'6px'} },
         el('button', { class:'btn btn-sm', onclick:()=> {
@@ -11046,9 +11032,6 @@ function rStu(content){
       headerBar.appendChild(ctrl);
     }
     listWrap.appendChild(headerBar);
-
-    // 替換變數參考：原本的 students 變成 pagedStudents（在分組顯示時）
-    students = pagedStudents;
 
     // 共用：學生 row 渲染
     function renderStudentRow(s){
@@ -11195,15 +11178,7 @@ function rStu(content){
       }
     });
 
-    // batch 2: 分頁控制（顯示在班級分組下方）
-    if(totalPages > 1){
-      listWrap.appendChild(renderPagination(totalFiltered, page, perPage, p => {
-        App._stuPage = p;
-        renderList();
-      }));
-    }
-
-    // 批次操作工具列（密碼相關）— 注意此處算 unchanged 用「全部學生」而非 paged
+    // 批次操作工具列（密碼相關）
     const allStudents = App.db.students;
     const unchangedCount = allStudents.filter(s => s.mustChangePw).length;
     if(unchangedCount > 0){
@@ -13261,31 +13236,59 @@ function rPending(content){
   }
 
   // ─── 區塊 2：註冊申請 ───
-  content.appendChild(el('div', { style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px'} },
-    el('h3', { style:{margin:'0'} }, '👤 註冊申請'),
-    el('span', { class:'pill', style:{background:'var(--surface-2)',color:'var(--text-muted)'} }, App.db.pending.length + ' 件')
-  ));
+  const pendCount = App.db.pending.length;
+  const pendHeader = el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
+    el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} },
+      el('h3', { style:{margin:'0'} }, '👤 註冊申請'),
+      el('span', { class:'pill', style:{background: pendCount?'var(--warn-soft)':'var(--surface-2)',color: pendCount?'var(--warn)':'var(--text-muted)',fontWeight:'700'} }, pendCount + ' 件')
+    )
+  );
+  if(pendCount){
+    pendHeader.appendChild(el('div', { class:'flex no-print', style:{gap:'6px'} },
+      el('button', { class:'btn btn-sm btn-success', onclick: async ()=> {
+        if(!await confirmDlg('確定接受全部 ' + pendCount + ' 件註冊申請嗎？', {})) return;
+        const ids = App.db.pending.map(x => x.id);
+        for(const id of ids){ try { approveStudent(id, true); } catch(_){} }
+        toast('已接受全部 ' + ids.length + ' 件','success');
+        rerender();
+      }}, '✓ 全部接受'),
+      el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        if(!await confirmDlg('確定拒絕並刪除全部 ' + pendCount + ' 件申請？', {danger:true})) return;
+        App.db.pending = [];
+        saveDB(); Sync.setMap('pending', App.db.pending); bcNotify();
+        toast('已清空待審核名單','warning');
+        rerender();
+      }}, '✗ 全部拒絕')
+    ));
+  }
+  content.appendChild(pendHeader);
 
-  if(!App.db.pending.length){
+  if(!pendCount){
     content.appendChild(el('div', { class:'empty card' },
       el('div', { class:'ico' }, '📭'),
-      el('div', null, '沒有待審核註冊')
+      el('div', null, '沒有待審核註冊'),
+      el('div', { class:'small muted', style:{marginTop:'8px'} },
+        '新學生在登入頁點「沒帳號？申請註冊」後，會出現在這裡讓您審核')
     ));
   } else {
     const card = el('div', { class:'card' });
     App.db.pending.slice().reverse().forEach(p => {
-      const row = el('div', { class:'list-row' });
-      row.appendChild(el('div', { class:'avatar' }, initials(p.name)));
-      row.appendChild(el('div', { class:'info' },
-        el('div', { class:'name' }, p.name + (p.seat?` (${p.seat})`:'')),
-        el('div', { class:'sub' },
-          (p.cls||'無班級')
-          + (p.sid ? ' · 學號 ' + p.sid : '')
-          + (p.email ? ' · 📧 ' + p.email : '')
-          + ' · ' + relTime(p.ts||0)
+      const row = el('div', { class:'list-row', style:{padding:'10px 12px'} });
+      row.appendChild(el('div', { class:'avatar', style:{background:'var(--accent)'} }, initials(p.name)));
+      // 完整資訊：姓名、班級、座號、學號、Email、申請時間
+      const info = el('div', { class:'info' },
+        el('div', { class:'name' }, p.name + (p.seat?` (${p.seat}號)`:'')),
+        el('div', { class:'sub', style:{lineHeight:'1.7'} },
+          '🏫 ' + (p.cls||'(未填班級)'),
+          p.sid ? el('span', null, ' · 🆔 學號 ' + p.sid) : null,
+          el('br'),
+          p.email ? el('span', null, '📧 ' + p.email) : el('span', { style:{color:'var(--danger)'} }, '📧 未填 Email'),
+          el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '· ⏱ ' + relTime(p.ts||0))
         )
-      ));
+      );
+      row.appendChild(info);
       const acts = el('div', { class:'actions' },
+        el('button', { class:'btn btn-sm', title:'核准前先修改資料', onclick:()=> openPendingEdit(p) }, '✏️ 修改'),
         el('button', { class:'btn btn-sm btn-success', onclick:()=> approveStudent(p.id) }, '✓ 接受'),
         el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectStudent(p.id) }, '✗ 拒絕')
       );
@@ -13295,7 +13298,54 @@ function rPending(content){
     content.appendChild(card);
   }
 }
-function approveStudent(pid){
+
+// 核准前先修改 pending 資料（修正學生填錯的班級/座號等）
+function openPendingEdit(p){
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '✏️ 修改註冊資料：' + p.name));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} }, '修改後再核准；密碼保留學生原本設定'));
+  const fields = [
+    { key:'name', label:'姓名' },
+    { key:'sid', label:'學號' },
+    { key:'cls', label:'班級' },
+    { key:'seat', label:'座號', type:'number' },
+    { key:'email', label:'Email', type:'email' }
+  ];
+  const inps = {};
+  fields.forEach(f => {
+    const fb = el('div', { class:'field' });
+    fb.appendChild(el('label', { class:'label' }, f.label));
+    const i = el('input', { class:'input', type:f.type||'text', value: p[f.key] || '' });
+    inps[f.key] = i;
+    fb.appendChild(i);
+    m.root.appendChild(fb);
+  });
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    p.name = inps.name.value.trim() || p.name;
+    p.sid = inps.sid.value.trim();
+    p.cls = inps.cls.value.trim();
+    p.seat = parseInt(inps.seat.value,10) || 0;
+    p.email = inps.email.value.trim();
+    saveDB();
+    try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
+    toast('已修改，可以核准了','success');
+    m.close();
+    rerender();
+  }}, '💾 儲存'));
+  actions.appendChild(el('button', { class:'btn btn-success', onclick: async ()=> {
+    p.name = inps.name.value.trim() || p.name;
+    p.sid = inps.sid.value.trim();
+    p.cls = inps.cls.value.trim();
+    p.seat = parseInt(inps.seat.value,10) || 0;
+    p.email = inps.email.value.trim();
+    m.close();
+    approveStudent(p.id);
+  }}, '✓ 儲存並核准'));
+  m.root.appendChild(actions);
+}
+function approveStudent(pid, silent){
   const p = App.db.pending.find(x => x.id === pid);
   if(!p) return;
   App.db.students.push({
@@ -13311,8 +13361,10 @@ function approveStudent(pid){
   Sync.setMap('pending', App.db.pending);
   bcNotify();
   if(typeof logOp === 'function') logOp('approveRegister', '核准 ' + p.name + ' 註冊');
-  toast('已加入 ' + p.name,'success');
-  rerender();
+  if(!silent){
+    toast('已加入 ' + p.name,'success');
+    rerender();
+  }
 }
 
 // 核准密碼重設請求
@@ -22175,6 +22227,7 @@ function openQuickSwitcher(){
     { k:'頁面', i:'🏠', t:'今日總覽', g:'overview' },
     { k:'頁面', i:'✅', t:'點名', g:'attendance' },
     { k:'頁面', i:'👥', t:'學生管理', g:'students' },
+    { k:'頁面', i:'📥', t:'註冊審核', g:'pending' },
     { k:'頁面', i:'📝', t:'作業', g:'assignments' },
     { k:'頁面', i:'📊', t:'成績', g:'grades' },
     { k:'頁面', i:'📋', t:'小考', g:'quiz' },
@@ -24819,6 +24872,7 @@ function getSidebarItems(role){
       daily: { label:'日常', items: [
         { key:'overview', icon:'📊', label:'總覽' },
         { key:'students', icon:'👥', label:'學生名單' },
+        { key:'pending', icon:'📥', label:'註冊審核' },
         { key:'attendance', icon:'✅', label:'出席管理' },
         { key:'matrix', icon:'🪑', label:'座位矩陣' },
         { key:'qr', icon:'📱', label:'QR Code 簽到' },
