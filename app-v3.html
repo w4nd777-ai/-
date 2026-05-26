@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-matrix-flicker-avatar-prof';
+const APP_BUILD = '2026-05-26-attach-preview-modal';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -6312,19 +6312,104 @@ async function attachDownload(meta){
   }, 200);
 }
 
-// 預覽附件（新分頁）
+// 預覽附件 — 用 in-app modal 顯示（之前 window.open(dataURI) 會被 Chrome 60+ 擋）
 async function attachPreview(meta){
   if(!meta){ toast('找不到附件','danger'); return; }
+  // Drive 走 webViewLink（有公開分享連結）
   if(meta.storage === 'drive' || meta.driveFileId){
     const url = meta.driveLink || ('https://drive.google.com/file/d/' + meta.driveFileId + '/view');
     window.open(url, '_blank');
     return;
   }
-  const url = await attachGetUrl(meta);
-  if(!url){ toast('找不到附件檔案','danger'); return; }
-  window.open(url, '_blank');
-  if(url.indexOf('blob:') === 0){
-    setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+  try { toast('📂 載入中...', 'info', 1500); } catch(_){}
+  let url;
+  try { url = await attachGetUrl(meta); } catch(e){ toast('讀取失敗：' + (e.message||e), 'danger'); return; }
+  if(!url){ toast('附件不存在或已被刪除','danger', 4000); return; }
+
+  // 判斷檔案類型
+  const name = meta.name || 'file';
+  const type = (meta.type || '').toLowerCase();
+  const isDataUri = url.startsWith('data:');
+  const isBlob = url.startsWith('blob:');
+  // 從 dataURI / type / name 判斷
+  let kind = 'other';
+  if(type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(name) || /^data:image\//i.test(url)) kind = 'image';
+  else if(type === 'application/pdf' || /\.pdf$/i.test(name) || /^data:application\/pdf/i.test(url)) kind = 'pdf';
+  else if(type.startsWith('video/') || /\.(mp4|webm|mov|ogv)$/i.test(name)) kind = 'video';
+  else if(type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a)$/i.test(name)) kind = 'audio';
+  else if(type.startsWith('text/') || /\.(txt|md|csv|log)$/i.test(name)) kind = 'text';
+
+  const m = modal('', { dismissable:true });
+  m.root.style.maxWidth = '95vw';
+  m.root.appendChild(el('h2', { style:{marginBottom:'4px'} }, '📂 ' + name));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    kind.toUpperCase() + (meta.size ? ' · ' + Math.round(meta.size/1024) + ' KB' : '')));
+
+  const body = el('div', { style:{textAlign:'center'} });
+
+  if(kind === 'image'){
+    body.appendChild(el('img', { src:url, alt:name, style:{maxWidth:'100%',maxHeight:'75vh',borderRadius:'6px',boxShadow:'0 4px 16px rgba(0,0,0,0.2)'} }));
+  } else if(kind === 'pdf' || kind === 'video' || kind === 'audio'){
+    // PDF embed / video / audio：iframe 或 <video>/<audio>
+    if(kind === 'pdf'){
+      body.appendChild(el('iframe', { src:url, style:{width:'90vw',height:'75vh',border:'1px solid var(--border)',borderRadius:'6px'} }));
+    } else if(kind === 'video'){
+      const v = el('video', { src:url, controls:true, style:{maxWidth:'100%',maxHeight:'75vh'} });
+      body.appendChild(v);
+    } else {
+      body.appendChild(el('audio', { src:url, controls:true, style:{width:'100%'} }));
+    }
+  } else if(kind === 'text'){
+    body.appendChild(el('div', { class:'small muted', style:{marginBottom:'6px'} }, '載入文字中...'));
+    try {
+      const resp = await fetch(url);
+      const txt = await resp.text();
+      const pre = el('pre', { style:{textAlign:'left',whiteSpace:'pre-wrap',wordBreak:'break-word',maxHeight:'70vh',overflow:'auto',background:'var(--surface-2)',padding:'10px',borderRadius:'6px',fontSize:'13px',fontFamily:'monospace'} }, txt.slice(0, 100000));
+      body.innerHTML = '';
+      body.appendChild(pre);
+    } catch(e){
+      body.appendChild(el('div', { style:{color:'var(--danger)'} }, '讀取失敗：' + e.message));
+    }
+  } else {
+    // 不支援預覽 → 顯示資訊 + 下載按鈕
+    body.appendChild(el('div', { class:'card', style:{padding:'24px',textAlign:'center',background:'var(--surface-2)'} },
+      el('div', { style:{fontSize:'48px',marginBottom:'10px'} }, '📄'),
+      el('div', { style:{fontWeight:'700',marginBottom:'4px'} }, name),
+      el('div', { class:'small muted' }, '此格式不支援預覽，請下載查看')
+    ));
+  }
+  m.root.appendChild(body);
+
+  // 動作列：下載 / 開新分頁 / 關閉
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> attachDownload(meta) }, '⬇ 下載'));
+  // 開新分頁 — 對 blob/dataURI 都能用（dataURI 在 modal 內已能顯示）
+  if(isBlob || (isDataUri && kind !== 'image' && kind !== 'pdf')){
+    actions.appendChild(el('button', { class:'btn', onclick:()=> {
+      // 若是 dataURI 太大 → 轉 blob 再開
+      if(isDataUri){
+        try {
+          fetch(url).then(r=>r.blob()).then(b => {
+            const blobUrl = URL.createObjectURL(b);
+            window.open(blobUrl, '_blank');
+            setTimeout(()=> URL.revokeObjectURL(blobUrl), 60000);
+          });
+        } catch(e){ toast('無法開新分頁', 'warn'); }
+      } else {
+        window.open(url, '_blank');
+      }
+    }}, '↗ 新分頁'));
+  }
+  m.root.appendChild(actions);
+
+  // modal 關閉時回收 blob URL
+  const origClose = m.close;
+  if(isBlob){
+    setTimeout(()=> {
+      // 60 秒後自動回收
+      try { URL.revokeObjectURL(url); } catch(_){}
+    }, 60 * 1000);
   }
 }
 
