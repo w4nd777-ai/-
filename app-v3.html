@@ -10933,6 +10933,7 @@ function rStu(content){
       el('button', { class:'btn btn-sm', onclick: openCSVExport, title:'匯出為 CSV 檔' }, '📤 匯出'),
       el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
       el('button', { class:'btn btn-sm', onclick: bulkAddStudents, title:'一次貼上多位學生姓名' }, '＋ 批次'),
+      el('button', { class:'btn btn-sm btn-warn', onclick: openBulkResetStudents, title:'重設密碼 / Email / 安全問題（可選全部或分班）' }, '🔄 批量重設'),
       el('button', { class:'btn btn-sm btn-success', onclick: quickCreateStudent, title:'最快速：只要姓名 + 學號就建立帳號' }, '⚡ 快速建立'),
       el('button', { class:'btn btn-primary', onclick:()=> openStudentEdit(), title:'新增單一學生（含完整欄位）' }, '＋ 新增')
     )
@@ -11366,7 +11367,8 @@ function quickCreateStudent(){
 
 function openStudentEdit(s=null){
   const isNew = !s;
-  const m = modal('');
+  // 修：不可點背景關閉（行動裝置常因為虛擬鍵盤誤觸而閃退）
+  const m = modal('', { dismissable:false });
   m.root.appendChild(el('h2', null, isNew?'新增學生':'編輯學生'));
 
   // 基本欄位
@@ -11412,51 +11414,246 @@ function openStudentEdit(s=null){
 
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
-    // H1: 副老師寫入權限攔截
-    if(!requirePerm('canEditStudents','編輯學生')) return;
-    const name = inps.name.value.trim();
-    if(!name) return toast('姓名必填','danger');
-    if(isNew){
-      const rec = { id: nid() };
-      for(const k of Object.keys(inps)){
-        const v = inps[k].value;
-        if(k === 'seat') rec[k] = parseInt(v,10) || 0;
-        else if(k === 'password'){
-          // 新增：若留空 → 用學號末 4 碼當預設
-          const raw = v || String(rec.sid || '').slice(-4) || '0000';
-          rec.password = await hashPassword(raw);  // H5: 自動產生 per-account salt
-          if(!v) rec.mustChangePw = true;
-        } else rec[k] = v;
-      }
-      App.db.students.push(rec);
-    } else {
-      // 編輯非自己班級的學生需要班級權限
-      if(!checkStudentClassPerm(s.id)){ toast('您沒有此學生班級的權限','warning'); return; }
-      for(const k of Object.keys(inps)){
-        const v = inps[k].value;
-        if(k === 'seat') s[k] = parseInt(v,10) || 0;
-        else if(k === 'password'){
-          // 編輯：留空 = 不修改
-          if(v){
-            s.password = await hashPassword(v);  // H5: 自動產生 per-account salt
-            s.passwordChangedAt = Date.now();
-            s.mustChangePw = false;
-          }
-        } else s[k] = v;
-      }
-    }
-    saveDB(true);  // H3: 密碼變更立即寫入
-    Sync.setMap('students', App.db.students);
-    bcNotify();
-    toast(isNew?'已新增':'已更新','success');
-    // POLISH-10/9: 儲存按鈕短暫變綠勾 (給使用者明確視覺反饋)
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async (ev)=> {
+    const saveBtn = ev.currentTarget;
+    saveBtn.disabled = true;  // 防止連點兩次造成重複新增
     try {
-      const btnEl = actions.querySelector('.btn-primary');
-      if(btnEl) btnSavedFlash(btnEl, 700);
-    } catch(_){}
-    setTimeout(()=> { m.close(); rerender(); }, 750);
+      // H1: 副老師寫入權限攔截
+      if(!requirePerm('canEditStudents','編輯學生')){ saveBtn.disabled=false; return; }
+      const name = inps.name.value.trim();
+      if(!name){ saveBtn.disabled=false; return toast('姓名必填','danger'); }
+      if(isNew){
+        const rec = { id: nid() };
+        for(const k of Object.keys(inps)){
+          const v = inps[k].value;
+          if(k === 'seat') rec[k] = parseInt(v,10) || 0;
+          else if(k === 'password'){
+            // 新增：若留空 → 用學號末 4 碼當預設
+            const raw = v || String(rec.sid || '').slice(-4) || '0000';
+            rec.password = await hashPassword(raw);  // H5: 自動產生 per-account salt
+            if(!v) rec.mustChangePw = true;
+          } else rec[k] = v;
+        }
+        App.db.students.push(rec);
+      } else {
+        // 編輯非自己班級的學生需要班級權限
+        if(!checkStudentClassPerm(s.id)){ saveBtn.disabled=false; toast('您沒有此學生班級的權限','warning'); return; }
+        for(const k of Object.keys(inps)){
+          const v = inps[k].value;
+          if(k === 'seat') s[k] = parseInt(v,10) || 0;
+          else if(k === 'password'){
+            // 編輯：留空 = 不修改
+            if(v){
+              s.password = await hashPassword(v);  // H5: 自動產生 per-account salt
+              s.passwordChangedAt = Date.now();
+              s.mustChangePw = false;
+            }
+          } else s[k] = v;
+        }
+      }
+      saveDB(true);  // H3: 密碼變更立即寫入
+      try { Sync.setMap('students', App.db.students); } catch(e){ _swallow('sync-stu', e); }
+      try { bcNotify(); } catch(_){}
+      toast(isNew?'已新增':'已更新','success');
+      // POLISH-10/9: 儲存按鈕短暫變綠勾 (給使用者明確視覺反饋)
+      try {
+        const btnEl = actions.querySelector('.btn-primary');
+        if(btnEl) btnSavedFlash(btnEl, 700);
+      } catch(_){}
+      setTimeout(()=> { try { m.close(); rerender(); } catch(_){} }, 750);
+    } catch(err){
+      // 任何錯誤都顯示給使用者而不是讓 modal 默默關掉
+      saveBtn.disabled = false;
+      console.error('[openStudentEdit save]', err);
+      toast('儲存失敗：' + (err.message || err), 'danger', 5000);
+    }
   } }, isNew?'新增':'儲存'));
+  m.root.appendChild(actions);
+}
+
+/* ════════════════════════════════════════════════════════════
+   🔄 批量重設學生（密碼 / Email / 安全問題 / 恢復碼）
+   ──────────────────────────────────────────────────────────── */
+function openBulkResetStudents(){
+  if(!requirePerm('canEditStudents','批量重設學生')) return;
+  const m = modal('', { dismissable:false });
+  m.root.style.maxWidth = '640px';
+  m.root.appendChild(el('h2', null, '🔄 批量重設學生'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
+    '選擇範圍 + 要重設的項目。重設後學生下次登入會被要求重新設定。'));
+
+  // ─── 範圍：全部 / 班級 / 自選 ───
+  const fScope = el('div', { class:'field' });
+  fScope.appendChild(el('label', { class:'label' }, '📌 範圍'));
+  const iScope = el('select', { class:'select' },
+    el('option', { value:'all' }, '全部學生'),
+    el('option', { value:'class' }, '指定班級（可複選）'),
+    el('option', { value:'students' }, '自選學生')
+  );
+  fScope.appendChild(iScope);
+  m.root.appendChild(fScope);
+
+  // 班級複選框
+  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean))).sort();
+  const fCls = el('div', { class:'field', style:{display:'none'} });
+  fCls.appendChild(el('label', { class:'label' }, '選擇班級'));
+  const clsCtrls = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} },
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { clsChecks.forEach(cb=>cb.checked=true); }}, '全選'),
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { clsChecks.forEach(cb=>cb.checked=false); }}, '全清')
+  );
+  fCls.appendChild(clsCtrls);
+  const clsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',padding:'8px',border:'1px solid var(--border)',borderRadius:'8px',maxHeight:'140px',overflow:'auto'} });
+  const clsChecks = [];
+  classes.forEach(c => {
+    const lbl = el('label', { style:{display:'inline-flex',alignItems:'center',gap:'4px',padding:'4px 10px',background:'var(--surface-2)',borderRadius:'6px',cursor:'pointer'} });
+    const cb = el('input', { type:'checkbox', value:c });
+    clsChecks.push(cb);
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', null, ' ' + c));
+    clsBox.appendChild(lbl);
+  });
+  fCls.appendChild(clsBox);
+  m.root.appendChild(fCls);
+
+  // 學生複選 (含搜尋)
+  const fStu = el('div', { class:'field', style:{display:'none'} });
+  fStu.appendChild(el('label', { class:'label' }, '選擇學生'));
+  const stuSearch = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號 / 班級', style:{marginBottom:'6px'} });
+  fStu.appendChild(stuSearch);
+  const stuActions = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} });
+  const stuCountLbl = el('span', { class:'tiny muted', style:{marginLeft:'auto',alignSelf:'center'} }, '');
+  stuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _visibleChecks().forEach(cb=>cb.checked=true); _updateCount(); }}, '全選可見'));
+  stuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _visibleChecks().forEach(cb=>cb.checked=false); _updateCount(); }}, '全清可見'));
+  stuActions.appendChild(stuCountLbl);
+  fStu.appendChild(stuActions);
+  const stuBox = el('div', { style:{maxHeight:'220px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
+  const stuChecks = {};
+  const stuRows = {};
+  App.db.students.forEach(s => {
+    const row = el('label', { class:'flex', style:{padding:'4px',cursor:'pointer'} });
+    const cb = el('input', { type:'checkbox' });
+    cb.addEventListener('change', _updateCount);
+    stuChecks[s.id] = cb;
+    stuRows[s.id] = row;
+    row.appendChild(cb);
+    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + (s.seat?s.seat+'號 ':'') + s.name));
+    stuBox.appendChild(row);
+  });
+  fStu.appendChild(stuBox);
+  m.root.appendChild(fStu);
+
+  function _visibleChecks(){ return Object.entries(stuChecks).filter(([id])=> stuRows[id].style.display!=='none').map(([_,cb])=>cb); }
+  function _updateCount(){
+    const sel = Object.values(stuChecks).filter(cb=>cb.checked).length;
+    stuCountLbl.textContent = '已選 ' + sel + ' / ' + App.db.students.length + ' 人';
+  }
+  function _filter(){
+    const q = (stuSearch.value||'').trim().toLowerCase();
+    App.db.students.forEach(s => {
+      const m = !q || (s.name||'').toLowerCase().includes(q) || String(s.sid||'').toLowerCase().includes(q) || String(s.cls||'').toLowerCase().includes(q);
+      stuRows[s.id].style.display = m ? '' : 'none';
+    });
+  }
+  stuSearch.addEventListener('input', _filter);
+  _updateCount();
+
+  iScope.addEventListener('change', () => {
+    fCls.style.display = iScope.value === 'class' ? '' : 'none';
+    fStu.style.display = iScope.value === 'students' ? '' : 'none';
+  });
+
+  // ─── 要重設的項目 ───
+  m.root.appendChild(el('h3', { style:{marginTop:'14px',marginBottom:'6px',fontSize:'14px'} }, '⚙️ 要重設的項目（可複選）'));
+  const items = [
+    { key:'password', label:'🔑 密碼（重設為學號末 4 碼）', danger:true, default:true },
+    { key:'mustChangePw', label:'⏰ 強制下次登入改密碼', default:true },
+    { key:'email', label:'📧 清空 Email', default:false },
+    { key:'security', label:'❓ 清空安全問題 + 答案', default:false },
+    { key:'recovery', label:'🛡 清空恢復碼', default:false },
+    { key:'phone', label:'📱 清空電話', default:false },
+    { key:'parent', label:'👨‍👩 清空家長聯絡資料', default:false }
+  ];
+  const itemChecks = {};
+  items.forEach(it => {
+    const lbl = el('label', { style:{display:'flex',alignItems:'center',gap:'8px',padding:'8px 10px',background: it.danger?'var(--danger-soft)':'var(--surface-2)',borderRadius:'6px',marginBottom:'6px',cursor:'pointer'} });
+    const cb = el('input', { type:'checkbox' });
+    if(it.default) cb.checked = true;
+    itemChecks[it.key] = cb;
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', null, ' ' + it.label));
+    m.root.appendChild(lbl);
+  });
+
+  // 預覽 / 統計
+  const summary = el('div', { class:'small muted', style:{marginTop:'10px',padding:'10px',background:'var(--surface-2)',borderRadius:'6px'} }, '請選擇範圍與項目');
+  m.root.appendChild(summary);
+
+  function getScopedStudents(){
+    if(iScope.value === 'all') return App.db.students.slice();
+    if(iScope.value === 'class'){
+      const set = new Set(clsChecks.filter(cb=>cb.checked).map(cb=>cb.value));
+      return App.db.students.filter(s => set.has(s.cls));
+    }
+    if(iScope.value === 'students'){
+      return App.db.students.filter(s => stuChecks[s.id]?.checked);
+    }
+    return [];
+  }
+  function refreshSummary(){
+    const list = getScopedStudents();
+    const itemCount = Object.values(itemChecks).filter(cb=>cb.checked).length;
+    summary.textContent = '將對 ' + list.length + ' 位學生重設 ' + itemCount + ' 個項目';
+  }
+  [iScope, ...clsChecks, ...Object.values(stuChecks), ...Object.values(itemChecks)].forEach(el => el.addEventListener('change', refreshSummary));
+  refreshSummary();
+
+  // ─── 動作 ───
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-danger', onclick: async (ev)=> {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      const list = getScopedStudents();
+      const picked = Object.entries(itemChecks).filter(([_,cb])=>cb.checked).map(([k])=>k);
+      if(!list.length){ btn.disabled = false; return toast('沒選到任何學生','warning'); }
+      if(!picked.length){ btn.disabled = false; return toast('沒選任何要重設的項目','warning'); }
+
+      const ok = await confirmDlg(
+        '確定要對 ' + list.length + ' 位學生重設這 ' + picked.length + ' 個項目嗎？\n此操作會立即生效並同步到雲端。',
+        { danger:true }
+      );
+      if(!ok){ btn.disabled = false; return; }
+
+      let resetCount = 0;
+      for(const s of list){
+        if(picked.includes('password')){
+          const def = String(s.sid||'0000').slice(-4).padStart(4,'0');
+          try { s.password = await hashPassword(def); } catch(e){ continue; }
+          s.passwordChangedAt = Date.now();
+        }
+        if(picked.includes('mustChangePw')) s.mustChangePw = true;
+        if(picked.includes('email')) s.email = '';
+        if(picked.includes('security')){ s.securityQ = ''; s.securityA = ''; }
+        if(picked.includes('recovery')){ s.recoveryCode = ''; s.recoveryCodeSetAt = 0; }
+        if(picked.includes('phone')) s.phone = '';
+        if(picked.includes('parent')){ s.parentName = ''; s.parentPhone = ''; s.parentEmail = ''; }
+        resetCount++;
+      }
+
+      saveDB(true);
+      try { Sync.setMap('students', App.db.students); } catch(e){ _swallow('sync-bulk-reset', e); }
+      try { bcNotify(); } catch(_){}
+
+      toast('✅ 已重設 ' + resetCount + ' 位學生的 ' + picked.length + ' 個項目','success', 4000);
+      m.close();
+      rerender();
+    } catch(err){
+      console.error('[bulk reset]', err);
+      btn.disabled = false;
+      toast('重設失敗：' + (err.message||err), 'danger', 5000);
+    }
+  }}, '🔄 執行重設'));
   m.root.appendChild(actions);
 }
 
