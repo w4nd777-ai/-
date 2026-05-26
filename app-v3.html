@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-final-qa-fixes';
+const APP_BUILD = '2026-05-26-30-users-concurrent';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5096,13 +5096,34 @@ const Sync = (() => {
     const s = _ensureEchoSet();
     s.add(node + '::' + id);
   }
+  // 🔧 突發偵測：短時間內多次 sync 事件 → 自動拉長 debounce
+  //   30 人同時簽到時，避免每 80ms 就重畫一次（CPU、電池、捲動位置都會崩）
   function _scheduleRerender(){
-    // debounce 避免大量 child_added 時暴衝
-    if(App._syncRerTimer) return;
+    const now = Date.now();
+    App._syncBurstStart = App._syncBurstStart || now;
+    App._syncBurstCount = (App._syncBurstCount || 0) + 1;
+    // 在 1 秒內收到 ≥ 3 次 → 視為突發 → 延後到 800 ms
+    const burstWindow = now - App._syncBurstStart < 1000;
+    const isBurst = burstWindow && App._syncBurstCount >= 3;
+    if(!burstWindow){ App._syncBurstStart = now; App._syncBurstCount = 1; }
+    if(App._syncRerTimer) return;  // 已排隊
+    const debounceMs = isBurst ? 800 : 200;  // 突發 800ms / 一般 200ms（原本 80ms 太頻繁）
     App._syncRerTimer = setTimeout(()=> {
       App._syncRerTimer = null;
-      try { rerender(); } catch(e){_swallow('auto',e)}
-    }, 80);
+      App._syncBurstCount = 0;
+      try {
+        // 🔧 若使用者正在輸入 → 延後 1.2 秒
+        const a = document.activeElement;
+        const isTyping = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+        if(isTyping){
+          App._syncRerTimer = setTimeout(()=> { App._syncRerTimer = null; _scheduleRerender(); }, 1200);
+          return;
+        }
+        // 登入畫面 — 完全跳過
+        if(!App.session) return;
+        rerender();
+      } catch(e){_swallow('auto',e)}
+    }, debounceMs);
   }
 
   function attachListeners(){
@@ -5489,17 +5510,41 @@ function initBC(){
   } catch(e){ App.bc = null; }
 }
 function bcNotify(){
+  // throttle 200ms — 突發時不要每個 sync event 都廣播一次
+  const now = Date.now();
+  if(App._bcLastTs && (now - App._bcLastTs) < 200){
+    // 排隊一個延遲廣播，把多次合併成一次
+    if(!App._bcQueueTimer){
+      App._bcQueueTimer = setTimeout(()=> {
+        App._bcQueueTimer = null;
+        App._bcLastTs = Date.now();
+        if(App.bc){ try{ App.bc.postMessage({ type:'db-update', ts:Date.now() }); }catch(e){_swallow('auto',e)} }
+      }, 250);
+    }
+    return;
+  }
+  App._bcLastTs = now;
   if(App.bc){ try{ App.bc.postMessage({ type:'db-update', ts:Date.now() }); }catch(e){_swallow('auto',e)} }
 }
 
 /* ---- storage event for cross-tab ---- */
+// 🔧 同樣應用「打字中延後 / 登入頁跳過」邏輯，避免別的 tab 寫入打斷本 tab 輸入
+function _safeRerenderForStorage(){
+  try {
+    const a = document.activeElement;
+    const isTyping = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+    if(isTyping){ setTimeout(_safeRerenderForStorage, 1200); return; }
+    if(!App.session) return;  // 登入頁不重畫
+    rerender();
+  } catch(_){}
+}
 window.addEventListener('storage', e => {
   if(!e.key) return;
   if(e.key === dbKey()){
-    loadDB(); rerender();
+    loadDB(); _safeRerenderForStorage();
   } else if(e.key === LS_SESSION){
     App.session = loadSession();
-    rerender();
+    _safeRerenderForStorage();
   } else if(e.key === LS_THEME || e.key === LS_ACCENT || e.key === LS_APPEARANCE){
     loadAppearance();
     applyTheme();
@@ -6005,13 +6050,56 @@ async function gdGetUsage(){
 }
 
 // 上傳 File，回傳 metadata：依設定智能切換 IDB / Google Drive
+// 🔧 圖片壓縮：超過 800KB 的 image/* 自動降畫質 + 縮 dim → 大幅提升上傳穩定度
+//    (iPhone HEIC 拍照常 5MB+，學生 IDB 配額有限會塞爆)
+async function _compressImageIfNeeded(file){
+  if(!file || !(file.type||'').startsWith('image/')) return file;
+  if(file.size <= 800 * 1024) return file;  // <= 800KB 不壓
+  try {
+    const dataUri = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = ()=> res(r.result);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = ()=> res(i);
+      i.onerror = ()=> rej(new Error('圖片格式無法讀取(可能是 HEIC)'));
+      i.src = dataUri;
+    });
+    // 最長邊不超過 1920，維持比例
+    const MAX_DIM = 1920;
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if(w > MAX_DIM || h > MAX_DIM){
+      const ratio = Math.min(MAX_DIM/w, MAX_DIM/h);
+      w = Math.round(w * ratio); h = Math.round(h * ratio);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const compressedBlob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+    if(!compressedBlob || compressedBlob.size >= file.size) return file;  // 沒變小就用原檔
+    const compressedFile = new File([compressedBlob], file.name.replace(/\.\w+$/, '') + '.jpg', { type:'image/jpeg' });
+    try { toast('🖼 已壓縮：' + Math.round(file.size/1024) + 'KB → ' + Math.round(compressedFile.size/1024) + 'KB', 'info', 2500); } catch(_){}
+    return compressedFile;
+  } catch(e){
+    // 壓縮失敗（HEIC 等格式）→ 跳出明確提示
+    try { toast('⚠️ ' + (e.message||'圖片無法壓縮') + '，將上傳原檔（可能較大）', 'warning', 4000); } catch(_){}
+    return file;
+  }
+}
+
 async function attachUpload(file){
   if(!file) throw new Error('沒有檔案');
   const DRIVE_MAX = 1024 * 1024 * 1024; // 1 GB（單檔 Drive 限制；Drive 本身允許更大但保守）
   const FB_STORAGE_MAX = 50 * 1024 * 1024; // 50 MB (Storage 單檔上限, 超過走 Drive)
 
+  // 🔧 先壓縮：iPhone 5MB 照片 → 500KB 以下，大幅提升 IDB+Firebase 同步成功率
+  file = await _compressImageIfNeeded(file);
+
   // 立即顯示「上傳中」toast 讓使用者知道在處理（避免「按了沒反應」誤會）
-  try { toast('📤 正在上傳 ' + file.name + '...', 'info', 2400); } catch(_){}
+  try { toast('📤 正在上傳 ' + file.name + ' (' + Math.round(file.size/1024) + 'KB)...', 'info', 2400); } catch(_){}
   const _doneProgress = (msg, type) => {
     if(msg){ try { toast(msg, type||'success', 3000); } catch(_){} }
   };
@@ -6121,10 +6209,11 @@ async function attachUpload(file){
   const key = _newAttachKey();
   await idbPut(key, file);
 
-  // ★ 跨裝置同步: 小檔 (< 500KB) 自動轉 base64 存到 Firebase
+  // ★ 跨裝置同步: 小檔 (< 1.5 MB) 自動轉 base64 存到 Firebase
   //   讓老師其他裝置打開時, 從 Firebase 拉回再寫入本地 IDB
+  //   (從 500KB 放寬到 1.5MB 配合壓縮後的圖片 — 提高學生上傳跨裝置成功率)
   let dataUri = null;
-  if(file.size < 500 * 1024){
+  if(file.size < 1500 * 1024){
     try {
       dataUri = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -10798,6 +10887,58 @@ function openLeaveDialog(studentId){
    - route: 'studentprofile'  (App._spId = studentId 帶入)
    - 顯示一位學生的所有資料: 基本卡 + 統計 + 時間軸
    ──────────────────────────────────────────────────────────── */
+// 🖼 學生頭像放大檢視 — 老師端點頭像可放大、下載原圖
+function openAvatarViewer(s){
+  if(!s || !s.avatar){ try { toast('此學生尚未上傳頭像', 'warning'); } catch(_){} return; }
+  const m = modal('', { dismissable: true });
+  m.root.style.maxWidth = '92vw';
+  m.root.appendChild(el('h2', { style:{marginBottom:'8px'} },
+    '🖼 ' + s.name + (s.seat ? ' (' + s.seat + '號)' : '') + ' — 頭像'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    (s.cls || '') + (s.sid ? ' · 學號 ' + s.sid : '')));
+  // 顯示原圖（max 80vh、自適應寬度）
+  const img = el('img', { src: s.avatar, alt: s.name + ' 頭像', style:{
+    display:'block',
+    maxWidth:'100%',
+    maxHeight:'80vh',
+    width:'auto',
+    height:'auto',
+    margin:'0 auto',
+    borderRadius:'8px',
+    boxShadow:'0 8px 30px rgba(0,0,0,0.3)'
+  }});
+  // 顯示原圖解析度
+  const dimLabel = el('div', { class:'small muted', style:{textAlign:'center',marginTop:'6px'} }, '載入中…');
+  img.addEventListener('load', () => {
+    dimLabel.textContent = '📐 原圖解析度：' + img.naturalWidth + ' × ' + img.naturalHeight + ' px';
+  });
+  m.root.appendChild(img);
+  m.root.appendChild(dimLabel);
+  // 動作列
+  const actions = el('div', { class:'modal-actions', style:{flexWrap:'wrap'} });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
+  // 下載原圖
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    try {
+      const a = document.createElement('a');
+      // dataUri 或 URL 都可直接 download
+      a.href = s.avatar;
+      // 自動判斷副檔名（從 dataURI mime 取，否則預設 jpg）
+      let ext = 'jpg';
+      const m1 = /^data:image\/(\w+)/i.exec(s.avatar || '');
+      if(m1) ext = m1[1].toLowerCase().replace('jpeg','jpg');
+      a.download = (s.cls || '') + '_' + (s.seat ? s.seat + '號_' : '') + s.name + '_頭像.' + ext;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=> a.remove(), 0);
+      toast('已下載 ' + s.name + ' 的頭像', 'success');
+    } catch(e){
+      toast('下載失敗：' + (e.message || e), 'danger');
+    }
+  }}, '⬇ 下載原圖'));
+  m.root.appendChild(actions);
+}
+
 function rStudentProfile(content){
   const sid = App._spId;
   const s = (App.db.students || []).find(x => String(x.id) === String(sid));
@@ -10822,7 +10963,7 @@ function rStudentProfile(content){
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
     el('div', { class:'flex', style:{alignItems:'center',gap:'12px'} },
       s.avatar
-        ? el('img', { src: s.avatar, style:{width:'72px',height:'72px',borderRadius:'50%',objectFit:'cover',border:'3px solid var(--primary)'} })
+        ? el('img', { src: s.avatar, title:'點擊放大', style:{width:'72px',height:'72px',borderRadius:'50%',objectFit:'cover',border:'3px solid var(--primary)',cursor:'zoom-in'}, onclick: ()=> openAvatarViewer(s) })
         : el('div', { class:'avatar', style:{width:'72px',height:'72px',fontSize:'28px',border:'3px solid var(--primary)'} }, initials(s.name)),
       el('div', null,
         el('h1', { style:{margin:'0 0 4px'} }, s.name + (s.seat ? ' (' + s.seat + '號)' : '')),
