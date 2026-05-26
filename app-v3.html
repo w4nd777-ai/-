@@ -9940,7 +9940,16 @@ function renderSidebarStudent(){
     speer: studentPendingPeerCount() || null,
     sann: studentUnreadAnnouncements() || null,
     // batch 5-29：今日 / 逾期待辦數
-    mytodos: (typeof getStudentTodoBadge === 'function' ? getStudentTodoBadge() : 0) || null
+    mytodos: (typeof getStudentTodoBadge === 'function' ? getStudentTodoBadge() : 0) || null,
+    // QA #3：通知中心未讀數
+    mynotifs: (function(){
+      try {
+        const me = currentStudent();
+        if(!me) return null;
+        const n = (App.db.notifications||[]).filter(x => String(x.studentId) === String(me.id) && !x.read).length;
+        return n || null;
+      } catch(_) { return null; }
+    })()
   };
 
   side.appendChild(sideSection('s_func', '功能', buildSidebarItems('student', 's_func', sBadges)));
@@ -11641,21 +11650,27 @@ function bulkAddStudents(){
   m.root.appendChild(ta);
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
     const lines = ta.value.split(/\n+/).map(l=>l.trim()).filter(Boolean);
     let added = 0;
-    lines.forEach(line => {
+    for(const line of lines){
       const parts = line.split(/[,\t]/).map(p=>p.trim());
-      if(!parts[0]) return;
+      if(!parts[0]) continue;
+      const seat = parseInt(parts[2],10)||0;
+      // QA #7：補預設密碼 (座號 4 碼) + mustChangePw
+      const defPw = String(seat||'0000').padStart(4,'0');
+      let pwHash = '';
+      try { pwHash = await hashPassword(defPw); } catch(e){ _swallow('bulk-add-hash', e); }
       App.db.students.push({
-        id: nid(), name: parts[0], cls: parts[1]||'', seat: parseInt(parts[2],10)||0
+        id: nid(), name: parts[0], cls: parts[1]||'', seat,
+        password: pwHash, mustChangePw: true
       });
       added++;
-    });
+    }
     saveDB();
     Sync.setMap('students', App.db.students);
     bcNotify();
-    toast('已新增 ' + added + ' 位','success');
+    toast('已新增 ' + added + ' 位（預設密碼=座號 4 碼，首次登入須改）','success', 4500);
     m.close();
     rerender();
   } }, '匯入'));
@@ -13248,7 +13263,7 @@ function rPending(content){
       el('button', { class:'btn btn-sm btn-success', onclick: async ()=> {
         if(!await confirmDlg('確定接受全部 ' + pendCount + ' 件註冊申請嗎？', {})) return;
         const ids = App.db.pending.map(x => x.id);
-        for(const id of ids){ try { approveStudent(id, true); } catch(_){} }
+        for(const id of ids){ try { await approveStudent(id, true); } catch(_){} }
         toast('已接受全部 ' + ids.length + ' 件','success');
         rerender();
       }}, '✓ 全部接受'),
@@ -13282,8 +13297,8 @@ function rPending(content){
           '🏫 ' + (p.cls||'(未填班級)'),
           p.sid ? el('span', null, ' · 🆔 學號 ' + p.sid) : null,
           el('br'),
-          p.email ? el('span', null, '📧 ' + p.email) : el('span', { style:{color:'var(--danger)'} }, '📧 未填 Email'),
-          el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '· ⏱ ' + relTime(p.ts||0))
+          p.email ? el('span', null, '📧 ' + p.email) : null,
+          el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
         )
       );
       row.appendChild(info);
@@ -13345,13 +13360,24 @@ function openPendingEdit(p){
   }}, '✓ 儲存並核准'));
   m.root.appendChild(actions);
 }
-function approveStudent(pid, silent){
+async function approveStudent(pid, silent){
   const p = App.db.pending.find(x => x.id === pid);
   if(!p) return;
+  // QA #2：確保 password 是雜湊過的。極少情況下舊版本可能寫入明文
+  let pwHashed = p.password || '';
+  try {
+    if(pwHashed && !isPasswordHashed(pwHashed)){
+      pwHashed = await hashPassword(pwHashed);
+    } else if(!pwHashed){
+      // 沒密碼 → 用學號末 4 碼當預設
+      const def = String(p.sid||'0000').slice(-4).padStart(4,'0');
+      pwHashed = await hashPassword(def);
+    }
+  } catch(e){ _swallow('approve-hash', e); }
   App.db.students.push({
     id: nid(), name:p.name, sid:p.sid||'', cls:p.cls, seat:p.seat,
     email:p.email||'',
-    password:p.password,
+    password: pwHashed,
     mustChangePw: !!p.mustChangePw,
     note:'學生自註冊'
   });
@@ -15341,13 +15367,25 @@ function openAssignmentEdit(asg){
     rec.latePenalty = parseInt(iLate.value,10) || 0;
     rec.weight = Math.max(1, Math.min(10, parseFloat(iWeight.value) || 1));
     rec.target = iTgt.value;
-    // 多班級 (新) — 同時寫 targetCls (相容舊資料 / isAssignmentForStudent)
+    // QA #6：依 target 分支寫對應欄位，避免殘留前次選擇
     const selectedClsList = clsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
-    rec.targetClsList = selectedClsList;
-    rec.targetCls = selectedClsList[0] || '';
-    rec.targetIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
-    if(iTgt.value === 'class' && !selectedClsList.length) return toast('請至少選一個班級', 'warning');
-    if(iTgt.value === 'students' && !rec.targetIds.length) return toast('請至少選一個學生', 'warning');
+    const selectedStuIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
+    if(iTgt.value === 'class'){
+      if(!selectedClsList.length) return toast('請至少選一個班級', 'warning');
+      rec.targetClsList = selectedClsList;
+      rec.targetCls = selectedClsList[0] || '';
+      rec.targetIds = [];
+    } else if(iTgt.value === 'students'){
+      if(!selectedStuIds.length) return toast('請至少選一個學生', 'warning');
+      rec.targetClsList = [];
+      rec.targetCls = '';
+      rec.targetIds = selectedStuIds;
+    } else {
+      // 'all'
+      rec.targetClsList = [];
+      rec.targetCls = '';
+      rec.targetIds = [];
+    }
     rec.attach = attached;
     rec.createdBy = App.session?.name || '老師';
     // 包 B-1：科目
@@ -15761,8 +15799,9 @@ function openSubmissionGrade(sub, list=null, idx=0){
   // ↩ 退回作業（要求學生重做）
   async function returnSubmission(){
     if(!requirePerm('canEditGrades','退回作業')) return;
-    const reason = prompt('退回原因（會顯示給學生）：', sub.returnReason || '請補充內容後再繳交');
-    if(reason === null) return; // user cancelled
+    // QA #5：用自製 promptDlg（iOS Safari PWA 模式原生 prompt 可能被擋）
+    const reason = await promptDlg('退回原因（會顯示給學生）：', sub.returnReason || '請補充內容後再繳交', { title:'↩ 退回作業' });
+    if(reason == null) return; // user cancelled
     sub.returned = true;
     sub.returnedAt = Date.now();
     sub.returnReason = (reason || '').trim();
@@ -21145,6 +21184,7 @@ function rerender(){
       // batch 5 新增學生端頁面
       else if(v === 'mybadges') rMyBadges(content);    // batch 5-27
       else if(v === 'mynotes') rMyNotes(content);      // batch 5-28
+      else if(v === 'mynotifs') rMyNotifications(content);  // QA #3
       else if(v === 'mytodos') rMyTodos(content);      // batch 5-29
       else if(v === 'mytrend') rMyTrend(content);      // batch 5-30
       else if(v === 'mytimetable') rMyTimetable(content); // 包 B-2
@@ -24945,6 +24985,7 @@ function getSidebarItems(role){
         { key:'me', icon:'👤', label:'個人' }
       ]},
       s_other: { label:'其他', items: [
+        { key:'mynotifs', icon:'🔔', label:'我的通知' },
         { key:'install', icon:'📲', label:'安裝 App' },
         { key:'help', icon:'📖', label:'使用說明' }
       ]}
@@ -29056,6 +29097,81 @@ function openTeacherNoteEditor(note){
     m.close(); toast('已儲存','success'); rerender();
   }}, '💾 儲存'));
   m.root.appendChild(actions);
+}
+
+/* QA #3: 學生通知中心 — 顯示老師退回作業、徽章獲得等系統通知 */
+function rMyNotifications(content){
+  const me = currentStudent();
+  if(!me){ content.appendChild(el('div', { class:'card' }, '請先登入')); return; }
+  if(!Array.isArray(App.db.notifications)) App.db.notifications = [];
+  const mine = App.db.notifications
+    .filter(n => String(n.studentId) === String(me.id))
+    .sort((a,b) => (b.ts||0) - (a.ts||0));
+  const unreadCount = mine.filter(n => !n.read).length;
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '🔔 我的通知'),
+      el('div', { class:'muted small' }, mine.length + ' 則通知 · ' + unreadCount + ' 則未讀')
+    ),
+    unreadCount > 0 ? el('div', { class:'flex no-print', style:{gap:'6px'} },
+      el('button', { class:'btn btn-sm btn-success', onclick:()=> {
+        mine.forEach(n => { n.read = true; });
+        saveDB();
+        try { Sync.setMap('notifications', App.db.notifications); } catch(_){}
+        rerender();
+        toast('已全部標為已讀','success');
+      }}, '✓ 全部標為已讀')
+    ) : null
+  ));
+
+  if(mine.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '📭'),
+      el('div', null, '尚無通知'),
+      el('div', { class:'small muted', style:{marginTop:'8px'} }, '老師退回作業、獲得徽章等通知會出現在這')
+    ));
+    return;
+  }
+
+  const list = el('div', { class:'card', style:{padding:'0'} });
+  mine.forEach(n => {
+    let icon = '📬', color = 'var(--primary)';
+    if(n.type === 'submission_returned'){ icon = '↩'; color = 'var(--warn)'; }
+    else if(n.type === 'badge'){ icon = '🏅'; color = 'var(--accent)'; }
+    else if(n.type === 'message'){ icon = '💬'; color = 'var(--primary)'; }
+
+    const row = el('div', { class:'list-row', style:{
+      padding:'12px 14px',
+      borderLeft: '4px solid ' + (n.read ? 'transparent' : color),
+      background: n.read ? 'transparent' : 'var(--surface-2)',
+      cursor: 'pointer'
+    }, onclick:()=> {
+      if(!n.read){
+        n.read = true;
+        saveDB();
+        try { Sync.setMap('notifications', App.db.notifications); } catch(_){}
+        rerender();
+      }
+      // 退回類型 → 帶到作業頁
+      if(n.type === 'submission_returned'){
+        // 找對應的 submission 取作業 id
+        const sub = (App.db.submissions||[]).find(s => s.studentId === me.id && s.returned);
+        if(sub) go('sasgn', sub.assignmentId);
+        else go('sasgn');
+      }
+    }});
+    row.appendChild(el('div', { style:{fontSize:'22px',marginRight:'10px'} }, icon));
+    row.appendChild(el('div', { class:'info' },
+      el('div', { class:'name', style:{fontWeight: n.read?'400':'700'} }, n.text || '(無內容)'),
+      el('div', { class:'sub' }, relTime(n.ts||0) + (n.read ? ' · 已讀' : ''))
+    ));
+    if(!n.read){
+      row.appendChild(el('span', { class:'pill', style:{background:color,color:'#fff',fontSize:'10px',marginLeft:'auto'} }, '新'));
+    }
+    list.appendChild(row);
+  });
+  content.appendChild(list);
 }
 
 function rMyNotes(content){
