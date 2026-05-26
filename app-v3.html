@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-proactive-bug-sweep';
+const APP_BUILD = '2026-05-26-print-csv-polish';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -12293,10 +12293,19 @@ function openCSVImport(){
 }
 
 function openCSVExport(){
-  const header = '姓名,班級,座號,信箱,電話,備註';
-  const rows = App.db.students.map(s =>
-    [s.name, s.cls, s.seat, s.email||'', s.phone||'', s.note||''].map(v => '"' + String(v||'').replace(/"/g,'""') + '"').join(',')
-  );
+  // 升級：含完整聯絡資訊 + 出席率 + 密碼狀態
+  const header = '姓名,班級,座號,學號,信箱,電話,家長姓名,家長電話,家長 Email,出席率(30d),作業繳交率,平均分,密碼狀態,備註';
+  const rows = App.db.students.map(s => {
+    let attRate = '', subRate = '', avg = '';
+    try { attRate = (typeof attendanceRate === 'function') ? attendanceRate(s.id) + '%' : ''; } catch(_){}
+    try { subRate = (typeof submissionRate === 'function') ? submissionRate(s.id) + '%' : ''; } catch(_){}
+    try { avg = (typeof submissionAvg === 'function') ? (submissionAvg(s.id) || '') : ''; } catch(_){}
+    const pwStat = s.mustChangePw ? '未改' : (s.passwordChangedAt ? '已改' : '預設');
+    return [s.name, s.cls, s.seat, s.sid||'', s.email||'', s.phone||'',
+            s.parentName||'', s.parentPhone||'', s.parentEmail||'',
+            attRate, subRate, avg, pwStat, s.note||'']
+      .map(v => '"' + String(v == null ? '' : v).replace(/"/g,'""') + '"').join(',');
+  });
   const csv = '﻿' + header + '\n' + rows.join('\n');
   const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -12305,7 +12314,7 @@ function openCSVExport(){
   a.download = 'students_' + td() + '.csv';
   a.click();
   URL.revokeObjectURL(url);
-  toast('已下載','success');
+  toast('已下載 (' + App.db.students.length + ' 位學生 + 14 個欄位)','success', 3500);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -13861,12 +13870,17 @@ function rPending(content){
           rerender();
         } finally { btn.disabled = false; }
       }}, '✓ 全部接受'),
-      el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+      el('button', { class:'btn btn-sm btn-danger', onclick: async (ev)=> {
+        const btn = ev.currentTarget;
+        if(btn.disabled) return;
         if(!await confirmDlg('確定拒絕並刪除全部 ' + pendCount + ' 件申請？', {danger:true})) return;
-        App.db.pending = [];
-        saveDB(); Sync.setMap('pending', App.db.pending); bcNotify();
-        toast('已清空待審核名單','warning');
-        rerender();
+        btn.disabled = true;
+        try {
+          App.db.pending = [];
+          saveDB(); Sync.setMap('pending', App.db.pending); bcNotify();
+          toast('已清空待審核名單','warning');
+          rerender();
+        } finally { btn.disabled = false; }
       }}, '✗ 全部拒絕')
     ));
   }
@@ -32530,8 +32544,9 @@ function rPrintCenter(content){
   ));
   content.appendChild(toolbar);
 
-  // 預覽
+  // 預覽（列印模式下 App._pcPrintAll = true → 不切片，全部輸出）
   const preview = el('div', { class:'pc-preview', id:'pc-preview' });
+  const renderAllOrSlice = (limit) => App._pcPrintAll ? Infinity : limit;
   if(App._pcTpl === 'attsheet') preview.appendChild(buildBlankAttSheet(opts.cls, opts));
   else if(App._pcTpl === 'seatchart') preview.appendChild(buildSeatChart(opts.cls, opts));
   else if(App._pcTpl === 'infocard'){
@@ -32541,8 +32556,8 @@ function rPrintCenter(content){
       const stus = (App.db.students||[]).filter(s => !opts.cls || s.cls === opts.cls)
         .sort((a,b)=> (a.seat||0)-(b.seat||0));
       if(!stus.length) preview.appendChild(el('div', null, '（無學生）'));
-      else stus.slice(0, 30).forEach(s => preview.appendChild(buildStudentInfoCard(s.id, opts)));
-      if(stus.length > 30) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 30 張，列印時全數輸出)'));
+      else stus.slice(0, renderAllOrSlice(30)).forEach(s => preview.appendChild(buildStudentInfoCard(s.id, opts)));
+      if(stus.length > 30 && !App._pcPrintAll) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 30 張，列印時全數輸出)'));
     }
   }
   else if(App._pcTpl === 'gradesheet'){
@@ -32552,8 +32567,8 @@ function rPrintCenter(content){
       const stus = (App.db.students||[]).filter(s => !opts.cls || s.cls === opts.cls)
         .sort((a,b)=> (a.seat||0)-(b.seat||0));
       if(!stus.length) preview.appendChild(el('div', null, '（無學生）'));
-      else stus.slice(0, 20).forEach(s => preview.appendChild(buildPrintGradeSheet(s.id, opts)));
-      if(stus.length > 20) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 20 張，列印時全數輸出)'));
+      else stus.slice(0, renderAllOrSlice(20)).forEach(s => preview.appendChild(buildPrintGradeSheet(s.id, opts)));
+      if(stus.length > 20 && !App._pcPrintAll) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 20 張，列印時全數輸出)'));
     }
   }
   // F-22 家長報告書
@@ -32564,8 +32579,8 @@ function rPrintCenter(content){
       const stus = (App.db.students||[]).filter(s => !opts.cls || s.cls === opts.cls)
         .sort((a,b)=> (a.seat||0)-(b.seat||0));
       if(!stus.length) preview.appendChild(el('div', null, '（無學生）'));
-      else stus.slice(0, 10).forEach(s => preview.appendChild(buildParentReport(s.id)));
-      if(stus.length > 10) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 10 張，列印時全數輸出)'));
+      else stus.slice(0, renderAllOrSlice(10)).forEach(s => preview.appendChild(buildParentReport(s.id)));
+      if(stus.length > 10 && !App._pcPrintAll) preview.appendChild(el('div', { style:{color:'#888',marginTop:'10px'} }, '...(僅顯示前 10 張，列印時全數輸出)'));
     }
   }
   content.appendChild(preview);
@@ -32670,15 +32685,23 @@ function buildParentReport(studentId){
 
 function doPrintPrintCenter(){
   try {
-    document.body.classList.add('printing-pc');
-    // 列印中心預覽要全量輸出（不要僅前 N 張）→ 重新 render 不切片
-    // 由於 preview 已被 render；列印時 CSS 會隱藏其他元素
+    // 列印前先重新 render preview，這次全量輸出（slice 改 Infinity）
+    App._pcPrintAll = true;
+    rerender();
     setTimeout(()=> {
-      window.print();
-      setTimeout(()=> document.body.classList.remove('printing-pc'), 500);
-    }, 100);
+      document.body.classList.add('printing-pc');
+      setTimeout(()=> {
+        window.print();
+        setTimeout(()=> {
+          document.body.classList.remove('printing-pc');
+          App._pcPrintAll = false;
+          rerender();  // 還原預覽切片
+        }, 500);
+      }, 100);
+    }, 200);
   } catch(e){
     document.body.classList.remove('printing-pc');
+    App._pcPrintAll = false;
     toast('列印失敗：' + (e.message||e), 'danger');
   }
 }
