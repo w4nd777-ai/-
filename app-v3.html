@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-30-users-concurrent';
+const APP_BUILD = '2026-05-26-final-polish-round';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9987,7 +9987,9 @@ function renderSidebarTeacher(){
   const badges = {
     messages: unreadMessages() || null,
     submissions: pendingGradeCount() || null,
-    feedback: teacherFeedbackBadge() || null
+    feedback: teacherFeedbackBadge() || null,
+    pending: ((App.db.pending||[]).length) || null,   // 新增：待審核註冊
+    leave: ((App.db.leaves||[]).filter(l => (l.status||'pending')==='pending').length) || null  // 新增：待批准請假
   };
 
   // 日常 — 依使用者自訂順序輸出
@@ -10358,14 +10360,18 @@ function doLogout(){
     saveSession();
     App._loginStage = 'choose';
     App._loginPrefill = null;
-    // batch 2-stab: 清掉所有 managed timer（QR 倒數、due reminder、notification、計時器…）
-    // 並重置 App.qrTimer / App._dueReminderTimer / App._notifyTimer / App._timerTick
+    // batch 2-stab: 清掉所有 managed timer
     try { clearAllTimers(); } catch(e){_swallow('auto',e)}
     App.qrTimer = null;
     App._dueReminderTimer = null;
     App._notifyTimer = null;
     App._timerTick = null;
     App._syncRerTimer = null;
+    // 清掉 sync 突發狀態（避免登入後沿用上個帳號的計數）
+    App._syncBurstStart = null;
+    App._syncBurstCount = 0;
+    App._bcLastTs = null;
+    if(App._bcQueueTimer){ try { clearTimeout(App._bcQueueTimer); } catch(_){} App._bcQueueTimer = null; }
     rerender();
   });
 }
@@ -15341,17 +15347,35 @@ function openStudentSelfEdit(){
   avBox.appendChild(avImg);
   avBox.appendChild(avInitials);
   const avFile = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
-  avFile.addEventListener('change', e => {
+  avFile.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    if(f.size > 2 * 1024 * 1024){ return toast('圖片不可超過 2MB','danger'); }
-    const reader = new FileReader();
-    reader.onload = ()=> {
-      avatarData = reader.result;
+    if(f.size > 5 * 1024 * 1024){ return toast('圖片不可超過 5MB','danger'); }
+    // QA #2: 強制壓縮到 200x200 JPEG，避免 2MB 原圖直接塞 dataURI 到 accounts collection
+    try {
+      avatarData = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = e2 => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const size = 200;
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const ratio = Math.max(size/img.width, size/img.height);
+            const w = img.width * ratio, h = img.height * ratio;
+            ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
+            res(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = ()=> rej(new Error('圖片無法讀取（可能是 HEIC）'));
+          img.src = e2.target.result;
+        };
+        reader.onerror = rej;
+        reader.readAsDataURL(f);
+      });
       avImg.src = avatarData;
       avImg.style.display = 'block';
       avInitials.style.display = 'none';
-    };
-    reader.readAsDataURL(f);
+    } catch(err){ toast('讀取失敗：' + (err.message||err), 'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
     el('button', { class:'btn btn-sm', onclick:()=> avFile.click() }, '📷 選擇圖片'),
@@ -16242,14 +16266,40 @@ function openSubmissionGrade(sub, list=null, idx=0){
     // 取消已批分數讓學生重新繳交後才有分
     sub.score = null;
     sub.rawScore = null;
+    // QA #3: 退回時清掉舊附件，避免學生重交時 attaches.push 不斷疊加塞爆 IDB
+    try {
+      const keysToFree = [];
+      if(sub.attach && sub.attach.key) keysToFree.push(sub.attach.key);
+      if(Array.isArray(sub.attaches)){
+        sub.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
+      }
+      // 6 秒延後清，配合 undo 視窗
+      setTimeout(() => {
+        const stillReturned = App.db.submissions.find(s => s.id === sub.id && s.returned);
+        if(stillReturned){
+          keysToFree.forEach(k => { try { attachDelete({key:k, storage:'idb'}); } catch(_){} });
+        }
+      }, 6500);
+      sub.attach = null;
+      sub.attaches = [];
+    } catch(_){}
     saveDB();
     Sync.push('submissions', sub);
-    // 通知學生
+    // 通知學生（同一份繳交同日內去重，避免老師連退多次塞滿）
     try {
       if(!App.db.notifications) App.db.notifications = [];
+      const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+      // 移除同一 submission 今日舊通知，只留最新的
+      App.db.notifications = App.db.notifications.filter(n =>
+        !(n.type === 'submission_returned' &&
+          n.studentId === sub.studentId &&
+          n.subId === sub.id &&
+          (n.ts||0) >= todayMidnight.getTime())
+      );
       App.db.notifications.push({
         id: nid(),
         studentId: sub.studentId,
+        subId: sub.id,    // 用於去重
         type: 'submission_returned',
         text: '老師退回「' + (asg.title||'作業') + '」: ' + (sub.returnReason||'請補充後重交'),
         ts: Date.now(),
@@ -17566,6 +17616,11 @@ function wsSwitchTo(roomCode){
   App._dueReminderTimer = null;
   App._notifyTimer = null;
   App._syncRerTimer = null;
+  // QA: 切教室也要重置 sync 突發狀態 + bcNotify queue（之前只在 doLogout 清）
+  App._syncBurstStart = null;
+  App._syncBurstCount = 0;
+  App._bcLastTs = null;
+  if(App._bcQueueTimer){ try { clearTimeout(App._bcQueueTimer); } catch(_){} App._bcQueueTimer = null; }
   App.cfg = Object.assign({}, App.cfg||{}, { roomCode });
   saveCfg();
   loadDB();
@@ -21485,8 +21540,9 @@ async function forceCacheReset(){
     }
     // 4. 用 timestamp query 強制 reload 跳過 HTTP cache
     const url = location.origin + location.pathname + '?_v=' + Date.now();
-    try { toast('🔄 已清快取，重新載入中...', 'success', 2000); } catch(_){}
-    setTimeout(()=> { location.replace(url); }, 500);
+    // QA #5: toast 3500ms（原 2000） + reload 延後 1200ms（原 500）讓使用者讀完訊息
+    try { toast('🔄 已清快取，重新載入中...', 'success', 3500); } catch(_){}
+    setTimeout(()=> { location.replace(url); }, 1200);
   } catch(e){
     try { alert('清快取失敗，請手動關掉瀏覽器再開：' + e.message); } catch(_){}
   }
@@ -29590,10 +29646,20 @@ function rMyNotifications(content){
   const me = currentStudent();
   if(!me){ content.appendChild(el('div', { class:'card' }, '請先登入')); return; }
   if(!Array.isArray(App.db.notifications)) App.db.notifications = [];
-  const mine = App.db.notifications
+  // QA #4: 自動清理 read=true 且超過 30 天的舊通知（避免 DB 無限膨脹）
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const before = App.db.notifications.length;
+  App.db.notifications = App.db.notifications.filter(n => !(n.read && (n.ts||0) < cutoff));
+  if(App.db.notifications.length !== before){
+    saveDB();
+    try { Sync.setMap('notifications', App.db.notifications); } catch(_){}
+  }
+  const allMine = App.db.notifications
     .filter(n => String(n.studentId) === String(me.id))
     .sort((a,b) => (b.ts||0) - (a.ts||0));
-  const unreadCount = mine.filter(n => !n.read).length;
+  // QA #4: 限制顯示最多 100 則（保留所有資料，只是不全 render）
+  const mine = allMine.slice(0, 100);
+  const unreadCount = allMine.filter(n => !n.read).length;
 
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
@@ -29621,6 +29687,11 @@ function rMyNotifications(content){
   }
 
   const list = el('div', { class:'card', style:{padding:'0'} });
+  // 超過 100 則時顯示提示
+  if(allMine.length > 100){
+    list.appendChild(el('div', { class:'small muted', style:{padding:'8px 14px',background:'var(--surface-2)',borderBottom:'1px solid var(--border)'} },
+      '📋 共 ' + allMine.length + ' 則，僅顯示最近 100 則（已讀超過 30 天的會自動清理）'));
+  }
   mine.forEach(n => {
     let icon = '📬', color = 'var(--primary)';
     if(n.type === 'submission_returned'){ icon = '↩'; color = 'var(--warn)'; }
