@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-attach-preview-modal';
+const APP_BUILD = '2026-05-26-proactive-bug-sweep';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5541,6 +5541,19 @@ function _safeRerenderForStorage(){
 window.addEventListener('storage', e => {
   if(!e.key) return;
   if(e.key === dbKey()){
+    // QA #4：跨 tab DB 變更時，若本 tab 有開 modal（編輯中）→ 延後 loadDB，避免覆蓋使用者編輯
+    if(App._openModals && App._openModals.length > 0){
+      // 等 modal 關了再 loadDB
+      const checkAndLoad = () => {
+        if(App._openModals && App._openModals.length > 0){
+          setTimeout(checkAndLoad, 1500);
+        } else {
+          loadDB(); _safeRerenderForStorage();
+        }
+      };
+      setTimeout(checkAndLoad, 1500);
+      return;
+    }
     loadDB(); _safeRerenderForStorage();
   } else if(e.key === LS_SESSION){
     App.session = loadSession();
@@ -6384,23 +6397,20 @@ async function attachPreview(meta){
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> attachDownload(meta) }, '⬇ 下載'));
-  // 開新分頁 — 對 blob/dataURI 都能用（dataURI 在 modal 內已能顯示）
-  if(isBlob || (isDataUri && kind !== 'image' && kind !== 'pdf')){
-    actions.appendChild(el('button', { class:'btn', onclick:()=> {
-      // 若是 dataURI 太大 → 轉 blob 再開
-      if(isDataUri){
-        try {
-          fetch(url).then(r=>r.blob()).then(b => {
-            const blobUrl = URL.createObjectURL(b);
-            window.open(blobUrl, '_blank');
-            setTimeout(()=> URL.revokeObjectURL(blobUrl), 60000);
-          });
-        } catch(e){ toast('無法開新分頁', 'warn'); }
-      } else {
-        window.open(url, '_blank');
-      }
-    }}, '↗ 新分頁'));
-  }
+  // 開新分頁 — 無論 image/pdf/text 都允許（dataURI 一律走 blob 轉換繞過 Chrome 限制）
+  actions.appendChild(el('button', { class:'btn', onclick:()=> {
+    if(isDataUri){
+      try {
+        fetch(url).then(r=>r.blob()).then(b => {
+          const blobUrl = URL.createObjectURL(b);
+          window.open(blobUrl, '_blank');
+          setTimeout(()=> URL.revokeObjectURL(blobUrl), 60000);
+        }).catch(()=> toast('無法開新分頁，請改用下載', 'warn'));
+      } catch(e){ toast('無法開新分頁', 'warn'); }
+    } else {
+      window.open(url, '_blank');
+    }
+  }}, '↗ 新分頁'));
   m.root.appendChild(actions);
 
   // modal 關閉時回收 blob URL
@@ -8507,7 +8517,8 @@ function _runForgotFlow(opts){
         if(result === 'webhook'){
           toast('✅ 驗證碼已透過 ' + method + ' 寄出，請查看您的頻道','success', 5000);
         } else if(result === 'mailto'){
-          toast('已開啟郵件 client，請按「傳送」後查看信箱','info', 5000);
+          // QA #11: 手機沒裝 mail app 時 mailto: 會悄悄失敗；同時提示「沒收到？點下方按鈕」
+          toast('已開啟郵件 client。手機沒跳出？點下方「沒收到信？點此顯示驗證碼」按鈕','info', 7000);
         } else {
           // 完全失敗 → 顯示在畫面上（含警告）
           st.fallbackOtp = code;
@@ -8889,7 +8900,7 @@ function _runForgotFlow(opts){
         if(result === 'webhook'){
           toast('✅ 驗證碼已透過 ' + method + ' 寄出','success', 5000);
         } else if(result === 'mailto'){
-          toast('已開啟郵件 client，請按「傳送」','info', 5000);
+          toast('已開啟郵件 client。手機沒跳出？點下方「沒收到信？點此顯示驗證碼」按鈕','info', 7000);
         } else {
           st.fallbackOtp = code;
           toast('Webhook 與郵件都失敗！驗證碼顯示在畫面上','danger', 8000);
@@ -9504,6 +9515,11 @@ function studentTapToLogin(studentId){
 }
 
 function finishStudentLogin(s){
+  // QA #6：封存的學生不可登入
+  if(s.status && s.status !== 'active'){
+    toast('此帳號已停用，請聯絡老師', 'danger', 5000);
+    return;
+  }
   App.session = { role:'student', id:s.id, name:s.name, cls:s.cls };
   saveSession();
   saveLastUser({ role:'student', id:s.id, name:s.name, cls:s.cls||'', ts:Date.now() });
@@ -12360,8 +12376,44 @@ function rAtt(content){
   );
   content.appendChild(bulkBar);
 
-  // student grid
+  // 🔎 搜尋 + 班級篩選（user 抱怨人多不好找）
+  const allClasses = Array.from(new Set(App.db.students.map(s=>s.cls).filter(Boolean))).sort();
+  const filterBar = el('div', { class:'flex no-print', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap',alignItems:'center'} });
+  const searchInp = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號 / 座號', style:{flex:'1',minWidth:'140px'},
+    autocapitalize:'off', spellcheck:'false', value: App._attSearch || '' });
+  searchInp.addEventListener('input', e => {
+    App._attSearch = e.target.value;
+    rerender();
+  });
+  filterBar.appendChild(searchInp);
+  const clsSel = el('select', { class:'select', style:{width:'auto'} });
+  clsSel.appendChild(el('option', { value:'' }, '全部班級'));
+  allClasses.forEach(c => clsSel.appendChild(el('option', { value:c, selected: c === App._attCls }, c)));
+  clsSel.addEventListener('change', e => {
+    App._attCls = e.target.value;
+    rerender();
+  });
+  filterBar.appendChild(clsSel);
+  if(App._attSearch || App._attCls){
+    filterBar.appendChild(el('button', { class:'btn btn-sm', onclick:()=> {
+      App._attSearch = ''; App._attCls = ''; rerender();
+    }}, '✗ 清除篩選'));
+  }
+  content.appendChild(filterBar);
+
+  // student grid — 套用篩選
   let students = App.db.students.slice().sort((a,b)=> (a.cls||'').localeCompare(b.cls||'') || (a.seat||0)-(b.seat||0));
+  if(App._attCls){
+    students = students.filter(s => s.cls === App._attCls);
+  }
+  if(App._attSearch){
+    const q = App._attSearch.trim().toLowerCase();
+    students = students.filter(s =>
+      (s.name||'').toLowerCase().includes(q) ||
+      String(s.sid||'').toLowerCase().includes(q) ||
+      String(s.seat||'').includes(q)
+    );
+  }
 
   // 計算遲到判斷的閾值（給 header 統計用）
   const lateMinSetting = App.db.settings.lateMinutes || 10;
@@ -13797,12 +13849,17 @@ function rPending(content){
   );
   if(pendCount){
     pendHeader.appendChild(el('div', { class:'flex no-print', style:{gap:'6px'} },
-      el('button', { class:'btn btn-sm btn-success', onclick: async ()=> {
+      el('button', { class:'btn btn-sm btn-success', onclick: async (ev)=> {
+        const btn = ev.currentTarget;
+        if(btn.disabled) return;
         if(!await confirmDlg('確定接受全部 ' + pendCount + ' 件註冊申請嗎？', {})) return;
-        const ids = App.db.pending.map(x => x.id);
-        for(const id of ids){ try { await approveStudent(id, true); } catch(_){} }
-        toast('已接受全部 ' + ids.length + ' 件','success');
-        rerender();
+        btn.disabled = true;
+        try {
+          const ids = App.db.pending.map(x => x.id);
+          for(const id of ids){ try { await approveStudent(id, true); } catch(_){} }
+          toast('已接受全部 ' + ids.length + ' 件','success');
+          rerender();
+        } finally { btn.disabled = false; }
       }}, '✓ 全部接受'),
       el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         if(!await confirmDlg('確定拒絕並刪除全部 ' + pendCount + ' 件申請？', {danger:true})) return;
@@ -13823,8 +13880,40 @@ function rPending(content){
         '新學生在登入頁點「沒帳號？申請註冊」後，會出現在這裡讓您審核')
     ));
   } else {
+    // 🔎 搜尋 + 班級篩選（>10 件時很實用）
+    const pendClasses = Array.from(new Set(App.db.pending.map(p=>p.cls).filter(Boolean))).sort();
+    if(pendCount > 5 || pendClasses.length > 1){
+      const filterBar = el('div', { class:'flex no-print', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap',alignItems:'center'} });
+      const pSearch = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號', style:{flex:'1',minWidth:'140px'},
+        value: App._pendingSearch || '', oninput: e => { App._pendingSearch = e.target.value; rerender(); }});
+      filterBar.appendChild(pSearch);
+      if(pendClasses.length > 1){
+        const pClsSel = el('select', { class:'select', style:{width:'auto'} });
+        pClsSel.appendChild(el('option', { value:'' }, '全部班級'));
+        pendClasses.forEach(c => pClsSel.appendChild(el('option', { value:c, selected: c === App._pendingCls }, c)));
+        pClsSel.addEventListener('change', e => { App._pendingCls = e.target.value; rerender(); });
+        filterBar.appendChild(pClsSel);
+      }
+      content.appendChild(filterBar);
+    }
     const card = el('div', { class:'card' });
-    App.db.pending.slice().reverse().forEach(p => {
+    let pendingList = App.db.pending.slice().reverse();
+    // 套用篩選
+    if(App._pendingSearch){
+      const q = App._pendingSearch.trim().toLowerCase();
+      pendingList = pendingList.filter(p =>
+        (p.name||'').toLowerCase().includes(q) ||
+        String(p.sid||'').toLowerCase().includes(q)
+      );
+    }
+    if(App._pendingCls){
+      pendingList = pendingList.filter(p => p.cls === App._pendingCls);
+    }
+    if(!pendingList.length){
+      card.appendChild(el('div', { class:'small muted', style:{padding:'14px',textAlign:'center'} },
+        '🔍 沒有符合條件的申請'));
+    }
+    pendingList.forEach(p => {
       const row = el('div', { class:'list-row', style:{padding:'10px 12px'} });
       row.appendChild(el('div', { class:'avatar', style:{background:'var(--accent)'} }, initials(p.name)));
       // 完整資訊：姓名、班級、座號、學號、Email、申請時間
@@ -16138,13 +16227,18 @@ function rSub(content){
     }
   } catch(e){_swallow('auto',e)}
 
-  const sBox = el('div', { class:'search-box' });
-  const sInp = el('input', { class:'input', placeholder:'搜尋學生 / 作業', oninput: e => {
-    App._subSearch = e.target.value.toLowerCase();
-    renderList();
-  }});
+  const sBox = el('div', { class:'flex', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap',alignItems:'center'} });
+  const sInp = el('input', { class:'input', placeholder:'🔎 搜尋學生 / 作業', style:{flex:'1',minWidth:'160px'},
+    oninput: e => { App._subSearch = e.target.value.toLowerCase(); renderList(); }});
   if(App._subSearch) sInp.value = App._subSearch;
   sBox.appendChild(sInp);
+  // 班級篩選
+  const subClasses = Array.from(new Set(App.db.students.map(s=>s.cls).filter(Boolean))).sort();
+  const subClsSel = el('select', { class:'select', style:{width:'auto'} });
+  subClsSel.appendChild(el('option', { value:'' }, '全部班級'));
+  subClasses.forEach(c => subClsSel.appendChild(el('option', { value:c, selected: c === App._subCls }, c)));
+  subClsSel.addEventListener('change', e => { App._subCls = e.target.value; renderList(); });
+  sBox.appendChild(subClsSel);
   content.appendChild(sBox);
 
   const listWrap = el('div');
@@ -16174,6 +16268,13 @@ function rSub(content){
         const stu = findStudent(s.studentId);
         const asg = App.db.assignments.find(x => x.id === s.assignmentId);
         return (stu?.name||'').toLowerCase().includes(q) || (asg?.title||'').toLowerCase().includes(q);
+      });
+    }
+    // 班級篩選
+    if(App._subCls){
+      list = list.filter(s => {
+        const stu = findStudent(s.studentId);
+        return stu && stu.cls === App._subCls;
       });
     }
     if(list.length === 0){
@@ -16415,15 +16516,20 @@ function openSubmissionGrade(sub, list=null, idx=0){
     if(late && asg.latePenalty > 0){
       finalScore = Math.round(sc * (1 - asg.latePenalty/100));
     }
-    sub.score = finalScore;
-    sub.rawScore = sc;
-    sub.comment = iCmt.value;
-    sub.gradedAt = Date.now();
-    sub.gradedBy = App.session?.name || '老師';
-    // 一旦批改 → 取消退回狀態
-    if(sub.returned){ sub.returned = false; }
+    // QA #3 race fix：modal 開的時候 sub 是當下的 reference；
+    //   等老師批改的這段時間，學生可能修改了 text/attach（Firebase child_changed 整顆替換物件）。
+    //   我們只應該寫入 grade 相關欄位 → 找最新的 sub，merge 後 push。
+    let target = (App.db.submissions||[]).find(x => x.id === sub.id) || sub;
+    target.score = finalScore;
+    target.rawScore = sc;
+    target.comment = iCmt.value;
+    target.gradedAt = Date.now();
+    target.gradedBy = App.session?.name || '老師';
+    if(target.returned){ target.returned = false; }
+    // 同步更新 closure 的 sub reference 給後續 advance 邏輯
+    sub = target;
     saveDB();
-    Sync.push('submissions', sub);
+    Sync.push('submissions', target);
     bcNotify();
     toast('已儲存批改','success');
     m.close();
@@ -16488,6 +16594,7 @@ function openSubmissionGrade(sub, list=null, idx=0){
         id: nid(),
         studentId: sub.studentId,
         subId: sub.id,    // 用於去重
+        assignmentId: sub.assignmentId,   // 用於點通知時直接跳到正確作業
         type: 'submission_returned',
         text: '老師退回「' + (asg.title||'作業') + '」: ' + (sub.returnReason||'請補充後重交'),
         ts: Date.now(),
@@ -29861,14 +29968,20 @@ function rMyNotifications(content){
   const me = currentStudent();
   if(!me){ content.appendChild(el('div', { class:'card' }, '請先登入')); return; }
   if(!Array.isArray(App.db.notifications)) App.db.notifications = [];
-  // QA #4: 自動清理 read=true 且超過 30 天的舊通知（避免 DB 無限膨脹）
-  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const before = App.db.notifications.length;
-  App.db.notifications = App.db.notifications.filter(n => !(n.read && (n.ts||0) < cutoff));
-  if(App.db.notifications.length !== before){
-    saveDB();
-    try { Sync.setMap('notifications', App.db.notifications); } catch(_){}
-  }
+  // QA #5: 30 天清理改為「每 6 小時最多跑一次」，避免每次開頁面都全表掃描 + saveDB + Sync
+  try {
+    const lastCleanup = parseInt(localStorage.getItem('cms_v3_notif_clean_ts') || '0', 10);
+    if(Date.now() - lastCleanup > 6 * 60 * 60 * 1000){
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const before = App.db.notifications.length;
+      App.db.notifications = App.db.notifications.filter(n => !(n.read && (n.ts||0) < cutoff));
+      if(App.db.notifications.length !== before){
+        saveDB();
+        try { Sync.setMap('notifications', App.db.notifications); } catch(_){}
+      }
+      localStorage.setItem('cms_v3_notif_clean_ts', String(Date.now()));
+    }
+  } catch(_){}
   const allMine = App.db.notifications
     .filter(n => String(n.studentId) === String(me.id))
     .sort((a,b) => (b.ts||0) - (a.ts||0));
@@ -29925,12 +30038,18 @@ function rMyNotifications(content){
         try { Sync.setMap('notifications', App.db.notifications); } catch(_){}
         rerender();
       }
-      // 退回類型 → 帶到作業頁
+      // 退回類型 → 帶到作業頁（QA #2：用通知存的 assignmentId/subId，不要抓「第一個 returned」會跳錯作業）
       if(n.type === 'submission_returned'){
-        // 找對應的 submission 取作業 id
-        const sub = (App.db.submissions||[]).find(s => s.studentId === me.id && s.returned);
-        if(sub) go('sasgn', sub.assignmentId);
-        else go('sasgn');
+        if(n.assignmentId){
+          go('sasgn', n.assignmentId);
+        } else if(n.subId){
+          // 舊資料相容：從 sub 找 assignmentId
+          const sub = (App.db.submissions||[]).find(s => s.id === n.subId);
+          if(sub) go('sasgn', sub.assignmentId);
+          else go('sasgn');
+        } else {
+          go('sasgn');
+        }
       }
     }});
     row.appendChild(el('div', { style:{fontSize:'22px',marginRight:'10px'} }, icon));
@@ -32663,7 +32782,7 @@ function buildStudentInfoCard(studentId, opts){
   const body = el('div', { style:{display:'flex',gap:'14px',alignItems:'flex-start'} });
   // 照片框
   const photo = el('div', { style:{width:'120px',height:'150px',border:'2px solid #333',display:'flex',alignItems:'center',justifyContent:'center',color:'#999',flexShrink:'0'} },
-    s.photo ? el('img', { src:s.photo, style:{width:'100%',height:'100%',objectFit:'cover'} }) : '照片'
+    (s.avatar || s.photo) ? el('img', { src:(s.avatar||s.photo), style:{width:'100%',height:'100%',objectFit:'cover'} }) : '照片'
   );
   body.appendChild(photo);
 
