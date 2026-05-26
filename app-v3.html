@@ -7726,7 +7726,9 @@ function renderLoginTeacherStage(){
 
   const f1 = el('div', { class:'field' });
   f1.appendChild(el('label', { class:'label' }, '帳號'));
+  // 修：手機禁用自動大寫/自動修正/拼字檢查 — 不然 "admin" 被改成 "Admin" 會登入失敗
   const i1 = el('input', { class:'input', placeholder:'admin', autocomplete:'username',
+    autocapitalize:'off', autocorrect:'off', spellcheck:'false', inputmode:'email',
     value: prefill.username || (rememberSaved && rememberSaved.username) || '' });
   f1.appendChild(i1);
   stage.appendChild(f1);
@@ -7738,8 +7740,10 @@ function renderLoginTeacherStage(){
   const savedPw = (rememberSaved && rememberSaved.username
     && (!prefill.username || prefill.username === rememberSaved.username))
     ? _deobfuscatePw(rememberSaved.pw || '') : '';
+  // 密碼欄也禁用自動大寫/修正（password type 在新瀏覽器有預設，但舊版仍可能觸發）
   const i2 = el('input', { class:'input', type:'password', placeholder:'密碼',
-    autocomplete:'current-password', value: savedPw });
+    autocomplete:'current-password', autocapitalize:'off', autocorrect:'off', spellcheck:'false',
+    value: savedPw });
   const togglePw = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: e => {
     e.preventDefault();
     if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
@@ -7773,7 +7777,10 @@ function renderLoginTeacherStage(){
   }
 
   const submit = async ()=>{
-    const u = i1.value.trim(); const pw = i2.value;
+    // 修手機登入：username 統一小寫比對，password trim（去除手機鍵盤可能誤插入的前後空白）
+    const u = (i1.value || '').trim().toLowerCase();
+    // 密碼只去除「兩端」空白與全形空白（中間不動）
+    const pw = (i2.value || '').replace(/^[\s　]+|[\s　]+$/g, '');
     if(!u || !pw){ toast('請輸入帳號和密碼','danger'); try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return; }
     // L1: 登入前先檢查鎖定狀態（與忘記密碼共用同一個帳號計數器）
     if(isForgotLocked(u)){
@@ -7783,7 +7790,8 @@ function renderLoginTeacherStage(){
       try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return;
     }
-    const candidate = App.db.accounts.find(x => x.username === u);
+    // username 不分大小寫比對
+    const candidate = App.db.accounts.find(x => String(x.username||'').toLowerCase() === u);
     if(!candidate){
       // L1: 帳號不存在也計入鎖定（避免暴力枚舉帳號）
       const l = incForgotLock(u);
@@ -13794,8 +13802,9 @@ function rSettings(content){
     card3.appendChild(row);
   });
   card3.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'10px'}, onclick: async ()=> {
-    const u = await promptDlg('新帳號名稱'); if(!u) return;
-    if(App.db.accounts.find(a => a.username === u)) return toast('已存在','danger');
+    const uRaw = await promptDlg('新帳號名稱'); if(!uRaw) return;
+    const u = uRaw.trim().toLowerCase();  // 統一存小寫，避免日後手機大小寫不一致
+    if(App.db.accounts.find(a => String(a.username||'').toLowerCase() === u)) return toast('已存在','danger');
     const p = await promptDlg('密碼', '', { type:'password' }); if(!p) return;
     const n = await promptDlg('顯示名稱', u); if(n === null) return;
     const hashed = await hashPassword(p);  // H5: 自動 per-account salt
@@ -14400,12 +14409,44 @@ function rCheckIn(content){
     }
   } catch(e){ /* progress is best-effort */ }
 
+  // 📱 QR 代碼簽到（學生用：老師牆上 QR 不方便掃時可手動輸入 6 碼）
+  if(!already && !onLeave){
+    const qrCard = el('div', { class:'card', style:{marginTop:'12px'} });
+    qrCard.appendChild(el('h3', null, '📱 QR Code 簽到'));
+    qrCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px',marginBottom:'8px'} },
+      '在老師螢幕上看 QR Code → 用手機相機掃即可自動簽到；不能掃就把 6 碼輸入下方'));
+    const qrInputWrap = el('div', { class:'flex', style:{gap:'6px',alignItems:'stretch'} });
+    const qrInput = el('input', { class:'input', placeholder:'例：ABC234', maxlength:'8',
+      autocapitalize:'characters', autocorrect:'off', spellcheck:'false',
+      style:{flex:'1',textTransform:'uppercase',fontSize:'18px',letterSpacing:'2px',fontFamily:'monospace'} });
+    const qrBtn = el('button', { class:'btn btn-primary', onclick: ()=> {
+      const code = (qrInput.value||'').trim().toUpperCase();
+      if(!code) return toast('請輸入代碼', 'warning');
+      App.pendingAttCode = code;
+      tryAutoCheckin();
+      qrInput.value = '';
+    }}, '✓ 簽到');
+    qrInputWrap.appendChild(qrInput);
+    qrInputWrap.appendChild(qrBtn);
+    qrCard.appendChild(qrInputWrap);
+    qrInput.addEventListener('keydown', e => { if(e.key === 'Enter') qrBtn.click(); });
+    content.appendChild(qrCard);
+  }
+
   // request leave action
   const lc = el('div', { class:'card', style:{marginTop:'12px',textAlign:'center'} });
   lc.appendChild(el('h3', null, '無法到課？'));
   lc.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '送出申請後等待老師批准'));
   lc.appendChild(el('button', { class:'btn btn-block', style:{marginTop:'10px'}, onclick:()=> studentRequestLeave() }, '📆 申請請假'));
   content.appendChild(lc);
+
+  // ⎋ 登出按鈕（手機版側邊欄可能收起，這裡放一個顯眼的登出按鈕）
+  const logoutCard = el('div', { class:'card', style:{marginTop:'12px',textAlign:'center',background:'transparent'} });
+  logoutCard.appendChild(el('button', {
+    class:'btn btn-block', style:{background:'var(--surface-2)',color:'var(--text-muted)'},
+    onclick: doLogout, title:'登出此帳號'
+  }, '⎋ 登出'));
+  content.appendChild(logoutCard);
 
   // 安裝 App 提醒（學生首次登入後顯示，可關閉）
   try {
