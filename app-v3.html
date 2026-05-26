@@ -3866,7 +3866,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-remove-default-hint';
+const APP_BUILD = '2026-05-26-modal-race-logout-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4357,6 +4357,12 @@ function modal(content, opts={}){
   // Round 2 M8：維護 modal stack + 支援 beforeClose（async）攔截關閉
   App._openModals = App._openModals || [];
   const host = $('#modal-host');
+  // 🔧 修：取消任何上一個 modal close 的 pending fade timeout
+  //    否則 A.close() 後立即 modal() 開 B，180ms 後 A 的 timeout 會清掉 B 的內容（race）
+  if(host._pendingClearTimer){
+    try { clearTimeout(host._pendingClearTimer); } catch(_){}
+    host._pendingClearTimer = null;
+  }
   // 既然 host 一次只放一個 modal，新開時把舊 stack 清空避免 ESC 對著「已被 innerHTML 清掉的舊 modal handle」失效
   if(host.firstChild){
     try { App._openModals.length = 0; } catch(_){_swallow('modal-stack-reset',_)}
@@ -4388,7 +4394,14 @@ function modal(content, opts={}){
       if(i >= 0) App._openModals.splice(i, 1);
     } catch(_){_swallow('modal-stack-pop',_)}
     wrap.style.animation = 'fadeIn .2s ease-out reverse';
-    setTimeout(()=> { try { host.innerHTML=''; } catch(_){_swallow('modal-clear',_)} }, 180);
+    // 🔧 修：把 timer id 記在 host 上，若期間有新 modal 開啟會被取消
+    host._pendingClearTimer = setTimeout(()=> {
+      try {
+        // 只在「目前還是這個 wrap」時才清掉；否則新 modal 已開，別動它
+        if(host.firstChild === wrap) host.innerHTML = '';
+      } catch(_){_swallow('modal-clear',_)}
+      host._pendingClearTimer = null;
+    }, 180);
   }
   const handle = { close, root:m };
   App._openModals.push(handle);
@@ -10151,7 +10164,7 @@ function openMoreMenuTeacher(){
   // ⎋ 登出 (放在顯眼位置，手機側邊欄收起時的備援)
   m.root.appendChild(el('button', {
     class:'btn btn-block btn-danger', style:{marginTop:'14px'},
-    onclick:()=> { m.close(); doLogout(); }
+    onclick:()=> { m.close(); setTimeout(()=> doLogout(), 220); }
   }, '⎋ 登出'));
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
@@ -10182,7 +10195,7 @@ function openMoreMenuStudent(){
   // ⎋ 登出 (放在顯眼位置)
   m.root.appendChild(el('button', {
     class:'btn btn-block btn-danger', style:{marginTop:'14px'},
-    onclick:()=> { m.close(); doLogout(); }
+    onclick:()=> { m.close(); setTimeout(()=> doLogout(), 220); }
   }, '⎋ 登出'));
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
