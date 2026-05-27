@@ -3941,7 +3941,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-split-settings';
+const APP_BUILD = '2026-05-27-google-redirect';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5390,7 +5390,7 @@ const Sync = (() => {
     if(!data || data.error){ throw new Error(data && data.error ? data.error : 'no data'); }
 
     var updated = 0;
-    var ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','_qrCodes'];
+    var ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','_qrCodes','subjects','notifications','attachments','timetable','teachers','groups','courses'];
     ARR_NODES.forEach(function(node){
       if(!_shouldSubscribe(node)) return;
       var v = data[node];
@@ -8191,34 +8191,19 @@ async function _googleSignInTeacher(ev){
     return;
   }
   const btn = (ev && ev.currentTarget) || null;
-  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = '導向 Google 登入...'; }
   try {
+    // 🔧 改用 redirect 模式為主 (不再用 popup) — 更穩定，不被 Chrome popup blocker 擋
     try { sessionStorage.setItem('_google_pending_role', 'teacher'); } catch(_){}
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    let result;
-    try {
-      result = await firebase.auth().signInWithPopup(provider);
-    } catch(e){
-      // popup 被擋 / iOS Safari 偏好 redirect
-      if(e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request'){
-        try { toast('popup 被擋，改用全頁登入...', 'warn'); } catch(_){}
-        await firebase.auth().signInWithRedirect(provider);
-        return;
-      }
-      if(e.code === 'auth/popup-closed-by-user'){
-        if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
-        try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
-        return; // 使用者主動關閉，不顯示錯誤
-      }
-      throw e;
-    }
-    try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
-    await _handleGoogleAuthResult(result.user);
+    await firebase.auth().signInWithRedirect(provider);
+    // 整頁跳轉去 Google，回來後 boot() 的 getRedirectResult 會接手
   } catch(e){
     console.error('[google-signin]', e);
     try { toast('Google 登入失敗: ' + (e.message || e), 'danger', 6000); } catch(_){ alert('Google 登入失敗: ' + (e.message||e)); }
-    if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
+    if(btn){ btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '用 Google 登入'; }
+    try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
   }
 }
 
@@ -8306,34 +8291,19 @@ async function _googleSignInStudent(ev){
     return;
   }
   const btn = (ev && ev.currentTarget) || null;
-  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = '導向 Google 登入...'; }
   try {
-    // 記住要走學生分支（redirect 模式回來時要識別）
+    // 🔧 改用 redirect 模式為主 (不再用 popup) — 更穩定不被擋
     try { sessionStorage.setItem('_google_pending_role', 'student'); } catch(_){}
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    let result;
-    try {
-      result = await firebase.auth().signInWithPopup(provider);
-    } catch(e){
-      if(e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request'){
-        try { toast('popup 被擋，改用全頁登入...', 'warn'); } catch(_){}
-        await firebase.auth().signInWithRedirect(provider);
-        return;
-      }
-      if(e.code === 'auth/popup-closed-by-user'){
-        if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
-        try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
-        return;
-      }
-      throw e;
-    }
-    try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
-    await _handleGoogleAuthStudent(result.user);
+    await firebase.auth().signInWithRedirect(provider);
+    // 整頁跳轉，回來後 boot getRedirectResult 接手走 _handleGoogleAuthStudent
   } catch(e){
     console.error('[google-signin-student]', e);
     try { toast('Google 登入失敗: ' + (e.message || e), 'danger', 6000); } catch(_){ alert('Google 登入失敗'); }
-    if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
+    if(btn){ btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '用 Google 登入'; }
+    try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
   }
 }
 
