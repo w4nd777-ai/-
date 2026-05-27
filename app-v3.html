@@ -3930,7 +3930,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-26-sentry';
+const APP_BUILD = '2026-05-27-nuclear';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8153,6 +8153,21 @@ function renderLoginTeacherStage(){
     '版本 ' + APP_BUILD));
   verWrap.appendChild(el('a', { href:'javascript:void(0)', class:'lsc-link', style:{fontSize:'11px',marginTop:'4px',display:'inline-block'}, onclick: forceCacheReset },
     '🔄 登入不了？強制清快取重整'));
+  // ☢️ 緊急清光 — 當「強制清快取」也救不了時的最後手段（手機卡舊版、密碼錯、看不到資料）
+  verWrap.appendChild(el('div', { style:{marginTop:'10px'} },
+    el('a', {
+      href: location.pathname + '?nuclear=1',
+      style: {
+        display:'inline-block', background:'#dc2626', color:'#fff',
+        padding:'8px 16px', borderRadius:'8px', textDecoration:'none',
+        fontSize:'12px', fontWeight:'600', boxShadow:'0 2px 6px rgba(220,38,38,.25)'
+      }
+    }, '☢️ 手機卡住？一鍵清光重來')
+  ));
+  verWrap.appendChild(el('div', {
+    class:'lsc-tiny-muted',
+    style:{fontSize:'10px',opacity:'0.5',marginTop:'4px',maxWidth:'280px',marginLeft:'auto',marginRight:'auto'}
+  }, '會清光這台裝置的本機快取並重新從雲端同步（雲端資料安全不會動）'));
   stage.appendChild(verWrap);
 
   i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
@@ -22525,6 +22540,97 @@ function boot(){
   try {
     // L8: adminreset 邏輯已抽到 handleAdminResetUrl()
     if(handleAdminResetUrl()) return;
+    // ☢️ 緊急清光重來 — 給「手機/平板卡住、看不到資料、密碼錯誤」用
+    // 清光: Service Worker + cache + localStorage + Firebase auth session
+    // 不清: Firebase 雲端資料（學生、出席、成績等都安全）
+    // 自動下載本機備份做保險
+    if(location.search.indexOf('nuclear=1') >= 0){
+      document.body.innerHTML =
+        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;'+
+        'min-height:100vh;font-family:system-ui,-apple-system,sans-serif;padding:20px;text-align:center;'+
+        'background:#f9fafb;color:#111">'+
+        '<div style="font-size:56px;margin-bottom:12px">☢️</div>'+
+        '<h2 style="margin:0 0 12px;font-size:22px">緊急清光重來</h2>'+
+        '<p style="max-width:480px;line-height:1.8;color:#555;font-size:14px;margin:0 0 24px">'+
+        '本機快取會被清光，並重新從雲端 (Firebase) 同步全部資料。<br>'+
+        '<strong style="color:#16a34a">✅ 不會清除</strong>：雲端上的學生 / 出席 / 成績 / 老師帳號<br>'+
+        '<strong style="color:#dc2626">✘ 會清除</strong>：這台裝置的本機快取 / 登入狀態<br>'+
+        '<em style="color:#888;font-size:13px">適用：手機卡舊版、密碼錯誤、資料看不到、跨裝置不同步</em>'+
+        '</p>'+
+        '<button id="__nuke_btn" style="background:#dc2626;color:#fff;padding:14px 32px;border-radius:10px;'+
+        'border:0;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,.3)">'+
+        '☢️ 確認清光 + 重新整理</button>'+
+        '<a href="'+location.pathname+'" '+
+        'style="color:#2563eb;text-decoration:underline;margin-top:18px;font-size:14px">取消，返回首頁</a>'+
+        '<pre id="__nuke_status" style="margin-top:24px;font-size:12px;color:#666;text-align:left;'+
+        'background:#fff;padding:12px;border-radius:6px;border:1px solid #e5e7eb;min-height:20px;'+
+        'max-width:480px;white-space:pre-wrap;word-break:break-all"></pre>'+
+        '</div>';
+      var nukeBtn = document.getElementById('__nuke_btn');
+      if(nukeBtn) nukeBtn.onclick = async function(){
+        var status = document.getElementById('__nuke_status');
+        var log = function(s){ if(status) status.textContent += s + '\n'; };
+        this.disabled = true; this.textContent = '清光中...請稍候';
+        this.style.background = '#9ca3af';
+        try {
+          // 0) 先把 localStorage 的 cms_* keys 整包丟到 download 做保險
+          try {
+            var snap = {};
+            for(var k in localStorage){ if(/^cms_/i.test(k)) snap[k] = localStorage.getItem(k); }
+            if(Object.keys(snap).length > 0){
+              var blob = new Blob([JSON.stringify(snap, null, 2)], {type:'application/json'});
+              var a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              a.download = 'cms-emergency-backup-' + new Date().toISOString().slice(0,10) + '.json';
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              log('✅ 本機快取已下載為保險備份');
+            }
+          } catch(_){ log('⚠️ 備份下載失敗（不影響後續清光）'); }
+          // 1) unregister all Service Workers
+          if('serviceWorker' in navigator){
+            try {
+              var regs = await navigator.serviceWorker.getRegistrations();
+              for(var i = 0; i < regs.length; i++){ try { await regs[i].unregister(); } catch(_){} }
+              log('✅ Service Worker 已移除 (' + regs.length + ' 個)');
+            } catch(e){ log('⚠️ SW 移除失敗: ' + e.message); }
+          }
+          // 2) clear all caches
+          if('caches' in window){
+            try {
+              var names = await caches.keys();
+              for(var j = 0; j < names.length; j++){ try { await caches.delete(names[j]); } catch(_){} }
+              log('✅ 快取已清空 (' + names.length + ' 個)');
+            } catch(e){ log('⚠️ Cache 清除失敗: ' + e.message); }
+          }
+          // 3) localStorage / sessionStorage
+          try { localStorage.clear(); log('✅ localStorage 已清空'); } catch(_){ log('⚠️ localStorage 清除失敗'); }
+          try { sessionStorage.clear(); log('✅ sessionStorage 已清空'); } catch(_){}
+          // 4) Firebase auth signout (if loaded)
+          try {
+            if(window.firebase && firebase.auth){
+              await firebase.auth().signOut();
+              log('✅ Firebase 登入狀態已重置');
+            }
+          } catch(_){}
+          // 5) IndexedDB (Firebase 在這也存了一些 cache)
+          try {
+            if(window.indexedDB && indexedDB.databases){
+              var dbs = await indexedDB.databases();
+              for(var d = 0; d < dbs.length; d++){
+                try { indexedDB.deleteDatabase(dbs[d].name); } catch(_){}
+              }
+              log('✅ IndexedDB 已清空 (' + dbs.length + ' 個)');
+            }
+          } catch(_){}
+          log('\n🎉 全部完成！2 秒後自動重新載入...');
+          setTimeout(function(){ location.href = location.pathname; }, 2000);
+        } catch(e){
+          log('\n❌ 清光過程出錯: ' + e.message);
+          log('請手動到瀏覽器設定 → 清除網站資料');
+        }
+      };
+      return;
+    }
     if(location.search.indexOf('reset=1') >= 0){
       // 批次 6 資安修補：原本的 ?reset=1 完全沒有驗證，任何人開啟此 URL 就能清空所有資料。
       // 現在改為「拒絕直接執行」，引導使用者改走需要主老師密碼的 ?adminreset=1 流程。
