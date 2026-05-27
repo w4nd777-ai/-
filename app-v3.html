@@ -3983,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-minimal-icon';
+const APP_BUILD = '2026-05-28-no-monkey';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4204,6 +4204,14 @@ function clearDraft(key){
    ──────────────────────────────────────────────────────────── */
 const $  = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+// 🔧 密碼顯示/隱藏 SVG icons (取代不雅 emoji 猴子)
+function _eyeSvg(){
+  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+}
+function _eyeOffSvg(){
+  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><path d="M14.12 14.12a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+}
 
 function el(tag, attrs, ...children){
   const e = document.createElement(tag);
@@ -8848,9 +8856,10 @@ function renderLoginTeacherStage(){
     value: savedPw });
   const togglePw = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: e => {
     e.preventDefault();
-    if(i2.type === 'password'){ i2.type = 'text'; togglePw.textContent = '🙈'; }
-    else { i2.type = 'password'; togglePw.textContent = '👁'; }
-  }}, '👁');
+    if(i2.type === 'password'){ i2.type = 'text'; togglePw.innerHTML = _eyeOffSvg(); }
+    else { i2.type = 'password'; togglePw.innerHTML = _eyeSvg(); }
+  }});
+  togglePw.innerHTML = _eyeSvg();
   pwWrap.appendChild(i2); pwWrap.appendChild(togglePw);
   f2.appendChild(pwWrap);
   stage.appendChild(f2);
@@ -10257,8 +10266,9 @@ function renderLoginStudentStage(){
   const iPw = el('input', { class:'input', type:'password', placeholder:'輸入密碼', autocomplete:'current-password' });
   const togBtn = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: ()=> {
     iPw.type = iPw.type === 'password' ? 'text' : 'password';
-    togBtn.textContent = iPw.type === 'password' ? '👁' : '🙈';
-  }}, '👁');
+    togBtn.innerHTML = iPw.type === 'password' ? _eyeSvg() : _eyeOffSvg();
+  }});
+  togBtn.innerHTML = _eyeSvg();
   pwWrap.appendChild(iPw);
   pwWrap.appendChild(togBtn);
   f3.appendChild(pwWrap);
@@ -10566,8 +10576,9 @@ function forceChangePassword(studentId){
   const i1 = el('input', { class:'input', type:'password', placeholder:'新密碼' });
   const tog1 = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: ()=> {
     i1.type = i1.type === 'password' ? 'text' : 'password';
-    tog1.textContent = i1.type === 'password' ? '👁' : '🙈';
-  }}, '👁');
+    tog1.innerHTML = i1.type === 'password' ? _eyeSvg() : _eyeOffSvg();
+  }});
+  tog1.innerHTML = _eyeSvg();
   wrap1.appendChild(i1); wrap1.appendChild(tog1);
   f1.appendChild(wrap1);
   m.root.appendChild(f1);
@@ -10743,8 +10754,9 @@ function forceChangeTeacherPassword(accountId){
   const i1 = el('input', { class:'input', type:'password', placeholder:'新密碼' });
   const tog1 = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼', onclick: ()=> {
     i1.type = i1.type === 'password' ? 'text' : 'password';
-    tog1.textContent = i1.type === 'password' ? '👁' : '🙈';
-  }}, '👁');
+    tog1.innerHTML = i1.type === 'password' ? _eyeSvg() : _eyeOffSvg();
+  }});
+  tog1.innerHTML = _eyeSvg();
   wrap1.appendChild(i1); wrap1.appendChild(tog1);
   f1.appendChild(wrap1);
   m.root.appendChild(f1);
