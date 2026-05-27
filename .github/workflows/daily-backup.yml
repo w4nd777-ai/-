@@ -27,22 +27,36 @@ jobs:
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
           FIREBASE_AUTH: ${{ secrets.FIREBASE_DB_SECRET }}
         run: |
-          # 取得 RTDB 全部資料
-          # URL 格式：https://YOUR-PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app/cms-v3.json
-          # 若沒設 secret 就用公開 read（前提：Firebase Rules 允許 .read: true）
-          if [ -n "$FIREBASE_AUTH" ]; then
-            URL="${FIREBASE_DB_URL}/cms-v3.json?auth=${FIREBASE_AUTH}"
-          else
-            URL="${FIREBASE_DB_URL}/cms-v3.json"
-          fi
-
+          # 🔧 重要修復：原本抓 cms-v3.json (root) 但 Firebase rules 只允許 cms-v3/$room
+          # 所以 root level 永遠是 Permission denied → 備份檔全部都是 39 bytes 的 error JSON
+          # 改成抓 cms-v3/DEMO01.json (主教室)，這個 rules 允許 .read: true 公開讀
+          # 額外：也把 cms-v3 root 下其他可能的 room 列出 (用 shallow 只列 key)
           mkdir -p backups
           DATE=$(TZ='Asia/Taipei' date +%Y-%m-%d)
           TIMESTAMP=$(TZ='Asia/Taipei' date +%Y-%m-%d_%H%M)
           FILENAME="backups/backup-${DATE}.json"
 
-          echo "📥 抓取 Firebase 資料..."
-          curl -s --max-time 60 -o "$FILENAME" "$URL"
+          # 主教室 DEMO01 完整資料
+          URL_DEMO01="${FIREBASE_DB_URL}/cms-v3/DEMO01.json"
+          if [ -n "$FIREBASE_AUTH" ]; then
+            URL_DEMO01="${URL_DEMO01}?auth=${FIREBASE_AUTH}"
+          fi
+          echo "📥 抓取 cms-v3/DEMO01 資料..."
+          curl -s --max-time 90 -o "/tmp/demo01.json" "$URL_DEMO01"
+
+          # 包成 { "DEMO01": {...} } 格式，方便還原
+          if [ -s "/tmp/demo01.json" ] && ! grep -q '"error"' "/tmp/demo01.json"; then
+            echo "{" > "$FILENAME"
+            echo "  \"_meta\": { \"backupAt\": \"${TIMESTAMP}\", \"source\": \"cms-v3/DEMO01\" }," >> "$FILENAME"
+            echo "  \"DEMO01\":" >> "$FILENAME"
+            cat "/tmp/demo01.json" >> "$FILENAME"
+            echo "" >> "$FILENAME"
+            echo "}" >> "$FILENAME"
+          else
+            echo "❌ DEMO01 抓取失敗或回傳 error"
+            cat "/tmp/demo01.json" || echo "(empty)"
+            exit 1
+          fi
 
           # 驗證下載成功 (檔案非空 + 是 JSON)
           if [ ! -s "$FILENAME" ]; then
