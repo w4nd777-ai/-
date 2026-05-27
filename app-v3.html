@@ -3983,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-gmail-real';
+const APP_BUILD = '2026-05-28-student-gmail';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10205,15 +10205,16 @@ function renderLoginStudentStage(){
       onmouseout: function(){ this.style.background = '#fff'; },
       onclick: _emailSignInStudent
     });
-    // Gmail 風彩色信封 logo
+    // Gmail 官方 logo (2020+) — 跟老師端同款
     const emailIconS = document.createElement('span');
     emailIconS.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
     emailIconS.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 48 48">' +
-      '<path fill="#4285F4" d="M6 12.6L24 24l18-11.4V36a2 2 0 01-2 2H8a2 2 0 01-2-2V12.6z"/>' +
-      '<path fill="#34A853" d="M6 12.6c0-1.1.9-2 2-2h32c1.1 0 2 .9 2 2L24 24 6 12.6z"/>' +
-      '<path fill="#FBBC05" d="M6 12.6V36a2 2 0 002 2h8V20.3L6 12.6z"/>' +
-      '<path fill="#EA4335" d="M42 12.6V36a2 2 0 01-2 2h-8V20.3l10-7.7z"/>' +
+      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
+      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
+      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
+      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
+      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
       '</svg>';
     emailStuBtn.appendChild(emailIconS);
     const emailTextS = document.createElement('span');
