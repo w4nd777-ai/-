@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-login-rerender';
+const APP_BUILD = '2026-05-27-auth-listener';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -23193,6 +23193,23 @@ function boot(){
 
   // 確保有管理員帳號 + 學生資料
   try { ensureDefaultsAndDemo(); } catch(e){ dbgWarn('[v3 defaults]', e); }
+
+  // ☁️ Firebase Auth 是 async 初始化 — 登入頁渲染時 currentUser 還是 null
+  // 加 onAuthStateChanged 監聽：auth state 變化時，若在登入頁 → rerender 顯示「已登入為 xxx」UI
+  try {
+    if(window.firebase && firebase.auth){
+      var _lastAuthEmail = null;
+      firebase.auth().onAuthStateChanged(function(user){
+        var newEmail = user && user.email || null;
+        if(newEmail === _lastAuthEmail) return; // 沒變化不 rerender
+        _lastAuthEmail = newEmail;
+        // 只在登入頁 (沒 App.session) 時重 render，避免進系統後又被打斷
+        if(!App.session){
+          try { rerender(); } catch(_){}
+        }
+      });
+    }
+  } catch(e){ console.warn('[auth-state-listener]', e); }
 
   // ☁️ Google Auth redirect 回來時的處理 (iOS Safari 偏好 redirect 模式)
   // 根據 sessionStorage._google_pending_role 分辨：teacher / student / student_bind (學生個人頁綁定)
