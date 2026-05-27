@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-google-signin';
+const APP_BUILD = '2026-05-27-google-student';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -6902,6 +6902,45 @@ function studentRegisterFlow(){
   m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'13px',marginBottom:'10px'} },
     '請完整填寫資料，等待老師審核'));
 
+  // ☁️ Google 自動填寫（新增） — 點下去填 Email + 姓名 + 自動綁定 Google
+  // 老師審核通過時會自動建立 google_students 對應，之後學生直接 Google 登入
+  let _gBound = null; // { email, displayName, uid, photoURL }
+  const gFillBtn = el('button', {
+    type:'button',
+    style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;min-height:46px;box-shadow:0 1px 3px rgba(0,0,0,.08)',
+    onclick: async function(ev){
+      ev.preventDefault();
+      const b = ev.currentTarget;
+      b.disabled = true; b.style.opacity = '0.6';
+      try {
+        if(!window.firebase || !firebase.auth){ toast('Firebase 未載入', 'danger'); return; }
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        const result = await firebase.auth().signInWithPopup(provider);
+        const u = result.user;
+        if(!u || !u.email){ toast('Google 帳號沒有 email', 'danger'); return; }
+        _gBound = { email: u.email, displayName: u.displayName || '', uid: u.uid, photoURL: u.photoURL || '' };
+        iEmail.value = u.email;
+        if(!iName.value && u.displayName) iName.value = u.displayName;
+        b.innerHTML = '';
+        b.appendChild(_googleBtnContent('✅ 已綁定 ' + u.email + '（點可換）'));
+        toast('✅ Google 已綁定，請繼續填學號 + 班級 + 座號 + 密碼', 'success', 4000);
+        // 不要 signOut — 留著 auth state，submit 後 _gBound 會寫進 pending
+      } catch(e){
+        console.warn('[register-google]', e);
+        if(e.code !== 'auth/popup-closed-by-user'){
+          toast('Google 綁定失敗: ' + (e.message || e), 'danger');
+        }
+        b.disabled = false; b.style.opacity = '1';
+      }
+    }
+  });
+  gFillBtn.appendChild(_googleBtnContent('🌐 用 Google 自動填 Email + 綁定（推薦）'));
+  m.root.appendChild(gFillBtn);
+  m.root.appendChild(el('div', {
+    style:'font-size:11px;color:#888;text-align:center;margin:-4px 0 14px'
+  }, '👆 綁定後忘記密碼也能直接用 Google 登入 / 換手機自動同步'));
+
   function field(label, input, hint){
     const f = el('div', { class:'field' });
     const lbl = el('label', { class:'label' }, label);
@@ -6967,6 +7006,13 @@ function studentRegisterFlow(){
       mustChangePw: false,  // 自己註冊的不用再改
       ts: Date.now()
     };
+    // ☁️ 若有 Google 綁定，一併寫進 pending（老師審核通過後會自動建立 google_students 對應）
+    if(_gBound && _gBound.email){
+      pending.googleEmail = _gBound.email;
+      pending.firebaseUid = _gBound.uid;
+      pending.photoURL = _gBound.photoURL || '';
+      pending.googleDisplayName = _gBound.displayName || '';
+    }
     App.db.pending.push(pending);
     saveDB();
     try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(e){_swallow('auto',e)}
@@ -8012,6 +8058,7 @@ async function _googleSignInTeacher(ev){
   const btn = (ev && ev.currentTarget) || null;
   if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
   try {
+    try { sessionStorage.setItem('_google_pending_role', 'teacher'); } catch(_){}
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     let result;
@@ -8026,10 +8073,12 @@ async function _googleSignInTeacher(ev){
       }
       if(e.code === 'auth/popup-closed-by-user'){
         if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
+        try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
         return; // 使用者主動關閉，不顯示錯誤
       }
       throw e;
     }
+    try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
     await _handleGoogleAuthResult(result.user);
   } catch(e){
     console.error('[google-signin]', e);
@@ -8097,7 +8146,7 @@ async function _handleGoogleAuthResult(user){
 }
 
 // Google 按鈕內容 (含官方 Google logo SVG)
-function _googleBtnContent(){
+function _googleBtnContent(label){
   const wrap = document.createElement('span');
   wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;width:100%;';
   wrap.innerHTML =
@@ -8107,8 +8156,192 @@ function _googleBtnContent(){
     '<path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>' +
     '<path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>' +
     '</svg>' +
-    '<span style="font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap">用 Google 登入（自動跨裝置同步）</span>';
+    '<span style="font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap">' +
+    (label || '用 Google 登入（自動跨裝置同步）') + '</span>';
   return wrap;
+}
+
+// ════════════════════════════════════════════════════════════
+// 🎓 學生端 Google 登入 — 首次登入需綁定學號，之後就一鍵登入
+// 解決問題：學生忘記密碼、換手機看不到資料、註冊麻煩
+// ════════════════════════════════════════════════════════════
+async function _googleSignInStudent(ev){
+  if(!window.firebase || !firebase.auth){
+    try { toast('Firebase 未載入，請重新整理頁面', 'danger'); } catch(_){ alert('Firebase 未載入'); }
+    return;
+  }
+  const btn = (ev && ev.currentTarget) || null;
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
+  try {
+    // 記住要走學生分支（redirect 模式回來時要識別）
+    try { sessionStorage.setItem('_google_pending_role', 'student'); } catch(_){}
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    let result;
+    try {
+      result = await firebase.auth().signInWithPopup(provider);
+    } catch(e){
+      if(e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request'){
+        try { toast('popup 被擋，改用全頁登入...', 'warn'); } catch(_){}
+        await firebase.auth().signInWithRedirect(provider);
+        return;
+      }
+      if(e.code === 'auth/popup-closed-by-user'){
+        if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
+        try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
+        return;
+      }
+      throw e;
+    }
+    try { sessionStorage.removeItem('_google_pending_role'); } catch(_){}
+    await _handleGoogleAuthStudent(result.user);
+  } catch(e){
+    console.error('[google-signin-student]', e);
+    try { toast('Google 登入失敗: ' + (e.message || e), 'danger', 6000); } catch(_){ alert('Google 登入失敗'); }
+    if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
+  }
+}
+
+// 處理學生 Google 登入結果（popup 或 redirect 回來）
+async function _handleGoogleAuthStudent(user){
+  if(!user || !user.email){
+    try { toast('Google 帳號沒有 email', 'danger'); } catch(_){}
+    return;
+  }
+  const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
+  // 確保有 roomCode + db 載好
+  try {
+    if(!App.cfg || !App.cfg.roomCode){
+      App.cfg = App.cfg || {};
+      App.cfg.roomCode = 'DEMO01';
+      if(typeof saveCfg === 'function') saveCfg(App.cfg);
+    }
+    if(typeof loadDB === 'function' && (!App.db || !App.db.students)){ loadDB(); }
+  } catch(_){}
+  // 1) 查 google_students lookup（看是否已綁過學號）
+  let sidBound = null;
+  try {
+    const refPath = 'cms-v3/' + App.cfg.roomCode + '/google_students/' + emailKey;
+    const snap = await firebase.database().ref(refPath).once('value');
+    if(snap.exists() && snap.val() && snap.val().sid){
+      sidBound = String(snap.val().sid);
+    }
+  } catch(e){ console.warn('[google-student] lookup failed:', e); }
+  // 2) 已綁定 → 直接登入該學生
+  if(sidBound){
+    const stu = (App.db.students || []).find(s => String(s.sid) === sidBound);
+    if(stu){
+      await _completeStudentGoogleLogin(stu, user);
+      return;
+    }
+    // 綁過但找不到學生（可能被刪了）→ 走未綁定流程
+    try { toast('原綁定的學號 ' + sidBound + ' 已不存在，請重新綁定', 'warn'); } catch(_){}
+  }
+  // 3) 未綁定 → 跳出綁定 UI 讓學生輸入學號
+  const sid = await _promptStudentSidBinding(user);
+  if(!sid){
+    try { toast('已取消綁定', 'warn'); } catch(_){}
+    try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
+    return;
+  }
+  // 4) 驗證學號是否存在
+  const stu = (App.db.students || []).find(s => String(s.sid) === String(sid));
+  if(!stu){
+    try { toast('找不到學號 ' + sid + ' 的學生，請確認後再試或聯絡老師', 'danger', 6000); } catch(_){}
+    try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
+    return;
+  }
+  // 5) 寫入綁定到 Firebase + 更新學生資料
+  try {
+    const refPath = 'cms-v3/' + App.cfg.roomCode + '/google_students/' + emailKey;
+    await firebase.database().ref(refPath).set({
+      sid: stu.sid,
+      email: user.email,
+      displayName: user.displayName || stu.name,
+      photoURL: user.photoURL || '',
+      firebaseUid: user.uid,
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+      lastLoginAt: firebase.database.ServerValue.TIMESTAMP
+    });
+    stu.googleEmail = user.email;
+    stu.firebaseUid = user.uid;
+    if(!stu.photoURL && user.photoURL) stu.photoURL = user.photoURL;
+    if(typeof saveDB === 'function') saveDB(true);
+    try { Sync.setMap('students', App.db.students); } catch(_){}
+  } catch(e){
+    console.warn('[google-student] binding write failed:', e);
+    // 即使寫入失敗仍允許本次登入
+  }
+  await _completeStudentGoogleLogin(stu, user);
+}
+
+async function _completeStudentGoogleLogin(stu, user){
+  try { toast('🎉 歡迎 ' + (stu.name || user.displayName || ''), 'success', 2500); } catch(_){}
+  try {
+    App.session = {
+      role: 'student',
+      sid: stu.sid,
+      studentId: stu.id,
+      name: stu.name,
+      cls: stu.cls,
+      photoURL: stu.photoURL || user.photoURL || '',
+      firebaseUid: user.uid,
+      googleEmail: user.email,
+      loginAt: Date.now(),
+      authMethod: 'google'
+    };
+    if(typeof saveSession === 'function') saveSession(App.session);
+  } catch(e){ console.warn('[google-student] saveSession failed:', e); }
+  setTimeout(function(){
+    try { location.reload(); } catch(_) { location.href = location.pathname; }
+  }, 600);
+}
+
+// 跳出綁定學號 UI — 第一次學生 Google 登入時用
+async function _promptStudentSidBinding(user){
+  return new Promise(function(resolve){
+    // 建立 modal-like overlay
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:system-ui,-apple-system,sans-serif';
+    card.innerHTML =
+      '<div style="text-align:center;margin-bottom:16px">' +
+      (user.photoURL ? '<img src="'+user.photoURL+'" style="width:64px;height:64px;border-radius:50%;margin-bottom:8px" referrerpolicy="no-referrer">' : '<div style="font-size:48px;margin-bottom:4px">👋</div>') +
+      '<div style="font-size:16px;font-weight:600;color:#111">嗨 ' + (user.displayName || '') + '</div>' +
+      '<div style="font-size:13px;color:#666;margin-top:2px">' + user.email + '</div>' +
+      '</div>' +
+      '<div style="font-size:14px;color:#333;line-height:1.6;margin-bottom:14px;text-align:center">' +
+      '第一次用 Google 登入，請輸入<strong>你的學號</strong>來綁定身份<br>' +
+      '<span style="font-size:12px;color:#888">綁定後以後直接用 Google 登入就好</span>' +
+      '</div>' +
+      '<input id="__sid_input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="例如 113001" ' +
+      'style="width:100%;padding:12px;border:2px solid #e5e7eb;border-radius:8px;font-size:16px;text-align:center;letter-spacing:2px;box-sizing:border-box" />' +
+      '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button id="__sid_cancel" style="flex:1;padding:10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;cursor:pointer;color:#555">取消</button>' +
+      '<button id="__sid_ok" style="flex:2;padding:10px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer">綁定並登入</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    var input = card.querySelector('#__sid_input');
+    var btnOk = card.querySelector('#__sid_ok');
+    var btnCancel = card.querySelector('#__sid_cancel');
+    setTimeout(function(){ try { input.focus(); } catch(_){} }, 100);
+    function close(val){
+      try { document.body.removeChild(overlay); } catch(_){}
+      resolve(val);
+    }
+    input.addEventListener('keydown', function(e){
+      if(e.key === 'Enter'){ btnOk.click(); }
+      if(e.key === 'Escape'){ btnCancel.click(); }
+    });
+    btnOk.onclick = function(){
+      var v = String(input.value || '').trim();
+      if(!v){ input.style.borderColor = '#dc2626'; input.focus(); return; }
+      close(v);
+    };
+    btnCancel.onclick = function(){ close(null); };
+  });
 }
 
 function renderLoginTeacherStage(){
@@ -9448,6 +9681,31 @@ function renderLoginStudentStage(){
   // Spotify 版：tab 已標示「學生」，stage 內不再放 H3
   const _lcS = (App._uiCustom && App._uiCustom.login) || {};
   const stage = el('div', { class:'login-stage' });
+
+  // ☁️ Google 登入按鈕 — 學生跨裝置同步 + 忘記密碼救星
+  // 第一次登入時跳出綁定學號的對話框，之後同一 Google 一鍵登入
+  const googleStuBtn = el('button', {
+    type:'button',
+    style: 'width:100%;padding:12px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:48px',
+    onmouseover: function(){ this.style.background = '#f8f9fa'; this.style.boxShadow = '0 2px 6px rgba(0,0,0,.12)'; },
+    onmouseout: function(){ this.style.background = '#fff'; this.style.boxShadow = '0 1px 3px rgba(0,0,0,.08)'; },
+    onclick: _googleSignInStudent
+  });
+  googleStuBtn.appendChild(_googleBtnContent('用 Google 登入 / 綁定（忘記密碼救星）'));
+  stage.appendChild(googleStuBtn);
+  stage.appendChild(el('div', {
+    style:'text-align:center;font-size:11px;color:rgba(255,255,255,.7);margin:2px 0 12px'
+  }, '👆 推薦！第一次輸入學號綁定，之後就不用記密碼，換裝置自動登入'));
+
+  // 「或用班級+姓名+密碼」分隔線
+  const dividerStu = el('div', {
+    style:'display:flex;align-items:center;gap:10px;margin:6px 0 12px;color:rgba(255,255,255,.6);font-size:12px'
+  });
+  dividerStu.appendChild(el('div', { style:'flex:1;height:1px;background:rgba(255,255,255,.2)' }));
+  dividerStu.appendChild(el('span', null, '或用班級+姓名'));
+  dividerStu.appendChild(el('div', { style:'flex:1;height:1px;background:rgba(255,255,255,.2)' }));
+  stage.appendChild(dividerStu);
+
   stage.appendChild(el('div', { class:'lsc-tiny-muted', style:{marginBottom:'8px',textAlign:'left'} },
     '依序選擇班級、姓名，輸入密碼即可登入'));
 
@@ -14392,19 +14650,41 @@ async function approveStudent(pid, silent){
       pwHashed = await hashPassword(def);
     }
   } catch(e){ _swallow('approve-hash', e); }
-  App.db.students.push({
+  const newStu = {
     id: nid(), name:p.name, sid:p.sid||'', cls:p.cls, seat:p.seat,
     email:p.email||'',
     password: pwHashed,
     mustChangePw: !!p.mustChangePw,
     note:'學生自註冊'
-  });
+  };
+  // ☁️ 若 pending 已綁定 Google → 一併寫進 student + 建立 google_students 對應
+  if(p.googleEmail){
+    newStu.googleEmail = p.googleEmail;
+    newStu.firebaseUid = p.firebaseUid || '';
+    if(p.photoURL) newStu.photoURL = p.photoURL;
+    // 寫到 Firebase google_students 路徑，學生之後直接 Google 登入就能進
+    try {
+      const emailKey = String(p.googleEmail).replace(/[.@]/g, '_').toLowerCase();
+      const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+      if(window.firebase && firebase.database){
+        firebase.database().ref('cms-v3/' + rc + '/google_students/' + emailKey).set({
+          sid: newStu.sid,
+          email: p.googleEmail,
+          displayName: p.googleDisplayName || p.name,
+          photoURL: p.photoURL || '',
+          firebaseUid: p.firebaseUid || '',
+          createdAt: firebase.database.ServerValue.TIMESTAMP
+        }).catch(function(e){ console.warn('[approve] google_students 寫入失敗:', e); });
+      }
+    } catch(e){ console.warn('[approve] google binding failed:', e); }
+  }
+  App.db.students.push(newStu);
   App.db.pending = App.db.pending.filter(x => x.id !== pid);
   saveDB();
   Sync.setMap('students', App.db.students);
   Sync.setMap('pending', App.db.pending);
   bcNotify();
-  if(typeof logOp === 'function') logOp('approveRegister', '核准 ' + p.name + ' 註冊');
+  if(typeof logOp === 'function') logOp('approveRegister', '核准 ' + p.name + ' 註冊' + (p.googleEmail ? ' (含 Google 綁定)' : ''));
   if(!silent){
     toast('已加入 ' + p.name,'success');
     rerender();
@@ -22809,12 +23089,19 @@ function boot(){
   try { ensureDefaultsAndDemo(); } catch(e){ dbgWarn('[v3 defaults]', e); }
 
   // ☁️ Google Auth redirect 回來時的處理 (iOS Safari 偏好 redirect 模式)
+  // 根據 sessionStorage._google_pending_role 分辨是老師還是學生分支
   try {
     if(window.firebase && firebase.auth){
       firebase.auth().getRedirectResult().then(function(result){
         if(result && result.user){
-          // 來自 Google redirect 登入 → 走 _handleGoogleAuthResult 設定 cfg+session+reload
-          if(typeof _handleGoogleAuthResult === 'function') _handleGoogleAuthResult(result.user);
+          var role = '';
+          try { role = sessionStorage.getItem('_google_pending_role') || ''; sessionStorage.removeItem('_google_pending_role'); } catch(_){}
+          if(role === 'student' && typeof _handleGoogleAuthStudent === 'function'){
+            _handleGoogleAuthStudent(result.user);
+          } else if(typeof _handleGoogleAuthResult === 'function'){
+            // 預設走老師（含 role===teacher 或未標記情境）
+            _handleGoogleAuthResult(result.user);
+          }
         }
       }).catch(function(e){
         if(e && e.code) console.warn('[google-redirect]', e.code, e.message);
