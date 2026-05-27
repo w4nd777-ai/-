@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#2563eb">
 <!-- 🔒 CSP — 限制可載入的資源來源，防止 XSS 注入 (含 'unsafe-inline' 因為大量 inline style/event)
      允許：本站、Firebase、Google Drive、Anthropic、QR 服務 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app wss://*.firebaseio.com https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com; media-src 'self' blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://apis.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app wss://*.firebaseio.com https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com https://*.firebaseapp.com; media-src 'self' blob: data:;">
 <!-- 🔒 防 clickjacking -->
 <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
 <!-- 🔒 不發送 referrer 給其他網站 -->
@@ -18,6 +18,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
 <!-- 🔧 早期錯誤捕捉 (在主腳本載入前 enable，以免 SyntaxError 等漏掉) -->
 <script>
@@ -3930,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-sw-bypass-fix';
+const APP_BUILD = '2026-05-27-google-signin';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -7998,9 +7999,144 @@ function renderLogin(root){
   if(activeStage) bindMascotInteractions(activeStage);
 }
 
+// ════════════════════════════════════════════════════════════
+// ☁️ Google 登入整合 — 達成「換裝置自動同步」(像 IG/FB/LINE)
+// 設計：Google 帳號 ↔ roomCode 對應寫在 cms-v3/google_users/{email_key}
+// 同一個 Google 在任何裝置登入 → 自動拿到 roomCode → 自動進入同一個資料區
+// ════════════════════════════════════════════════════════════
+async function _googleSignInTeacher(ev){
+  if(!window.firebase || !firebase.auth){
+    try { toast('Firebase 未載入，請重新整理頁面', 'danger'); } catch(_){ alert('Firebase 未載入'); }
+    return;
+  }
+  const btn = (ev && ev.currentTarget) || null;
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    let result;
+    try {
+      result = await firebase.auth().signInWithPopup(provider);
+    } catch(e){
+      // popup 被擋 / iOS Safari 偏好 redirect
+      if(e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request'){
+        try { toast('popup 被擋，改用全頁登入...', 'warn'); } catch(_){}
+        await firebase.auth().signInWithRedirect(provider);
+        return;
+      }
+      if(e.code === 'auth/popup-closed-by-user'){
+        if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
+        return; // 使用者主動關閉，不顯示錯誤
+      }
+      throw e;
+    }
+    await _handleGoogleAuthResult(result.user);
+  } catch(e){
+    console.error('[google-signin]', e);
+    try { toast('Google 登入失敗: ' + (e.message || e), 'danger', 6000); } catch(_){ alert('Google 登入失敗: ' + (e.message||e)); }
+    if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
+  }
+}
+
+// 處理 Google Auth 登入結果 (popup 或 redirect 回來都走這裡)
+async function _handleGoogleAuthResult(user){
+  if(!user || !user.email){
+    try { toast('Google 帳號沒有 email', 'danger'); } catch(_){}
+    return;
+  }
+  const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
+  try { toast('Google 登入成功，連線中...', 'success', 2500); } catch(_){}
+  // 查 google_users → 找對應 roomCode
+  let roomCode = 'DEMO01';
+  try {
+    const userRef = firebase.database().ref('cms-v3/google_users/' + emailKey);
+    const snap = await userRef.once('value');
+    if(snap.exists() && snap.val() && snap.val().roomCode){
+      roomCode = snap.val().roomCode;
+    } else {
+      // 第一次用 Google 登入 → 寫入對應
+      await userRef.set({
+        email: user.email,
+        displayName: user.displayName || user.email,
+        photoURL: user.photoURL || '',
+        roomCode: roomCode,
+        firebaseUid: user.uid,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        lastLoginAt: firebase.database.ServerValue.TIMESTAMP
+      });
+    }
+    // 更新 lastLoginAt
+    try { userRef.child('lastLoginAt').set(firebase.database.ServerValue.TIMESTAMP); } catch(_){}
+  } catch(e){
+    console.warn('[google-signin] google_users 查詢失敗 (續用預設 DEMO01):', e);
+  }
+  // 設定 cfg
+  try {
+    App.cfg = App.cfg || {};
+    App.cfg.roomCode = roomCode;
+    App.cfg.role = 'teacher';
+    if(typeof saveCfg === 'function') saveCfg(App.cfg);
+  } catch(e){ console.warn('[google-signin] saveCfg failed:', e); }
+  // 設定 session — 直接給老師身份
+  try {
+    App.session = {
+      role: 'teacher',
+      account: 'google:' + user.email,
+      displayName: user.displayName || user.email,
+      photoURL: user.photoURL || '',
+      firebaseUid: user.uid,
+      loginAt: Date.now(),
+      authMethod: 'google'
+    };
+    if(typeof saveSession === 'function') saveSession(App.session);
+  } catch(e){ console.warn('[google-signin] saveSession failed:', e); }
+  // 短暫等待寫入後 reload 套用
+  setTimeout(function(){
+    try { location.reload(); } catch(_) { location.href = location.pathname; }
+  }, 600);
+}
+
+// Google 按鈕內容 (含官方 Google logo SVG)
+function _googleBtnContent(){
+  const wrap = document.createElement('span');
+  wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;width:100%;';
+  wrap.innerHTML =
+    '<svg width="20" height="20" viewBox="0 0 18 18" style="flex-shrink:0">' +
+    '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>' +
+    '<path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>' +
+    '<path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>' +
+    '<path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>' +
+    '</svg>' +
+    '<span style="font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap">用 Google 登入（自動跨裝置同步）</span>';
+  return wrap;
+}
+
 function renderLoginTeacherStage(){
   // Spotify 版：tab 已標示「老師」，stage 內不再放 H3
   const stage = el('div', { class:'login-stage' });
+
+  // ☁️ Google 登入按鈕 — 放最頂部，最顯眼 (跨裝置自動同步)
+  const googleBtn = el('button', {
+    type:'button',
+    style: 'width:100%;padding:12px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:48px',
+    onmouseover: function(){ this.style.background = '#f8f9fa'; this.style.boxShadow = '0 2px 6px rgba(0,0,0,.12)'; },
+    onmouseout: function(){ this.style.background = '#fff'; this.style.boxShadow = '0 1px 3px rgba(0,0,0,.08)'; },
+    onclick: _googleSignInTeacher
+  });
+  googleBtn.appendChild(_googleBtnContent());
+  stage.appendChild(googleBtn);
+  stage.appendChild(el('div', {
+    style:'text-align:center;font-size:11px;color:#888;margin:2px 0 14px'
+  }, '👆 換手機 / 平板 / 其他電腦都用同一個 Google 登入，自動看到一樣的資料'));
+
+  // 「或用帳號密碼登入」分隔線
+  const divider = el('div', {
+    style:'display:flex;align-items:center;gap:10px;margin:6px 0 14px;color:#999;font-size:12px'
+  });
+  divider.appendChild(el('div', { style:'flex:1;height:1px;background:#e5e7eb' }));
+  divider.appendChild(el('span', null, '或用帳號密碼'));
+  divider.appendChild(el('div', { style:'flex:1;height:1px;background:#e5e7eb' }));
+  stage.appendChild(divider);
 
   const prefill = App._loginPrefill || {};
   const rememberSaved = loadRemember();
@@ -22682,6 +22818,20 @@ function boot(){
 
   // 確保有管理員帳號 + 學生資料
   try { ensureDefaultsAndDemo(); } catch(e){ dbgWarn('[v3 defaults]', e); }
+
+  // ☁️ Google Auth redirect 回來時的處理 (iOS Safari 偏好 redirect 模式)
+  try {
+    if(window.firebase && firebase.auth){
+      firebase.auth().getRedirectResult().then(function(result){
+        if(result && result.user){
+          // 來自 Google redirect 登入 → 走 _handleGoogleAuthResult 設定 cfg+session+reload
+          if(typeof _handleGoogleAuthResult === 'function') _handleGoogleAuthResult(result.user);
+        }
+      }).catch(function(e){
+        if(e && e.code) console.warn('[google-redirect]', e.code, e.message);
+      });
+    }
+  } catch(e){ console.warn('[google-redirect init]', e); }
 
   // route from hash if present (and not a join hash we already consumed)
   if(!handled){
