@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-sync-fix';
+const APP_BUILD = '2026-05-27-login-rerender';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5184,8 +5184,15 @@ const Sync = (() => {
           App._syncRerTimer = setTimeout(()=> { App._syncRerTimer = null; _scheduleRerender(); }, 1200);
           return;
         }
-        // 登入畫面 — 完全跳過
-        if(!App.session) return;
+        // 登入畫面 — 大多數時候跳過 (避免閃)
+        // 🔧 但允許「students 第一次到位」時 rerender 一次，否則學生 tab 班級下拉永遠空白
+        if(!App.session){
+          if(!App._loginInitialRerenderDone && Array.isArray(App.db && App.db.students) && App.db.students.length > 0){
+            App._loginInitialRerenderDone = true;
+            rerender();
+          }
+          return;
+        }
         rerender();
       } catch(e){_swallow('auto',e)}
     }, debounceMs);
