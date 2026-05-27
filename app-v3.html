@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-no-dup-admin';
+const APP_BUILD = '2026-05-27-sidebar-tidy';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10700,30 +10700,30 @@ function renderSidebarTeacher(){
     leave: ((App.db.leaves||[]).filter(l => (l.status||'pending')==='pending').length) || null  // 新增：待批准請假
   };
 
-  // 日常 — 依使用者自訂順序輸出
+  // 🎨 新分組順序：日常 → 點名 → 作業 → 課程 → 互動 → 工具 → 進階管理 → 系統
   side.appendChild(sideSection('daily', '日常', buildSidebarItems('teacher', 'daily', badges)));
+  side.appendChild(sideSection('attendance', '點名 / 出席', buildSidebarItems('teacher', 'attendance', badges)));
+  side.appendChild(sideSection('assign', '作業 / 成績', buildSidebarItems('teacher', 'assign', badges)));
+  side.appendChild(sideSection('teaching', '課程 / 教學', buildSidebarItems('teacher', 'teaching', badges)));
+  side.appendChild(sideSection('feedback', '互動 / 公告', buildSidebarItems('teacher', 'feedback', badges)));
 
-  // 教學
-  side.appendChild(sideSection('teaching', '教學', buildSidebarItems('teacher', 'teaching', badges)));
-
-  // 課堂工具
-  side.appendChild(sideSection('tools', '課堂工具', buildSidebarItems('teacher', 'tools', badges)));
-
-  // 系統 — AI 助教為特殊按鈕（無對應 view）
-  const systemSpecials = {
-    // 注意：AI 助教在 getSidebarItems 內並未列出，因此這裡在 section 開頭額外塞一個
-  };
-  const systemItems = buildSidebarItems('teacher', 'system', badges, systemSpecials);
-  // 在系統分組前頭插入 AI 助教按鈕（若使用者未在 items 中隱藏「ai」key 則顯示）
+  // 課堂工具 + AI 助教
+  const toolsItems = buildSidebarItems('teacher', 'tools', badges);
   const aiCust = ((App._uiCustom && App._uiCustom.items) || {})['ai_assistant'] || {};
   if(!aiCust.hidden){
     const aiBtn = el('button', { class:'side-item', onclick: openAIAssistant, title: aiCust.label || 'AI 助教' },
       el('span', { class:'ico' }, aiCust.icon || '🤖'),
       el('span', null, aiCust.label || 'AI 助教')
     );
-    systemItems.unshift(aiBtn);
+    toolsItems.push(aiBtn);
   }
-  side.appendChild(sideSection('system', '系統', systemItems));
+  side.appendChild(sideSection('tools', '課堂工具', toolsItems));
+
+  // 進階管理 (多教室、學期、Firebase 等)
+  side.appendChild(sideSection('manage', '進階管理', buildSidebarItems('teacher', 'manage', badges)));
+
+  // 設定 / 系統
+  side.appendChild(sideSection('system', '設定 / 系統', buildSidebarItems('teacher', 'system', badges)));
 
   // bottom: user info + logout
   const spacer = el('div', { style:{flex:'1'} });
@@ -26860,54 +26860,61 @@ function renderCustomBlocks(position){
 /* 預設項目清單 — 與 renderSidebarTeacher / renderSidebarStudent 對齊 */
 function getSidebarItems(role){
   if(role === 'teacher'){
+    // 🎨 重新分組：6 個主分組，每個 3-5 項，更易閱讀
     return {
       daily: { label:'日常', items: [
         { key:'overview', icon:'📊', label:'總覽' },
         { key:'students', icon:'👥', label:'學生名單' },
         { key:'pending', icon:'📥', label:'註冊審核' },
+        { key:'messages', icon:'💬', label:'訊息' }
+      ]},
+      attendance: { label:'點名 / 出席', items: [
         { key:'attendance', icon:'✅', label:'出席管理' },
         { key:'matrix', icon:'🪑', label:'座位矩陣' },
         { key:'qr', icon:'📱', label:'QR Code 簽到' },
         { key:'leave', icon:'📆', label:'請假管理' },
-        { key:'messages', icon:'💬', label:'訊息' },
         { key:'behavior', icon:'⭐', label:'行為點數' }
       ]},
-      teaching: { label:'教學', items: [
+      assign: { label:'作業 / 成績', items: [
         { key:'assignments', icon:'📋', label:'作業管理' },
         { key:'submissions', icon:'📥', label:'繳交記錄' },
         { key:'grades', icon:'🎯', label:'學期成績' },
-        { key:'quiz', icon:'📝', label:'線上小考' },
-        { key:'subjects', icon:'📚', label:'科目管理' },     // 包 B-1
-        { key:'timetable', icon:'🗓', label:'課表' },        // 包 B-2
+        { key:'gantt', icon:'📊', label:'作業甘特圖' },
+        { key:'quiz', icon:'📝', label:'線上小考' }
+      ]},
+      teaching: { label:'課程 / 教學', items: [
+        { key:'subjects', icon:'📚', label:'科目管理' },
+        { key:'timetable', icon:'🗓', label:'課表' },
+        { key:'teachernotes', icon:'📓', label:'教案筆記' },
+        { key:'calendar', icon:'📅', label:'行事曆' },
+        { key:'analytics', icon:'📈', label:'分析工具' }
+      ]},
+      feedback: { label:'互動 / 公告', items: [
+        { key:'announcements', icon:'📢', label:'公告管理' },
         { key:'evals', icon:'💬', label:'課程評價' },
         { key:'feedback', icon:'🗳️', label:'學生回饋' },
-        { key:'peer', icon:'⭐', label:'學生互評' },
-        { key:'announcements', icon:'📢', label:'公告管理' },
-        { key:'analytics', icon:'📈', label:'分析工具' },
-        { key:'calendar', icon:'📅', label:'行事曆' },
-        { key:'gantt', icon:'📊', label:'作業甘特圖' },
-        { key:'teachernotes', icon:'📓', label:'教案筆記' }  // F-16
+        { key:'peer', icon:'⭐', label:'學生互評' }
       ]},
       tools: { label:'課堂工具', items: [
         { key:'picker', icon:'🎲', label:'隨機抽籤' },
         { key:'timer', icon:'⏰', label:'課堂計時器' }
       ]},
-      manage: { label:'管理', items: [
-        { key:'teachers', icon:'🧑‍🏫', label:'老師管理' }
-      ]},
-      system: { label:'系統', items: [
-        { key:'semestermgr', icon:'📅', label:'學期管理' },  // 包 B-3
+      manage: { label:'進階管理', items: [
+        { key:'teachers', icon:'🧑‍🏫', label:'老師管理' },
+        { key:'semestermgr', icon:'📅', label:'學期管理' },
         { key:'workspace', icon:'🏢', label:'多教室管理' },
-        { key:'notify', icon:'📲', label:'通知設定' },
-        { key:'backup', icon:'💼', label:'備份與還原' },
-        { key:'exportcenter', icon:'📦', label:'匯出中心' },
-        { key:'printcenter', icon:'🖨', label:'列印中心' },  // 包 C-2
-        { key:'logs', icon:'📜', label:'操作紀錄' },
-        { key:'storage', icon:'💾', label:'儲存空間' },
+        { key:'firebase', icon:'☁️', label:'跨裝置同步' }
+      ]},
+      system: { label:'設定 / 系統', items: [
         { key:'settings', icon:'⚙️', label:'設定' },
         { key:'appearance', icon:'🎨', label:'外觀設定' },
         { key:'uieditor', icon:'🛠️', label:'介面編輯器' },
-        { key:'firebase', icon:'☁️', label:'跨裝置同步' },
+        { key:'notify', icon:'📲', label:'通知設定' },
+        { key:'backup', icon:'💼', label:'備份與還原' },
+        { key:'exportcenter', icon:'📦', label:'匯出中心' },
+        { key:'printcenter', icon:'🖨', label:'列印中心' },
+        { key:'logs', icon:'📜', label:'操作紀錄' },
+        { key:'storage', icon:'💾', label:'儲存空間' },
         { key:'install', icon:'📲', label:'安裝 App' },
         { key:'help', icon:'📖', label:'使用說明' }
       ]}
