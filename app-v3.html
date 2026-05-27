@@ -508,47 +508,57 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
 
 /* ---------- student card / list rows ---------- */
 .stu-grid{ display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); }
-/* 條列模式：每個學生一行，table row 風格 (左色條 + 對齊 column + 按鈕靠右) */
-.stu-grid.list-mode{ display:flex; flex-direction:column; gap:6px; }
+/* 條列模式 v3：整個列表一張卡，內部每行是 table row (左色條表狀態) */
+.stu-grid.list-mode{
+  display:flex; flex-direction:column; gap:0;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:12px;
+  overflow:hidden;
+}
 .stu-grid.list-mode .stu-card{
   flex-direction:row;
   align-items:center;
-  gap:14px;
-  padding:10px 16px 10px 12px;
-  min-height:52px;
-  border-left:4px solid var(--border);
-  background:var(--surface);
+  gap:16px;
+  padding:12px 18px;
+  min-height:56px;
+  border:none !important;
+  border-bottom:1px solid var(--border) !important;
+  border-left:4px solid transparent !important;
+  border-radius:0 !important;
+  background:var(--surface) !important;
+  transition:background .15s;
 }
-.stu-grid.list-mode .stu-card.signed{ border-left-color:var(--success); background:var(--success-soft); }
-.stu-grid.list-mode .stu-card.late{ border-left-color:var(--warn); background:var(--warn-soft); }
-.stu-grid.list-mode .stu-card.absent{ border-left-color:var(--danger); background:transparent; }
-.stu-grid.list-mode .stu-card.leave{ border-left-color:var(--accent); background:var(--accent-soft); }
+.stu-grid.list-mode .stu-card:last-child{ border-bottom:none !important; }
+.stu-grid.list-mode .stu-card:hover{ background:var(--surface-2) !important; }
+.stu-grid.list-mode .stu-card.signed{ border-left-color:var(--success) !important; }
+.stu-grid.list-mode .stu-card.late{ border-left-color:var(--warn) !important; }
+.stu-grid.list-mode .stu-card.absent{ border-left-color:var(--danger) !important; }
+.stu-grid.list-mode .stu-card.leave{ border-left-color:var(--accent) !important; }
 .stu-grid.list-mode .stu-card .name{
   font-size:15px; font-weight:600;
-  flex:0 0 160px; min-width:0;
+  flex:0 0 160px; min-width:0; color:var(--text);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .stu-grid.list-mode .stu-card .meta{
-  flex:0 0 100px; font-size:12px;
+  flex:0 0 110px; font-size:12px; color:var(--text-muted);
 }
 .stu-grid.list-mode .stu-card .small,
 .stu-grid.list-mode .stu-card .mono{ flex:1; margin:0; font-size:13px; }
-.stu-grid.list-mode .stu-card .tiny{ flex:1; margin:0; }
-.stu-grid.list-mode .stu-card .actions{
-  margin-top:0; margin-left:auto;
-  flex:0 0 auto;
-}
-/* mobile：條列模式自動換行 */
+.stu-grid.list-mode .stu-card .tiny{ flex:1; margin:0; font-size:12px; }
+.stu-grid.list-mode .stu-card .actions{ margin-top:0; margin-left:auto; flex:0 0 auto; }
+.stu-grid.list-mode .stu-card .actions .btn{ padding:6px 12px; font-size:13px; }
+/* mobile：每行寬度有限，垂直堆疊 */
 @media (max-width:640px){
   .stu-grid.list-mode .stu-card{
-    flex-wrap:wrap; padding:8px 12px;
+    flex-wrap:wrap; padding:10px 14px; gap:8px;
   }
   .stu-grid.list-mode .stu-card .name{ flex:1 1 auto; min-width:0; }
   .stu-grid.list-mode .stu-card .meta{ flex:0 0 auto; }
   .stu-grid.list-mode .stu-card .small,
   .stu-grid.list-mode .stu-card .mono,
   .stu-grid.list-mode .stu-card .tiny{ flex:1 1 100%; }
-  .stu-grid.list-mode .stu-card .actions{ margin-left:0; flex:1 1 100%; }
+  .stu-grid.list-mode .stu-card .actions{ margin-left:0; flex:1 1 100%; justify-content:flex-end; display:flex; }
 }
 .stu-card{
   padding:12px; border-radius:var(--r-md);
@@ -3973,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-google-instant';
+const APP_BUILD = '2026-05-28-no-force-pw';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8704,14 +8714,26 @@ function renderLoginTeacherStage(){
     App._loginStage = null; App._loginPrefill = null;
     toast('歡迎，' + a.name + '！','success');
     go('overview');
-    // batch 1 強化：若是 admin/admin123 預設組合 或 帳號標記 mustChangePw → 強制改密碼
+    // 🔧 改為「只提醒不強制」 — 使用者反映每次登入都被打斷重設密碼
+    //    僅在帳號明確標記 mustChangePw 時才強制
     try {
       const isDefaultPair = (a.username === 'admin' && pw === 'admin123');
-      if(isDefaultPair || a.mustChangePw){
+      if(a.mustChangePw){
+        // 帳號標記必須改密碼 → 強制
         setTimeout(()=> { try { forceChangeTeacherPassword(a.id); } catch(_){_swallow('auto',_)} }, 500);
+      } else if(isDefaultPair){
+        // 使用預設 admin/admin123 → 只 toast 提醒，不強制
+        setTimeout(()=> {
+          try { toast('⚠️ 你正在使用預設密碼 admin123，建議到「設定」改成自訂密碼', 'warn', 8000); } catch(_){}
+        }, 1500);
       } else if(!a.email || !a.securityQ || !a.securityA || !a.recoveryCode){
-        // 批次 6：若缺 recovery 欄位（email/安全問題/恢復碼）→ 強制設定
-        setTimeout(()=> { try { forceSetupRecovery(a.id); } catch(_){_swallow('auto',_)} }, 800);
+        // 缺 recovery 資訊 → 只在本機未提醒過時 toast 一次（不再強制彈 modal）
+        if(!localStorage.getItem('cms_v3_recovery_reminded_' + a.id)){
+          try { localStorage.setItem('cms_v3_recovery_reminded_' + a.id, '1'); } catch(_){}
+          setTimeout(()=> {
+            try { toast('💡 建議到「設定」設定 Email + 安全問題，忘記密碼時可自助重設', 'info', 8000); } catch(_){}
+          }, 1500);
+        }
       }
     } catch(_){_swallow('auto',_)}
   };
