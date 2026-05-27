@@ -1661,7 +1661,7 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   transition: box-shadow .15s ease, border-color .15s ease;
   text-align:left;
 }
-/* select 重設原生樣式 + 自訂下拉箭頭 (讓文字對齊 + 不歪) */
+/* select 重設原生樣式 + 自訂下拉箭頭 + 文字置中 (塞滿寬度) */
 .login-spotify-card .input.select,
 .login-spotify-card select.input{
   appearance:none;
@@ -1671,8 +1671,15 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   background-repeat:no-repeat;
   background-position:right 14px center;
   background-size:12px;
+  padding-left:38px;       /* 對稱兩邊 padding 讓內容真正置中 */
   padding-right:38px;
   cursor:pointer;
+  text-align:center;       /* 主流瀏覽器 */
+  text-align-last:center;  /* 顯示中的選項置中 (Chrome/FF/Safari) */
+}
+.login-spotify-card .input.select option,
+.login-spotify-card select.input option{
+  text-align:center;       /* 下拉打開後每個選項也置中 */
 }
 .login-spotify-card .input.select option,
 .login-spotify-card select.input option{
@@ -4001,7 +4008,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-login-tabs';
+const APP_BUILD = '2026-05-28-select-center';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
