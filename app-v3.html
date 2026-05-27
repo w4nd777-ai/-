@@ -3983,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-email-only';
+const APP_BUILD = '2026-05-28-room-hidden';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8193,8 +8193,9 @@ function renderLogin(root){
   // 自訂內容 (position='login-bottom')
   card.appendChild(renderCustomBlocks('login-bottom'));
 
-  // ── 底部：切換教室 ──
-  if(!lc.hideSwitchRoom){
+  // 🎨 「切換教室」按鈕已移除 (改放在版本字旁邊的「⚙ 進階」link，需要時才用)
+  // 原本邏輯保留作備用，若 lc.showSwitchRoom = true 才顯示
+  if(lc.showSwitchRoom){
     card.appendChild(el('hr', { class:'sep' }));
     card.appendChild(el('button', {
       type:'button',
@@ -8977,13 +8978,42 @@ function renderLoginTeacherStage(){
     stage.appendChild(forgotWrap);
   }
 
-  // 📦 版本字 + 一個小小的「重置」link（隱藏在版本字旁邊，需要時才用）
+  // 📦 版本字 + 進階小選項 (重置 / 切換教室) — 需要時才用
   const verWrap = el('div', { style:{marginTop:'18px',textAlign:'center',fontSize:'10px',opacity:'0.5'} });
   verWrap.appendChild(el('span', null, '版本 ' + APP_BUILD + ' · '));
   verWrap.appendChild(el('a', {
     href: location.pathname + '?nuclear=1',
     style:{color:'inherit',textDecoration:'underline'}
   }, '重置裝置'));
+  verWrap.appendChild(el('span', null, ' · '));
+  verWrap.appendChild(el('a', {
+    href:'javascript:void(0)',
+    style:{color:'inherit',textDecoration:'underline'},
+    onclick: async function(){
+      const currentRoom = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+      const newRoom = prompt(
+        '輸入要切換的教室代碼（大寫字母 + 數字）：\n\n目前教室：' + currentRoom + '\n\n說明：每個教室是獨立資料區。除非你有多個學校或要切到別人分享的教室，否則用預設 DEMO01 即可。',
+        currentRoom
+      );
+      if(!newRoom) return;
+      const code = String(newRoom).trim().toUpperCase();
+      if(!code || code === currentRoom){ return; }
+      if(!/^[A-Z0-9]{2,20}$/.test(code)){
+        alert('教室代碼格式：2-20 字，只能英文字母 + 數字');
+        return;
+      }
+      App.cfg = App.cfg || {};
+      App.cfg.roomCode = code;
+      App.session = null;
+      try {
+        if(typeof saveCfg === 'function') saveCfg(App.cfg);
+        try { localStorage.removeItem(LS_SESSION); } catch(_){}
+        try { localStorage.removeItem(LS_LAST_USER); } catch(_){}
+      } catch(_){}
+      try { if(typeof toast === 'function') toast('✅ 已切換到教室 ' + code, 'success', 2500); } catch(_){}
+      setTimeout(function(){ location.reload(); }, 600);
+    }
+  }, '切換教室'));
   stage.appendChild(verWrap);
 
   i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
