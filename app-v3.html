@@ -508,6 +508,16 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
 
 /* ---------- student card / list rows ---------- */
 .stu-grid{ display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); }
+/* 條列模式：每個學生一行，名字+資訊水平排列 */
+.stu-grid.list-mode{ display:flex; flex-direction:column; gap:4px; }
+.stu-grid.list-mode .stu-card{
+  flex-direction:row; align-items:center; gap:12px; padding:8px 12px;
+}
+.stu-grid.list-mode .stu-card .name{ font-size:14px; min-width:120px; }
+.stu-grid.list-mode .stu-card .meta{ flex:0 0 auto; font-size:11px; }
+.stu-grid.list-mode .stu-card .small,
+.stu-grid.list-mode .stu-card .tiny{ flex:1; margin:0; }
+.stu-grid.list-mode .stu-card .actions{ margin-top:0; margin-left:auto; }
 .stu-card{
   padding:12px; border-radius:var(--r-md);
   background:var(--surface); border:1px solid var(--border);
@@ -3931,7 +3941,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-csp-fix';
+const APP_BUILD = '2026-05-27-list-mode';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11499,10 +11509,38 @@ function rOv(content){
     // batch 2-stab: O(n) — 預先 build 當日簽到 / 請假 map，下方雙重 forEach 都用 .get(id)
     const _todayMaps = buildTodayMaps(today);
 
-    // 全展開 / 全收合按鈕
+    // 顯示模式 (條列 / 卡片) — 從 localStorage 載入偏好
+    if(App._ovDisplayMode === undefined){
+      try { App._ovDisplayMode = localStorage.getItem('cms_v3_ov_display_mode') || 'card'; } catch(_){ App._ovDisplayMode = 'card'; }
+    }
+    var isListMode = App._ovDisplayMode === 'list';
+
+    // 工具列：顯示模式切換 + 全展開 / 全收合
     const toolbar = el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
       el('h3', { style:{margin:'0'} }, '今日班況 · 依班級'),
-      el('div', { class:'flex no-print' },
+      el('div', { class:'flex no-print', style:{gap:'6px'} },
+        // 顯示模式切換 (條列 / 卡片)
+        el('button', {
+          class:'btn btn-sm',
+          style: isListMode ? {} : {background:'var(--primary)',color:'#fff'},
+          title:'卡片模式',
+          onclick:()=> {
+            App._ovDisplayMode = 'card';
+            try { localStorage.setItem('cms_v3_ov_display_mode', 'card'); } catch(_){}
+            rerender();
+          }
+        }, '▦ 卡片'),
+        el('button', {
+          class:'btn btn-sm',
+          style: isListMode ? {background:'var(--primary)',color:'#fff'} : {},
+          title:'條列模式',
+          onclick:()=> {
+            App._ovDisplayMode = 'list';
+            try { localStorage.setItem('cms_v3_ov_display_mode', 'list'); } catch(_){}
+            rerender();
+          }
+        }, '☰ 條列'),
+        el('span', { style:{width:'8px'} }),
         el('button', { class:'btn btn-sm', onclick:()=> {
           classes.forEach(c => { App._ovExpandedCls[c] = true; });
           rerender();
@@ -11572,7 +11610,7 @@ function rOv(content){
 
       if(isExpanded){
         const body = el('div', { style:{padding:'14px 16px'} });
-        const sgrid = el('div', { class:'stu-grid' });
+        const sgrid = el('div', { class: isListMode ? 'stu-grid list-mode' : 'stu-grid' });
         stuInCls.forEach(s => {
           // batch 2-stab: 用預先 build 的 map（同上）
           const att = _todayMaps.signedMap.get(s.id);
