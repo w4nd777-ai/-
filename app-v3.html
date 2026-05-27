@@ -3941,7 +3941,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-list-mode';
+const APP_BUILD = '2026-05-27-split-settings';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10774,8 +10774,10 @@ function renderSidebarTeacher(){
   // 進階管理 (多教室、學期、Firebase 等)
   side.appendChild(sideSection('manage', '進階管理', buildSidebarItems('teacher', 'manage', badges)));
 
-  // 設定 / 系統
-  side.appendChild(sideSection('system', '設定 / 系統', buildSidebarItems('teacher', 'system', badges)));
+  // 拆原本「設定 / 系統」11 項 → 設定 (4) + 資料管理 (3) + 系統工具 (4)
+  side.appendChild(sideSection('settings', '⚙️ 設定', buildSidebarItems('teacher', 'settings', badges)));
+  side.appendChild(sideSection('data', '📦 資料管理', buildSidebarItems('teacher', 'data', badges)));
+  side.appendChild(sideSection('system', '🔧 系統工具', buildSidebarItems('teacher', 'system', badges)));
 
   // bottom: user info + logout
   const spacer = el('div', { style:{flex:'1'} });
@@ -26985,14 +26987,18 @@ function getSidebarItems(role){
         { key:'workspace', icon:'🏢', label:'多教室管理' },
         { key:'firebase', icon:'☁️', label:'跨裝置同步' }
       ]},
-      system: { label:'設定 / 系統', items: [
+      settings: { label:'⚙️ 設定', items: [
         { key:'settings', icon:'⚙️', label:'設定' },
         { key:'appearance', icon:'🎨', label:'外觀設定' },
         { key:'uieditor', icon:'🛠️', label:'介面編輯器' },
-        { key:'notify', icon:'📲', label:'通知設定' },
+        { key:'notify', icon:'📲', label:'通知設定' }
+      ]},
+      data: { label:'📦 資料管理', items: [
         { key:'backup', icon:'💼', label:'備份與還原' },
         { key:'exportcenter', icon:'📦', label:'匯出中心' },
-        { key:'printcenter', icon:'🖨', label:'列印中心' },
+        { key:'printcenter', icon:'🖨', label:'列印中心' }
+      ]},
+      system: { label:'🔧 系統工具', items: [
         { key:'logs', icon:'📜', label:'操作紀錄' },
         { key:'storage', icon:'💾', label:'儲存空間' },
         { key:'install', icon:'📲', label:'安裝 App' },
