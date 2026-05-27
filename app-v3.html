@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-sync-fallback';
+const APP_BUILD = '2026-05-27-no-dup-admin';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4875,17 +4875,67 @@ function ensureDefaultsAndDemo(){
   let changed = false;
 
   // 預設管理員帳號
+  // 🔧 重要修復：避免每次 nuclear 後重複建 admin (Firebase 上累積 5 個重複 entry)
+  // 1. 若 Firebase 已連線 → 等 5 秒讓 Sync listener 抓回再判斷，沒抓到才建
+  // 2. 若無 Firebase → 直接本地建
   if(!App.db.accounts || App.db.accounts.length === 0){
-    App.db.accounts = [{
-      id: nid(),
-      username: 'admin',
-      password: 'admin123',
-      name: '管理員',
-      role: 'teacher',
-      createdAt: Date.now()
-    }];
-    changed = true;
-    dbg('[v3] 建立預設管理員帳號 admin / admin123');
+    if(App.fbRef){
+      // 延遲 5 秒，給 Sync.init 的 child_added + once('value') fallback 時間抓資料
+      setTimeout(function(){
+        try {
+          var hasAdmin = (App.db.accounts || []).some(function(a){
+            return a && String(a.username||'').toLowerCase() === 'admin';
+          });
+          if(hasAdmin){
+            dbg('[v3] Firebase 已有 admin，不重複建立');
+            return;
+          }
+          // Firebase 上也沒 admin → 真的建一個
+          App.db.accounts = App.db.accounts || [];
+          App.db.accounts.push({
+            id: nid(),
+            username: 'admin',
+            password: 'admin123',
+            name: '管理員',
+            role: 'teacher',
+            createdAt: Date.now()
+          });
+          if(typeof saveDB === 'function') saveDB();
+          try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
+          try { rerender(); } catch(_){}
+          dbg('[v3] 5 秒後 Firebase 仍無 admin，建立預設帳號 admin / admin123');
+        } catch(e){ console.warn('[ensureDefaults deferred]', e); }
+      }, 5000);
+    } else {
+      // 純本地模式 (沒連 Firebase) → 立即建
+      App.db.accounts = [{
+        id: nid(),
+        username: 'admin',
+        password: 'admin123',
+        name: '管理員',
+        role: 'teacher',
+        createdAt: Date.now()
+      }];
+      changed = true;
+      dbg('[v3] 建立本地預設管理員帳號 admin / admin123 (無 Firebase)');
+    }
+  } else {
+    // 已有 accounts，但檢查是否有 admin（防止 accounts 有資料但 admin 被誤刪）
+    var hasAdmin = App.db.accounts.some(function(a){
+      return a && String(a.username||'').toLowerCase() === 'admin';
+    });
+    if(!hasAdmin){
+      App.db.accounts.push({
+        id: nid(),
+        username: 'admin',
+        password: 'admin123',
+        name: '管理員',
+        role: 'teacher',
+        createdAt: Date.now()
+      });
+      changed = true;
+      dbg('[v3] accounts 有資料但缺 admin → 補建一個');
+    }
   }
 
   // 預設課程
