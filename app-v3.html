@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-auth-listener';
+const APP_BUILD = '2026-05-27-sync-fallback';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5298,6 +5298,32 @@ const Sync = (() => {
       rerender();
     });
     App.listeners.push(()=> cref.off('value', ccb));
+
+    // 🔧 重大修復：child_added listener 在某些情況下只抓部分資料 (尤其大量學生時)
+    //    出席、作業、繳交、評量等都沒抓回 → 老師看不到。
+    //    在連線建立後 2 秒，對每個 array collection 主動 once('value') 強制抓全
+    setTimeout(function(){
+      if(!App.fbRef) return;
+      ARRAY_COLLECTIONS.forEach(function(node){
+        if(!_shouldSubscribe(node)) return;
+        try {
+          App.fbRef.child(node).once('value', function(snap){
+            var val = snap.val();
+            if(!val) return;
+            var arr = Array.isArray(val) ? val : Object.values(val);
+            arr = arr.filter(function(x){ return x && (x.id || x.sid); });
+            // 用 id 為 key 合併，不覆蓋本地新編輯（child_added 已收到的）
+            var existing = App.db[node] || [];
+            var byId = {};
+            existing.forEach(function(x){ if(x && x.id != null) byId[x.id] = x; });
+            arr.forEach(function(x){ if(x && x.id != null && !byId[x.id]) byId[x.id] = x; });
+            App.db[node] = Object.values(byId);
+            try { _saveDBLocal(); } catch(_){}
+          });
+        } catch(e){ console.warn('[sync-fallback]', node, e); }
+      });
+      try { _scheduleRerender(); } catch(_){}
+    }, 2500);
   }
   function push(node, data){
     saveDB();
