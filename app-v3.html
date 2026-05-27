@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-google-student';
+const APP_BUILD = '2026-05-27-clean-login';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8348,28 +8348,21 @@ function renderLoginTeacherStage(){
   // Spotify 版：tab 已標示「老師」，stage 內不再放 H3
   const stage = el('div', { class:'login-stage' });
 
-  // ☁️ Google 登入按鈕 — 放最頂部，最顯眼 (跨裝置自動同步)
+  // ☁️ Google 登入按鈕 — 簡潔版（去掉冗長說明）
   const googleBtn = el('button', {
     type:'button',
-    style: 'width:100%;padding:12px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:48px',
-    onmouseover: function(){ this.style.background = '#f8f9fa'; this.style.boxShadow = '0 2px 6px rgba(0,0,0,.12)'; },
-    onmouseout: function(){ this.style.background = '#fff'; this.style.boxShadow = '0 1px 3px rgba(0,0,0,.08)'; },
+    style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
+    onmouseover: function(){ this.style.background = '#f8f9fa'; },
+    onmouseout: function(){ this.style.background = '#fff'; },
     onclick: _googleSignInTeacher
   });
-  googleBtn.appendChild(_googleBtnContent());
+  googleBtn.appendChild(_googleBtnContent('用 Google 登入'));
   stage.appendChild(googleBtn);
-  stage.appendChild(el('div', {
-    style:'text-align:center;font-size:11px;color:#888;margin:2px 0 14px'
-  }, '👆 換手機 / 平板 / 其他電腦都用同一個 Google 登入，自動看到一樣的資料'));
 
-  // 「或用帳號密碼登入」分隔線
-  const divider = el('div', {
-    style:'display:flex;align-items:center;gap:10px;margin:6px 0 14px;color:#999;font-size:12px'
-  });
-  divider.appendChild(el('div', { style:'flex:1;height:1px;background:#e5e7eb' }));
-  divider.appendChild(el('span', null, '或用帳號密碼'));
-  divider.appendChild(el('div', { style:'flex:1;height:1px;background:#e5e7eb' }));
-  stage.appendChild(divider);
+  // 細分隔線 — 不要文字
+  stage.appendChild(el('div', {
+    style:'height:1px;background:rgba(255,255,255,.1);margin:0 0 14px'
+  }));
 
   const prefill = App._loginPrefill || {};
   const rememberSaved = loadRemember();
@@ -8516,27 +8509,13 @@ function renderLoginTeacherStage(){
     stage.appendChild(forgotWrap);
   }
 
-  // 📦 版本標示 + 強制更新（手機若卡舊版本，按這裡可以強制清快取重整）
-  const verWrap = el('div', { style:{marginTop:'16px',textAlign:'center'} });
-  verWrap.appendChild(el('div', { class:'lsc-tiny-muted', style:{fontSize:'10px',opacity:'0.6'} },
-    '版本 ' + APP_BUILD));
-  verWrap.appendChild(el('a', { href:'javascript:void(0)', class:'lsc-link', style:{fontSize:'11px',marginTop:'4px',display:'inline-block'}, onclick: forceCacheReset },
-    '🔄 登入不了？強制清快取重整'));
-  // ☢️ 緊急清光 — 當「強制清快取」也救不了時的最後手段（手機卡舊版、密碼錯、看不到資料）
-  verWrap.appendChild(el('div', { style:{marginTop:'10px'} },
-    el('a', {
-      href: location.pathname + '?nuclear=1',
-      style: {
-        display:'inline-block', background:'#dc2626', color:'#fff',
-        padding:'8px 16px', borderRadius:'8px', textDecoration:'none',
-        fontSize:'12px', fontWeight:'600', boxShadow:'0 2px 6px rgba(220,38,38,.25)'
-      }
-    }, '☢️ 手機卡住？一鍵清光重來')
-  ));
-  verWrap.appendChild(el('div', {
-    class:'lsc-tiny-muted',
-    style:{fontSize:'10px',opacity:'0.5',marginTop:'4px',maxWidth:'280px',marginLeft:'auto',marginRight:'auto'}
-  }, '會清光這台裝置的本機快取並重新從雲端同步（雲端資料安全不會動）'));
+  // 📦 版本字 + 一個小小的「重置」link（隱藏在版本字旁邊，需要時才用）
+  const verWrap = el('div', { style:{marginTop:'18px',textAlign:'center',fontSize:'10px',opacity:'0.5'} });
+  verWrap.appendChild(el('span', null, '版本 ' + APP_BUILD + ' · '));
+  verWrap.appendChild(el('a', {
+    href: location.pathname + '?nuclear=1',
+    style:{color:'inherit',textDecoration:'underline'}
+  }, '重置裝置'));
   stage.appendChild(verWrap);
 
   i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
@@ -9682,32 +9661,21 @@ function renderLoginStudentStage(){
   const _lcS = (App._uiCustom && App._uiCustom.login) || {};
   const stage = el('div', { class:'login-stage' });
 
-  // ☁️ Google 登入按鈕 — 學生跨裝置同步 + 忘記密碼救星
-  // 第一次登入時跳出綁定學號的對話框，之後同一 Google 一鍵登入
+  // ☁️ Google 登入按鈕 — 學生簡潔版
   const googleStuBtn = el('button', {
     type:'button',
-    style: 'width:100%;padding:12px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:48px',
-    onmouseover: function(){ this.style.background = '#f8f9fa'; this.style.boxShadow = '0 2px 6px rgba(0,0,0,.12)'; },
-    onmouseout: function(){ this.style.background = '#fff'; this.style.boxShadow = '0 1px 3px rgba(0,0,0,.08)'; },
+    style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
+    onmouseover: function(){ this.style.background = '#f8f9fa'; },
+    onmouseout: function(){ this.style.background = '#fff'; },
     onclick: _googleSignInStudent
   });
-  googleStuBtn.appendChild(_googleBtnContent('用 Google 登入 / 綁定（忘記密碼救星）'));
+  googleStuBtn.appendChild(_googleBtnContent('用 Google 登入'));
   stage.appendChild(googleStuBtn);
+
+  // 細分隔線 — 不要文字
   stage.appendChild(el('div', {
-    style:'text-align:center;font-size:11px;color:rgba(255,255,255,.7);margin:2px 0 12px'
-  }, '👆 推薦！第一次輸入學號綁定，之後就不用記密碼，換裝置自動登入'));
-
-  // 「或用班級+姓名+密碼」分隔線
-  const dividerStu = el('div', {
-    style:'display:flex;align-items:center;gap:10px;margin:6px 0 12px;color:rgba(255,255,255,.6);font-size:12px'
-  });
-  dividerStu.appendChild(el('div', { style:'flex:1;height:1px;background:rgba(255,255,255,.2)' }));
-  dividerStu.appendChild(el('span', null, '或用班級+姓名'));
-  dividerStu.appendChild(el('div', { style:'flex:1;height:1px;background:rgba(255,255,255,.2)' }));
-  stage.appendChild(dividerStu);
-
-  stage.appendChild(el('div', { class:'lsc-tiny-muted', style:{marginBottom:'8px',textAlign:'left'} },
-    '依序選擇班級、姓名，輸入密碼即可登入'));
+    style:'height:1px;background:rgba(255,255,255,.1);margin:0 0 14px'
+  }));
 
   if(!App.db.students.length){
     stage.appendChild(el('div', { style:{padding:'16px 8px',textAlign:'center',color:'rgba(255,255,255,.85)'} },
@@ -22956,84 +22924,33 @@ function boot(){
   try {
     // L8: adminreset 邏輯已抽到 handleAdminResetUrl()
     if(handleAdminResetUrl()) return;
-    // ☢️ 緊急清光重來 — 給「手機/平板卡住、看不到資料、密碼錯誤」用
-    // 清光: Service Worker + cache + localStorage + Firebase auth session
-    // 不清: Firebase 雲端資料（學生、出席、成績等都安全）
-    // 自動下載本機備份做保險
+    // ☢️ Silent 清光 (?nuclear=1) — 直接清光不顯示頁面 (使用者反映原本的全頁很醜)
+    // 清光: SW / cache / localStorage / sessionStorage / Firebase auth / IndexedDB
+    // 不清: Firebase 雲端資料 (學生 / 出席 / 成績 / 老師帳號 都安全)
     if(location.search.indexOf('nuclear=1') >= 0){
-      document.body.innerHTML =
-        '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;'+
-        'min-height:100vh;font-family:system-ui,-apple-system,sans-serif;padding:20px;text-align:center;'+
-        'background:#f9fafb;color:#111">'+
-        '<div style="font-size:56px;margin-bottom:12px">☢️</div>'+
-        '<h2 style="margin:0 0 12px;font-size:22px">緊急清光重來</h2>'+
-        '<p style="max-width:480px;line-height:1.8;color:#555;font-size:14px;margin:0 0 24px">'+
-        '本機快取會被清光，並重新從雲端 (Firebase) 同步全部資料。<br>'+
-        '<strong style="color:#16a34a">✅ 不會清除</strong>：雲端上的學生 / 出席 / 成績 / 老師帳號<br>'+
-        '<strong style="color:#dc2626">✘ 會清除</strong>：這台裝置的本機快取 / 登入狀態<br>'+
-        '<em style="color:#888;font-size:13px">適用：手機卡舊版、密碼錯誤、資料看不到、跨裝置不同步</em>'+
-        '</p>'+
-        '<button id="__nuke_btn" style="background:#dc2626;color:#fff;padding:14px 32px;border-radius:10px;'+
-        'border:0;font-weight:600;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,.3)">'+
-        '☢️ 確認清光 + 重新整理</button>'+
-        '<a href="'+location.pathname+'" '+
-        'style="color:#2563eb;text-decoration:underline;margin-top:18px;font-size:14px">取消，返回首頁</a>'+
-        '<pre id="__nuke_status" style="margin-top:24px;font-size:12px;color:#666;text-align:left;'+
-        'background:#fff;padding:12px;border-radius:6px;border:1px solid #e5e7eb;min-height:20px;'+
-        'max-width:480px;white-space:pre-wrap;word-break:break-all"></pre>'+
-        '</div>';
-      var nukeBtn = document.getElementById('__nuke_btn');
-      if(nukeBtn) nukeBtn.onclick = async function(){
-        var status = document.getElementById('__nuke_status');
-        var log = function(s){ if(status) status.textContent += s + '\n'; };
-        this.disabled = true; this.textContent = '清光中...請稍候';
-        this.style.background = '#9ca3af';
+      document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui;color:#666;font-size:14px">清光中...</div>';
+      (async function(){
         try {
-          // 註：原本會自動下載本機備份做保險，但使用者反映「跳出下載很奇怪」，已移除
-          // 雲端資料 (Firebase) 才是真實資料，本機只是快取，清光不損失任何重要內容
-          // 1) unregister all Service Workers
           if('serviceWorker' in navigator){
-            try {
-              var regs = await navigator.serviceWorker.getRegistrations();
-              for(var i = 0; i < regs.length; i++){ try { await regs[i].unregister(); } catch(_){} }
-              log('✅ Service Worker 已移除 (' + regs.length + ' 個)');
-            } catch(e){ log('⚠️ SW 移除失敗: ' + e.message); }
+            var regs = await navigator.serviceWorker.getRegistrations();
+            for(var i=0;i<regs.length;i++){ try { await regs[i].unregister(); } catch(_){} }
           }
-          // 2) clear all caches
           if('caches' in window){
-            try {
-              var names = await caches.keys();
-              for(var j = 0; j < names.length; j++){ try { await caches.delete(names[j]); } catch(_){} }
-              log('✅ 快取已清空 (' + names.length + ' 個)');
-            } catch(e){ log('⚠️ Cache 清除失敗: ' + e.message); }
+            var names = await caches.keys();
+            for(var j=0;j<names.length;j++){ try { await caches.delete(names[j]); } catch(_){} }
           }
-          // 3) localStorage / sessionStorage
-          try { localStorage.clear(); log('✅ localStorage 已清空'); } catch(_){ log('⚠️ localStorage 清除失敗'); }
-          try { sessionStorage.clear(); log('✅ sessionStorage 已清空'); } catch(_){}
-          // 4) Firebase auth signout (if loaded)
-          try {
-            if(window.firebase && firebase.auth){
-              await firebase.auth().signOut();
-              log('✅ Firebase 登入狀態已重置');
-            }
-          } catch(_){}
-          // 5) IndexedDB (Firebase 在這也存了一些 cache)
+          try { localStorage.clear(); } catch(_){}
+          try { sessionStorage.clear(); } catch(_){}
+          try { if(window.firebase && firebase.auth) await firebase.auth().signOut(); } catch(_){}
           try {
             if(window.indexedDB && indexedDB.databases){
               var dbs = await indexedDB.databases();
-              for(var d = 0; d < dbs.length; d++){
-                try { indexedDB.deleteDatabase(dbs[d].name); } catch(_){}
-              }
-              log('✅ IndexedDB 已清空 (' + dbs.length + ' 個)');
+              for(var d=0;d<dbs.length;d++){ try { indexedDB.deleteDatabase(dbs[d].name); } catch(_){} }
             }
           } catch(_){}
-          log('\n🎉 全部完成！2 秒後自動重新載入...');
-          setTimeout(function(){ location.href = location.pathname; }, 2000);
-        } catch(e){
-          log('\n❌ 清光過程出錯: ' + e.message);
-          log('請手動到瀏覽器設定 → 清除網站資料');
-        }
-      };
+        } catch(_){}
+        setTimeout(function(){ location.href = location.pathname; }, 400);
+      })();
       return;
     }
     if(location.search.indexOf('reset=1') >= 0){
