@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-sidebar-tidy';
+const APP_BUILD = '2026-05-27-fetch-sync';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5349,31 +5349,73 @@ const Sync = (() => {
     });
     App.listeners.push(()=> cref.off('value', ccb));
 
-    // 🔧 重大修復：child_added listener 在某些情況下只抓部分資料 (尤其大量學生時)
-    //    出席、作業、繳交、評量等都沒抓回 → 老師看不到。
-    //    在連線建立後 2 秒，對每個 array collection 主動 once('value') 強制抓全
+    // 🔧 重大修復：用 fetch REST API 補抓全部資料
+    //    Firebase SDK 的 child_added listener 在處理大量 students 後似乎卡住
+    //    後續 collection (assignments / attendance / submissions / evals) 都沒抓回
+    //    用 fetch 直接打 Firebase REST API 完全繞過 SDK WebSocket 問題
+    //    PowerShell curl 能成功 = fetch 也一定能成功
     setTimeout(function(){
-      if(!App.fbRef) return;
-      ARRAY_COLLECTIONS.forEach(function(node){
-        if(!_shouldSubscribe(node)) return;
-        try {
-          App.fbRef.child(node).once('value', function(snap){
-            var val = snap.val();
-            if(!val) return;
-            var arr = Array.isArray(val) ? val : Object.values(val);
-            arr = arr.filter(function(x){ return x && (x.id || x.sid); });
-            // 用 id 為 key 合併，不覆蓋本地新編輯（child_added 已收到的）
-            var existing = App.db[node] || [];
-            var byId = {};
-            existing.forEach(function(x){ if(x && x.id != null) byId[x.id] = x; });
-            arr.forEach(function(x){ if(x && x.id != null && !byId[x.id]) byId[x.id] = x; });
-            App.db[node] = Object.values(byId);
-            try { _saveDBLocal(); } catch(_){}
-          });
-        } catch(e){ console.warn('[sync-fallback]', node, e); }
+      _fetchAllFromFirebase().then(function(updated){
+        if(updated > 0){
+          console.log('[fetch-sync] 補抓回', updated, '個 collection 的資料');
+          try { _scheduleRerender(); } catch(_){}
+        }
+      }).catch(function(e){
+        console.warn('[fetch-sync] failed:', e);
       });
-      try { _scheduleRerender(); } catch(_){}
-    }, 2500);
+    }, 3000);
+  }
+
+  // 用 fetch REST API 抓 cms-v3/<roomCode> 完整資料 (繞過 SDK WebSocket)
+  async function _fetchAllFromFirebase(){
+    if(!App.cfg || !App.cfg.roomCode) return 0;
+    if(!window.firebase || !firebase.database || !firebase.database().app) return 0;
+    var dbURL = firebase.database().app.options.databaseURL;
+    if(!dbURL) return 0;
+    var url = dbURL.replace(/\/$/, '') + '/cms-v3/' + App.cfg.roomCode + '.json';
+    var r;
+    try { r = await fetch(url, { cache: 'no-store' }); } catch(e){ throw e; }
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    var data = await r.json();
+    if(!data || data.error){ throw new Error(data && data.error ? data.error : 'no data'); }
+
+    var updated = 0;
+    var ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','_qrCodes'];
+    ARR_NODES.forEach(function(node){
+      if(!_shouldSubscribe(node)) return;
+      var v = data[node];
+      if(!v) return;
+      var arr = Array.isArray(v) ? v : Object.values(v);
+      arr = arr.filter(function(x){ return x && (x.id != null || x.sid != null); });
+      // 用 id 合併，本地剛新增的不覆蓋
+      var existing = App.db[node] || [];
+      var byId = {};
+      existing.forEach(function(x){ if(x && x.id != null) byId[x.id] = x; });
+      arr.forEach(function(x){
+        if(x && x.id != null && !byId[x.id]){ byId[x.id] = x; }
+        else if(x && x.id == null && x.sid != null){
+          // 學生用 sid 比對
+          var existed = Object.values(byId).find(function(e){ return e && e.sid == x.sid; });
+          if(!existed) byId['_sid_' + x.sid] = x;
+        }
+      });
+      var merged = Object.values(byId);
+      if(merged.length > existing.length){
+        App.db[node] = merged;
+        updated++;
+      }
+    });
+    // 物件型 (settings / grades / branding)
+    ['settings','grades','branding'].forEach(function(node){
+      if(data[node] && !App.db[node]){
+        App.db[node] = data[node];
+        updated++;
+      }
+    });
+    if(updated > 0){
+      try { _saveDBLocal(); } catch(_){}
+    }
+    return updated;
   }
   function push(node, data){
     saveDB();
