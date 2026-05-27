@@ -1680,6 +1680,16 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 .login-spotify-card .input.select option,
 .login-spotify-card select.input option{
   text-align:center;       /* 下拉打開後每個選項也置中 */
+  color:#222;              /* 一般 option 深色 */
+}
+/* placeholder option 淡灰色 (IG/Discord 風 input placeholder) */
+.login-spotify-card .input.select option[disabled],
+.login-spotify-card select.input option[disabled]{
+  color:#9ca3af;
+}
+.login-spotify-card .input.select:has(option:disabled:checked),
+.login-spotify-card select.input:has(option:disabled:checked){
+  color:#9ca3af;           /* 還沒選時 select 自己也顯示灰色 */
 }
 .login-spotify-card .input.select option,
 .login-spotify-card select.input option{
@@ -4008,7 +4018,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-select-center';
+const APP_BUILD = '2026-05-28-placeholder';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10296,7 +10306,7 @@ function renderLoginStudentStage(){
   const f1 = el('div', { class:'field' });
   f1.appendChild(el('label', { class:'label' }, '① 選擇班級'));
   const selCls = el('select', { class:'input select' });
-  selCls.appendChild(el('option', { value:'' }, '── 請選擇班級 ──'));
+  selCls.appendChild(el('option', { value:'', disabled:'', selected:'', hidden:'' }, '請選擇班級'));
   classes.forEach(c => {
     const o = el('option', { value:c }, c);
     if(App._loginCls === c) o.setAttribute('selected','');
@@ -10333,7 +10343,7 @@ function renderLoginStudentStage(){
   const stuRemChk = el('input', { type:'checkbox' });
   if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId) stuRemChk.checked = true;
   stuRemLabel.appendChild(stuRemChk);
-  stuRemLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
+  stuRemLabel.appendChild(document.createTextNode(' 記住我'));
   stage.appendChild(stuRemLabel);
 
   // 自動回填: 班級 + 姓名 + 密碼 (若記住我有存)
@@ -10368,7 +10378,7 @@ function renderLoginStudentStage(){
       return;
     }
     selName.disabled = false;
-    selName.appendChild(el('option', { value:'' }, '── 請選擇姓名 ──'));
+    selName.appendChild(el('option', { value:'', disabled:'', selected:'', hidden:'' }, '請選擇姓名'));
     const list = App.db.students
       .filter(s => (s.cls || '未分班') === cls)
       .sort((a,b) => (a.seat||0) - (b.seat||0) || (a.name||'').localeCompare(b.name||''));
