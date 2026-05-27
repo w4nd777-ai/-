@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#2563eb">
 <!-- 🔒 CSP — 限制可載入的資源來源，防止 XSS 注入 (含 'unsafe-inline' 因為大量 inline style/event)
      允許：本站、Firebase、Google Drive、Anthropic、QR 服務 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://apis.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app wss://*.firebaseio.com https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com https://*.firebaseapp.com; media-src 'self' blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://apis.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app https://*.gstatic.com wss://*.firebaseio.com wss://*.firebasedatabase.app https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com https://*.firebaseapp.com; media-src 'self' blob: data:;">
 <!-- 🔒 防 clickjacking -->
 <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
 <!-- 🔒 不發送 referrer 給其他網站 -->
@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-fetch-sync';
+const APP_BUILD = '2026-05-27-csp-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
