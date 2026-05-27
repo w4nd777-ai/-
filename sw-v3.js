@@ -1,6 +1,6 @@
 /* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
 // M3: CACHE_NAME 動態化 — 每次部署 bump BUILD 字串即可強制取得新版資源
-const BUILD = '2026-05-27-nuclear';
+const BUILD = '2026-05-27-sw-bypass-fix';
 const CACHE_NAME = 'cms-v3-' + BUILD;
 const CORE_ASSETS = [
   'manifest.json',
@@ -36,9 +36,15 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  // never intercept API calls
+  // never intercept API calls (SW 攔截會打亂 long-polling / WebSocket)
   if(url.host.includes('anthropic.com')) return;
-  if(url.host.includes('firebaseio.com')) return;
+  if(url.host.includes('firebaseio.com')) return;            // 舊版 Firebase RTDB host
+  if(url.host.includes('firebasedatabase.app')) return;       // 🔧 新版 Firebase RTDB host (e.g. asia-southeast1.firebasedatabase.app)
+  if(url.host.includes('firebasestorage.app')) return;        // 🔧 Firebase Storage
+  if(url.host.includes('firebaseapp.com')) return;            // 🔧 Firebase Hosting / Auth
+  if(url.host.includes('identitytoolkit')) return;            // 🔧 Firebase Auth API
+  if(url.host.includes('securetoken')) return;                // 🔧 Firebase Auth token refresh
+  if(url.host.includes('ingest.sentry.io') || url.host.includes('ingest.us.sentry.io')) return; // Sentry 上報
   if(url.host.includes('googleapis.com')) return;
   if(url.host.includes('discord.com')) return;
   if(url.host.includes('api.qrserver.com')) return;
