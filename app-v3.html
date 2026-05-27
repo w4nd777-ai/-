@@ -22709,19 +22709,8 @@ function boot(){
         this.disabled = true; this.textContent = '清光中...請稍候';
         this.style.background = '#9ca3af';
         try {
-          // 0) 先把 localStorage 的 cms_* keys 整包丟到 download 做保險
-          try {
-            var snap = {};
-            for(var k in localStorage){ if(/^cms_/i.test(k)) snap[k] = localStorage.getItem(k); }
-            if(Object.keys(snap).length > 0){
-              var blob = new Blob([JSON.stringify(snap, null, 2)], {type:'application/json'});
-              var a = document.createElement('a');
-              a.href = URL.createObjectURL(blob);
-              a.download = 'cms-emergency-backup-' + new Date().toISOString().slice(0,10) + '.json';
-              document.body.appendChild(a); a.click(); document.body.removeChild(a);
-              log('✅ 本機快取已下載為保險備份');
-            }
-          } catch(_){ log('⚠️ 備份下載失敗（不影響後續清光）'); }
+          // 註：原本會自動下載本機備份做保險，但使用者反映「跳出下載很奇怪」，已移除
+          // 雲端資料 (Firebase) 才是真實資料，本機只是快取，清光不損失任何重要內容
           // 1) unregister all Service Workers
           if('serviceWorker' in navigator){
             try {
