@@ -3983,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-room-hidden';
+const APP_BUILD = '2026-05-28-clean-login-v2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8802,18 +8802,11 @@ function renderLoginTeacherStage(){
       onclick: _emailSignInTeacher
     });
     // Email icon (信封 SVG)
-    const emailIcon = document.createElement('span');
-    emailIcon.style.cssText = 'display:inline-flex;align-items:center';
-    emailIcon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><path d="M3 8l9 6 9-6m-18 0v10a2 2 0 002 2h14a2 2 0 002-2V8m-18 0V6a2 2 0 012-2h14a2 2 0 012 2v2" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    emailBtn.appendChild(emailIcon);
     const emailText = document.createElement('span');
     emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-    emailText.textContent = '用 Email 跨裝置登入';
+    emailText.textContent = '使用 Email 登入';
     emailBtn.appendChild(emailText);
     stage.appendChild(emailBtn);
-    stage.appendChild(el('div', {
-      style:'text-align:center;font-size:11px;color:rgba(255,255,255,.6);margin:-4px 0 10px'
-    }, '👆 推薦：任何裝置同一個 email + 密碼就同步'));
   }
 
   // 細分隔線 — 不要文字
@@ -8858,9 +8851,7 @@ function renderLoginTeacherStage(){
   const rememberChk = el('input', { type:'checkbox' });
   if(rememberSaved && rememberSaved.username) rememberChk.checked = true;
   rememberLabel.appendChild(rememberChk);
-  rememberLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
-  // L-6: 隱身視窗友善提示（device-key 可能無法保留）
-  rememberLabel.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '⚠ 隱身視窗不支援'));
+  rememberLabel.appendChild(document.createTextNode(' 記住我'));
   stage.appendChild(rememberLabel);
 
   const _lcT = (App._uiCustom && App._uiCustom.login) || {};
@@ -8966,15 +8957,13 @@ function renderLoginTeacherStage(){
   stage.appendChild(el('button', { type:'button', class:'btn-pill-primary',
     style:{marginTop:'8px'}, onclick: submit }, '登入'));
 
-  // 🔑 忘記密碼連結（批次 6：明示需要 Email + 安全問題雙重驗證）
+  // 忘記密碼連結 (極簡 - 無 icon，無說明文字)
   if(!_lcT.hideForgot){
-    const forgotWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px'} });
+    const forgotWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px',textAlign:'center'} });
     forgotWrap.appendChild(
       el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword, class:'lsc-link' },
-        '🔑 忘記密碼？')
+        '忘記密碼？')
     );
-    forgotWrap.appendChild(el('div', { class:'lsc-tiny-muted' },
-      '🛡️ 需 Email 驗證碼 + 安全問題（防止他人未授權重設）'));
     stage.appendChild(forgotWrap);
   }
 
@@ -10194,13 +10183,9 @@ function renderLoginStudentStage(){
       onmouseout: function(){ this.style.background = '#fff'; },
       onclick: _emailSignInStudent
     });
-    const emailIconS = document.createElement('span');
-    emailIconS.style.cssText = 'display:inline-flex;align-items:center';
-    emailIconS.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><path d="M3 8l9 6 9-6m-18 0v10a2 2 0 002 2h14a2 2 0 002-2V8m-18 0V6a2 2 0 012-2h14a2 2 0 012 2v2" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    emailStuBtn.appendChild(emailIconS);
     const emailTextS = document.createElement('span');
     emailTextS.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-    emailTextS.textContent = '用 Email 跨裝置登入';
+    emailTextS.textContent = '使用 Email 登入';
     emailStuBtn.appendChild(emailTextS);
     stage.appendChild(emailStuBtn);
   }
@@ -10266,8 +10251,6 @@ function renderLoginStudentStage(){
   if(_stuRem && _stuRem.role === 'student' && _stuRem.studentId) stuRemChk.checked = true;
   stuRemLabel.appendChild(stuRemChk);
   stuRemLabel.appendChild(document.createTextNode(' 記住我（7 天免輸入密碼）'));
-  // L-6: 隱身視窗友善提示
-  stuRemLabel.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, '⚠ 隱身視窗不支援'));
   stage.appendChild(stuRemLabel);
 
   // 自動回填: 班級 + 姓名 + 密碼 (若記住我有存)
@@ -10409,15 +10392,13 @@ function renderLoginStudentStage(){
     stage.appendChild(el('button', { type:'button', class:'btn-pill-ghost', style:{marginTop:'8px'}, onclick: studentRegisterFlow }, '📤 沒帳號？申請註冊'));
   }
 
-  // 忘記密碼（批次 6：明示需 Email 驗證碼，老師審核才生效）
+  // 忘記密碼 (極簡)
   if(!_lcS.hideForgot){
-    const fWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px'} });
+    const fWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px',textAlign:'center'} });
     fWrap.appendChild(
       el('a', { href:'javascript:void(0)', onclick: showForgotPassword, class:'lsc-link' },
-        '🔑 忘記密碼？')
+        '忘記密碼？')
     );
-    fWrap.appendChild(el('div', { class:'lsc-tiny-muted' },
-      '🛡️ 需 Email 驗證碼，老師審核後才生效'));
     stage.appendChild(fWrap);
   }
 
