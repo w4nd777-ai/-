@@ -3983,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-clean-login-v2';
+const APP_BUILD = '2026-05-28-gmail-logo';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8802,6 +8802,17 @@ function renderLoginTeacherStage(){
       onclick: _emailSignInTeacher
     });
     // Email icon (信封 SVG)
+    // Gmail 風彩色信封 logo (4 色精緻 icon，跟 Google G logo 同等級設計)
+    const emailIcon = document.createElement('span');
+    emailIcon.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
+    emailIcon.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 48 48">' +
+      '<path fill="#4285F4" d="M6 12.6L24 24l18-11.4V36a2 2 0 01-2 2H8a2 2 0 01-2-2V12.6z"/>' +
+      '<path fill="#34A853" d="M6 12.6c0-1.1.9-2 2-2h32c1.1 0 2 .9 2 2L24 24 6 12.6z"/>' +
+      '<path fill="#FBBC05" d="M6 12.6V36a2 2 0 002 2h8V20.3L6 12.6z"/>' +
+      '<path fill="#EA4335" d="M42 12.6V36a2 2 0 01-2 2h-8V20.3l10-7.7z"/>' +
+      '</svg>';
+    emailBtn.appendChild(emailIcon);
     const emailText = document.createElement('span');
     emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
     emailText.textContent = '使用 Email 登入';
@@ -10183,6 +10194,17 @@ function renderLoginStudentStage(){
       onmouseout: function(){ this.style.background = '#fff'; },
       onclick: _emailSignInStudent
     });
+    // Gmail 風彩色信封 logo
+    const emailIconS = document.createElement('span');
+    emailIconS.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
+    emailIconS.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 48 48">' +
+      '<path fill="#4285F4" d="M6 12.6L24 24l18-11.4V36a2 2 0 01-2 2H8a2 2 0 01-2-2V12.6z"/>' +
+      '<path fill="#34A853" d="M6 12.6c0-1.1.9-2 2-2h32c1.1 0 2 .9 2 2L24 24 6 12.6z"/>' +
+      '<path fill="#FBBC05" d="M6 12.6V36a2 2 0 002 2h8V20.3L6 12.6z"/>' +
+      '<path fill="#EA4335" d="M42 12.6V36a2 2 0 01-2 2h-8V20.3l10-7.7z"/>' +
+      '</svg>';
+    emailStuBtn.appendChild(emailIconS);
     const emailTextS = document.createElement('span');
     emailTextS.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
     emailTextS.textContent = '使用 Email 登入';
@@ -10387,19 +10409,32 @@ function renderLoginStudentStage(){
   // 登入按鈕 (Spotify 風格 pill primary)
   stage.appendChild(el('button', { type:'button', class:'btn-pill-primary', style:{marginTop:'8px'}, onclick: attemptLogin }, '登入'));
 
-  // 申請註冊（學生 tab 特有）
+  // 申請註冊 + 忘記密碼 — 放同一行兩邊，用「 · 」分隔，視覺區分（註冊強調 / 忘記密碼次要）
+  const bottomRow = el('div', { class:'lsc-bottom-links', style:{marginTop:'12px',textAlign:'center',display:'flex',justifyContent:'center',alignItems:'center',gap:'10px'} });
   if(!_lcS.hideRegister){
-    stage.appendChild(el('button', { type:'button', class:'btn-pill-ghost', style:{marginTop:'8px'}, onclick: studentRegisterFlow }, '📤 沒帳號？申請註冊'));
+    // 申請註冊 — 強調 (粗體 + 主色)
+    bottomRow.appendChild(el('a', {
+      href:'javascript:void(0)',
+      onclick: studentRegisterFlow,
+      class:'lsc-link',
+      style:'font-weight:700;color:var(--primary,#2563eb)'
+    }, '申請註冊'));
   }
-
-  // 忘記密碼 (極簡)
+  if(!_lcS.hideRegister && !_lcS.hideForgot){
+    // 分隔符
+    bottomRow.appendChild(el('span', { style:'color:rgba(255,255,255,.3);font-size:11px' }, '|'));
+  }
   if(!_lcS.hideForgot){
-    const fWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px',textAlign:'center'} });
-    fWrap.appendChild(
-      el('a', { href:'javascript:void(0)', onclick: showForgotPassword, class:'lsc-link' },
-        '忘記密碼？')
-    );
-    stage.appendChild(fWrap);
+    // 忘記密碼 — 次要 (一般字、灰色)
+    bottomRow.appendChild(el('a', {
+      href:'javascript:void(0)',
+      onclick: showForgotPassword,
+      class:'lsc-link',
+      style:'color:rgba(255,255,255,.7)'
+    }, '忘記密碼？'));
+  }
+  if(bottomRow.children.length > 0){
+    stage.appendChild(bottomRow);
   }
 
   return stage;
