@@ -4001,7 +4001,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-select-fix';
+const APP_BUILD = '2026-05-28-login-tabs';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8384,8 +8384,12 @@ async function _emailLoginModal(title){
     var card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:14px;padding:26px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:system-ui';
     card.innerHTML =
-      '<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:6px">' + title + '</div>' +
-      '<div style="font-size:13px;color:#666;margin-bottom:18px;line-height:1.6">用同樣 email + 密碼，任何裝置都能登入並同步資料</div>' +
+      '<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:14px">' + title + '</div>' +
+      // tabs (登入 / 註冊)
+      '<div style="display:flex;gap:0;margin-bottom:18px;border-bottom:1.5px solid #e5e7eb">' +
+      '<button id="__el_tab_login" type="button" style="flex:1;padding:10px;border:0;background:transparent;cursor:pointer;font-size:14px;font-weight:600;color:#16a34a;border-bottom:2.5px solid #16a34a;margin-bottom:-1.5px">登入</button>' +
+      '<button id="__el_tab_reg" type="button" style="flex:1;padding:10px;border:0;background:transparent;cursor:pointer;font-size:14px;font-weight:600;color:#888;border-bottom:2.5px solid transparent;margin-bottom:-1.5px">註冊</button>' +
+      '</div>' +
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">Email</label>' +
       '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:14px" />' +
@@ -8394,15 +8398,44 @@ async function _emailLoginModal(title){
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:18px" />' +
       '<div style="display:flex;gap:8px">' +
       '<button id="__el_cancel" style="flex:1;padding:11px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#555;cursor:pointer;font-size:14px">取消</button>' +
-      '<button id="__el_ok" style="flex:2;padding:11px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px">登入 / 註冊</button>' +
+      '<button id="__el_ok" style="flex:2;padding:11px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px">登入</button>' +
       '</div>' +
-      '<div style="font-size:11px;color:#888;text-align:center;margin-top:12px;line-height:1.5">沒帳號的話會自動註冊<br>之後任何裝置用同樣 email + 密碼都能登入</div>';
+      '<div id="__el_hint" style="font-size:11px;color:#888;text-align:center;margin-top:12px;line-height:1.5">用同樣 email + 密碼，任何裝置都能登入並同步資料</div>';
     overlay.appendChild(card);
     document.body.appendChild(overlay);
     var iEmail = card.querySelector('#__el_email');
     var iPw = card.querySelector('#__el_pw');
     var btnOk = card.querySelector('#__el_ok');
     var btnCancel = card.querySelector('#__el_cancel');
+    var tabLogin = card.querySelector('#__el_tab_login');
+    var tabReg = card.querySelector('#__el_tab_reg');
+    var hintEl = card.querySelector('#__el_hint');
+    var mode = 'login'; // 預設登入 tab
+
+    function setMode(m){
+      mode = m;
+      if(m === 'login'){
+        tabLogin.style.color = '#16a34a';
+        tabLogin.style.borderBottomColor = '#16a34a';
+        tabReg.style.color = '#888';
+        tabReg.style.borderBottomColor = 'transparent';
+        btnOk.textContent = '登入';
+        iPw.setAttribute('autocomplete', 'current-password');
+        hintEl.textContent = '用同樣 email + 密碼，任何裝置都能登入並同步資料';
+      } else {
+        tabReg.style.color = '#16a34a';
+        tabReg.style.borderBottomColor = '#16a34a';
+        tabLogin.style.color = '#888';
+        tabLogin.style.borderBottomColor = 'transparent';
+        btnOk.textContent = '註冊';
+        iPw.setAttribute('autocomplete', 'new-password');
+        hintEl.textContent = '建立帳號後，任何裝置用同樣 email + 密碼都能登入';
+      }
+    }
+
+    tabLogin.onclick = function(){ setMode('login'); };
+    tabReg.onclick = function(){ setMode('reg'); };
+
     setTimeout(function(){ try { iEmail.focus(); } catch(_){} }, 100);
     function close(val){ try { document.body.removeChild(overlay); } catch(_){} resolve(val); }
     iEmail.addEventListener('keydown', function(e){ if(e.key==='Enter') iPw.focus(); });
@@ -8412,7 +8445,7 @@ async function _emailLoginModal(title){
       var pw = iPw.value || '';
       if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ iEmail.style.borderColor='#dc2626'; iEmail.focus(); return; }
       if(!pw || pw.length < 6){ iPw.style.borderColor='#dc2626'; iPw.focus(); return; }
-      close({email: email, password: pw});
+      close({email: email, password: pw, mode: mode});
     };
     btnCancel.onclick = function(){ close(null); };
   });
@@ -8423,39 +8456,43 @@ async function _emailSignInStudent(ev){
     try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
-  const input = await _emailLoginModal('📧 學生 Email 登入');
+  const input = await _emailLoginModal('學生 Email 登入');
   if(!input) return;
-  const email = input.email, password = input.password;
+  const email = input.email, password = input.password, mode = input.mode || 'login';
   try {
     let userCred;
-    try {
-      userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
-    } catch(e){
-      if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential'){
-        const ok = confirm('Email ' + email + ' 還沒註冊。\n要立即註冊嗎？\n\n注意：第一次需綁定學號（系統會自動詢問）');
-        if(!ok) return;
-        try {
-          userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-        } catch(e2){
-          if(e2.code === 'auth/email-already-in-use'){
-            const sendReset = confirm('Email ' + email + ' 已註冊但密碼不對。\n要寄重設信到 ' + email + ' 嗎？');
-            if(sendReset){
-              try {
-                await firebase.auth().sendPasswordResetEmail(email);
-                toast('✅ 重設信已寄到 ' + email + '，收信後重來登入', 'success', 10000);
-              } catch(eR){ toast('寄信失敗: ' + (eR.message||eR.code), 'danger'); }
-            }
-          }
-          else if(e2.code === 'auth/weak-password'){ toast('密碼太弱 (至少 6 字)', 'danger'); }
-          else if(e2.code === 'auth/operation-not-allowed'){ toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); }
-          else { toast('註冊失敗: ' + (e2.message||e2.code), 'danger'); }
-          return;
+    if(mode === 'reg'){
+      // 註冊模式
+      try {
+        userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      } catch(e){
+        if(e.code === 'auth/email-already-in-use'){
+          try { toast('此 Email 已註冊。請切到「登入」分頁登入', 'danger', 6000); } catch(_){}
+        } else if(e.code === 'auth/weak-password'){
+          try { toast('密碼太弱 (至少 6 字)', 'danger'); } catch(_){}
+        } else if(e.code === 'auth/operation-not-allowed'){
+          try { toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+        } else {
+          try { toast('註冊失敗: ' + (e.message||e.code), 'danger'); } catch(_){}
         }
-      } else if(e.code === 'auth/wrong-password'){ toast('密碼錯誤', 'danger'); return; }
-      else if(e.code === 'auth/operation-not-allowed'){ toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); return; }
-      else { toast('登入失敗: ' + (e.message||e.code), 'danger'); return; }
+        return;
+      }
+    } else {
+      // 登入模式
+      try {
+        userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
+      } catch(e){
+        if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
+          try { toast('帳號或密碼錯誤。沒帳號請切到「註冊」分頁', 'danger', 5000); } catch(_){}
+        } else if(e.code === 'auth/operation-not-allowed'){
+          try { toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+        } else {
+          try { toast('登入失敗: ' + (e.message||e.code), 'danger'); } catch(_){}
+        }
+        return;
+      }
     }
-    // 成功 — 走學生綁定流程 (沿用 google student handler 的邏輯)
+    // 成功 — 走學生綁定流程 (第一次會跳出學號綁定)
     await _handleGoogleAuthStudent(userCred.user);
   } catch(e){
     console.error('[email-signin-student]', e);
@@ -8468,53 +8505,39 @@ async function _emailSignInTeacher(ev){
     try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
-  const input = await _emailLoginModal('📧 老師 Email 登入');
+  const input = await _emailLoginModal('老師 Email 登入');
   if(!input) return;
-  const email = input.email, password = input.password;
+  const email = input.email, password = input.password, mode = input.mode || 'login';
   try {
     let userCred;
-    try {
-      userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
-    } catch(e){
-      if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential'){
-        // 自動註冊
-        const ok = confirm('Email ' + email + ' 還沒註冊。\n要立即註冊嗎？\n\n注意：這個 email + 密碼 就是你的「跨裝置登入帳號」，任何裝置都能用同樣帳密進入。');
-        if(!ok) return;
-        try {
-          userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-        } catch(e2){
-          if(e2.code === 'auth/email-already-in-use'){
-            // 🔧 提供「寄重設密碼信」選項
-            const sendReset = confirm(
-              'Email ' + email + ' 已註冊，但密碼不對 (可能是你之前測試時建的)。\n\n' +
-              '要寄「重設密碼」信到 ' + email + ' 嗎？\n' +
-              '（收信後點連結設新密碼，再回來這裡登入）'
-            );
-            if(sendReset){
-              try {
-                await firebase.auth().sendPasswordResetEmail(email);
-                try { toast('✅ 重設信已寄到 ' + email + '，請去收信點連結設新密碼', 'success', 10000); } catch(_){}
-              } catch(eReset){
-                try { toast('寄信失敗: ' + (eReset.message || eReset.code), 'danger'); } catch(_){}
-              }
-            }
-          } else if(e2.code === 'auth/weak-password'){
-            try { toast('密碼太弱（至少 6 字）', 'danger'); } catch(_){}
-          } else if(e2.code === 'auth/operation-not-allowed'){
-            try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
-          } else {
-            try { toast('註冊失敗: ' + (e2.message || e2.code), 'danger', 6000); } catch(_){}
-          }
-          return;
+    if(mode === 'reg'){
+      // 註冊模式
+      try {
+        userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      } catch(e){
+        if(e.code === 'auth/email-already-in-use'){
+          try { toast('此 Email 已註冊。請切到「登入」分頁登入，或用「忘記密碼」重設', 'danger', 7000); } catch(_){}
+        } else if(e.code === 'auth/weak-password'){
+          try { toast('密碼太弱（至少 6 字）', 'danger'); } catch(_){}
+        } else if(e.code === 'auth/operation-not-allowed'){
+          try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+        } else {
+          try { toast('註冊失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
         }
-      } else if(e.code === 'auth/wrong-password'){
-        try { toast('密碼錯誤', 'danger'); } catch(_){}
         return;
-      } else if(e.code === 'auth/operation-not-allowed'){
-        try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
-        return;
-      } else {
-        try { toast('登入失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
+      }
+    } else {
+      // 登入模式
+      try {
+        userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
+      } catch(e){
+        if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
+          try { toast('帳號或密碼錯誤。沒帳號請切到「註冊」分頁', 'danger', 5000); } catch(_){}
+        } else if(e.code === 'auth/operation-not-allowed'){
+          try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+        } else {
+          try { toast('登入失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
+        }
         return;
       }
     }
