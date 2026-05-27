@@ -3983,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-no-force-pw';
+const APP_BUILD = '2026-05-28-email-login';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8346,6 +8346,196 @@ async function _handleGoogleAuthResult(user){
 }
 
 // Google 按鈕內容 (含官方 Google logo SVG)
+// ════════════════════════════════════════════════════════════
+// 📧 Email/Password 登入 — Chrome 第三方 cookie 政策不擋這個
+//    100% 純 HTTPS REST API，跨裝置同步無 cookie / popup / iframe 問題
+// ════════════════════════════════════════════════════════════
+async function _emailLoginModal(title){
+  return new Promise(function(resolve){
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#fff;border-radius:14px;padding:26px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:system-ui';
+    card.innerHTML =
+      '<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:6px">' + title + '</div>' +
+      '<div style="font-size:13px;color:#666;margin-bottom:18px;line-height:1.6">用同樣 email + 密碼，任何裝置都能登入並同步資料</div>' +
+      '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">📧 Email</label>' +
+      '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" ' +
+      'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:14px" />' +
+      '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">🔑 密碼 (至少 6 字)</label>' +
+      '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" ' +
+      'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:18px" />' +
+      '<div style="display:flex;gap:8px">' +
+      '<button id="__el_cancel" style="flex:1;padding:11px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#555;cursor:pointer;font-size:14px">取消</button>' +
+      '<button id="__el_ok" style="flex:2;padding:11px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px">登入 / 註冊</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:#888;text-align:center;margin-top:12px;line-height:1.5">沒帳號的話會自動註冊<br>之後任何裝置用同樣 email + 密碼都能登入</div>';
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    var iEmail = card.querySelector('#__el_email');
+    var iPw = card.querySelector('#__el_pw');
+    var btnOk = card.querySelector('#__el_ok');
+    var btnCancel = card.querySelector('#__el_cancel');
+    setTimeout(function(){ try { iEmail.focus(); } catch(_){} }, 100);
+    function close(val){ try { document.body.removeChild(overlay); } catch(_){} resolve(val); }
+    iEmail.addEventListener('keydown', function(e){ if(e.key==='Enter') iPw.focus(); });
+    iPw.addEventListener('keydown', function(e){ if(e.key==='Enter') btnOk.click(); if(e.key==='Escape') btnCancel.click(); });
+    btnOk.onclick = function(){
+      var email = (iEmail.value||'').trim();
+      var pw = iPw.value || '';
+      if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ iEmail.style.borderColor='#dc2626'; iEmail.focus(); return; }
+      if(!pw || pw.length < 6){ iPw.style.borderColor='#dc2626'; iPw.focus(); return; }
+      close({email: email, password: pw});
+    };
+    btnCancel.onclick = function(){ close(null); };
+  });
+}
+
+async function _emailSignInStudent(ev){
+  if(!window.firebase || !firebase.auth){
+    try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
+    return;
+  }
+  const input = await _emailLoginModal('📧 學生 Email 登入');
+  if(!input) return;
+  const email = input.email, password = input.password;
+  try {
+    let userCred;
+    try {
+      userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
+    } catch(e){
+      if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential'){
+        const ok = confirm('Email ' + email + ' 還沒註冊。\n要立即註冊嗎？\n\n注意：第一次需綁定學號（系統會自動詢問）');
+        if(!ok) return;
+        try {
+          userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+        } catch(e2){
+          if(e2.code === 'auth/email-already-in-use'){ toast('Email 已註冊但密碼錯誤', 'danger'); }
+          else if(e2.code === 'auth/weak-password'){ toast('密碼太弱 (至少 6 字)', 'danger'); }
+          else if(e2.code === 'auth/operation-not-allowed'){ toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); }
+          else { toast('註冊失敗: ' + (e2.message||e2.code), 'danger'); }
+          return;
+        }
+      } else if(e.code === 'auth/wrong-password'){ toast('密碼錯誤', 'danger'); return; }
+      else if(e.code === 'auth/operation-not-allowed'){ toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); return; }
+      else { toast('登入失敗: ' + (e.message||e.code), 'danger'); return; }
+    }
+    // 成功 — 走學生綁定流程 (沿用 google student handler 的邏輯)
+    await _handleGoogleAuthStudent(userCred.user);
+  } catch(e){
+    console.error('[email-signin-student]', e);
+    try { toast('Email 登入失敗: ' + (e.message || e), 'danger'); } catch(_){}
+  }
+}
+
+async function _emailSignInTeacher(ev){
+  if(!window.firebase || !firebase.auth){
+    try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
+    return;
+  }
+  const input = await _emailLoginModal('📧 老師 Email 登入');
+  if(!input) return;
+  const email = input.email, password = input.password;
+  try {
+    let userCred;
+    try {
+      userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
+    } catch(e){
+      if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential'){
+        // 自動註冊
+        const ok = confirm('Email ' + email + ' 還沒註冊。\n要立即註冊嗎？\n\n注意：這個 email + 密碼 就是你的「跨裝置登入帳號」，任何裝置都能用同樣帳密進入。');
+        if(!ok) return;
+        try {
+          userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
+        } catch(e2){
+          if(e2.code === 'auth/email-already-in-use'){
+            try { toast('此 Email 已有人註冊，密碼錯誤', 'danger', 5000); } catch(_){}
+          } else if(e2.code === 'auth/weak-password'){
+            try { toast('密碼太弱（至少 6 字）', 'danger'); } catch(_){}
+          } else if(e2.code === 'auth/operation-not-allowed'){
+            try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+          } else {
+            try { toast('註冊失敗: ' + (e2.message || e2.code), 'danger', 6000); } catch(_){}
+          }
+          return;
+        }
+      } else if(e.code === 'auth/wrong-password'){
+        try { toast('密碼錯誤', 'danger'); } catch(_){}
+        return;
+      } else if(e.code === 'auth/operation-not-allowed'){
+        try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+        return;
+      } else {
+        try { toast('登入失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
+        return;
+      }
+    }
+    // 成功
+    await _completeEmailLogin(userCred.user, 'teacher');
+  } catch(e){
+    console.error('[email-signin-teacher]', e);
+    try { toast('Email 登入失敗: ' + (e.message || e), 'danger', 6000); } catch(_){}
+  }
+}
+
+async function _completeEmailLogin(user, role){
+  // 設定 cfg
+  try {
+    App.cfg = App.cfg || {};
+    if(!App.cfg.roomCode) App.cfg.roomCode = 'DEMO01';
+    App.cfg.role = role;
+    if(typeof saveCfg === 'function') saveCfg(App.cfg);
+  } catch(_){}
+  // 寫 email_users mapping (跨裝置同步用)
+  try {
+    if(window.firebase && firebase.database){
+      const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
+      firebase.database().ref('cms-v3/' + App.cfg.roomCode + '/email_users/' + emailKey).update({
+        email: user.email,
+        uid: user.uid,
+        role: role,
+        lastLoginAt: firebase.database.ServerValue.TIMESTAMP
+      }).catch(function(e){ console.warn('[email-login] mapping write:', e); });
+    }
+  } catch(_){}
+  // 確保 accounts 有對應 entry
+  try {
+    App.db = App.db || { accounts: [] };
+    App.db.accounts = App.db.accounts || [];
+    const uname = 'email:' + user.email;
+    let acc = App.db.accounts.find(function(a){ return a && a.username === uname; });
+    if(!acc){
+      acc = {
+        id: 'acc_e_' + Date.now(),
+        username: uname,
+        email: user.email,
+        firebaseUid: user.uid,
+        name: user.email.split('@')[0],
+        role: role,
+        createdAt: Date.now()
+      };
+      App.db.accounts.push(acc);
+      try { if(typeof saveDB === 'function') saveDB(true); } catch(_){}
+      try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
+    }
+    App.session = {
+      role: role,
+      account: uname,
+      accountId: acc.id,
+      username: uname,
+      name: acc.name,
+      email: user.email,
+      firebaseUid: user.uid,
+      loginAt: Date.now(),
+      authMethod: 'email'
+    };
+    if(typeof saveSession === 'function') saveSession(App.session);
+  } catch(e){ console.warn('[email-login] session:', e); }
+  // 立即進系統
+  try { toast('🎉 已用 ' + user.email + ' 登入', 'success', 3000); } catch(_){}
+  try { if(typeof rerender === 'function') rerender(); } catch(_){ try { location.reload(); } catch(__){} }
+}
+
 function _googleBtnContent(label){
   const wrap = document.createElement('span');
   wrap.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;width:100%;';
@@ -8590,6 +8780,19 @@ function renderLoginTeacherStage(){
     });
     googleBtn.appendChild(_googleBtnContent('用 Google 登入'));
     stage.appendChild(googleBtn);
+
+    // 📧 Email/Password 登入 (跨裝置同步，不依賴 Chrome cookie 政策)
+    const emailBtn = el('button', {
+      type:'button',
+      style:'width:100%;padding:11px 14px;border-radius:10px;border:0;background:#16a34a;color:#fff;cursor:pointer;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;font-weight:600;font-size:14px;box-shadow:0 2px 6px rgba(22,163,74,.25)',
+      onclick: _emailSignInTeacher
+    },
+      document.createTextNode('📧 用 Email 跨裝置登入')
+    );
+    stage.appendChild(emailBtn);
+    stage.appendChild(el('div', {
+      style:'text-align:center;font-size:11px;color:rgba(255,255,255,.6);margin:-4px 0 10px'
+    }, '👆 推薦：任何裝置同一個 email + 密碼就同步'));
   }
 
   // 細分隔線 — 不要文字
@@ -9942,6 +10145,16 @@ function renderLoginStudentStage(){
     });
     googleStuBtn.appendChild(_googleBtnContent('用 Google 登入'));
     stage.appendChild(googleStuBtn);
+
+    // 📧 Email/Password 登入 (跨裝置同步)
+    const emailStuBtn = el('button', {
+      type:'button',
+      style:'width:100%;padding:11px 14px;border-radius:10px;border:0;background:#16a34a;color:#fff;cursor:pointer;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;font-weight:600;font-size:14px;box-shadow:0 2px 6px rgba(22,163,74,.25)',
+      onclick: _emailSignInStudent
+    },
+      document.createTextNode('📧 用 Email 跨裝置登入')
+    );
+    stage.appendChild(emailStuBtn);
   }
 
   // 細分隔線 — 不要文字
