@@ -3983,7 +3983,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-email-reset';
+const APP_BUILD = '2026-05-28-email-only';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8764,7 +8764,7 @@ function renderLoginTeacherStage(){
   // Spotify 版：tab 已標示「老師」，stage 內不再放 H3
   const stage = el('div', { class:'login-stage' });
 
-  // ☁️ 偵測是否已用 Google 登入 → 顯示「點此繼續」綠色按鈕
+  // 📧 偵測是否已用 Email/Google 登入 → 顯示「點此繼續」按鈕
   const fbUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
   if(fbUser && fbUser.email){
     // 已登入狀態
@@ -8785,31 +8785,30 @@ function renderLoginTeacherStage(){
         style:'font-size:11px;color:rgba(255,255,255,.6);text-decoration:underline',
         onclick: async function(){
           try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
-          try { toast('已登出 Google，請重新選擇帳號', 'success', 2000); } catch(_){}
+          try { toast('已登出，請重新登入', 'success', 2000); } catch(_){}
           setTimeout(function(){ try { rerender(); } catch(_){ location.reload(); } }, 400);
         }
-      }, '換其他 Google 帳號')
+      }, '換其他帳號')
     ));
   } else {
-    // ☁️ Google 登入按鈕 — 簡潔版
-    const googleBtn = el('button', {
-      type:'button',
-      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
-      onmouseover: function(){ this.style.background = '#f8f9fa'; },
-      onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: _googleSignInTeacher
-    });
-    googleBtn.appendChild(_googleBtnContent('用 Google 登入'));
-    stage.appendChild(googleBtn);
-
-    // 📧 Email/Password 登入 (跨裝置同步，不依賴 Chrome cookie 政策)
+    // 📧 Email/Password 登入 — 跟原本 Google 按鈕一樣的精緻白底樣式
+    // (Google 按鈕已移除，因 Chrome 第三方 cookie 政策擋住 OAuth)
     const emailBtn = el('button', {
       type:'button',
-      style:'width:100%;padding:11px 14px;border-radius:10px;border:0;background:#16a34a;color:#fff;cursor:pointer;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;font-weight:600;font-size:14px;box-shadow:0 2px 6px rgba(22,163,74,.25)',
+      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
+      onmouseover: function(){ this.style.background = '#f8f9fa'; },
+      onmouseout: function(){ this.style.background = '#fff'; },
       onclick: _emailSignInTeacher
-    },
-      document.createTextNode('📧 用 Email 跨裝置登入')
-    );
+    });
+    // Email icon (信封 SVG)
+    const emailIcon = document.createElement('span');
+    emailIcon.style.cssText = 'display:inline-flex;align-items:center';
+    emailIcon.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><path d="M3 8l9 6 9-6m-18 0v10a2 2 0 002 2h14a2 2 0 002-2V8m-18 0V6a2 2 0 012-2h14a2 2 0 012 2v2" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    emailBtn.appendChild(emailIcon);
+    const emailText = document.createElement('span');
+    emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
+    emailText.textContent = '用 Email 跨裝置登入';
+    emailBtn.appendChild(emailText);
     stage.appendChild(emailBtn);
     stage.appendChild(el('div', {
       style:'text-align:center;font-size:11px;color:rgba(255,255,255,.6);margin:-4px 0 10px'
@@ -10156,25 +10155,23 @@ function renderLoginStudentStage(){
       }, '換其他 Google 帳號')
     ));
   } else {
-    // ☁️ Google 登入按鈕 — 學生簡潔版
-    const googleStuBtn = el('button', {
-      type:'button',
-      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
-      onmouseover: function(){ this.style.background = '#f8f9fa'; },
-      onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: _googleSignInStudent
-    });
-    googleStuBtn.appendChild(_googleBtnContent('用 Google 登入'));
-    stage.appendChild(googleStuBtn);
-
-    // 📧 Email/Password 登入 (跨裝置同步)
+    // 📧 Email/Password 登入 — 跟原本 Google 按鈕一樣的精緻白底樣式
+    // Google 按鈕已移除 (Chrome 第三方 cookie 政策擋住 OAuth)
     const emailStuBtn = el('button', {
       type:'button',
-      style:'width:100%;padding:11px 14px;border-radius:10px;border:0;background:#16a34a;color:#fff;cursor:pointer;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;font-weight:600;font-size:14px;box-shadow:0 2px 6px rgba(22,163,74,.25)',
+      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
+      onmouseover: function(){ this.style.background = '#f8f9fa'; },
+      onmouseout: function(){ this.style.background = '#fff'; },
       onclick: _emailSignInStudent
-    },
-      document.createTextNode('📧 用 Email 跨裝置登入')
-    );
+    });
+    const emailIconS = document.createElement('span');
+    emailIconS.style.cssText = 'display:inline-flex;align-items:center';
+    emailIconS.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><path d="M3 8l9 6 9-6m-18 0v10a2 2 0 002 2h14a2 2 0 002-2V8m-18 0V6a2 2 0 012-2h14a2 2 0 012 2v2" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    emailStuBtn.appendChild(emailIconS);
+    const emailTextS = document.createElement('span');
+    emailTextS.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
+    emailTextS.textContent = '用 Email 跨裝置登入';
+    emailStuBtn.appendChild(emailTextS);
     stage.appendChild(emailStuBtn);
   }
 
