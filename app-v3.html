@@ -3973,7 +3973,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-list-mode-v2';
+const APP_BUILD = '2026-05-28-google-instant';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8279,10 +8279,36 @@ async function _handleGoogleAuthResult(user){
     if(typeof saveCfg === 'function') saveCfg(App.cfg);
   } catch(e){ console.warn('[google-signin] saveCfg failed:', e); }
   // 設定 session — 直接給老師身份
+  // 🔧 確保老師帳號存在於 App.db.accounts (rerender 後 currentTeacher 才找得到)
   try {
+    App.db = App.db || { accounts: [] };
+    App.db.accounts = App.db.accounts || [];
+    const existingAcc = App.db.accounts.find(a => a && a.username === 'google:' + user.email);
+    let acc;
+    if(!existingAcc){
+      acc = {
+        id: 'acc_g_' + Date.now(),
+        username: 'google:' + user.email,
+        displayName: user.displayName || user.email,
+        password: '',
+        email: user.email,
+        photoURL: user.photoURL || '',
+        firebaseUid: user.uid,
+        role: 'teacher',
+        createdAt: Date.now()
+      };
+      App.db.accounts.push(acc);
+      try { if(typeof saveDB === 'function') saveDB(true); } catch(_){}
+      try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
+    } else {
+      acc = existingAcc;
+    }
     App.session = {
       role: 'teacher',
-      account: 'google:' + user.email,
+      account: acc.username,
+      accountId: acc.id,
+      username: acc.username,
+      name: acc.displayName || user.displayName || user.email,
       displayName: user.displayName || user.email,
       photoURL: user.photoURL || '',
       firebaseUid: user.uid,
@@ -8291,7 +8317,19 @@ async function _handleGoogleAuthResult(user){
     };
     if(typeof saveSession === 'function') saveSession(App.session);
   } catch(e){ console.warn('[google-signin] saveSession failed:', e); }
-  // 短暫等待寫入後 reload 套用
+
+  // 🔧 立即進系統 — 直接 rerender 而不是 setTimeout reload
+  // 這修了「登入後登入畫面還在」的 bug
+  try {
+    if(typeof toast === 'function') toast('🎉 歡迎 ' + (user.displayName || user.email), 'success', 2500);
+  } catch(_){}
+  try {
+    if(typeof rerender === 'function'){
+      rerender();
+      return; // rerender 成功，不需 reload
+    }
+  } catch(e){ console.warn('[google-signin] rerender failed:', e); }
+  // fallback: rerender 失敗才 reload
   setTimeout(function(){
     try { location.reload(); } catch(_) { location.href = location.pathname; }
   }, 600);
@@ -8444,9 +8482,14 @@ async function _completeStudentGoogleLogin(stu, user){
     };
     if(typeof saveSession === 'function') saveSession(App.session);
   } catch(e){ console.warn('[google-student] saveSession failed:', e); }
+  // 🔧 立即進系統 (不再等 600ms reload，避免「登入後登入畫面還在」bug)
+  try {
+    if(typeof rerender === 'function'){ rerender(); return; }
+  } catch(e){ console.warn('[google-student] rerender failed:', e); }
+  // fallback
   setTimeout(function(){
     try { location.reload(); } catch(_) { location.href = location.pathname; }
-  }, 600);
+  }, 300);
 }
 
 // 跳出綁定學號 UI — 第一次學生 Google 登入時用
