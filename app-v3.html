@@ -3931,7 +3931,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-27-student-bind';
+const APP_BUILD = '2026-05-27-sync-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8229,7 +8229,22 @@ async function _handleGoogleAuthStudent(user){
   } catch(e){ console.warn('[google-student] lookup failed:', e); }
   // 2) 已綁定 → 直接登入該學生
   if(sidBound){
-    const stu = (App.db.students || []).find(s => String(s.sid) === sidBound);
+    let stu = (App.db.students || []).find(s => String(s.sid) === sidBound);
+    // 🔧 修跨裝置同步問題：新裝置 localStorage 空，本地找不到 → 直接從 Firebase 拉學生名單
+    if(!stu && firebase.database){
+      try {
+        const stuSnap = await firebase.database().ref('cms-v3/' + App.cfg.roomCode + '/students').once('value');
+        const remoteStudents = stuSnap.val();
+        if(remoteStudents){
+          // 兼容 array 或 object 格式
+          const arr = Array.isArray(remoteStudents) ? remoteStudents : Object.values(remoteStudents);
+          App.db = App.db || {};
+          App.db.students = arr.filter(function(s){ return s && (s.id || s.sid); });
+          try { if(typeof saveDB === 'function') saveDB(true); } catch(_){}
+          stu = App.db.students.find(s => String(s.sid) === sidBound);
+        }
+      } catch(e){ console.warn('[google-student] fetch students fallback failed:', e); }
+    }
     if(stu){
       await _completeStudentGoogleLogin(stu, user);
       return;
@@ -8348,16 +8363,44 @@ function renderLoginTeacherStage(){
   // Spotify 版：tab 已標示「老師」，stage 內不再放 H3
   const stage = el('div', { class:'login-stage' });
 
-  // ☁️ Google 登入按鈕 — 簡潔版（去掉冗長說明）
-  const googleBtn = el('button', {
-    type:'button',
-    style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
-    onmouseover: function(){ this.style.background = '#f8f9fa'; },
-    onmouseout: function(){ this.style.background = '#fff'; },
-    onclick: _googleSignInTeacher
-  });
-  googleBtn.appendChild(_googleBtnContent('用 Google 登入'));
-  stage.appendChild(googleBtn);
+  // ☁️ 偵測是否已用 Google 登入 → 顯示「點此繼續」綠色按鈕
+  const fbUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+  if(fbUser && fbUser.email){
+    // 已登入狀態
+    const continueBtn = el('button', {
+      type:'button',
+      style:'width:100%;padding:11px 14px;border-radius:10px;border:0;background:#16a34a;color:#fff;cursor:pointer;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px;font-weight:600;font-size:14px;box-shadow:0 2px 6px rgba(22,163,74,.25)',
+      onclick: function(){
+        if(typeof _handleGoogleAuthResult === 'function') _handleGoogleAuthResult(fbUser);
+      }
+    },
+      (fbUser.photoURL ? (function(){ var i = document.createElement('img'); i.src = fbUser.photoURL; i.referrerPolicy = 'no-referrer'; i.style.cssText='width:24px;height:24px;border-radius:50%'; return i; })() : document.createTextNode('✅')),
+      el('span', null, '繼續以 ' + fbUser.email + ' 登入')
+    );
+    stage.appendChild(continueBtn);
+    stage.appendChild(el('div', { style:'text-align:center;margin-bottom:14px' },
+      el('a', {
+        href:'javascript:void(0)',
+        style:'font-size:11px;color:rgba(255,255,255,.6);text-decoration:underline',
+        onclick: async function(){
+          try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
+          try { toast('已登出 Google，請重新選擇帳號', 'success', 2000); } catch(_){}
+          setTimeout(function(){ try { rerender(); } catch(_){ location.reload(); } }, 400);
+        }
+      }, '換其他 Google 帳號')
+    ));
+  } else {
+    // ☁️ Google 登入按鈕 — 簡潔版
+    const googleBtn = el('button', {
+      type:'button',
+      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
+      onmouseover: function(){ this.style.background = '#f8f9fa'; },
+      onmouseout: function(){ this.style.background = '#fff'; },
+      onclick: _googleSignInTeacher
+    });
+    googleBtn.appendChild(_googleBtnContent('用 Google 登入'));
+    stage.appendChild(googleBtn);
+  }
 
   // 細分隔線 — 不要文字
   stage.appendChild(el('div', {
@@ -9661,16 +9704,43 @@ function renderLoginStudentStage(){
   const _lcS = (App._uiCustom && App._uiCustom.login) || {};
   const stage = el('div', { class:'login-stage' });
 
-  // ☁️ Google 登入按鈕 — 學生簡潔版
-  const googleStuBtn = el('button', {
-    type:'button',
-    style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
-    onmouseover: function(){ this.style.background = '#f8f9fa'; },
-    onmouseout: function(){ this.style.background = '#fff'; },
-    onclick: _googleSignInStudent
-  });
-  googleStuBtn.appendChild(_googleBtnContent('用 Google 登入'));
-  stage.appendChild(googleStuBtn);
+  // ☁️ 偵測是否已用 Google 登入 → 顯示「點此繼續」綠色按鈕
+  const fbUserS = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+  if(fbUserS && fbUserS.email){
+    const continueBtnS = el('button', {
+      type:'button',
+      style:'width:100%;padding:11px 14px;border-radius:10px;border:0;background:#16a34a;color:#fff;cursor:pointer;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px;font-weight:600;font-size:14px;box-shadow:0 2px 6px rgba(22,163,74,.25)',
+      onclick: function(){
+        if(typeof _handleGoogleAuthStudent === 'function') _handleGoogleAuthStudent(fbUserS);
+      }
+    },
+      (fbUserS.photoURL ? (function(){ var i = document.createElement('img'); i.src = fbUserS.photoURL; i.referrerPolicy = 'no-referrer'; i.style.cssText='width:24px;height:24px;border-radius:50%'; return i; })() : document.createTextNode('✅')),
+      el('span', null, '繼續以 ' + fbUserS.email + ' 進入')
+    );
+    stage.appendChild(continueBtnS);
+    stage.appendChild(el('div', { style:'text-align:center;margin-bottom:14px' },
+      el('a', {
+        href:'javascript:void(0)',
+        style:'font-size:11px;color:rgba(255,255,255,.6);text-decoration:underline',
+        onclick: async function(){
+          try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
+          try { toast('已登出 Google，請重新選擇帳號', 'success', 2000); } catch(_){}
+          setTimeout(function(){ try { rerender(); } catch(_){ location.reload(); } }, 400);
+        }
+      }, '換其他 Google 帳號')
+    ));
+  } else {
+    // ☁️ Google 登入按鈕 — 學生簡潔版
+    const googleStuBtn = el('button', {
+      type:'button',
+      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;min-height:46px',
+      onmouseover: function(){ this.style.background = '#f8f9fa'; },
+      onmouseout: function(){ this.style.background = '#fff'; },
+      onclick: _googleSignInStudent
+    });
+    googleStuBtn.appendChild(_googleBtnContent('用 Google 登入'));
+    stage.appendChild(googleStuBtn);
+  }
 
   // 細分隔線 — 不要文字
   stage.appendChild(el('div', {
@@ -16081,8 +16151,10 @@ function rMe(content){
               if(!await confirmDlg('⚠️ 這個 Google 帳號已綁到學號 ' + snap.val().sid + '。要把它改綁到你這個帳號嗎？')) return;
             }
           } catch(_){}
-          // 寫入綁定
-          await firebase.database().ref('cms-v3/' + rc + '/google_students/' + emailKey).set({
+          // 🔧 Atomic update：同時寫 google_students + students/{id} 的個別欄位
+          // 避免 Sync.setMap 走 listener 路徑 → 跨裝置同步 race condition
+          const updates = {};
+          updates['cms-v3/' + rc + '/google_students/' + emailKey] = {
             sid: me.sid,
             email: user.email,
             displayName: user.displayName || me.name,
@@ -16090,12 +16162,19 @@ function rMe(content){
             firebaseUid: user.uid,
             createdAt: firebase.database.ServerValue.TIMESTAMP,
             lastLoginAt: firebase.database.ServerValue.TIMESTAMP
-          });
-          // 更新 student
+          };
+          // 直接寫 student 個別欄位到 Firebase (確保跨裝置撈得到綁定資訊)
+          updates['cms-v3/' + rc + '/students/' + me.id + '/googleEmail'] = user.email;
+          updates['cms-v3/' + rc + '/students/' + me.id + '/firebaseUid'] = user.uid;
+          if(user.photoURL && !me.avatar){
+            updates['cms-v3/' + rc + '/students/' + me.id + '/photoURL'] = user.photoURL;
+          }
+          await firebase.database().ref().update(updates);
+          // 更新本地 student
           me.googleEmail = user.email;
           me.firebaseUid = user.uid;
           if(!me.avatar && user.photoURL) me.photoURL = user.photoURL;
-          saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+          saveDB(); Sync.setMap('students', App.db.students, true); bcNotify();
           toast('🎉 已綁定 ' + user.email + '！下次可以直接用 Google 登入','success', 4500);
           rerender();
         } catch(e){
