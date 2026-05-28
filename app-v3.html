@@ -4145,7 +4145,9 @@ try {
 window.DEFAULT_GD_CFG = window.DEFAULT_GD_CFG || {
   enabled: true,
   clientId: '805278389047-ptftk27vqie72i9ielohiuimfq9qom3p.apps.googleusercontent.com',
-  folderId: '',           // 留空 = 上傳到 Drive 根目錄
+  // 用戶指定:備份/上傳全部丟進這個資料夾
+  // https://drive.google.com/drive/folders/1Ll21eW7g0nKzdHrgdBZeth8bcV2KJ7Nm
+  folderId: '1Ll21eW7g0nKzdHrgdBZeth8bcV2KJ7Nm',
   // ⚠️ 改用 overflow：只有大檔（>50MB Firebase Storage 上限）才走 Drive
   //    避免每個學生繳交時都觸發 OAuth popup（會被瀏覽器擋掉，導致上傳卡住）
   mode: 'overflow',
@@ -4160,6 +4162,10 @@ window._applyDefaultGDOnLoad = function(){
     if(!cur || !cur.clientId){
       App.db.settings.googleDrive = JSON.parse(JSON.stringify(window.DEFAULT_GD_CFG));
       console.log('[cms] 已套用全站預設 Google Drive 設定');
+    } else if(!cur.folderId && window.DEFAULT_GD_CFG.folderId){
+      // 已有 clientId 但沒設 folderId → 補上預設資料夾 (老師已授權過 Drive 的情況)
+      cur.folderId = window.DEFAULT_GD_CFG.folderId;
+      console.log('[cms] 已補上預設 Drive 資料夾:', cur.folderId);
     }
   } catch(_){}
 };
