@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-google-only';
+const APP_BUILD = '2026-05-29-student-email-login';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9118,8 +9118,15 @@ async function _emailLoginModal(title, role){
       '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:14px" />' +
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">密碼</label>' +
+      // ★ 密碼欄加眼睛圖示 (show/hide)
+      '<div style="position:relative;margin-bottom:12px">' +
       '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" ' +
-      'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:12px" />' +
+      'style="width:100%;padding:11px 44px 11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box" />' +
+      '<button id="__el_pw_eye" type="button" tabindex="-1" aria-label="顯示或隱藏密碼" ' +
+      'style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:0;cursor:pointer;padding:8px;color:#888;display:inline-flex;align-items:center">' +
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>' +
+      '</button>' +
+      '</div>' +
       '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#444;cursor:pointer;user-select:none;margin-bottom:14px">' +
       '<input id="__el_remember" type="checkbox" style="width:16px;height:16px;accent-color:#16a34a;cursor:pointer">' +
       '<span>記住我 <span style="color:#9ca3af;font-size:11px">(下次自動帶入 Email + 密碼)</span></span>' +
@@ -9135,6 +9142,19 @@ async function _emailLoginModal(title, role){
     var iRem = card.querySelector('#__el_remember');
     var btnOk = card.querySelector('#__el_ok');
     var btnCancel = card.querySelector('#__el_cancel');
+    var btnEye = card.querySelector('#__el_pw_eye');
+    // 眼睛 toggle:顯示/隱藏密碼
+    var _pwVisible = false;
+    if(btnEye){
+      btnEye.onclick = function(e){
+        e.preventDefault();
+        _pwVisible = !_pwVisible;
+        iPw.type = _pwVisible ? 'text' : 'password';
+        btnEye.innerHTML = _pwVisible
+          ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><path d="M14.12 14.12a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+      };
+    }
     // 安全 set values (避免 HTML injection)
     iEmail.value = savedEmail;
     iPw.value = savedPw;
@@ -9175,6 +9195,10 @@ async function _emailSignInStudent(ev){
     try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
+  if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
+    try { toast('Firebase 初始化失敗,請重整','danger', 5000); } catch(_){}
+    return;
+  }
   const input = await _emailLoginModal('學生 Email 登入', 'student');
   if(!input) return;
   const email = input.email, password = input.password;
@@ -9184,8 +9208,7 @@ async function _emailSignInStudent(ev){
       userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
     } catch(e){
       if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
-        // ★ 改更友善的錯誤訊息:大多學生根本沒設過 Email + 密碼,要清楚告知
-        try { toast('查無此 Email 註冊紀錄,或密碼錯誤。\n如果你平常是用「班級 + 姓名 + 密碼」登入,請改用上方表單。', 'danger', 8000); } catch(_){}
+        try { toast('查無此 Email,或密碼錯誤。\n如果你還沒設定過,請先用班級+姓名+密碼登入,再到「個人」設定 Email 登入', 'danger', 9000); } catch(_){}
       } else if(e.code === 'auth/operation-not-allowed'){
         try { toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
       } else {
@@ -9193,8 +9216,47 @@ async function _emailSignInStudent(ev){
       }
       return;
     }
-    // 成功 — 走學生綁定流程 (第一次會跳出學號綁定)
-    await _handleGoogleAuthStudent(userCred.user);
+    // 成功 — 查 email_students 找對應學號,然後登入該學生
+    const user = userCred.user;
+    const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
+    let sid = null, studentId = null;
+    const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+    try {
+      const snap = await firebase.database().ref('cms-v3/' + rc + '/email_students/' + emailKey).once('value');
+      if(snap.exists() && snap.val()){
+        sid = snap.val().sid;
+        studentId = snap.val().studentId;
+      }
+    } catch(e){ console.warn('[email-signin-student] lookup:', e); }
+    // 找本地學生
+    let stu = null;
+    if(studentId) stu = (App.db.students||[]).find(s => String(s.id) === String(studentId));
+    if(!stu && sid) stu = (App.db.students||[]).find(s => String(s.sid) === String(sid));
+    if(!stu) stu = (App.db.students||[]).find(s => String(s.email||'').toLowerCase() === email.toLowerCase());
+    if(!stu){
+      try { toast('找不到對應學生,請先用班級+姓名+密碼登入一次,再到「個人」設定 Email 登入', 'warning', 9000); } catch(_){}
+      try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
+      return;
+    }
+    // 登入該學生 (直接設 session)
+    App.cfg = App.cfg || {};
+    App.cfg.role = 'student';
+    if(!App.cfg.roomCode) App.cfg.roomCode = rc;
+    if(typeof saveCfg === 'function') saveCfg(App.cfg);
+    App.session = {
+      role: 'student',
+      sid: stu.sid,
+      studentId: stu.id,
+      name: stu.name,
+      cls: stu.cls,
+      email: stu.email,
+      firebaseUid: user.uid,
+      loginAt: Date.now(),
+      authMethod: 'email'
+    };
+    if(typeof saveSession === 'function') saveSession(App.session);
+    try { toast('🎉 歡迎 ' + stu.name, 'success', 3000); } catch(_){}
+    try { rerender(); } catch(_){ setTimeout(()=> location.reload(), 600); }
   } catch(e){
     console.error('[email-signin-student]', e);
     try { toast('Email 登入失敗: ' + (e.message || e), 'danger'); } catch(_){}
@@ -9569,9 +9631,34 @@ function renderLoginTeacherStage(){
       }, '換其他帳號')
     ));
   } else {
-    // ★ 用戶決定:只留 Google 登入,移除 Email 登入
-    //   理由:1) Email 登入要記新密碼 2) 寄信/改密碼都有 bug 3) 跟 Google 同 email 易混
-    //   保留「申請註冊」(用 Email 註冊後 admin 核准 → 再綁 Google) + 「忘記密碼」(本地帳號)
+    // ★ 用戶決定 (M7):老師兩個都留 — Email 登入 + Google 登入
+    //   老師可以二選一或都用 (個人頁設 Email + 密碼,或綁 Google)
+    // 📧 使用 Email 登入
+    const emailBtn = el('button', {
+      type:'button',
+      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
+      onmouseover: function(){ this.style.background = '#f8f9fa'; },
+      onmouseout: function(){ this.style.background = '#fff'; },
+      onclick: _emailSignInTeacher
+    });
+    const emailIcon = document.createElement('span');
+    emailIcon.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
+    emailIcon.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
+      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
+      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
+      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
+      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
+      '</svg>';
+    emailBtn.appendChild(emailIcon);
+    const emailText = document.createElement('span');
+    emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
+    emailText.textContent = '使用 Email 登入';
+    emailBtn.appendChild(emailText);
+    stage.appendChild(emailBtn);
+
+    // ☁️ 用 Google 登入 (給綁過 Google 的老師)
     if(window.firebase && firebase.auth){
       const googleBtn = el('button', {
         type:'button',
@@ -11180,33 +11267,33 @@ function renderLoginStudentStage(){
       }, '換其他 Google 帳號')
     ));
   }
-  // ★ 用戶決定:只留 Google 登入,移除 Email 登入 (Email 登入太多 bug + 密碼管理麻煩)
+  // ★ 用戶決定 (M7):學生不用 Google,改用 Email + 密碼登入
+  //   (學生個人頁要先設定 email + 密碼,設完之後從這裡 Email 登入)
   if(!isStudentBound){
-    // ☁️ 用 Google 登入 — 給綁過 Google 的學生 (不用記任何密碼)
-    if(window.firebase && firebase.auth){
-      const googleStuBtn = el('button', {
-        type:'button',
-        style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
-        onmouseover: function(){ this.style.background = '#f8f9fa'; },
-        onmouseout: function(){ this.style.background = '#fff'; },
-        onclick: _googleSignInStudent
-      });
-      const gIcon = document.createElement('span');
-      gIcon.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
-      gIcon.innerHTML =
-        '<svg width="22" height="22" viewBox="0 0 18 18">' +
-        '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>' +
-        '<path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>' +
-        '<path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>' +
-        '<path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>' +
-        '</svg>';
-      googleStuBtn.appendChild(gIcon);
-      const gText = document.createElement('span');
-      gText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-      gText.textContent = '用 Google 登入';
-      googleStuBtn.appendChild(gText);
-      stage.appendChild(googleStuBtn);
-    }
+    // 📧 使用 Email 登入 — 給已在個人頁設定過 email + 密碼的學生
+    const emailStuBtn = el('button', {
+      type:'button',
+      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
+      onmouseover: function(){ this.style.background = '#f8f9fa'; },
+      onmouseout: function(){ this.style.background = '#fff'; },
+      onclick: _emailSignInStudent
+    });
+    const emailIconS = document.createElement('span');
+    emailIconS.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
+    emailIconS.innerHTML =
+      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
+      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
+      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
+      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
+      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
+      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
+      '</svg>';
+    emailStuBtn.appendChild(emailIconS);
+    const emailTextS = document.createElement('span');
+    emailTextS.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
+    emailTextS.textContent = '使用 Email 登入';
+    emailStuBtn.appendChild(emailTextS);
+    stage.appendChild(emailStuBtn);
   }
 
   // 細分隔線 — 不要文字
@@ -18195,124 +18282,127 @@ function rMe(content){
   if(me.sid) card.appendChild(el('div', { class:'small muted' }, '學號 ' + me.sid));
   content.appendChild(card);
 
-  // ─── ☁️ Google 帳號綁定（跨裝置同步）───
-  const cardGoogle = el('div', { class:'card', style:{marginTop:'12px'} });
-  cardGoogle.appendChild(el('h3', null, '☁️ Google 帳號（換裝置自動同步）'));
-  if(me.googleEmail){
-    // 已綁定
-    cardGoogle.appendChild(el('div', { class:'small', style:{padding:'10px 12px',background:'var(--success-soft)',color:'var(--success)',borderRadius:'8px',marginBottom:'10px',fontWeight:'500'} },
-      '✅ 已綁定：' + me.googleEmail));
-    cardGoogle.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
-      '可以在任何裝置點「用 Google 登入」自動進入你的帳號（忘記密碼也沒關係）'));
-    cardGoogle.appendChild(el('button', { class:'btn btn-sm', style:{background:'var(--danger-soft)',color:'var(--danger)'}, onclick: async ()=> {
-      if(!await confirmDlg('確定解除 Google 綁定？解除後就不能用 Google 登入了，需要回到班級+姓名+密碼方式登入。')) return;
-      const oldEmail = me.googleEmail;
-      // 🔧 防呆:確保 Firebase 已初始化 (失敗就只清本地,雲端 google_students 留待下次)
-      ensureFirebaseInit();
+  // ─── 📧 Email + 密碼 設定 (用戶要求:學生改用 Email 登入,不再用 Google) ───
+  const cardEmailSetup = el('div', { class:'card', style:{marginTop:'12px'} });
+  cardEmailSetup.appendChild(el('h3', null, '📧 Email 登入設定 (換裝置都能用)'));
+  cardEmailSetup.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.7'} },
+    '設定 email + 密碼後,可以在任何裝置(手機/平板/電腦)點登入畫面的「使用 Email 登入」進入你的帳號,不用每次選班級+姓名+密碼。'));
+
+  const hasEmailAuth = !!me.firebaseUid && !!me.email;
+  if(hasEmailAuth){
+    cardEmailSetup.appendChild(el('div', { class:'small', style:{padding:'10px 12px',background:'var(--success-soft)',color:'var(--success)',borderRadius:'8px',marginBottom:'10px',fontWeight:'500'} },
+      '✅ 已設定 Email 登入:' + me.email));
+  }
+
+  // Email 欄位
+  const fE = el('div', { class:'field' });
+  fE.appendChild(el('label', { class:'label' }, '📧 Email'));
+  const iE = el('input', { class:'input', type:'email', placeholder:'name@example.com', value: me.email || '', autocapitalize:'off' });
+  fE.appendChild(iE);
+  cardEmailSetup.appendChild(fE);
+
+  // 密碼欄位 (含眼睛)
+  const fP = el('div', { class:'field' });
+  fP.appendChild(el('label', { class:'label' }, hasEmailAuth ? '🔑 新密碼 (留空 = 不修改)' : '🔑 設定密碼 (至少 6 字元)'));
+  const pwWrap = el('div', { class:'pw-input-wrap' });
+  const iP = el('input', { class:'input', type:'password', placeholder: hasEmailAuth ? '不修改請留空' : '輸入密碼', autocapitalize:'off', autocomplete:'new-password' });
+  const togglePEye = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼' });
+  togglePEye.innerHTML = _eyeSvg();
+  togglePEye.onclick = (e) => {
+    e.preventDefault();
+    if(iP.type === 'password'){ iP.type = 'text'; togglePEye.innerHTML = _eyeOffSvg(); }
+    else { iP.type = 'password'; togglePEye.innerHTML = _eyeSvg(); }
+  };
+  pwWrap.appendChild(iP); pwWrap.appendChild(togglePEye);
+  fP.appendChild(pwWrap);
+  cardEmailSetup.appendChild(fP);
+
+  // 確認密碼
+  const fP2 = el('div', { class:'field' });
+  fP2.appendChild(el('label', { class:'label' }, '🔑 確認密碼'));
+  const pwWrap2 = el('div', { class:'pw-input-wrap' });
+  const iP2 = el('input', { class:'input', type:'password', placeholder:'再輸入一次', autocapitalize:'off', autocomplete:'new-password' });
+  const togglePEye2 = el('button', { type:'button', class:'pw-toggle', title:'顯示/隱藏密碼', 'aria-label':'顯示或隱藏密碼' });
+  togglePEye2.innerHTML = _eyeSvg();
+  togglePEye2.onclick = (e) => {
+    e.preventDefault();
+    if(iP2.type === 'password'){ iP2.type = 'text'; togglePEye2.innerHTML = _eyeOffSvg(); }
+    else { iP2.type = 'password'; togglePEye2.innerHTML = _eyeSvg(); }
+  };
+  pwWrap2.appendChild(iP2); pwWrap2.appendChild(togglePEye2);
+  fP2.appendChild(pwWrap2);
+  cardEmailSetup.appendChild(fP2);
+
+  cardEmailSetup.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick: async ()=> {
+    const em = (iE.value||'').trim().toLowerCase();
+    const pw = iP.value || '';
+    const pw2 = iP2.value || '';
+    if(!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){ toast('請輸入有效 Email','danger'); return; }
+    // 第一次設定 → 密碼必填
+    if(!hasEmailAuth && (!pw || pw.length < 6)){ toast('密碼至少 6 字元','danger'); return; }
+    if(pw && pw.length < 6){ toast('密碼至少 6 字元','danger'); return; }
+    if(pw && pw !== pw2){ toast('兩次密碼不一致','danger'); return; }
+    if(!window.firebase || !firebase.auth){ toast('Firebase 未載入,請重整','danger'); return; }
+    if(!ensureFirebaseInit()){ toast('Firebase 初始化失敗','danger'); return; }
+    try {
+      // 嘗試建立 Firebase Auth 帳號;若已存在,改成登入後 updatePassword
+      let cred;
       try {
-        const emailKey = String(oldEmail).replace(/[.@]/g, '_').toLowerCase();
-        const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
-        if(window.firebase && firebase.database && firebase.apps && firebase.apps.length){
-          await firebase.database().ref('cms-v3/' + rc + '/google_students/' + emailKey).remove();
-        }
-        if(window.firebase && firebase.auth && firebase.apps && firebase.apps.length){
-          try { await firebase.auth().signOut(); } catch(_){}
-        }
-      } catch(e){ console.warn('[unbind google]', e); }
-      delete me.googleEmail;
-      delete me.firebaseUid;
-      saveDB(); Sync.setMap('students', App.db.students); bcNotify();
-      toast('✅ 已解除 Google 綁定','success');
-      rerender();
-    }}, '🔓 解除綁定'));
-  } else {
-    // 未綁定
-    cardGoogle.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.6'} },
-      '綁定後就可以在任何裝置（手機 / 平板 / 電腦）用同一個 Google 登入，自動同步資料。即使忘記密碼也能用 Google 登入。'));
-    cardGoogle.appendChild(el('button', {
-      class:'btn',
-      style:{background:'#fff',color:'#3c4043',border:'1px solid #dadce0',display:'inline-flex',alignItems:'center',gap:'8px',padding:'10px 16px'},
-      onclick: async function(){
-        if(!window.firebase || !firebase.auth){ toast('Firebase 未載入','danger'); return; }
-        // 🔧 防呆:Firebase app 沒 init 就先補做
-        if(!ensureFirebaseInit()){
-          toast('Firebase 初始化失敗,請聯絡老師重新整理','danger', 6000);
-          return;
-        }
-        try {
-          const provider = new firebase.auth.GoogleAuthProvider();
-          provider.setCustomParameters({ prompt: 'select_account' });
-          let result;
+        cred = await firebase.auth().createUserWithEmailAndPassword(em, pw || 'temp_' + Date.now());
+      } catch(e){
+        if(e.code === 'auth/email-already-in-use'){
+          // 已存在 → 必須先用舊密碼登入才能改
+          if(!pw){ toast('此 Email 已註冊過,要設新密碼請填密碼欄','warning', 6000); return; }
+          // 嘗試用「填的密碼」直接登入(假設用戶記得自己的舊密碼,或這就是 first set)
           try {
-            result = await firebase.auth().signInWithPopup(provider);
-          } catch(e){
-            if(e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request'){
-              try { sessionStorage.setItem('_google_pending_role', 'student_bind'); sessionStorage.setItem('_google_bind_sid', String(me.sid||'')); } catch(_){}
-              await firebase.auth().signInWithRedirect(provider);
-              return;
-            }
-            if(e.code === 'auth/popup-closed-by-user') return;
-            throw e;
+            cred = await firebase.auth().signInWithEmailAndPassword(em, pw);
+            toast('Email 已存在,已用此密碼登入','info', 4000);
+          } catch(e2){
+            toast('此 Email 已註冊但密碼錯誤。請用正確密碼,或聯絡老師重設','danger', 8000);
+            return;
           }
-          const user = result.user;
-          if(!user || !user.email){ toast('Google 帳號沒有 email','danger'); return; }
-          const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
-          const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
-          // 檢查這 email 是否已被綁到其他學生
-          try {
-            const snap = await firebase.database().ref('cms-v3/' + rc + '/google_students/' + emailKey).once('value');
-            if(snap.exists() && snap.val() && String(snap.val().sid) !== String(me.sid||'')){
-              if(!await confirmDlg('⚠️ 這個 Google 帳號已綁到學號 ' + snap.val().sid + '。要把它改綁到你這個帳號嗎？')) return;
-            }
-          } catch(_){}
-          // 🔧 Atomic update：同時寫 google_students + students/{id} 的個別欄位
-          // 避免 Sync.setMap 走 listener 路徑 → 跨裝置同步 race condition
-          const updates = {};
-          updates['cms-v3/' + rc + '/google_students/' + emailKey] = {
-            sid: me.sid,
-            email: user.email,
-            displayName: user.displayName || me.name,
-            photoURL: user.photoURL || '',
-            firebaseUid: user.uid,
-            createdAt: firebase.database.ServerValue.TIMESTAMP,
-            lastLoginAt: firebase.database.ServerValue.TIMESTAMP
-          };
-          // 直接寫 student 個別欄位到 Firebase (確保跨裝置撈得到綁定資訊)
-          updates['cms-v3/' + rc + '/students/' + me.id + '/googleEmail'] = user.email;
-          updates['cms-v3/' + rc + '/students/' + me.id + '/firebaseUid'] = user.uid;
-          if(user.photoURL && !me.avatar){
-            updates['cms-v3/' + rc + '/students/' + me.id + '/photoURL'] = user.photoURL;
-          }
-          await firebase.database().ref().update(updates);
-          // 更新本地 student
-          me.googleEmail = user.email;
-          me.firebaseUid = user.uid;
-          if(!me.avatar && user.photoURL) me.photoURL = user.photoURL;
-          saveDB(); Sync.setMap('students', App.db.students, true); bcNotify();
-          toast('🎉 已綁定 ' + user.email + '！下次可以直接用 Google 登入','success', 4500);
-          rerender();
-        } catch(e){
-          console.error('[bind google]', e);
-          toast('綁定失敗：' + (e.message || e), 'danger', 5000);
+        } else if(e.code === 'auth/weak-password'){
+          toast('密碼太弱,至少 6 字元','danger'); return;
+        } else if(e.code === 'auth/invalid-email'){
+          toast('Email 格式錯誤','danger'); return;
+        } else {
+          toast('設定失敗:' + (e.message||e),'danger', 6000); return;
         }
       }
-    },
-      // Google logo SVG
-      (function(){
-        const s = document.createElement('span');
-        s.style.cssText = 'display:inline-flex;align-items:center';
-        s.innerHTML =
-          '<svg width="18" height="18" viewBox="0 0 18 18" style="margin-right:8px">' +
-          '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>' +
-          '<path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>' +
-          '<path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>' +
-          '<path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>' +
-          '</svg>用 Google 綁定';
-        return s;
-      })()
-    ));
-  }
-  content.appendChild(cardGoogle);
+      // 若有新密碼 + 是更新模式 → updatePassword
+      if(hasEmailAuth && pw && cred && cred.user){
+        try { await cred.user.updatePassword(pw); } catch(e){ console.warn('[updatePw]', e); }
+      }
+      const user = cred && cred.user;
+      // 更新學生記錄
+      me.email = em;
+      if(user){ me.firebaseUid = user.uid; }
+      // 寫 cms-v3/{room}/email_students/{emailKey} 對應 (登入時找學號)
+      try {
+        const emailKey = em.replace(/[.@]/g, '_');
+        const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+        await firebase.database().ref('cms-v3/' + rc + '/email_students/' + emailKey).set({
+          sid: me.sid,
+          studentId: me.id,
+          email: em,
+          firebaseUid: user ? user.uid : '',
+          name: me.name,
+          createdAt: firebase.database.ServerValue.TIMESTAMP,
+          updatedAt: firebase.database.ServerValue.TIMESTAMP
+        });
+      } catch(e){ console.warn('[email-students write]', e); }
+      saveDB();
+      try { Sync.setMap('students', App.db.students); bcNotify(); } catch(_){}
+      toast('🎉 Email 登入已設定!下次可以用「使用 Email 登入」進去','success', 6000);
+      rerender();
+    } catch(e){
+      console.error('[email setup]', e);
+      toast('設定失敗:' + (e.message||e),'danger', 6000);
+    }
+  }}, hasEmailAuth ? '💾 更新 Email / 密碼' : '✅ 設定 Email + 密碼'));
+  content.appendChild(cardEmailSetup);
+
+  // ─── (已移除:Google 綁定卡 — 用戶要求學生改用 Email 登入,不再用 Google) ───
 
   // ─── 1. 頭像照片 ───
   const cardAv = el('div', { class:'card', style:{marginTop:'12px'} });
