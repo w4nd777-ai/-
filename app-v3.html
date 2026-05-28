@@ -18470,30 +18470,63 @@ function rSub(content){
 
       const isExpanded = App._subExpandedCls[cls] !== false;
 
-      // 班級 header
+      // 用班級名 hash 決定 accent color (從 6 個主題色循環)
+      const _hash = String(cls).split('').reduce((a,c) => a + c.charCodeAt(0), 0);
+      const clsAccent = ['#3b82f6','#10b981','#8b5cf6','#ec4899','#f59e0b','#06b6d4'][_hash % 6];
+
+      // 班級 card 容器 (外層,有陰影 + 左色條)
+      const clsCard = el('div', { style:{
+        marginBottom:'14px',
+        background:'var(--surface)',
+        borderRadius:'12px',
+        border:'1px solid var(--border)',
+        borderLeft:'4px solid ' + clsAccent,
+        boxShadow:'0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.03)',
+        overflow:'hidden',
+        transition:'box-shadow .15s'
+      }});
+
+      // 班級 header (在 card 內,點擊摺疊整個 card)
       const header = el('div', { class:'cls-section-header', style:{
-        padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
-        background:'var(--surface-2)',borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
-        marginTop:'10px',marginBottom: isExpanded ? '0' : '4px',
+        padding:'14px 16px',cursor:'pointer',display:'flex',alignItems:'center',gap:'12px',
+        background: isExpanded ? 'linear-gradient(to right, ' + clsAccent + '08, transparent 50%)' : 'transparent',
+        borderBottom: isExpanded ? '1px solid var(--border)' : 'none',
         transition:'background .15s'
       }, onclick:()=> {
         App._subExpandedCls[cls] = !isExpanded;
         renderList();
       }});
-      header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+      header.appendChild(el('span', { style:{
+        fontSize:'14px',display:'inline-block',color:clsAccent,
+        transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'
+      } }, '▼'));
       header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
-        el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
-        el('span', { class:'small muted' }, '（' + peopleCount + ' 人 · ' + totalCount + ' 筆繳交）')
+        el('span', { style:{fontWeight:'800',fontSize:'17px',color:clsAccent,letterSpacing:'.01em'} }, '🏫 ' + cls),
+        el('span', { class:'small muted', style:{fontSize:'13px'} },
+          peopleCount + ' 位學生 · ' + totalCount + ' 筆繳交')
       ));
       header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
-        el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} }, '✅ ' + gradedCount),
-        pendingCount > 0 ? el('span', { class:'pill', style:{background:'var(--warn-soft)',color:'var(--warn)',fontSize:'11px',fontWeight:'700'} }, '🟡 ' + pendingCount) : null,
-        el('span', { style:{fontWeight:'700',fontSize:'14px',color:rateColor,marginLeft:'4px'} }, rate + '%')
+        el('span', { style:{
+          background:'var(--success-soft)',color:'var(--success)',
+          fontSize:'12px',fontWeight:'700',padding:'4px 10px',borderRadius:'12px',
+          display:'inline-flex',alignItems:'center',gap:'4px'
+        }}, '✅ 已批 ' + gradedCount),
+        pendingCount > 0 ? el('span', { style:{
+          background:'var(--warn-soft)',color:'var(--warn)',
+          fontSize:'12px',fontWeight:'700',padding:'4px 10px',borderRadius:'12px',
+          display:'inline-flex',alignItems:'center',gap:'4px'
+        }}, '🟡 待批 ' + pendingCount) : null,
+        // 大數字
+        el('span', { style:{
+          fontWeight:'800',fontSize:'18px',color:rateColor,marginLeft:'6px',
+          padding:'2px 10px',background:rate>=80?'var(--success-soft)':(rate>=50?'var(--warn-soft)':'var(--danger-soft)'),
+          borderRadius:'8px'
+        }}, rate + '%')
       ));
-      listWrap.appendChild(header);
+      clsCard.appendChild(header);
 
       if(isExpanded){
-        const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',overflow:'hidden'} });
+        const body = el('div', { style:{background:'var(--surface)'} });
 
         // 把這班的繳交依「作業 ID」再分組
         const subsByAsg = {};
@@ -18533,33 +18566,79 @@ function rSub(content){
             const asgKey = cls + '|' + aid;
             const asgExpanded = App._subExpandedAsg[asgKey] !== false;  // 預設展開
 
-            // 作業 header (子層) — 可摺疊
+            // 作業子區塊容器 (在 班級 card 內)
+            const asgBlock = el('div', {
+              style:{
+                margin:'10px 12px 12px',
+                background:'#fafbfc',
+                border:'1px solid var(--border-soft, #e5e7eb)',
+                borderRadius:'10px',
+                overflow:'hidden'
+              }
+            });
+            // 作業 header (sub-section, 可摺疊)
             const asgHeader = el('div', {
               style:{
-                padding:'10px 14px 10px 36px',
-                background:'rgba(0,0,0,.02)',
-                borderBottom: asgIdx < asgIds.length-1 ? '1px solid var(--border)' : 'none',
-                borderTop: asgIdx > 0 ? '1px solid var(--border)' : 'none',
+                padding:'12px 16px',
+                background: asgExpanded ? '#f3f4f6' : '#fafbfc',
+                borderBottom: asgExpanded ? '1px solid var(--border)' : 'none',
                 cursor:'pointer',
-                display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'
+                display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap',
+                userSelect:'none',
+                transition:'background .15s'
               },
               onclick:()=> {
                 App._subExpandedAsg[asgKey] = !asgExpanded;
                 renderList();
               }
             });
-            asgHeader.appendChild(el('span', { style:{fontSize:'11px',display:'inline-block',transform: asgExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
-            asgHeader.appendChild(el('span', { style:{fontWeight:'700',flexShrink:'0', color: asgDeleted ? 'var(--text-muted)' : ''} },
-              (asgDeleted ? '⚠️ ' : '📋 ') + asgTitle));
-            if(asgDue) asgHeader.appendChild(el('span', { class:'small muted' }, '期限 ' + asgDue));
-            asgHeader.appendChild(el('div', { class:'flex', style:{gap:'6px',marginLeft:'auto',alignItems:'center',flexWrap:'wrap'} },
-              el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'10px',fontWeight:'700'} },
-                '已繳 ' + submittedCount + '/' + expectedCount),
-              missingStu.length ? el('span', { class:'pill', style:{background:'var(--danger-soft)',color:'var(--danger)',fontSize:'10px',fontWeight:'700'} },
-                '未繳 ' + missingStu.length) : null,
-              el('span', { style:{fontWeight:'700',fontSize:'13px',color:asgRateColor} }, asgRate + '%')
-            ));
-            body.appendChild(asgHeader);
+            asgHeader.appendChild(el('span', { style:{
+              fontSize:'12px',color:'var(--text-muted)',
+              display:'inline-block',transform: asgExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'
+            } }, '▼'));
+            asgHeader.appendChild(el('span', { style:{
+              fontWeight:'700',fontSize:'14px',flexShrink:'0',
+              color: asgDeleted ? 'var(--text-muted)' : 'var(--text)'
+            } }, (asgDeleted ? '⚠️ ' : '📋 ') + asgTitle));
+            if(asgDue) asgHeader.appendChild(el('span', {
+              style:{fontSize:'11px',color:'var(--text-muted)',background:'rgba(0,0,0,.04)',padding:'2px 8px',borderRadius:'10px'}
+            }, '⏱ ' + asgDue));
+            // 進度條 + 比例
+            const progressWrap = el('div', { style:{
+              marginLeft:'auto',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'
+            }},
+              // 進度條
+              el('div', { style:{
+                width:'80px',height:'8px',
+                background:'rgba(0,0,0,.08)',
+                borderRadius:'4px',overflow:'hidden',
+                position:'relative'
+              }},
+                el('div', { style:{
+                  width: asgRate + '%',height:'100%',
+                  background: asgRateColor,
+                  transition:'width .3s ease',
+                  borderRadius:'4px'
+                }})
+              ),
+              // 已繳 / 未繳 pill 緊湊版
+              el('span', { style:{
+                background:'var(--success-soft)',color:'var(--success)',
+                fontSize:'11px',fontWeight:'700',padding:'3px 8px',borderRadius:'10px',
+                display:'inline-flex',alignItems:'center',gap:'3px',whiteSpace:'nowrap'
+              }}, '✅ ' + submittedCount),
+              missingStu.length ? el('span', { style:{
+                background:'var(--danger-soft)',color:'var(--danger)',
+                fontSize:'11px',fontWeight:'700',padding:'3px 8px',borderRadius:'10px',
+                display:'inline-flex',alignItems:'center',gap:'3px',whiteSpace:'nowrap'
+              }}, '❌ ' + missingStu.length) : null,
+              el('span', { style:{
+                fontWeight:'800',fontSize:'14px',color:asgRateColor,
+                minWidth:'42px',textAlign:'right'
+              }}, asgRate + '%')
+            );
+            asgHeader.appendChild(progressWrap);
+            asgBlock.appendChild(asgHeader);
 
             if(asgExpanded){
               // 排序 helper
@@ -18619,13 +18698,16 @@ function rSub(content){
                   grid.appendChild(chip);
                 });
                 matrixBlock.appendChild(grid);
-                body.appendChild(matrixBlock);
+                asgBlock.appendChild(matrixBlock);
               } else {
                 // 清單模式 (原本的)
 
                 // 已繳 — 依座號排序
                 const sortedSubs = subs.slice().sort((a, b) => cmpSeat(findStudent(a.sub.studentId) || {}, findStudent(b.sub.studentId) || {}));
-                sortedSubs.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
+                // 加 wrapper 包已繳 rows,加 padding 留白
+                const submittedWrap = el('div', { style:{padding:'4px 0'} });
+                sortedSubs.forEach(({sub, origIdx}) => submittedWrap.appendChild(renderSubRow(sub, origIdx)));
+                asgBlock.appendChild(submittedWrap);
 
                 // 未繳清單 — grid + 可摺疊 (用戶要求)
                 if(missingStu.length){
@@ -18634,36 +18716,54 @@ function rSub(content){
                   App._subMissingExpanded = App._subMissingExpanded || {};
                   const missingExpanded = App._subMissingExpanded[missingKey] !== false;  // 預設展開
 
-                  // header (可點)
+                  // 未繳區塊容器 (在 asgBlock 內,跟已繳區隔)
                   const missingBlock = el('div', {
-                    style:{ padding:'10px 14px', background:'var(--danger-soft)',
-                            borderTop:'1px dashed var(--danger)', color:'var(--danger)' }
+                    style:{
+                      margin:'0 12px 12px',
+                      background:'#fef2f2',
+                      border:'1px solid rgba(220, 38, 38, .15)',
+                      borderRadius:'8px',
+                      overflow:'hidden'
+                    }
                   });
+                  // header (可點)
                   const missingHeader = el('div', {
-                    style:{ fontWeight:'700', fontSize:'13px', cursor:'pointer', userSelect:'none',
-                            display:'flex', alignItems:'center', gap:'6px' },
+                    style:{
+                      padding:'10px 14px',
+                      fontWeight:'700',fontSize:'13px',
+                      cursor:'pointer',userSelect:'none',
+                      display:'flex',alignItems:'center',gap:'8px',
+                      color:'var(--danger)',
+                      background: missingExpanded ? '#fee2e2' : '#fef2f2',
+                      borderBottom: missingExpanded ? '1px solid rgba(220, 38, 38, .15)' : 'none',
+                      transition:'background .15s'
+                    },
                     title: missingExpanded ? '點此收合未繳清單' : '點此展開未繳清單',
                     onclick:()=> { App._subMissingExpanded[missingKey] = !missingExpanded; renderList(); }
                   },
-                    el('span', { style:{display:'inline-block',width:'14px',transition:'transform .2s',
+                    el('span', { style:{display:'inline-block',width:'14px',color:'var(--danger)',
+                                        transition:'transform .2s',
                                         transform: missingExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'} }, '▼'),
-                    el('span', null, '❌ 未繳 ' + sortedMissing.length + ' 人 (依座號排序)')
+                    el('span', null, '❌ 未繳 '),
+                    el('span', { style:{background:'var(--danger)',color:'#fff',padding:'1px 8px',borderRadius:'10px',fontSize:'12px'} },
+                      String(sortedMissing.length) + ' 人'),
+                    el('span', { style:{color:'var(--text-muted)',fontWeight:'400',fontSize:'12px'} }, '依座號排序')
                   );
                   missingBlock.appendChild(missingHeader);
 
                   if(missingExpanded){
                     const grid = el('div', { style:{
                       display:'grid',
-                      gridTemplateColumns:'repeat(auto-fill, minmax(120px, 1fr))',
+                      gridTemplateColumns:'repeat(auto-fill, minmax(115px, 1fr))',
                       gap:'6px',
-                      marginTop:'8px'
+                      padding:'10px 12px'
                     }});
                     sortedMissing.forEach(s => {
                       const chip = el('div', { style:{
                         background:'#fff',
-                        border:'1px solid var(--danger)',
-                        borderRadius:'6px',
-                        padding:'6px 10px',
+                        border:'1px solid rgba(220, 38, 38, .3)',
+                        borderRadius:'8px',
+                        padding:'6px 8px',
                         fontSize:'13px',
                         color:'#1f2937',
                         display:'flex',
@@ -18671,7 +18771,8 @@ function rSub(content){
                         gap:'6px',
                         overflow:'hidden',
                         textOverflow:'ellipsis',
-                        whiteSpace:'nowrap'
+                        whiteSpace:'nowrap',
+                        boxShadow:'0 1px 2px rgba(0,0,0,.04)'
                       }});
                       chip.appendChild(el('span', { style:{
                         background:'var(--danger)', color:'#fff',
@@ -18686,14 +18787,17 @@ function rSub(content){
                     });
                     missingBlock.appendChild(grid);
                   }
-                  body.appendChild(missingBlock);
+                  asgBlock.appendChild(missingBlock);
                 }
               }
             }
+            // 一定要把 asgBlock 加到 body (不論展開或收合)
+            body.appendChild(asgBlock);
           });
         }
-        listWrap.appendChild(body);
+        clsCard.appendChild(body);
       }
+      listWrap.appendChild(clsCard);
     });
   }
   renderList();
