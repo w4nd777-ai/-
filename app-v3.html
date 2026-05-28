@@ -12491,6 +12491,214 @@ function rOv(content){
     }
   } catch(e){ dbgWarn('[overview today detail]', e); }
 
+  // 今日繳交明細 — 條列式 + 班級分組 + 展開收合 (對齊簽到明細風格,用戶要求)
+  try {
+    const todayStr2 = td();
+    const isToday = (ts) => {
+      if(!ts) return false;
+      try { const d = new Date(ts); const t = new Date(); return d.getFullYear()===t.getFullYear() && d.getMonth()===t.getMonth() && d.getDate()===t.getDate(); }
+      catch(_){ return false; }
+    };
+    const todaySubs = (App.db.submissions || []).filter(s => isToday(s.ts));
+    {
+      const sCard = el('div', { class:'card', style:{marginBottom:'12px'} });
+      sCard.appendChild(el('div', { class:'flex-between' },
+        el('h3', null, '📥 今日繳交明細 ' + (todaySubs.length ? '(' + todaySubs.length + ' 筆)' : '(尚無資料)')),
+        el('button', { class:'btn btn-sm', onclick:()=> go('submissions'), title:'進入繳交批改' }, '批改 →')
+      ));
+
+      // 工具列 — 搜尋 + 班級 + 狀態
+      const allClasses2 = Array.from(new Set((App.db.students||[]).map(s=>s.cls).filter(Boolean))).sort();
+      const tb2 = el('div', { class:'flex no-print', style:{gap:'6px',flexWrap:'wrap',margin:'8px 0',alignItems:'center'} });
+      const sInp = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號 / 作業', style:{flex:'1',minWidth:'140px'},
+        autocapitalize:'off', spellcheck:'false' });
+      if(App._ovSubSearch) sInp.value = App._ovSubSearch;
+      const sCls = el('select', { class:'select', style:{width:'auto'} });
+      sCls.appendChild(el('option', { value:'' }, '全部班級'));
+      allClasses2.forEach(c => sCls.appendChild(el('option', { value:c }, c)));
+      if(App._ovSubCls) sCls.value = App._ovSubCls;
+      const sStat = el('select', { class:'select', style:{width:'auto'} },
+        el('option', { value:'' }, '全部狀態'),
+        el('option', { value:'pending' }, '🔵 待批改'),
+        el('option', { value:'graded' }, '🟢 已批改'),
+        el('option', { value:'returned' }, '🟡 已退回')
+      );
+      if(App._ovSubStat) sStat.value = App._ovSubStat;
+      tb2.appendChild(sInp); tb2.appendChild(sCls); tb2.appendChild(sStat);
+      App._ovSubExpandedCls = App._ovSubExpandedCls || {};
+      tb2.appendChild(el('button', { class:'btn btn-sm', title:'全部展開所有班級', onclick: ()=> {
+        const allCls = Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean)));
+        allCls.forEach(c => { App._ovSubExpandedCls[c] = true; });
+        renderSubRows();
+      }}, '全部展開 ▼'));
+      tb2.appendChild(el('button', { class:'btn btn-sm', title:'全部收合所有班級', onclick: ()=> {
+        const allCls = Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean)));
+        allCls.forEach(c => { App._ovSubExpandedCls[c] = false; });
+        renderSubRows();
+      }}, '全部收合 ▲'));
+      sCard.appendChild(tb2);
+
+      const sWrap = el('div', { style:{overflowX:'auto'} });
+      const sTbl = el('table', { class:'rep-table', style:{width:'100%',marginTop:'8px'} });
+      const sTh = el('thead');
+      sTh.appendChild(el('tr', null,
+        el('th', { style:{width:'40px'} }, ''),
+        el('th', { style:{width:'56px',textAlign:'center'} }, '座號'),
+        el('th', null, '姓名'),
+        el('th', { style:{width:'80px'} }, '班級'),
+        el('th', null, '作業'),
+        el('th', { style:{width:'120px'} }, '繳交時間'),
+        el('th', { style:{width:'70px'} }, '附件'),
+        el('th', { style:{width:'90px'} }, '狀態')
+      ));
+      sTbl.appendChild(sTh);
+      const sTb = el('tbody');
+      sTbl.appendChild(sTb);
+      sWrap.appendChild(sTbl);
+      sCard.appendChild(sWrap);
+      const sSummary = el('div', { class:'small muted', style:{marginTop:'6px'} });
+      sCard.appendChild(sSummary);
+
+      function renderSubRows(){
+        sTb.innerHTML = '';
+        const q = (sInp.value||'').trim().toLowerCase();
+        const cFilter = sCls.value;
+        const stFilter = sStat.value;
+        App._ovSubSearch = q;
+        App._ovSubCls = cFilter;
+        App._ovSubStat = stFilter;
+        let shown = 0, graded = 0, returned = 0, pending = 0;
+
+        // group by class
+        const byClass = {};
+        todaySubs.forEach(sub => {
+          const s = (App.db.students||[]).find(x => x.id === sub.studentId);
+          if(!s) return;
+          if(cFilter && s.cls !== cFilter) return;
+          const isReturned = !!sub.returned;
+          const isGraded = !isReturned && typeof sub.score === 'number';
+          const isPending = !isReturned && !isGraded;
+          if(stFilter === 'pending' && !isPending) return;
+          if(stFilter === 'graded' && !isGraded) return;
+          if(stFilter === 'returned' && !isReturned) return;
+          const asg = (App.db.assignments||[]).find(a => a.id === sub.assignmentId);
+          if(q){
+            const hit = (s.name||'').toLowerCase().includes(q) ||
+                        String(s.sid||'').toLowerCase().includes(q) ||
+                        String(s.seat||'').includes(q) ||
+                        (asg && (asg.title||'').toLowerCase().includes(q));
+            if(!hit) return;
+          }
+          const cls = s.cls || '未分班';
+          if(!byClass[cls]) byClass[cls] = [];
+          byClass[cls].push({sub, s, asg, isReturned, isGraded, isPending});
+        });
+
+        Object.keys(byClass).sort().forEach(cls => {
+          byClass[cls].sort((A,B) => {
+            const seatA = (A.s.seat != null && A.s.seat !== '') ? Number(A.s.seat) : 999;
+            const seatB = (B.s.seat != null && B.s.seat !== '') ? Number(B.s.seat) : 999;
+            if(seatA !== seatB) return seatA - seatB;
+            return (B.sub.ts||0) - (A.sub.ts||0);
+          });
+          const items = byClass[cls];
+          const grpG = items.filter(x => x.isGraded).length;
+          const grpR = items.filter(x => x.isReturned).length;
+          const grpP = items.filter(x => x.isPending).length;
+          const isExpanded = App._ovSubExpandedCls[cls] !== false;
+          const headerTr = el('tr');
+          const headerTd = el('td', {
+            colspan:'8',
+            style:{padding:'10px 12px',background:'var(--surface-2)',borderTop:'2px solid var(--primary)',fontWeight:'700',fontSize:'13px',cursor:'pointer',userSelect:'none'},
+            title:isExpanded ? '點此收合班級' : '點此展開班級',
+            onclick:()=> { App._ovSubExpandedCls[cls] = !isExpanded; renderSubRows(); }
+          },
+            el('span', { style:{display:'inline-block',width:'14px',transition:'transform .2s',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'} }, '▼'),
+            el('span', null, ' 🏫 ' + cls),
+            el('span', { class:'small muted', style:{marginLeft:'10px',fontWeight:'400'} },
+              '(' + items.length + ' 筆 · 🟢 已批 ' + grpG + ' · 🟡 退回 ' + grpR + ' · 🔵 待批 ' + grpP + ')')
+          );
+          headerTr.appendChild(headerTd);
+          sTb.appendChild(headerTr);
+
+          if(!isExpanded){
+            shown += items.length;
+            items.forEach(it => {
+              if(it.isGraded) graded++;
+              else if(it.isReturned) returned++;
+              else pending++;
+            });
+            return;
+          }
+
+          items.forEach(({sub, s, asg, isReturned, isGraded, isPending}) => {
+            // 頭像
+            const avCell = el('td', { style:{padding:'4px'} });
+            if(s.avatar){
+              avCell.appendChild(el('img', {
+                src: s.avatar, title:'點擊放大下載原圖',
+                style:{width:'32px',height:'32px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',display:'block'},
+                onclick: ()=> openAvatarViewer(s)
+              }));
+            } else {
+              avCell.appendChild(el('div', { class:'avatar', style:{width:'32px',height:'32px',fontSize:'13px',cursor:'pointer'}, title:'點此看個人檔案', onclick:()=> { App._spId = s.id; go('studentprofile'); }}, initials(s.name)));
+            }
+            // 狀態
+            let stTxt, stColor;
+            if(isReturned){ stTxt = '🟡 已退回'; stColor = 'var(--warn)'; }
+            else if(isGraded){ stTxt = '🟢 已批 ' + sub.score + ' 分'; stColor = 'var(--success)'; }
+            else { stTxt = '🔵 待批改'; stColor = 'var(--primary)'; }
+            // 時間
+            const t = sub.ts ? new Date(sub.ts) : null;
+            const timeStr = t ? (String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0')) : '—';
+            // 附件數
+            const attCount = (Array.isArray(sub.attaches) ? sub.attaches.length : 0) || (sub.attach ? 1 : 0);
+            const linkBadge = sub.link ? ' 🔗' : '';
+            // 列背景
+            const rowBg = isReturned ? 'var(--warn-soft)' : (isGraded ? 'rgba(16, 185, 129, .04)' : '');
+            sTb.appendChild(el('tr', { style: rowBg ? { background: rowBg } : null },
+              avCell,
+              el('td', { class:'mono', style:{textAlign:'center',fontWeight:'700',color:'var(--text-muted)'} },
+                (s.seat != null && s.seat !== '') ? String(s.seat) : '—'),
+              el('td', null, el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'none'}, onclick: ()=> { App._spId = s.id; go('studentprofile'); }}, s.name || '')),
+              el('td', null, s.cls || ''),
+              el('td', null,
+                el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'none'},
+                  title:'點此前往批改',
+                  onclick: ()=> { App._gradeSubId = sub.id; go('submissions'); }
+                }, asg ? (asg.title || '(無標題)') : '(已刪除)')
+              ),
+              el('td', { class:'mono' }, timeStr),
+              el('td', { style:{textAlign:'center'} }, attCount ? ('📎 ' + attCount + linkBadge) : (sub.link ? '🔗' : '—')),
+              el('td', { style:{color:stColor,fontWeight:'600'} }, stTxt)
+            ));
+            shown++;
+            if(isGraded) graded++;
+            else if(isReturned) returned++;
+            else pending++;
+          });
+        });
+
+        sSummary.innerHTML = '';
+        sSummary.appendChild(el('span', null,
+          '今日繳交 ' + todaySubs.length + ' 筆 · 🟢 已批 ' + graded + ' · 🟡 退回 ' + returned + ' · 🔵 待批 ' + pending));
+        if(q || cFilter || stFilter){
+          sSummary.appendChild(el('span', { style:{marginLeft:'8px',color:'var(--primary)'} }, '· 篩選後顯示 ' + shown + ' 筆'));
+        }
+        if(shown === 0){
+          sTb.innerHTML = '';
+          sTb.appendChild(el('tr', null, el('td', { colspan:'8', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)'} },
+            todaySubs.length === 0 ? '📭 今日尚無學生繳交' : '🔍 沒有符合條件的紀錄')));
+        }
+      }
+      sInp.addEventListener('input', renderSubRows);
+      sCls.addEventListener('change', renderSubRows);
+      sStat.addEventListener('change', renderSubRows);
+      renderSubRows();
+      content.appendChild(sCard);
+    }
+  } catch(e){ dbgWarn('[overview today submissions]', e); }
+
   // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考
   try {
     const sideRow = el('div', { class:'grid grid-2', style:{marginBottom:'12px'} });
@@ -12857,16 +13065,36 @@ function renderHealthDashboard(){
   const dbStatus = dbPercent > 90 ? '🔴 接近上限' : dbPercent > 70 ? '🟡 注意' : '🟢 正常';
   const dbColor = dbPercent > 90 ? 'var(--danger)' : dbPercent > 70 ? 'var(--warn)' : 'var(--success)';
 
-  // Firebase 連線
-  const fbStatus = App.fbStatus === 'online' ? '🟢 正常' : App.fbStatus === 'connecting' ? '🟡 連線中' : '🔴 離線';
-  const fbColor = App.fbStatus === 'online' ? 'var(--success)' : 'var(--warn)';
+  // Firebase 連線 — 主文字也要友善 (不要直接印 'error')
+  let fbMainText, fbStatus, fbColor;
+  if(App.fbStatus === 'online'){
+    fbMainText = '已同步'; fbStatus = '🟢 正常'; fbColor = 'var(--success)';
+  } else if(App.fbStatus === 'connecting'){
+    fbMainText = '連線中...'; fbStatus = '🟡 連線中'; fbColor = 'var(--warn)';
+  } else if(App.fbStatus === 'error'){
+    fbMainText = '連線失敗'; fbStatus = '🔴 離線'; fbColor = 'var(--danger)';
+  } else if(App.fbStatus === 'idle'){
+    fbMainText = '本機模式'; fbStatus = '⚪ 未啟用'; fbColor = 'var(--text-muted)';
+  } else {
+    fbMainText = '未連線'; fbStatus = '🔴 離線'; fbColor = 'var(--danger)';
+  }
 
-  // 上次備份
+  // 上次備份 — 同時看 ts 跟 LS_BACKUP_LAST (日期字串),避免「自動備份了但沒寫 ts」
   let lastBackup = '從未';
   let backupColor = 'var(--danger)';
+  let hasAnyBackup = false;
   try {
-    const lastTs = parseInt(localStorage.getItem('cms_v3_last_backup_ts') || '0', 10);
+    let lastTs = parseInt(localStorage.getItem('cms_v3_last_backup_ts') || '0', 10);
+    // Fallback: 若 ts 沒寫,從 LS_BACKUP_LAST (yyyy-mm-dd) 估一個
+    if(!lastTs){
+      const lastDate = localStorage.getItem(LS_BACKUP_LAST) || '';
+      if(lastDate){
+        const t = Date.parse(lastDate);
+        if(!isNaN(t)) lastTs = t;
+      }
+    }
     if(lastTs){
+      hasAnyBackup = true;
       const days = Math.floor((Date.now() - lastTs) / 86400000);
       if(days === 0) { lastBackup = '今天'; backupColor = 'var(--success)'; }
       else if(days <= 7) { lastBackup = days + ' 天前'; backupColor = 'var(--success)'; }
@@ -12875,14 +13103,18 @@ function renderHealthDashboard(){
     }
   } catch(_){}
 
-  // 24h 錯誤數（從 LS 暫存）
-  let errCount = 0;
+  // 24h 錯誤數 — 用「種類數」(dedupe by signature) 而非「次數」,
+  // 避免一個錯誤狂噴 49 次就顯示 49 件,實際只是 1 種問題
+  let errCount = 0, errKinds = 0;
   try {
     const errs = JSON.parse(localStorage.getItem('cms_v3_recent_errors') || '[]');
     const cutoff = Date.now() - 86400000;
-    errCount = errs.filter(e => e.ts >= cutoff).length;
+    const recent = errs.filter(e => (e.ts||0) >= cutoff);
+    errCount = recent.reduce((sum, e) => sum + (e.count || 1), 0);
+    errKinds = new Set(recent.map(e => (e.msg||'') + '|' + (e.file||'') + ':' + (e.line||0))).size;
   } catch(_){}
-  const errColor = errCount > 10 ? 'var(--danger)' : errCount > 3 ? 'var(--warn)' : 'var(--success)';
+  // 用「種類數」當門檻 — 5 種以上才算異常
+  const errColor = errKinds > 5 ? 'var(--danger)' : errKinds > 2 ? 'var(--warn)' : 'var(--success)';
 
   // 學生數 / 出席紀錄數
   const stuCount = (App.db.students || []).filter(s => (s.status||'active') === 'active').length;
@@ -12897,24 +13129,67 @@ function renderHealthDashboard(){
     el('div', { class:'tiny', style:{color:dbColor} }, dbStatus)
   ));
 
-  grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+fbColor,padding:'8px 12px'} },
+  // Firebase tile — 連線錯誤時可點擊重連
+  const isFbBroken = (App.fbStatus === 'error' || App.fbStatus === 'offline' || !App.fbStatus);
+  grid.appendChild(el('div', {
+    class:'stat',
+    style:{borderLeft:'3px solid '+fbColor,padding:'8px 12px',cursor: isFbBroken ? 'pointer' : 'default'},
+    title: isFbBroken ? '點此重試連線' : '同步狀態',
+    onclick: isFbBroken ? ()=> {
+      toast('重新連線中...','info');
+      try {
+        if(typeof Sync !== 'undefined' && typeof Sync.init === 'function'){
+          const cfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+          if(cfg) Sync.init(cfg);
+        } else {
+          // 沒有 Sync.init 就用 reload 兜底
+          setTimeout(()=> location.reload(), 500);
+        }
+      } catch(_){ setTimeout(()=> location.reload(), 500); }
+      setTimeout(rerender, 1500);
+    } : null
+  },
     el('div', { class:'lbl', style:{fontSize:'11px'} }, '🔌 Firebase'),
-    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, App.fbStatus || '未連線'),
-    el('div', { class:'tiny', style:{color:fbColor} }, fbStatus)
+    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, fbMainText),
+    el('div', { class:'tiny', style:{color:fbColor} }, fbStatus + (isFbBroken ? ' · 點此重連' : ''))
   ));
 
+  // 上次備份 tile — 從未/過期時直接觸發備份;否則進備份頁
   grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+backupColor,padding:'8px 12px',cursor:'pointer'},
-    onclick: ()=> go('backup'), title:'點此前往備份頁面'
+    onclick: async ()=> {
+      if(!hasAnyBackup){
+        // 從未備份 → 直接幫他做一次 + 下載 JSON
+        const ok = await confirmDlg('從未備份過,現在立刻備份 + 下載 JSON?', { title:'💾 立即備份' });
+        if(!ok) return;
+        try {
+          backupCreate(td());
+          if(typeof exportFullJSON === 'function') exportFullJSON();
+          toast('已建立備份','success');
+          rerender();
+        } catch(e){ toast('備份失敗:' + (e.message||e),'danger'); }
+      } else {
+        go('backup');
+      }
+    },
+    title: hasAnyBackup ? '點此前往備份頁面' : '點此立即建立第一個備份'
   },
     el('div', { class:'lbl', style:{fontSize:'11px'} }, '💾 上次備份'),
     el('div', { style:{fontSize:'14px',fontWeight:'700'} }, lastBackup),
-    el('div', { class:'tiny', style:{color:backupColor} }, lastBackup === '從未' ? '點此設定' : '點此手動備份')
+    el('div', { class:'tiny', style:{color:backupColor} }, hasAnyBackup ? '點此手動備份' : '點此立即備份')
   ));
 
-  grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+errColor,padding:'8px 12px'} },
+  // 24h 錯誤 tile — 點開錯誤詳情
+  const errLabel = errKinds > 5 ? '🔴 異常' : errKinds > 2 ? '🟡 觀察中' : '🟢 健康';
+  const errSubText = (errKinds > 0 && errCount !== errKinds)
+    ? (errKinds + ' 種 · ' + errCount + ' 次')
+    : (errCount + ' 件');
+  grid.appendChild(el('div', { class:'stat', style:{borderLeft:'3px solid '+errColor,padding:'8px 12px',cursor: errCount > 0 ? 'pointer' : 'default'},
+    onclick: errCount > 0 ? ()=> showRecentErrors() : null,
+    title: errCount > 0 ? '點此查看錯誤詳情' : '系統健康無錯誤'
+  },
     el('div', { class:'lbl', style:{fontSize:'11px'} }, '⚠️ 24h 錯誤'),
-    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, errCount + ' 件'),
-    el('div', { class:'tiny', style:{color:errColor} }, errCount > 10 ? '🔴 異常' : errCount > 3 ? '🟡 觀察中' : '🟢 健康')
+    el('div', { style:{fontSize:'14px',fontWeight:'700'} }, errSubText),
+    el('div', { class:'tiny', style:{color:errColor} }, errLabel + (errCount > 0 ? ' · 點此查看' : ''))
   ));
   card.appendChild(grid);
 
@@ -12931,12 +13206,38 @@ function renderHealthDashboard(){
         '建議：1) 立即下載備份 2) 學期末歸檔舊資料 3) 清理 _errors 節點')
     ));
   }
-  if(errCount > 10){
+  if(errKinds > 5){
+    const warnBox = el('div', { class:'card', style:{marginTop:'8px',padding:'10px',background:'var(--danger-soft)',borderColor:'var(--danger)'} });
+    warnBox.appendChild(el('div', { style:{fontWeight:'700',color:'var(--danger)'} }, '🔴 過去 24 小時錯誤類型過多 (' + errKinds + ' 種)'));
+    warnBox.appendChild(el('div', { class:'small', style:{marginTop:'4px'} },
+      '建議:1) 查看詳情找出問題 2) Firebase 離線時請點上方重連 3) 清空舊紀錄重新觀察'));
+    const wbtns = el('div', { class:'flex', style:{marginTop:'6px',gap:'6px',flexWrap:'wrap'} });
+    wbtns.appendChild(el('button', { class:'btn btn-sm', onclick:()=> showRecentErrors() }, '🔍 查看錯誤詳情'));
+    wbtns.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+      if(!await confirmDlg('清空所有錯誤紀錄?', {danger:true})) return;
+      try { localStorage.removeItem('cms_v3_recent_errors'); } catch(_){}
+      toast('已清空錯誤紀錄','success');
+      rerender();
+    }}, '🗑 清空錯誤'));
+    warnBox.appendChild(wbtns);
+    card.appendChild(warnBox);
+  }
+  // Firebase 連線錯誤的提示也補一個
+  if(isFbBroken && App.fbStatus === 'error'){
     card.appendChild(el('div', { class:'card', style:{marginTop:'8px',padding:'10px',background:'var(--danger-soft)',borderColor:'var(--danger)'} },
-      el('div', { style:{fontWeight:'700',color:'var(--danger)'} }, '🔴 過去 24 小時錯誤異常多'),
+      el('div', { style:{fontWeight:'700',color:'var(--danger)'} }, '🔴 Firebase 連線異常'),
       el('div', { class:'small', style:{marginTop:'4px'} },
-        '建議：點下方按鈕查看詳情，或登出後再登入。'),
-      el('button', { class:'btn btn-sm', style:{marginTop:'6px'}, onclick:()=> showRecentErrors() }, '🔍 查看錯誤詳情')
+        '繳交/出席會暫存本機,網路恢復後自動同步。\n常見原因:1) 網路斷線 2) Firebase 設定錯誤 3) 防火牆擋住 firebasedatabase.app'),
+      el('div', { class:'flex', style:{marginTop:'6px',gap:'6px',flexWrap:'wrap'} },
+        el('button', { class:'btn btn-sm btn-primary', onclick: ()=> {
+          try {
+            const cfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+            if(cfg && typeof Sync !== 'undefined' && Sync.init){ Sync.init(cfg); toast('重新連線中...','info'); setTimeout(rerender, 1500); return; }
+          } catch(_){}
+          location.reload();
+        }}, '🔄 立即重連'),
+        el('button', { class:'btn btn-sm', onclick: ()=> go('firebase') }, '⚙ 檢查 Firebase 設定')
+      )
     ));
   }
 
@@ -12960,11 +13261,14 @@ function showRecentErrors(){
   } else {
     const list = el('div', { class:'card', style:{maxHeight:'60vh',overflow:'auto'} });
     errs.slice().reverse().slice(0, 50).forEach(e => {
+      const cnt = (e.count || 1);
       list.appendChild(el('div', { style:{padding:'8px',borderBottom:'1px solid var(--border)'} },
-        el('div', { class:'small', style:{color:'var(--danger)'} }, e.msg || '(無訊息)'),
+        el('div', { class:'small', style:{color:'var(--danger)'} },
+          (cnt > 1 ? '×' + cnt + ' ' : '') + (e.msg || '(無訊息)')),
         el('div', { class:'tiny muted' },
           (e.file ? e.file + ':' + e.line : '') +
-          ' · ' + new Date(e.ts).toLocaleString('zh-TW'))
+          ' · 首發 ' + new Date(e.ts).toLocaleString('zh-TW') +
+          (e.lastTs && e.lastTs !== e.ts ? ' · 末發 ' + new Date(e.lastTs).toLocaleString('zh-TW') : ''))
       ));
     });
     m.root.appendChild(list);
@@ -21673,6 +21977,8 @@ function backupCreate(label){
       });
     }
     try { localStorage.setItem(LS_BACKUP_LAST, today); } catch(e){_swallow('auto',e)}
+    // 也同步寫健康儀表板用的 timestamp,讓「上次備份」會更新
+    try { localStorage.setItem('cms_v3_last_backup_ts', String(Date.now())); } catch(_){}
     return key;
   } catch(e){
     dbgWarn('backup failed', e);
@@ -25389,9 +25695,24 @@ function boot(){
       });
     }
     // 持續監控 — 同步寫 Firebase + localStorage (給健康儀表板讀)
+    // M6: 去重 — 同樣的 msg+file+line 在 60 秒內重複觸發就只更新 count,避免把儀表板灌爆
     function _recordErrorLocally(info){
       try {
         const errs = JSON.parse(localStorage.getItem('cms_v3_recent_errors') || '[]');
+        const sig = (info.msg||'') + '|' + (info.file||'') + ':' + (info.line||0);
+        // 從尾端往前找最近一筆同 signature 的
+        for(let i = errs.length - 1; i >= Math.max(0, errs.length - 10); i--){
+          const e = errs[i];
+          const esig = (e.msg||'') + '|' + (e.file||'') + ':' + (e.line||0);
+          if(esig === sig && (info.ts - (e.ts||0)) < 60000){
+            // 60 秒內重複 — 只累加次數,不新增 row
+            e.count = (e.count || 1) + 1;
+            e.lastTs = info.ts;
+            localStorage.setItem('cms_v3_recent_errors', JSON.stringify(errs));
+            return;
+          }
+        }
+        info.count = 1;
         errs.push(info);
         // 保留最近 100 筆
         if(errs.length > 100) errs.splice(0, errs.length - 100);
