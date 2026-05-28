@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#2563eb">
 <!-- 🔒 CSP — 限制可載入的資源來源，防止 XSS 注入 (含 'unsafe-inline' 因為大量 inline style/event)
      允許：本站、Firebase、Google Drive、Anthropic、QR 服務 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://apis.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com https://files.catbox.moe; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app https://*.gstatic.com wss://*.firebaseio.com wss://*.firebasedatabase.app https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io https://catbox.moe https://files.catbox.moe; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com https://*.firebaseapp.com; media-src 'self' blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://apis.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com https://files.catbox.moe https://0x0.st; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app https://*.gstatic.com wss://*.firebaseio.com wss://*.firebasedatabase.app https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io https://catbox.moe https://files.catbox.moe https://0x0.st; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com https://*.firebaseapp.com; media-src 'self' blob: data:;">
 <!-- 🔒 防 clickjacking -->
 <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
 <!-- 🔒 不發送 referrer 給其他網站 -->
@@ -6621,26 +6621,50 @@ async function _compressImageIfNeeded(file){
   }
 }
 
-// 匿名上傳到 catbox.moe (免費 200 MB 永久,無註冊,跨裝置)
-async function _catboxUpload(file){
-  if(file.size > 200 * 1024 * 1024) throw new Error('catbox 上限 200 MB');
-  const fd = new FormData();
-  fd.append('reqtype', 'fileupload');
-  fd.append('fileToUpload', file);
-  // 30s timeout
-  const ctrl = new AbortController();
-  const timeoutId = setTimeout(()=> ctrl.abort(), 30000);
-  let resp;
+// 免費匿名上傳到 0x0.st 或 catbox.moe (跨裝置)
+async function _bigFileUpload(file){
+  // 試 0x0.st 優先 (穩定,免費,512 MB 上限)
   try {
-    resp = await fetch('https://catbox.moe/user/api.php', {
-      method:'POST', body: fd, signal: ctrl.signal
-    });
-  } finally { clearTimeout(timeoutId); }
-  if(!resp.ok) throw new Error('catbox HTTP ' + resp.status);
-  const url = (await resp.text()).trim();
-  if(!url.startsWith('http')) throw new Error('catbox 回傳異常: ' + url.slice(0, 80));
-  return url;
+    const fd = new FormData();
+    fd.append('file', file);
+    const ctrl = new AbortController();
+    const tid = setTimeout(()=> ctrl.abort(), 120000);  // 2 min timeout 給大檔
+    let resp;
+    try {
+      resp = await fetch('https://0x0.st', {
+        method:'POST', body: fd, signal: ctrl.signal
+      });
+    } finally { clearTimeout(tid); }
+    if(!resp.ok) throw new Error('0x0 HTTP ' + resp.status);
+    const url = (await resp.text()).trim();
+    if(url.startsWith('http')) return { url, host:'0x0.st' };
+    throw new Error('0x0 回傳異常: ' + url.slice(0, 80));
+  } catch(e0){
+    console.warn('[0x0.st upload failed]', e0.message);
+    // fallback catbox.moe
+    try {
+      const fd = new FormData();
+      fd.append('reqtype', 'fileupload');
+      fd.append('fileToUpload', file);
+      const ctrl = new AbortController();
+      const tid = setTimeout(()=> ctrl.abort(), 120000);
+      let resp;
+      try {
+        resp = await fetch('https://catbox.moe/user/api.php', {
+          method:'POST', body: fd, signal: ctrl.signal
+        });
+      } finally { clearTimeout(tid); }
+      if(!resp.ok) throw new Error('catbox HTTP ' + resp.status);
+      const url = (await resp.text()).trim();
+      if(url.startsWith('http')) return { url, host:'catbox.moe' };
+      throw new Error('catbox 回傳異常: ' + url.slice(0, 80));
+    } catch(eC){
+      throw new Error('兩家圖床都失敗 (0x0.st: ' + e0.message + ', catbox: ' + eC.message + ')');
+    }
+  }
 }
+// 相容舊呼叫名稱
+const _catboxUpload = _bigFileUpload;
 
 async function attachUpload(file){
   if(!file) throw new Error('沒有檔案');
@@ -6667,23 +6691,24 @@ async function attachUpload(file){
     if(msg){ try { toast(msg, type||'success', 3000); } catch(_){} }
   };
 
-  // ★ 超大檔 (>50 MB) 優先走 catbox.moe 免費匿名空間 (用戶要求,免設定 Drive)
-  if(file.size > 50 * 1024 * 1024 && file.size <= 200 * 1024 * 1024){
+  // ★ 超大檔 (>50 MB) 走免費匿名圖床 (0x0.st 優先,catbox.moe 備援)
+  if(file.size > 50 * 1024 * 1024 && file.size <= 512 * 1024 * 1024){
     try {
-      try { toast('☁️ 大檔上傳到 catbox.moe (免費 200 MB,匿名)...', 'info', 5000); } catch(_){}
-      const catboxUrl = await _catboxUpload(file);
-      _doneProgress('✅ 已上傳到 catbox.moe: ' + file.name, 'success');
+      try { toast('☁️ 大檔 (' + Math.round(file.size/1024/1024) + ' MB) 上傳到免費圖床中(可能需 1-2 分鐘)...', 'info', 8000); } catch(_){}
+      const result = await _bigFileUpload(file);
+      _doneProgress('✅ 已上傳到 ' + result.host + ': ' + file.name, 'success');
       return {
         name: file.name,
         type: file.type || '',
         size: file.size,
-        storage: 'catbox',
-        catboxUrl: catboxUrl,
+        storage: 'catbox',         // 維持向後相容的 storage key
+        catboxUrl: result.url,
+        catboxHost: result.host,
         storedAt: Date.now()
       };
     } catch(e){
-      console.warn('[catbox upload failed]', e);
-      try { toast('catbox 上傳失敗 (' + (e.message||e) + '),改試 Drive', 'warn', 4000); } catch(_){}
+      console.warn('[big file upload failed]', e);
+      try { toast('免費圖床上傳失敗:' + (e.message||e) + ' — 改存本機 + 提示貼連結', 'warn', 6000); } catch(_){}
       // fallthrough → 走 Drive / IDB 路徑
     }
   }
