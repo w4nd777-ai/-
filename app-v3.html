@@ -10042,83 +10042,42 @@ function _runForgotFlow(opts){
     toast((customMsg || '驗證失敗') + '（剩餘 ' + left + ' 次嘗試）','danger', 3500);
   }
 
-  /* ── Step 1：輸入帳號（老師） */
+  /* ── Step 1：輸入帳號 (老師) — 簡化為 3 步流程 ──
+       1) 帳號 → 2) Email → 3) 安全問題 → 設新密碼
+       移除沒用的 OTP / Firebase 寄信流程 (用戶反映都收不到信) */
   function renderTeacherStep1(){
-    header('🔑 找回老師密碼',
-      '請選擇你要的方式重設密碼。');
+    header('🔑 找回老師密碼 — 第 1 / 3 步',
+      '只要你記得「Email + 安全問題答案」就能重設密碼,不用任何驗證碼。');
 
-    // ★ 推薦方式:Firebase Auth 直接寄重設信 (不用驗證碼 / 不用安全問題)
-    //   用戶反映「驗證碼根本收不到」→ 原本的 6 步驟 OTP 走 webhook / mailto,
-    //   都不是真的寄信。改用 Firebase 內建 sendPasswordResetEmail,
-    //   會從 noreply@<project>.firebaseapp.com 真的寄信到用戶 Gmail
-    const fastBox = el('div', { style:{
-      padding:'14px',border:'2px solid var(--success)',borderRadius:'10px',
-      background:'var(--success-soft)',marginBottom:'12px'
+    // 替代方案 — 有綁 Google / 有恢復碼的捷徑
+    const altBox = el('div', { style:{
+      padding:'10px 12px',background:'var(--surface-2)',borderRadius:'8px',
+      marginBottom:'12px',fontSize:'12px',lineHeight:'1.7'
     }});
-    fastBox.appendChild(el('div', { style:{fontWeight:'700',color:'var(--success)',marginBottom:'4px',fontSize:'14px'} },
-      '⚡ 推薦:直接收 Firebase 重設信'));
-    fastBox.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.6'} },
-      '輸入註冊時的 Email,Firebase 會立刻從 noreply@firebaseapp.com 寄一封含重設連結的信。\n' +
-      '點信裡的連結 → 直接設新密碼。免驗證碼、免安全問題。'));
-    const fastEmail = el('input', { class:'input', type:'email', placeholder:'name@example.com',
-      autocomplete:'email', style:{marginBottom:'8px'} });
-    fastBox.appendChild(fastEmail);
-    const fastBtn = el('button', { class:'btn btn-primary btn-block', onclick: async ()=> {
-      const em = (fastEmail.value || '').trim().toLowerCase();
-      if(!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){
-        toast('請輸入有效 Email','warning'); return;
-      }
-      if(!window.firebase || !firebase.auth){
-        toast('Firebase 未載入,改用下方傳統流程','warning', 4000); return;
-      }
-      // 確保 Firebase 已初始化
-      if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
-        toast('Firebase 初始化失敗,改用下方傳統流程','danger', 4000); return;
-      }
-      fastBtn.disabled = true;
-      fastBtn.textContent = '⏳ 寄送中...';
-      try {
-        await firebase.auth().sendPasswordResetEmail(em);
-        toast('✅ 重設信已寄出!請到 ' + em + ' 收信 (記得也看垃圾信匣)','success', 8000);
-        // 5 秒後自動關閉 modal
-        setTimeout(()=> { try { m.close(); } catch(_){} }, 2000);
-      } catch(e){
-        let msg = e.message || String(e);
-        if(e.code === 'auth/user-not-found'){
-          // 為了不洩露帳號是否存在,模糊化訊息
-          msg = '若這個 Email 有註冊過,重設信已寄出。請到信箱查看 (含垃圾信匣)。';
-          toast(msg, 'info', 7000);
-          setTimeout(()=> { try { m.close(); } catch(_){} }, 1500);
-        } else if(e.code === 'auth/invalid-email'){
-          toast('Email 格式不正確','danger', 4000);
-          fastBtn.disabled = false; fastBtn.textContent = '📨 寄出重設信';
-        } else if(e.code === 'auth/too-many-requests'){
-          toast('嘗試次數過多,請稍後再試','danger', 5000);
-          fastBtn.disabled = false; fastBtn.textContent = '📨 寄出重設信';
-        } else {
-          toast('寄送失敗:' + msg, 'danger', 5000);
-          fastBtn.disabled = false; fastBtn.textContent = '📨 寄出重設信';
-        }
-      }
-    }}, '📨 寄出重設信');
-    fastBox.appendChild(fastBtn);
-    fastBox.appendChild(el('div', { class:'tiny muted', style:{marginTop:'8px'} },
-      '💡 適用於用 Email 註冊 / Google 登入的老師帳號。如果你是用 admin/admin123 之類的本地帳號,請用下方傳統流程。'));
-    stage.appendChild(fastBox);
+    altBox.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'4px'} },
+      '💡 已有更快的方式?'));
+    altBox.appendChild(el('div', { class:'muted' },
+      '• 你有綁 Google → 直接回登入頁點「用 Google 登入」'));
+    altBox.appendChild(el('div', { class:'muted' },
+      '• 你有恢復碼 → 點下方「🔐 我有恢復碼」'));
+    altBox.appendChild(el('div', { class:'muted' },
+      '• 都沒有 → 照下面 3 步驟走'));
+    stage.appendChild(altBox);
 
-    // ── 分隔線 ──
-    stage.appendChild(el('div', { style:{textAlign:'center',color:'var(--text-muted)',fontSize:'12px',margin:'12px 0'} },
-      '── 或用傳統 6 步驟流程 ──'));
-
-    stage.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px',lineHeight:'1.6'} },
-      '傳統流程需 Email + 安全問題 + 驗證碼。如果上面的「直接寄重設信」失敗,試試這個。'));
     const f = el('div', { class:'field' });
     f.appendChild(el('label', { class:'label' }, '老師帳號 (username)'));
-    const inp = el('input', { class:'input', placeholder:'例：admin', autocomplete:'username' });
+    const inp = el('input', { class:'input', placeholder:'例:admin', autocomplete:'username' });
     f.appendChild(inp);
     stage.appendChild(f);
+
+    // 我有恢復碼捷徑
+    stage.appendChild(el('div', { class:'small', style:{marginTop:'6px'} },
+      el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'underline'},
+        onclick:()=> { st.useRecovery = true; render(); } }, '🔐 我有恢復碼 (跳過所有驗證直接設新密碼)')
+    ));
+
     stage.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} },
-      '🛡️ 安全機制：10 次失敗將鎖定 15 分鐘'));
+      '🛡️ 安全機制:10 次失敗將鎖定 15 分鐘'));
 
     const next = ()=> {
       const u = inp.value.trim();
@@ -10136,9 +10095,19 @@ function _runForgotFlow(opts){
         toast('若帳號存在，將進入下一步驗證（剩餘 ' + left + ' 次嘗試）','info', 4000);
         return;
       }
-      // 帳號存在但缺 recovery 欄位 → 提示先登入完成設定
+      // 帳號存在但缺 recovery 欄位 → 給出實際可走的選項
       if(!acc.email || !acc.securityQ || !acc.securityA){
-        toast('此帳號尚未設定 Email 與安全問題，請先用原密碼登入完成設定','warning', 5500);
+        const hasRecovery = !!acc.recoveryCode;
+        const hasGoogle = !!acc.googleEmail;
+        let msg = '此帳號沒設定 Email + 安全問題,無法走標準復原流程。\n\n';
+        if(hasGoogle){
+          msg += '✅ 你有綁 Google → 回登入頁點「用 Google 登入」就能進去。';
+        } else if(hasRecovery){
+          msg += '✅ 你有恢復碼 → 點「🔐 我有恢復碼」直接設新密碼。';
+        } else {
+          msg += '請聯絡主老師幫你重設,或使用預設帳號(admin/admin123)登入。';
+        }
+        toast(msg, 'warning', 9000);
         return;
       }
       st.account = acc;
@@ -10155,15 +10124,15 @@ function _runForgotFlow(opts){
     ));
   }
 
-  /* ── Step 2：Email 驗證 */
+  /* ── Step 2：Email 驗證 (用戶反映驗證碼收不到 → 跳過 OTP 直接到安全問題) */
   function renderTeacherStep2(){
-    header('📧 Email 驗證 — 第 2 / 6 步',
-      '請輸入帳號註冊時填寫的 Email，必須完全相符（不分大小寫）。');
+    header('📧 Email 驗證 — 第 2 / 3 步',
+      '請輸入帳號註冊時填寫的 Email,完全相符就會進到安全問題。');
     const banner = lockBanner(st.username);
     if(banner) stage.appendChild(banner);
     stage.appendChild(el('div', { style:{
       background:'var(--surface-2)',padding:'10px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px'
-    }}, '提示：此帳號 Email 為 ', el('code', null, maskEmail(st.account.email))));
+    }}, '提示:此帳號 Email 為 ', el('code', null, maskEmail(st.account.email))));
 
     const f = el('div', { class:'field' });
     f.appendChild(el('label', { class:'label' }, '完整 Email'));
@@ -10173,7 +10142,7 @@ function _runForgotFlow(opts){
 
     stage.appendChild(el('div', { class:'small', style:{marginTop:'8px'} },
       el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'underline'},
-        onclick:()=> { st.useRecovery = true; render(); } }, '🔐 我有恢復碼（跳過 Email 驗證）')
+        onclick:()=> { st.useRecovery = true; render(); } }, '🔐 我有恢復碼 (跳過 Email 驗證)')
     ));
 
     const next = ()=> {
@@ -10187,7 +10156,10 @@ function _runForgotFlow(opts){
         failGeneric(st.username, 'Email 與帳號註冊資料不符');
         return;
       }
-      st.step = 3;
+      // ★ 改:跳過 Step 3 (寄 OTP) + Step 4 (輸入 OTP),直接到 Step 5 (安全問題)
+      //   原因:用戶反映 OTP 不論用 webhook 還是 mailto 都收不到,
+      //   Email 自身就是身份驗證 (要打對才能繼續),加上安全問題已足夠
+      st.step = 5;
       render();
     };
     inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
@@ -10195,7 +10167,7 @@ function _runForgotFlow(opts){
 
     stage.appendChild(actions(
       el('button', { class:'btn', onclick:()=> { st.step = 1; render(); } }, '← 上一步'),
-      el('button', { class:'btn btn-primary', onclick: next }, '驗證 Email →')
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證 Email → 答安全問題')
     ));
   }
 
@@ -10349,10 +10321,10 @@ function _runForgotFlow(opts){
     ));
   }
 
-  /* ── Step 5：安全問題 */
+  /* ── Step 5：安全問題 (改稱第 3 步,因為已跳過 OTP) */
   function renderTeacherStep5(){
-    header('❓ 安全問題 — 第 5 / 6 步',
-      '請回答您設定的安全問題（答案不分大小寫）。');
+    header('❓ 安全問題 — 第 3 / 3 步',
+      '請回答您設定的安全問題 (答案不分大小寫)。答對就能設新密碼。');
     const banner = lockBanner(st.username);
     if(banner) stage.appendChild(banner);
 
@@ -10382,8 +10354,9 @@ function _runForgotFlow(opts){
     setTimeout(()=> inp.focus(), 80);
 
     stage.appendChild(actions(
-      el('button', { class:'btn', onclick:()=> { st.step = 4; render(); } }, '← 上一步'),
-      el('button', { class:'btn btn-primary', onclick: next }, '驗證答案 →')
+      // 回到 step 2 (Email),不是 step 4 (已跳過的 OTP)
+      el('button', { class:'btn', onclick:()=> { st.step = 2; render(); } }, '← 上一步'),
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證答案 → 設新密碼')
     ));
   }
 
@@ -10503,9 +10476,9 @@ function _runForgotFlow(opts){
     }
   }
 
-  /* ── 學生 Step 1：學號 + 班級 */
+  /* ── 學生 Step 1：學號 + 班級 (簡化為 2 步,跳過 OTP) */
   function renderStudentStep1(){
-    header('🔑 找回學生密碼 — 第 1 / 5 步',
+    header('🔑 找回學生密碼 — 第 1 / 2 步',
       '請輸入學號並選擇班級。為保護隱私不直接列出學生姓名。');
     const f1 = el('div', { class:'field' });
     f1.appendChild(el('label', { class:'label' }, '學號'));
@@ -10560,15 +10533,15 @@ function _runForgotFlow(opts){
     ));
   }
 
-  /* ── 學生 Step 2：Email */
+  /* ── 學生 Step 2：Email (跳過 OTP,直接到 step 5 設新密碼) */
   function renderStudentStep2(){
-    header('📧 Email 驗證 — 第 2 / 5 步',
-      '請輸入註冊時填寫的 Email，必須完全相符。');
+    header('📧 Email 驗證 — 第 2 / 2 步',
+      '請輸入註冊時填寫的 Email,正確就能直接設新密碼。');
     const banner = lockBanner(st.username);
     if(banner) stage.appendChild(banner);
     stage.appendChild(el('div', { style:{
       background:'var(--surface-2)',padding:'10px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px'
-    }}, '提示：此學生 Email 為 ', el('code', null, maskEmail(st.account.email))));
+    }}, '提示:此學生 Email 為 ', el('code', null, maskEmail(st.account.email))));
 
     const f = el('div', { class:'field' });
     f.appendChild(el('label', { class:'label' }, '完整 Email'));
@@ -10583,7 +10556,10 @@ function _runForgotFlow(opts){
         failGeneric(st.username, 'Email 不符');
         return;
       }
-      st.step = 3;
+      // ★ 跳過 step 3 (OTP 寄送) + step 4 (OTP 輸入) → 直接到 step 5 (設新密碼)
+      //   用戶反映驗證碼根本收不到,且學生流程本來就沒有「安全問題」這層
+      //   Email 對上就足以驗證 (沒打對的就 fail + lock)
+      st.step = 5;
       render();
     };
     inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
@@ -10591,7 +10567,7 @@ function _runForgotFlow(opts){
 
     stage.appendChild(actions(
       el('button', { class:'btn', onclick:()=> { st.step = 1; render(); } }, '← 上一步'),
-      el('button', { class:'btn btn-primary', onclick: next }, '驗證 →')
+      el('button', { class:'btn btn-primary', onclick: next }, '驗證 Email → 設新密碼')
     ));
   }
 
@@ -10723,11 +10699,11 @@ function _runForgotFlow(opts){
     ));
   }
 
-  /* ── 學生 Step 5：留言給老師並送出申請（保留審核機制） */
+  /* ── 學生 Step 5：留言給老師並送出申請 (跳過 OTP 後直接到此) */
   function renderStudentStep5MessageThenSubmit(){
-    header('📝 留言給老師 — 第 5 / 5 步',
-      '驗證已通過，最後請寫一段訊息給老師（選填），點下方按鈕送出重設申請。' +
-      '老師核准後您才能用新密碼登入（學號末 4 碼）。');
+    header('📝 留言給老師 — 第 2 / 2 步',
+      'Email 驗證通過,最後寫一段訊息給老師 (選填),按下方送出重設申請。' +
+      '老師核准後請用「學號末 4 碼」登入並立即修改密碼。');
 
     const f = el('div', { class:'field' });
     f.appendChild(el('label', { class:'label' }, '訊息（選填）'));
@@ -10771,7 +10747,8 @@ function _runForgotFlow(opts){
     };
 
     stage.appendChild(actions(
-      el('button', { class:'btn', onclick:()=> { st.step = 4; render(); } }, '← 上一步'),
+      // step 4 (OTP) 已跳過 → 回到 step 2 (Email)
+      el('button', { class:'btn', onclick:()=> { st.step = 2; render(); } }, '← 上一步'),
       el('button', { class:'btn btn-primary', onclick: submit }, '📨 送出申請給老師')
     ));
   }
