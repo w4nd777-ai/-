@@ -11741,13 +11741,14 @@ function rOv(content){
   }
 
   // 今日簽到簽退明細 — 加搜尋 + 班級篩選 + 頭像（點擊放大下載）
+  // 改：永遠顯示這個條列式表格 (即使 0 筆也顯示工具列,讓老師知道功能存在)
   try {
     const todayStr = td();
     const todayAtt = (App.db.attendance || []).filter(a => a.date === todayStr);
-    if(todayAtt.length){
+    {
       const detailCard = el('div', { class:'card', style:{marginBottom:'12px'} });
       detailCard.appendChild(el('div', { class:'flex-between' },
-        el('h3', null, '🕒 今日簽到 / 簽退明細'),
+        el('h3', null, '🕒 今日簽到 / 簽退明細 ' + (todayAtt.length ? '(' + todayAtt.length + ' 筆)' : '(尚無資料)')),
         el('button', { class:'btn btn-sm', onclick:()=> go('attendance'), title:'進入出席管理' }, '管理 →')
       ));
 
