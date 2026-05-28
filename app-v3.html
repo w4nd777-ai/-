@@ -7257,6 +7257,155 @@ function studentRegisterFlow(){
   setTimeout(()=> iName.focus(), 80);
 }
 
+// 老師申請註冊 — 需管理員審核通過才能使用 Email 登入
+function teacherRegisterFlow(){
+  const m = modal('', { dismissable:false });
+  m.root.appendChild(el('h2', null, '老師申請註冊'));
+  m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'13px',marginBottom:'10px'} },
+    '請完整填寫資料,等待管理員審核通過後即可使用 Email 登入'));
+
+  function field(label, input, hint){
+    const f = el('div', { class:'field' });
+    f.appendChild(el('label', { class:'label' }, label));
+    f.appendChild(input);
+    if(hint) f.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} }, hint));
+    return f;
+  }
+
+  const iName = el('input', { class:'input', placeholder:'王老師' });
+  const iEmail = el('input', { class:'input', type:'email', placeholder:'your@example.com', autocomplete:'email' });
+  const iPw = el('input', { class:'input', type:'password', placeholder:'至少 6 字元' });
+  const iPw2 = el('input', { class:'input', type:'password', placeholder:'再輸入一次' });
+  const iNote = el('textarea', { class:'input textarea', placeholder:'(選填) 任教科目 / 班級 / 留給管理員的訊息', rows:'2' });
+
+  m.root.appendChild(field('姓名 *', iName));
+  m.root.appendChild(field('Email *', iEmail, '審核通過後用此 Email 登入'));
+  m.root.appendChild(field('密碼 *', iPw, '至少 6 字元'));
+  m.root.appendChild(field('確認密碼 *', iPw2));
+  m.root.appendChild(field('備註 (選填)', iNote));
+
+  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',padding:'8px 12px',background:'var(--danger-soft)',borderRadius:'8px',marginTop:'8px'} });
+  m.root.appendChild(err);
+  function showErr(msg){ err.textContent = msg; err.style.display = 'block'; }
+
+  const submit = async (ev)=> {
+    const btn = ev.currentTarget;
+    if(btn.disabled) return;
+    const name = iName.value.trim();
+    const email = iEmail.value.trim();
+    const pw = iPw.value;
+    const pw2 = iPw2.value;
+    const note = iNote.value.trim();
+    err.style.display = 'none';
+    if(!name) return showErr('請輸入姓名');
+    if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showErr('請輸入有效 Email');
+    if(!pw || pw.length < 6) return showErr('密碼至少 6 字元');
+    if(pw !== pw2) return showErr('兩次密碼不一致');
+
+    if((App.db.pending||[]).some(p => p.role === 'teacher' && p.email === email)){
+      return showErr('此 Email 已申請過,審核中');
+    }
+    if((App.db.accounts||[]).some(a => a.username === 'email:' + email)){
+      return showErr('此 Email 已是老師帳號,請改用「使用 Email 登入」');
+    }
+
+    if(!window.firebase || !firebase.auth){
+      return showErr('Firebase 未載入,請重新整理頁面');
+    }
+    btn.disabled = true;
+    btn.textContent = '處理中...';
+    let uid = '';
+    try {
+      const cred = await firebase.auth().createUserWithEmailAndPassword(email, pw);
+      uid = cred.user.uid;
+      try { await firebase.auth().signOut(); } catch(_){}
+    } catch(e){
+      btn.disabled = false; btn.textContent = '✓ 送出申請';
+      if(e.code === 'auth/email-already-in-use'){
+        return showErr('此 Email 已在 Firebase 註冊過。可能您之前已申請,請聯絡管理員確認');
+      } else if(e.code === 'auth/weak-password'){
+        return showErr('密碼太弱 (至少 6 字)');
+      } else if(e.code === 'auth/operation-not-allowed'){
+        return showErr('管理員尚未在 Firebase Console 啟用 Email/Password');
+      } else {
+        return showErr('註冊失敗: ' + (e.message || e.code));
+      }
+    }
+
+    const pending = {
+      id: nid(),
+      role: 'teacher',
+      name, email,
+      firebaseUid: uid,
+      note: note || '',
+      ts: Date.now(),
+      status: 'pending'
+    };
+    App.db.pending = App.db.pending || [];
+    App.db.pending.push(pending);
+    try { saveDB(); } catch(_){}
+    try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
+    if(typeof logOp === 'function') logOp('register', '老師 ' + name + ' 申請註冊');
+    m.close();
+    toast('✅ 申請已送出!審核通過後,使用 Email 登入即可進系統', 'success', 6000);
+  };
+
+  iPw2.addEventListener('keydown', e => { if(e.key === 'Enter') submit({currentTarget:document.querySelector('#__tr_submit')}); });
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  const btnSubmit = el('button', { class:'btn btn-primary', id:'__tr_submit', onclick: submit }, '✓ 送出申請');
+  actions.appendChild(btnSubmit);
+  m.root.appendChild(actions);
+
+  setTimeout(()=> iName.focus(), 80);
+}
+
+// 核准老師申請 — 建立 accounts entry,讓他可以用 Email 登入
+async function approveTeacher(pid, silent){
+  const p = App.db.pending.find(x => x.id === pid && x.role === 'teacher');
+  if(!p){ if(!silent) toast('找不到該老師申請','danger'); return; }
+  const uname = 'email:' + p.email;
+  if(App.db.accounts.some(a => a.username === uname)){
+    if(!silent) toast('此 Email 已是老師帳號','warn');
+    App.db.pending = App.db.pending.filter(x => x.id !== pid);
+    try { saveDB(); Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
+    if(!silent) rerender();
+    return;
+  }
+  const acc = {
+    id: 'acc_e_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    username: uname,
+    email: p.email,
+    firebaseUid: p.firebaseUid || '',
+    name: p.name || p.email.split('@')[0],
+    role: 'teacher',
+    createdAt: Date.now(),
+    approvedAt: Date.now(),
+    note: p.note || ''
+  };
+  App.db.accounts.push(acc);
+  App.db.pending = App.db.pending.filter(x => x.id !== pid);
+  try { saveDB(); } catch(_){}
+  try { Sync.setMap('accounts', App.db.accounts); Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
+  if(typeof logOp === 'function') logOp('approveTeacher', '核准老師 ' + p.name + ' (' + p.email + ')');
+  if(!silent){
+    toast('✅ 已核准老師 ' + p.name + ',可用 Email 登入','success', 5000);
+    rerender();
+  }
+}
+
+function rejectTeacher(pid){
+  const p = App.db.pending.find(x => x.id === pid && x.role === 'teacher');
+  if(!p) return;
+  if(!confirm('確定拒絕「' + p.name + '」(' + p.email + ') 的申請?\n注意:Firebase 內已建立的帳號可能仍可登入,但無法進系統 (因為缺少 accounts entry)。建議到 Firebase Console 手動刪除使用者。')) return;
+  App.db.pending = App.db.pending.filter(x => x.id !== pid);
+  try { saveDB(); Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
+  if(typeof logOp === 'function') logOp('rejectTeacher', '拒絕老師 ' + p.name);
+  toast('已拒絕老師申請: ' + p.name, 'warn');
+  rerender();
+}
+
 /* ════════════════════════════════════════════════════════════
    LOGIN SCREENS  (batch 1 redesign)
    ──────────────────────────────────────────────────────────── */
@@ -8400,16 +8549,12 @@ async function _emailLoginModal(title, role){
     var card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:14px;padding:26px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:system-ui';
     card.innerHTML =
-      '<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:14px">' + title + '</div>' +
-      // tabs (登入 / 註冊)
-      '<div style="display:flex;gap:0;margin-bottom:18px;border-bottom:1.5px solid #e5e7eb">' +
-      '<button id="__el_tab_login" type="button" style="flex:1;padding:10px;border:0;background:transparent;cursor:pointer;font-size:14px;font-weight:600;color:#16a34a;border-bottom:2.5px solid #16a34a;margin-bottom:-1.5px">登入</button>' +
-      '<button id="__el_tab_reg" type="button" style="flex:1;padding:10px;border:0;background:transparent;cursor:pointer;font-size:14px;font-weight:600;color:#888;border-bottom:2.5px solid transparent;margin-bottom:-1.5px">註冊</button>' +
-      '</div>' +
+      '<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:18px">' + title + '</div>' +
+      // (移除 tabs — Email 只負責登入,註冊請走「申請註冊」)
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">Email</label>' +
       '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" value="' + savedEmail.replace(/"/g,'&quot;') + '" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:14px" />' +
-      '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">密碼 (至少 6 字)</label>' +
+      '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">密碼</label>' +
       '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" value="' + savedPw.replace(/"/g,'&quot;') + '" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:12px" />' +
       // 記住我
@@ -8421,7 +8566,7 @@ async function _emailLoginModal(title, role){
       '<button id="__el_cancel" style="flex:1;padding:11px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#555;cursor:pointer;font-size:14px">取消</button>' +
       '<button id="__el_ok" style="flex:2;padding:11px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px">登入</button>' +
       '</div>' +
-      '<div id="__el_hint" style="font-size:11px;color:#888;text-align:center;margin-top:12px;line-height:1.5">用同樣 email + 密碼，任何裝置都能登入並同步資料</div>';
+      '<div id="__el_hint" style="font-size:11px;color:#888;text-align:center;margin-top:12px;line-height:1.5">沒有帳號?請先到登入畫面點「申請註冊」</div>';
     overlay.appendChild(card);
     document.body.appendChild(overlay);
     var iEmail = card.querySelector('#__el_email');
@@ -8429,36 +8574,8 @@ async function _emailLoginModal(title, role){
     var iRem = card.querySelector('#__el_remember');
     var btnOk = card.querySelector('#__el_ok');
     var btnCancel = card.querySelector('#__el_cancel');
-    var tabLogin = card.querySelector('#__el_tab_login');
-    var tabReg = card.querySelector('#__el_tab_reg');
-    var hintEl = card.querySelector('#__el_hint');
-    var mode = 'login'; // 預設登入 tab
 
-    function setMode(m){
-      mode = m;
-      if(m === 'login'){
-        tabLogin.style.color = '#16a34a';
-        tabLogin.style.borderBottomColor = '#16a34a';
-        tabReg.style.color = '#888';
-        tabReg.style.borderBottomColor = 'transparent';
-        btnOk.textContent = '登入';
-        iPw.setAttribute('autocomplete', 'current-password');
-        hintEl.textContent = '用同樣 email + 密碼，任何裝置都能登入並同步資料';
-      } else {
-        tabReg.style.color = '#16a34a';
-        tabReg.style.borderBottomColor = '#16a34a';
-        tabLogin.style.color = '#888';
-        tabLogin.style.borderBottomColor = 'transparent';
-        btnOk.textContent = '註冊';
-        iPw.setAttribute('autocomplete', 'new-password');
-        hintEl.textContent = '建立帳號後，任何裝置用同樣 email + 密碼都能登入';
-      }
-    }
-
-    tabLogin.onclick = function(){ setMode('login'); };
-    tabReg.onclick = function(){ setMode('reg'); };
-
-    // 自動 focus 邏輯: 有記住 email + 密碼 → focus 「登入」按鈕讓直接 Enter; 否則 focus email
+    // 自動 focus 邏輯
     setTimeout(function(){
       try {
         if(savedEmail && savedPw) btnOk.focus();
@@ -8481,7 +8598,8 @@ async function _emailLoginModal(title, role){
       } else {
         saveEmailRemember(role, null);
       }
-      close({email: email, password: pw, mode: mode, remember: !!iRem.checked});
+      // mode 一律 'login' (移除 tabs 之後沒有註冊模式)
+      close({email: email, password: pw, mode: 'login', remember: !!iRem.checked});
     };
     btnCancel.onclick = function(){ close(null); };
   });
@@ -8494,39 +8612,20 @@ async function _emailSignInStudent(ev){
   }
   const input = await _emailLoginModal('學生 Email 登入', 'student');
   if(!input) return;
-  const email = input.email, password = input.password, mode = input.mode || 'login';
+  const email = input.email, password = input.password;
   try {
     let userCred;
-    if(mode === 'reg'){
-      // 註冊模式
-      try {
-        userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-      } catch(e){
-        if(e.code === 'auth/email-already-in-use'){
-          try { toast('此 Email 已註冊。請切到「登入」分頁登入', 'danger', 6000); } catch(_){}
-        } else if(e.code === 'auth/weak-password'){
-          try { toast('密碼太弱 (至少 6 字)', 'danger'); } catch(_){}
-        } else if(e.code === 'auth/operation-not-allowed'){
-          try { toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
-        } else {
-          try { toast('註冊失敗: ' + (e.message||e.code), 'danger'); } catch(_){}
-        }
-        return;
+    try {
+      userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
+    } catch(e){
+      if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
+        try { toast('帳號或密碼錯誤。沒帳號請到登入畫面點「申請註冊」', 'danger', 5000); } catch(_){}
+      } else if(e.code === 'auth/operation-not-allowed'){
+        try { toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+      } else {
+        try { toast('登入失敗: ' + (e.message||e.code), 'danger'); } catch(_){}
       }
-    } else {
-      // 登入模式
-      try {
-        userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
-      } catch(e){
-        if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
-          try { toast('帳號或密碼錯誤。沒帳號請切到「註冊」分頁', 'danger', 5000); } catch(_){}
-        } else if(e.code === 'auth/operation-not-allowed'){
-          try { toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
-        } else {
-          try { toast('登入失敗: ' + (e.message||e.code), 'danger'); } catch(_){}
-        }
-        return;
-      }
+      return;
     }
     // 成功 — 走學生綁定流程 (第一次會跳出學號綁定)
     await _handleGoogleAuthStudent(userCred.user);
@@ -8543,41 +8642,37 @@ async function _emailSignInTeacher(ev){
   }
   const input = await _emailLoginModal('老師 Email 登入', 'teacher');
   if(!input) return;
-  const email = input.email, password = input.password, mode = input.mode || 'login';
+  const email = input.email, password = input.password;
   try {
     let userCred;
-    if(mode === 'reg'){
-      // 註冊模式
-      try {
-        userCred = await firebase.auth().createUserWithEmailAndPassword(email, password);
-      } catch(e){
-        if(e.code === 'auth/email-already-in-use'){
-          try { toast('此 Email 已註冊。請切到「登入」分頁登入，或用「忘記密碼」重設', 'danger', 7000); } catch(_){}
-        } else if(e.code === 'auth/weak-password'){
-          try { toast('密碼太弱（至少 6 字）', 'danger'); } catch(_){}
-        } else if(e.code === 'auth/operation-not-allowed'){
-          try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
-        } else {
-          try { toast('註冊失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
-        }
-        return;
+    try {
+      userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
+    } catch(e){
+      if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
+        try { toast('帳號或密碼錯誤。沒帳號請到登入畫面點「申請註冊」', 'danger', 5000); } catch(_){}
+      } else if(e.code === 'auth/operation-not-allowed'){
+        try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+      } else {
+        try { toast('登入失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
       }
-    } else {
-      // 登入模式
-      try {
-        userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
-      } catch(e){
-        if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
-          try { toast('帳號或密碼錯誤。沒帳號請切到「註冊」分頁', 'danger', 5000); } catch(_){}
-        } else if(e.code === 'auth/operation-not-allowed'){
-          try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
-        } else {
-          try { toast('登入失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
-        }
-        return;
-      }
+      return;
     }
-    // 成功
+    // 檢查是否已被管理員審核通過 (accounts 內有對應 entry)
+    const uname = 'email:' + email;
+    const acc = (App.db && App.db.accounts || []).find(function(a){ return a && a.username === uname; });
+    if(!acc){
+      // 還沒審核 → 登出 Firebase + 提示
+      try { await firebase.auth().signOut(); } catch(_){}
+      // 檢查是否在 pending 列表
+      const pendingEntry = (App.db && App.db.pending || []).find(function(p){ return p && p.role === 'teacher' && p.email === email; });
+      if(pendingEntry){
+        try { toast('您的申請尚未審核通過,請等候管理員審核', 'warn', 7000); } catch(_){}
+      } else {
+        try { toast('查不到此帳號的審核紀錄,請先到登入畫面點「申請註冊」', 'danger', 7000); } catch(_){}
+      }
+      return;
+    }
+    // 已核准 → 進系統
     await _completeEmailLogin(userCred.user, 'teacher');
   } catch(e){
     console.error('[email-signin-teacher]', e);
@@ -8605,26 +8700,30 @@ async function _completeEmailLogin(user, role){
       }).catch(function(e){ console.warn('[email-login] mapping write:', e); });
     }
   } catch(_){}
-  // 確保 accounts 有對應 entry
+  // 確保 accounts 有對應 entry (老師審核通過才會有,沒有就不該到這裡)
   try {
     App.db = App.db || { accounts: [] };
     App.db.accounts = App.db.accounts || [];
     const uname = 'email:' + user.email;
     let acc = App.db.accounts.find(function(a){ return a && a.username === uname; });
-    if(!acc){
+    // 學生用 Email 登入: 沒 accounts entry 也可進 (走學號綁定流程不靠 accounts)
+    // 老師用 Email 登入: _emailSignInTeacher 已先擋下沒 accounts 的狀況,跑到這裡保證有 acc
+    if(!acc && role === 'student'){
+      // 學生 fallback — 建立 stub accounts (學號綁定後會更新)
       acc = {
         id: 'acc_e_' + Date.now(),
         username: uname,
         email: user.email,
         firebaseUid: user.uid,
         name: user.email.split('@')[0],
-        role: role,
+        role: 'student',
         createdAt: Date.now()
       };
       App.db.accounts.push(acc);
       try { if(typeof saveDB === 'function') saveDB(true); } catch(_){}
       try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
     }
+    if(!acc){ throw new Error('No accounts entry — should not reach here'); }
     App.session = {
       role: role,
       account: uname,
@@ -9056,15 +9155,26 @@ function renderLoginTeacherStage(){
   stage.appendChild(el('button', { type:'button', class:'btn-pill-primary',
     style:{marginTop:'8px'}, onclick: submit }, '登入'));
 
-  // 忘記密碼連結 (極簡 - 無 icon，無說明文字)
-  if(!_lcT.hideForgot){
-    const forgotWrap = el('div', { class:'lsc-bottom-links', style:{marginTop:'10px',textAlign:'center'} });
-    forgotWrap.appendChild(
-      el('a', { href:'javascript:void(0)', onclick: showTeacherForgotPassword, class:'lsc-link' },
-        '忘記密碼？')
-    );
-    stage.appendChild(forgotWrap);
+  // 申請註冊 + 忘記密碼 — 同一行水平排列 (跟學生 tab 同款式)
+  const bottomRow = el('div', { style:{marginTop:'12px',textAlign:'center',display:'flex',flexDirection:'row',justifyContent:'center',alignItems:'center',gap:'12px',flexWrap:'wrap'} });
+  if(!_lcT.hideRegister){
+    bottomRow.appendChild(el('a', {
+      href:'javascript:void(0)',
+      onclick: teacherRegisterFlow,
+      class:'lsc-link',
+      style:'font-weight:700;color:var(--primary,#2563eb)'
+    }, '申請註冊'));
   }
+  if(!_lcT.hideRegister && !_lcT.hideForgot){
+    bottomRow.appendChild(el('span', { style:'color:rgba(255,255,255,.3);font-size:11px' }, '|'));
+  }
+  if(!_lcT.hideForgot){
+    bottomRow.appendChild(el('a', {
+      href:'javascript:void(0)', onclick: showTeacherForgotPassword,
+      class:'lsc-link', style:'color:rgba(255,255,255,.7)'
+    }, '忘記密碼？'));
+  }
+  if(bottomRow.childNodes.length) stage.appendChild(bottomRow);
 
   // 📦 版本字 + 進階小選項 (重置 / 切換教室) — 需要時才用
   const verWrap = el('div', { style:{marginTop:'18px',textAlign:'center',fontSize:'10px',opacity:'0.5'} });
@@ -15171,28 +15281,45 @@ function rPending(content){
         '🔍 沒有符合條件的申請'));
     }
     pendingList.forEach(p => {
+      const isTeacher = p.role === 'teacher';
       const row = el('div', { class:'list-row', style:{padding:'10px 12px'} });
-      row.appendChild(el('div', { class:'avatar', style:{background:'var(--accent)'} }, initials(p.name)));
-      // 完整資訊：姓名、班級、座號、學號、Email、申請時間
+      row.appendChild(el('div', { class:'avatar', style:{background: isTeacher ? 'var(--primary)' : 'var(--accent)'} }, initials(p.name)));
+      // 完整資訊
       const info = el('div', { class:'info' },
-        el('div', { class:'name' }, p.name + (p.seat?` (${p.seat}號)`:'')),
-        el('div', { class:'sub', style:{lineHeight:'1.7'} },
-          '🏫 ' + (p.cls||'(未填班級)'),
-          p.sid ? el('span', null, ' · 🆔 學號 ' + p.sid) : null,
-          el('br'),
-          p.email ? el('span', null, '📧 ' + p.email) : null,
-          el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
-        )
+        el('div', { class:'name' },
+          isTeacher ? el('span', { class:'pill', style:{background:'var(--primary-soft)',color:'var(--primary)',fontSize:'10px',fontWeight:'700',padding:'2px 6px',marginRight:'6px',borderRadius:'4px'} }, '老師') : null,
+          p.name + (p.seat?` (${p.seat}號)`:'')
+        ),
+        isTeacher
+          ? el('div', { class:'sub', style:{lineHeight:'1.7'} },
+              '📧 ' + (p.email || '(無)'),
+              p.note ? el('span', null, ' · 💬 ' + p.note) : null,
+              el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
+            )
+          : el('div', { class:'sub', style:{lineHeight:'1.7'} },
+              '🏫 ' + (p.cls||'(未填班級)'),
+              p.sid ? el('span', null, ' · 🆔 學號 ' + p.sid) : null,
+              el('br'),
+              p.email ? el('span', null, '📧 ' + p.email) : null,
+              el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
+            )
       );
       row.appendChild(info);
       const acts = el('div', { class:'actions' },
-        el('button', { class:'btn btn-sm', title:'核准前先修改資料', onclick:()=> openPendingEdit(p) }, '✏️ 修改'),
+        isTeacher
+          ? null  // 老師不提供「修改」(申請資料簡單)
+          : el('button', { class:'btn btn-sm', title:'核准前先修改資料', onclick:()=> openPendingEdit(p) }, '✏️ 修改'),
         el('button', { class:'btn btn-sm btn-success', onclick: async (ev)=> {
-          // 防止連點 race：approveStudent 是 async (含 hashPassword)
           ev.currentTarget.disabled = true;
-          try { await approveStudent(p.id); } catch(e){ _swallow('approve-single', e); ev.currentTarget.disabled = false; }
+          try {
+            if(isTeacher) await approveTeacher(p.id);
+            else await approveStudent(p.id);
+          } catch(e){ _swallow('approve-single', e); ev.currentTarget.disabled = false; }
         }}, '✓ 接受'),
-        el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectStudent(p.id) }, '✗ 拒絕')
+        el('button', { class:'btn btn-sm btn-danger', onclick:()=> {
+          if(isTeacher) rejectTeacher(p.id);
+          else rejectStudent(p.id);
+        }}, '✗ 拒絕')
       );
       row.appendChild(acts);
       card.appendChild(row);
