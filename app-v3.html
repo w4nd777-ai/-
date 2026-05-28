@@ -9215,7 +9215,19 @@ async function _completeEmailLogin(user, role){
   } catch(e){ console.warn('[email-login] session:', e); }
   // 立即進系統
   try { toast('🎉 已用 ' + user.email + ' 登入', 'success', 3000); } catch(_){}
-  try { if(typeof rerender === 'function') rerender(); } catch(_){ try { location.reload(); } catch(__){} }
+  // ★ 修「Email 登入畫面不變」bug — rerender 後 300ms 檢查有沒有切到主畫面
+  //   沒切就強制 location.reload 兜底,確保用戶看得到變化
+  let rerendered = false;
+  try { if(typeof rerender === 'function'){ rerender(); rerendered = true; } } catch(e){ console.warn('[email-login rerender]', e); }
+  setTimeout(()=> {
+    try {
+      const rootEl = document.querySelector('#root');
+      const stillOnLogin = rootEl && rootEl.querySelector('.login-spotify-shell, .login-card');
+      if(!rerendered || stillOnLogin){
+        location.reload();
+      }
+    } catch(_){ location.reload(); }
+  }, 600);
 }
 
 function _googleBtnContent(label){
@@ -10032,10 +10044,76 @@ function _runForgotFlow(opts){
 
   /* ── Step 1：輸入帳號（老師） */
   function renderTeacherStep1(){
-    header('🔑 找回老師密碼 — 第 1 / 6 步',
-      '請輸入您的老師帳號。為避免暴露帳號資訊，系統不會直接顯示帳號是否存在。');
+    header('🔑 找回老師密碼',
+      '請選擇你要的方式重設密碼。');
+
+    // ★ 推薦方式:Firebase Auth 直接寄重設信 (不用驗證碼 / 不用安全問題)
+    //   用戶反映「驗證碼根本收不到」→ 原本的 6 步驟 OTP 走 webhook / mailto,
+    //   都不是真的寄信。改用 Firebase 內建 sendPasswordResetEmail,
+    //   會從 noreply@<project>.firebaseapp.com 真的寄信到用戶 Gmail
+    const fastBox = el('div', { style:{
+      padding:'14px',border:'2px solid var(--success)',borderRadius:'10px',
+      background:'var(--success-soft)',marginBottom:'12px'
+    }});
+    fastBox.appendChild(el('div', { style:{fontWeight:'700',color:'var(--success)',marginBottom:'4px',fontSize:'14px'} },
+      '⚡ 推薦:直接收 Firebase 重設信'));
+    fastBox.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.6'} },
+      '輸入註冊時的 Email,Firebase 會立刻從 noreply@firebaseapp.com 寄一封含重設連結的信。\n' +
+      '點信裡的連結 → 直接設新密碼。免驗證碼、免安全問題。'));
+    const fastEmail = el('input', { class:'input', type:'email', placeholder:'name@example.com',
+      autocomplete:'email', style:{marginBottom:'8px'} });
+    fastBox.appendChild(fastEmail);
+    const fastBtn = el('button', { class:'btn btn-primary btn-block', onclick: async ()=> {
+      const em = (fastEmail.value || '').trim().toLowerCase();
+      if(!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){
+        toast('請輸入有效 Email','warning'); return;
+      }
+      if(!window.firebase || !firebase.auth){
+        toast('Firebase 未載入,改用下方傳統流程','warning', 4000); return;
+      }
+      // 確保 Firebase 已初始化
+      if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
+        toast('Firebase 初始化失敗,改用下方傳統流程','danger', 4000); return;
+      }
+      fastBtn.disabled = true;
+      fastBtn.textContent = '⏳ 寄送中...';
+      try {
+        await firebase.auth().sendPasswordResetEmail(em);
+        toast('✅ 重設信已寄出!請到 ' + em + ' 收信 (記得也看垃圾信匣)','success', 8000);
+        // 5 秒後自動關閉 modal
+        setTimeout(()=> { try { m.close(); } catch(_){} }, 2000);
+      } catch(e){
+        let msg = e.message || String(e);
+        if(e.code === 'auth/user-not-found'){
+          // 為了不洩露帳號是否存在,模糊化訊息
+          msg = '若這個 Email 有註冊過,重設信已寄出。請到信箱查看 (含垃圾信匣)。';
+          toast(msg, 'info', 7000);
+          setTimeout(()=> { try { m.close(); } catch(_){} }, 1500);
+        } else if(e.code === 'auth/invalid-email'){
+          toast('Email 格式不正確','danger', 4000);
+          fastBtn.disabled = false; fastBtn.textContent = '📨 寄出重設信';
+        } else if(e.code === 'auth/too-many-requests'){
+          toast('嘗試次數過多,請稍後再試','danger', 5000);
+          fastBtn.disabled = false; fastBtn.textContent = '📨 寄出重設信';
+        } else {
+          toast('寄送失敗:' + msg, 'danger', 5000);
+          fastBtn.disabled = false; fastBtn.textContent = '📨 寄出重設信';
+        }
+      }
+    }}, '📨 寄出重設信');
+    fastBox.appendChild(fastBtn);
+    fastBox.appendChild(el('div', { class:'tiny muted', style:{marginTop:'8px'} },
+      '💡 適用於用 Email 註冊 / Google 登入的老師帳號。如果你是用 admin/admin123 之類的本地帳號,請用下方傳統流程。'));
+    stage.appendChild(fastBox);
+
+    // ── 分隔線 ──
+    stage.appendChild(el('div', { style:{textAlign:'center',color:'var(--text-muted)',fontSize:'12px',margin:'12px 0'} },
+      '── 或用傳統 6 步驟流程 ──'));
+
+    stage.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px',lineHeight:'1.6'} },
+      '傳統流程需 Email + 安全問題 + 驗證碼。如果上面的「直接寄重設信」失敗,試試這個。'));
     const f = el('div', { class:'field' });
-    f.appendChild(el('label', { class:'label' }, '老師帳號（username）'));
+    f.appendChild(el('label', { class:'label' }, '老師帳號 (username)'));
     const inp = el('input', { class:'input', placeholder:'例：admin', autocomplete:'username' });
     f.appendChild(inp);
     stage.appendChild(f);
@@ -12292,7 +12370,7 @@ function doLogout(){
   confirmDlg('要登出嗎？資料會保留', { title:'登出' }).then(ok => {
     if(!ok) return;
     App.session = null;
-    saveSession();
+    try { saveSession(); } catch(_){}
     App._loginStage = 'choose';
     App._loginPrefill = null;
     // batch 2-stab: 清掉所有 managed timer
@@ -12307,7 +12385,21 @@ function doLogout(){
     App._syncBurstCount = 0;
     App._bcLastTs = null;
     if(App._bcQueueTimer){ try { clearTimeout(App._bcQueueTimer); } catch(_){} App._bcQueueTimer = null; }
-    rerender();
+    // ★ 修「登出後白屏」bug:rerender 有時因為殘留 DOM / SW 沒切掉,
+    //   改成 rerender + 短延遲 location.reload() 雙保險
+    let rerendered = false;
+    try { rerender(); rerendered = true; } catch(e){ console.warn('[doLogout rerender]', e); }
+    // 不論成不成功,300ms 後強制重整,確保畫面真的回到登入頁
+    setTimeout(()=> {
+      try {
+        // 還在 session 狀態 → 沒回到登入頁 → 強制 reload
+        const rootEl = document.querySelector('#root');
+        const stillInApp = rootEl && rootEl.querySelector('.app, .main-area, .sidebar');
+        if(!rerendered || stillInApp){
+          location.reload();
+        }
+      } catch(_){ location.reload(); }
+    }, 300);
   });
 }
 
