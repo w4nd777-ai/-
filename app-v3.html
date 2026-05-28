@@ -17316,25 +17316,27 @@ function rMe(content){
   const avFile = el('input', { type:'file', accept:'image/*' });
   avFile.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    if(f.size > 2*1024*1024){ toast('圖片不能超過 2MB','danger'); return; }
+    // 提高上傳限制 2MB → 20MB (用戶要求,跟另一條 self-edit 路徑同步)
+    if(f.size > 20*1024*1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
-      // 簡單壓縮：縮成 200x200 base64
+      // 提高解析度 200→1024,品質 0.85→0.92
       const dataUrl = await new Promise((res, rej) => {
         const reader = new FileReader();
         reader.onload = e => {
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const size = 200;
+            const size = 1024;
             canvas.width = size;
             canvas.height = size;
             const ctx = canvas.getContext('2d');
-            // 等比例縮放置中
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             const ratio = Math.max(size/img.width, size/img.height);
             const w = img.width * ratio;
             const h = img.height * ratio;
             ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
-            res(canvas.toDataURL('image/jpeg', 0.85));
+            res(canvas.toDataURL('image/jpeg', 0.92));
           };
           img.onerror = rej;
           img.src = e.target.result;
@@ -17344,7 +17346,7 @@ function rMe(content){
       });
       me.avatar = dataUrl;
       saveDB(); Sync.setMap('students', App.db.students); bcNotify();
-      toast('✅ 頭像已更新','success');
+      toast('✅ 頭像已更新 (1024×1024 超高解析度)','success');
       rerender();
     } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
   });
@@ -17552,10 +17554,10 @@ function openStudentSelfEdit(){
   const avFile = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
   avFile.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    // 提高上傳限制 5MB → 10MB (用戶要求,大手機照片才能上傳)
-    if(f.size > 10 * 1024 * 1024){ return toast('圖片不可超過 10MB','danger'); }
-    // 提高儲存解析度 200→512 (老師端看原圖也會更大張更清楚)
-    // JPEG 品質 0.85→0.9, 壓縮後約 30-60 KB/人, 159 人總計 < 10 MB
+    // 提高上傳限制 10MB → 20MB (用戶要求,單眼/iPhone 高畫質照片直接上傳)
+    if(f.size > 20 * 1024 * 1024){ return toast('圖片不可超過 20MB','danger'); }
+    // 提高儲存解析度 512→1024 (面積 4x,老師端看原圖超清晰)
+    // JPEG 品質 0.9→0.92, 壓縮後約 150-300 KB/人, 159 人總計 ~40 MB
     try {
       avatarData = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -17563,7 +17565,7 @@ function openStudentSelfEdit(){
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const size = 512;  // 提高 200→512 (用戶要求原圖解析度提高)
+            const size = 1024;  // 提高 512→1024 (用戶要求再拉到極限實用解析度)
             canvas.width = size; canvas.height = size;
             const ctx = canvas.getContext('2d');
             // 高品質縮放
@@ -17572,7 +17574,7 @@ function openStudentSelfEdit(){
             const ratio = Math.max(size/img.width, size/img.height);
             const w = img.width * ratio, h = img.height * ratio;
             ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
-            res(canvas.toDataURL('image/jpeg', 0.9));
+            res(canvas.toDataURL('image/jpeg', 0.92));
           };
           img.onerror = ()=> rej(new Error('圖片無法讀取（可能是 HEIC）'));
           img.src = e2.target.result;
@@ -17583,7 +17585,7 @@ function openStudentSelfEdit(){
       avImg.src = avatarData;
       avImg.style.display = 'block';
       avInitials.style.display = 'none';
-      try { toast('已儲存 512×512 高解析度頭像','success', 2000); } catch(_){}
+      try { toast('已儲存 1024×1024 超高解析度頭像','success', 2000); } catch(_){}
     } catch(err){ toast('讀取失敗：' + (err.message||err), 'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
