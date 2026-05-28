@@ -6768,13 +6768,18 @@ async function attachUpload(file){
   const key = _newAttachKey();
   await idbPut(key, file);
 
-  // ★ 跨裝置同步: 小檔 (< 1.5 MB) 自動轉 base64 存到 Firebase
-  //   讓老師其他裝置打開時, 從 Firebase 拉回再寫入本地 IDB
-  //   (從 500KB 放寬到 1.5MB 配合壓縮後的圖片 — 提高學生上傳跨裝置成功率)
+  // ★ 跨裝置同步 — 兩種策略:
+  //   - 小檔 (<4 MB):整個 base64 寫入 Firebase 單一 node (原本機制)
+  //   - 大檔 (4-50 MB):分塊上傳,每塊 ~750 KB → ~1 MB base64,完全免費 (用戶要求 50 MB)
   let dataUri = null;
-  // 提高同步閾值 1500 KB → 4 MB (用戶反映:大於此會跨裝置看不到)
-  // Firebase RTDB 單筆 node 上限 ~16 MB,4 MB base64 ≈ 5.3 MB JSON,安全
-  if(file.size < 4 * 1024 * 1024){
+  let chunked = false;
+  let totalChunks = 0;
+  const RTDB_SMALL_LIMIT = 4 * 1024 * 1024;    // 4 MB 走單一 node
+  const RTDB_CHUNK_SIZE = 750 * 1024;          // 750 KB raw → ~1 MB base64,RTDB 安全
+  const RTDB_CHUNK_LIMIT = 50 * 1024 * 1024;   // 50 MB 走分塊上傳
+
+  if(file.size < RTDB_SMALL_LIMIT){
+    // 小檔:單一 node 寫入
     try {
       dataUri = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -6782,7 +6787,6 @@ async function attachUpload(file){
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      // 寫到 Firebase 的 attachments node
       if(typeof Sync !== 'undefined' && Sync.setNode){
         Sync.setNode('attachments/' + key, {
           name: file.name, type: file.type||'', size: file.size,
@@ -6791,21 +6795,69 @@ async function attachUpload(file){
         dbg('[v3] 小檔自動同步 Firebase: ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)');
       }
     } catch(e){ _swallow('attach-fb-sync', e); }
-  } else {
-    // 大於 4 MB 提示
+  } else if(file.size <= RTDB_CHUNK_LIMIT){
+    // 大檔 4-50 MB:分塊上傳 (用戶要求,免費跨裝置)
     try {
-      toast('⚠️ ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MB) 超過 4 MB,只存在本機,老師可能看不到。建議:壓縮圖片到 4 MB 以下,或請管理員啟用 Firebase Storage', 'warn', 8000);
+      totalChunks = Math.ceil(file.size / RTDB_CHUNK_SIZE);
+      try { toast('📤 ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MB) 分 ' + totalChunks + ' 塊上傳中...', 'info', 4000); } catch(_){}
+      const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+      if(fbCfg && fbCfg.databaseURL && typeof firebase !== 'undefined'){
+        const roomCode = App.cfg?.roomCode || 'DEFAULT';
+        const baseRef = firebase.database().ref('cms-v3/' + roomCode + '/attachments/' + key);
+        // 先寫 meta
+        await baseRef.child('meta').set({
+          name: file.name, type: file.type||'', size: file.size,
+          chunked: true, totalChunks: totalChunks, chunkSize: RTDB_CHUNK_SIZE,
+          ts: Date.now()
+        });
+        // 分塊上傳 (4 並行避免塞爆)
+        const CONCURRENT = 4;
+        for(let batchStart = 0; batchStart < totalChunks; batchStart += CONCURRENT){
+          const batch = [];
+          for(let i = batchStart; i < Math.min(batchStart + CONCURRENT, totalChunks); i++){
+            const start = i * RTDB_CHUNK_SIZE;
+            const end = Math.min(start + RTDB_CHUNK_SIZE, file.size);
+            const chunkBlob = file.slice(start, end);
+            const chunkDataUri = await new Promise((res, rej) => {
+              const fr = new FileReader();
+              fr.onload = () => res(fr.result);
+              fr.onerror = rej;
+              fr.readAsDataURL(chunkBlob);
+            });
+            batch.push(baseRef.child('c' + i).set(chunkDataUri));
+          }
+          await Promise.all(batch);
+          // 進度 toast (每 4 塊一次)
+          const progress = Math.min(batchStart + CONCURRENT, totalChunks);
+          if(totalChunks > 8 && batchStart > 0){
+            try { toast('📤 已上傳 ' + progress + '/' + totalChunks + ' 塊...', 'info', 1500); } catch(_){}
+          }
+        }
+        chunked = true;
+        dbg('[v3] 大檔分塊同步 Firebase: ' + file.name + ' (' + totalChunks + ' 塊)');
+      }
+    } catch(e){
+      console.warn('[chunked-upload] failed:', e);
+      try { toast('分塊上傳失敗,大檔將只存本機:' + (e.message||e), 'warn', 5000); } catch(_){}
+    }
+  } else {
+    // 超過 50 MB 提示
+    try {
+      toast('⚠️ ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MB) 超過 50 MB,只存本機,老師可能看不到。請壓縮或改貼雲端連結 (Drive/Dropbox)', 'warn', 8000);
     } catch(_){}
   }
 
-  _doneProgress('✅ 已儲存：' + file.name + (dataUri ? ' (已同步雲端)' : ' (本機)'), 'success');
+  const syncedNote = dataUri ? ' (已同步雲端)' : (chunked ? ' (分塊同步雲端 ' + totalChunks + ' 塊)' : ' (本機)');
+  _doneProgress('✅ 已儲存：' + file.name + syncedNote, 'success');
   return {
     name: file.name,
     type: file.type || '',
     size: file.size,
     storage: 'idb',
     key: key,
-    fbSynced: !!dataUri,  // 標記是否已同步到 Firebase
+    fbSynced: !!dataUri,         // 單一 node 同步
+    chunked: chunked,             // 分塊同步
+    totalChunks: totalChunks,     // 分塊數
     storedAt: Date.now()
   };
 }
@@ -6826,21 +6878,54 @@ async function attachGetUrl(meta){
     try {
       const blob = await idbGet(meta.key);
       if(blob) return URL.createObjectURL(blob);
-      // ★ 本機沒檔 → 先試從 Firebase RTDB 拉 (小檔 dataUri)
-      // 注意:即便 fbSynced 沒標,也試一下 (歷史資料相容)
+      // ★ 本機沒檔 → 從 Firebase RTDB 拉 (兩種情況都試)
       try {
         const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
         if(fbCfg && fbCfg.databaseURL && typeof firebase !== 'undefined'){
-          const snap = await firebase.app().database().ref('cms-v3/' + App.cfg.roomCode + '/attachments/' + meta.key).once('value');
+          const baseRef = firebase.app().database().ref('cms-v3/' + App.cfg.roomCode + '/attachments/' + meta.key);
+
+          // 情況 A:分塊上傳 — 從 c0, c1, c2, ... 組回
+          if(meta.chunked && meta.totalChunks){
+            try { toast('📥 載入大檔 (' + meta.totalChunks + ' 塊)...', 'info', 3000); } catch(_){}
+            const blobs = [];
+            const CONCURRENT = 6;
+            for(let batchStart = 0; batchStart < meta.totalChunks; batchStart += CONCURRENT){
+              const ps = [];
+              for(let i = batchStart; i < Math.min(batchStart + CONCURRENT, meta.totalChunks); i++){
+                ps.push(baseRef.child('c' + i).once('value').then(s => ({i, val: s.val()})));
+              }
+              const results = await Promise.all(ps);
+              results.sort((a,b) => a.i - b.i);
+              for(const r of results){
+                if(!r.val) throw new Error('chunk ' + r.i + ' 遺失');
+                const byteString = atob(r.val.split(',')[1]);
+                const bytes = new Uint8Array(byteString.length);
+                for(let j = 0; j < byteString.length; j++) bytes[j] = byteString.charCodeAt(j);
+                blobs.push(new Blob([bytes]));
+              }
+            }
+            const fullBlob = new Blob(blobs, { type: meta.type || 'application/octet-stream' });
+            // 寫回 IDB 供下次快速讀
+            try { await idbPut(meta.key, fullBlob); } catch(_){}
+            return URL.createObjectURL(fullBlob);
+          }
+
+          // 情況 B:單一 node (小檔)
+          const snap = await baseRef.once('value');
           const data = snap.val();
           if(data && data.dataUri){
-            // 寫回本地 IDB 給下次用
             try {
               const resp = await fetch(data.dataUri);
               const blob2 = await resp.blob();
               await idbPut(meta.key, blob2);
               return URL.createObjectURL(blob2);
             } catch(e){ _swallow('attach-restore', e); return data.dataUri; }
+          }
+          // 情況 C:有 meta 但 chunked 標記不在 meta.chunked — 從 RTDB meta 讀
+          if(data && data.meta && data.meta.chunked && data.meta.totalChunks){
+            // 重新呼叫自己 (帶 chunked meta)
+            const newMeta = Object.assign({}, meta, { chunked:true, totalChunks: data.meta.totalChunks, type: data.meta.type });
+            return attachGetUrl(newMeta);
           }
         }
       } catch(e){ _swallow('attach-fb-fetch', e); }
@@ -6903,12 +6988,12 @@ async function attachPreview(meta){
   let url;
   try { url = await attachGetUrl(meta); } catch(e){ toast('讀取失敗：' + (e.message||e), 'danger'); return; }
   if(!url){
-    // 大檔 + 跨裝置看不到 → 友善訊息提示
+    // 跨裝置看不到 → 友善訊息提示
     const sizeMB = meta.size ? Math.round(meta.size/1024/1024 * 10) / 10 : null;
-    if(sizeMB && sizeMB > 4){
-      toast('⚠️ 此附件 ' + sizeMB + ' MB,超過 4 MB 上限,只存在學生上傳的裝置。請學生在原裝置重新繳交較小的檔案,或啟用 Firebase Storage 跨裝置同步','danger', 9000);
+    if(sizeMB && sizeMB > 50){
+      toast('⚠️ 此附件 ' + sizeMB + ' MB,超過 50 MB 上限,只存在學生上傳的裝置。請學生改用較小檔案或貼 Drive/Dropbox 連結','danger', 9000);
     } else {
-      toast('附件無法載入。檔案可能在原裝置 IDB 中,跨裝置看不到。請聯絡學生重新上傳','danger', 7000);
+      toast('附件無法載入。請學生在同一裝置重新繳交,或重新上傳會自動分塊同步雲端','danger', 7000);
     }
     return;
   }
