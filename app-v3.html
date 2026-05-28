@@ -1711,6 +1711,66 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   transform:translateY(-1px);
 }
 .login-spotify-card .input::placeholder{ color:#9ca3af; font-weight:400; }
+
+/* ── 自訂下拉元件 (取代原生 select) ── */
+.login-spotify-card .ns-wrap{ position:relative; width:100%; }
+.login-spotify-card .ns-trigger{
+  /* 繼承 .input.select 樣式但用 button — 文字真正置中 */
+  text-align:center !important;
+  display:block;
+  line-height:48px;  /* 配合 height:48px 垂直置中 */
+  padding:0 48px;
+}
+.login-spotify-card .ns-trigger.ns-empty{
+  color:#9ca3af; font-weight:400; font-size:15px; letter-spacing:0;
+}
+.login-spotify-card .ns-wrap.ns-disabled .ns-trigger{
+  opacity:0.55; cursor:not-allowed;
+}
+.login-spotify-card .ns-popup{
+  position:absolute; left:0; right:0; top:calc(100% + 6px);
+  background:#fff; border-radius:14px;
+  box-shadow:0 10px 30px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.06);
+  max-height:280px; overflow-y:auto;
+  padding:6px;
+  z-index:100;
+  display:none;
+  border:1px solid rgba(0,0,0,.06);
+}
+.login-spotify-card .ns-wrap.ns-open .ns-popup{
+  display:block;
+  animation: nsPopupFade .15s ease-out;
+}
+@keyframes nsPopupFade{
+  from { opacity:0; transform:translateY(-4px); }
+  to { opacity:1; transform:translateY(0); }
+}
+.login-spotify-card .ns-option{
+  padding:11px 16px;
+  font-size:16px; font-weight:600; color:#1f2937;
+  text-align:center !important;
+  border-radius:9px;
+  cursor:pointer;
+  transition: background .12s ease, color .12s ease;
+  letter-spacing:.03em;
+  user-select:none;
+}
+.login-spotify-card .ns-option:hover{ background:#f3f4f6; }
+.login-spotify-card .ns-option.ns-active{
+  background: color-mix(in srgb, var(--lc-primary, #2563eb) 12%, transparent);
+  color: var(--lc-primary, #2563eb);
+  font-weight:700;
+}
+.login-spotify-card .ns-empty-msg{
+  padding:14px; text-align:center; color:#9ca3af; font-size:13px;
+}
+/* hover/focus 同 input — 但 ns-trigger 是 button 預設沒這個 */
+.login-spotify-card .ns-wrap.ns-open .ns-trigger{
+  border-color: var(--lc-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--lc-primary) 22%, transparent),
+              0 2px 8px rgba(0,0,0,.08);
+}
+
 .login-spotify-card .pw-input-wrap{ position:relative; }
 .login-spotify-card .pw-input-wrap .input{ padding-right:48px; }
 .login-spotify-card .pw-toggle{
@@ -10355,6 +10415,91 @@ function forceSetupRecovery(accountId, opts){
   setTimeout(()=> iEmail.focus(), 100);
 }
 
+// 自訂下拉元件 — 取代原生 <select>,因為原生 dropdown 是 OS 渲染,CSS 無法置中
+function makeNiceSelect(opts){
+  opts = opts || {};
+  let _value = opts.initialValue || '';
+  let _options = [];
+  let _disabled = !!opts.disabled;
+  let _placeholder = opts.placeholder || '請選擇';
+  let _onChange = opts.onChange || null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'ns-wrap';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'input select ns-trigger';
+  const popup = document.createElement('div');
+  popup.className = 'ns-popup';
+  wrap.appendChild(trigger);
+  wrap.appendChild(popup);
+
+  function update(){
+    const o = _options.find(x => x.value === _value);
+    if(o){ trigger.textContent = o.label; trigger.classList.remove('ns-empty'); }
+    else { trigger.textContent = _placeholder; trigger.classList.add('ns-empty'); }
+    trigger.disabled = _disabled;
+    if(_disabled) wrap.classList.add('ns-disabled'); else wrap.classList.remove('ns-disabled');
+  }
+  function renderPopup(){
+    popup.innerHTML = '';
+    if(!_options.length){
+      const emptyMsg = document.createElement('div');
+      emptyMsg.className = 'ns-empty-msg';
+      emptyMsg.textContent = _placeholder;
+      popup.appendChild(emptyMsg);
+      return;
+    }
+    _options.forEach(o => {
+      const item = document.createElement('div');
+      item.className = 'ns-option' + (o.value === _value ? ' ns-active' : '');
+      item.textContent = o.label;
+      item.onclick = (e) => {
+        e.stopPropagation();
+        const changed = _value !== o.value;
+        _value = o.value;
+        update();
+        close();
+        if(changed && _onChange) _onChange(_value);
+      };
+      popup.appendChild(item);
+    });
+  }
+  let _outside = null;
+  function open(){
+    if(_disabled) return;
+    renderPopup();
+    wrap.classList.add('ns-open');
+    _outside = (e) => { if(!wrap.contains(e.target)) close(); };
+    setTimeout(() => document.addEventListener('click', _outside), 0);
+  }
+  function close(){
+    wrap.classList.remove('ns-open');
+    if(_outside){ document.removeEventListener('click', _outside); _outside = null; }
+  }
+  trigger.onclick = (e) => {
+    e.stopPropagation();
+    if(wrap.classList.contains('ns-open')) close(); else open();
+  };
+
+  update();
+  return {
+    el: wrap,
+    setOptions(opts){
+      _options = (opts || []).filter(o => o && o.value !== undefined);
+      if(_value && !_options.find(o => o.value === _value)) _value = '';
+      update();
+      if(wrap.classList.contains('ns-open')) renderPopup();
+    },
+    setValue(v){ _value = (v == null) ? '' : String(v); update(); },
+    getValue(){ return _value; },
+    setDisabled(d){ _disabled = !!d; update(); },
+    setPlaceholder(p){ _placeholder = p || '請選擇'; update(); },
+    setOnChange(fn){ _onChange = fn; },
+    focus(){ trigger.focus(); }
+  };
+}
+
 function renderLoginStudentStage(){
   // 🔒 隱私友善版：班級下拉 → 姓名下拉 → 密碼
   // Spotify 版：tab 已標示「學生」，stage 內不再放 H3
@@ -10435,25 +10580,24 @@ function renderLoginStudentStage(){
   // 取得所有班級（去重 + 排序）
   const classes = [...new Set(App.db.students.map(s => s.cls || '未分班'))].sort((a,b)=> a.localeCompare(b));
 
-  // 班級下拉
+  // 班級下拉 — 自訂元件 (原生 select 的 dropdown 是 OS 渲染,CSS 無法置中)
   const f1 = el('div', { class:'field' });
   f1.appendChild(el('label', { class:'label' }, '① 選擇班級'));
-  const selCls = el('select', { class:'input select' });
-  selCls.appendChild(el('option', { value:'', disabled:'', selected:'', hidden:'' }, '請選擇班級'));
-  classes.forEach(c => {
-    const o = el('option', { value:c }, c);
-    if(App._loginCls === c) o.setAttribute('selected','');
-    selCls.appendChild(o);
-  });
-  f1.appendChild(selCls);
+  const selClsApi = makeNiceSelect({ placeholder:'請選擇班級', initialValue: App._loginCls || '' });
+  selClsApi.setOptions(classes.map(c => ({ value:c, label:c })));
+  f1.appendChild(selClsApi.el);
   stage.appendChild(f1);
 
-  // 姓名下拉（依班級篩選）
+  // 姓名下拉 — 也用自訂元件
   const f2 = el('div', { class:'field' });
   f2.appendChild(el('label', { class:'label' }, '② 選擇姓名'));
-  const selName = el('select', { class:'input select' });
-  f2.appendChild(selName);
+  const selNameApi = makeNiceSelect({ placeholder:'請先選班級', disabled:true });
+  f2.appendChild(selNameApi.el);
   stage.appendChild(f2);
+
+  // 為了相容下方程式碼 — 提供 select-like 介面 (.value, .disabled)
+  const selCls = { get value(){ return selClsApi.getValue(); }, set value(v){ selClsApi.setValue(v); }, get disabled(){ return false; }, set disabled(d){ selClsApi.setDisabled(d); } };
+  const selName = { get value(){ return selNameApi.getValue(); }, set value(v){ selNameApi.setValue(v); }, get disabled(){ return false; }, set disabled(d){ selNameApi.setDisabled(d); }, set innerHTML(_){} /* no-op */ };
 
   // 密碼欄
   const f3 = el('div', { class:'field' });
@@ -10501,36 +10645,32 @@ function renderLoginStudentStage(){
   }
 
   function refreshNameList(){
-    const cls = selCls.value;
-    selName.innerHTML = '';
+    const cls = selClsApi.getValue();
     if(!cls){
-      const o = el('option', { value:'' }, '── 請先選班級 ──');
-      o.setAttribute('disabled','');
-      selName.appendChild(o);
-      selName.disabled = true;
+      selNameApi.setDisabled(true);
+      selNameApi.setPlaceholder('請先選班級');
+      selNameApi.setOptions([]);
       return;
     }
-    selName.disabled = false;
-    selName.appendChild(el('option', { value:'', disabled:'', selected:'', hidden:'' }, '請選擇姓名'));
+    selNameApi.setDisabled(false);
+    selNameApi.setPlaceholder('請選擇姓名');
     const list = App.db.students
       .filter(s => (s.cls || '未分班') === cls)
       .sort((a,b) => (a.seat||0) - (b.seat||0) || (a.name||'').localeCompare(b.name||''));
-    list.forEach(s => {
-      // 隱私：顯示「座號 + 姓名首字 + ○ + 姓名末字」(可選)
-      // 這裡用完整姓名（學生選自己的本來就知道）
-      const o = el('option', { value:String(s.id) }, (s.seat ? '['+s.seat+'] ' : '') + s.name);
-      if(App._loginStuId == s.id) o.setAttribute('selected','');
-      selName.appendChild(o);
-    });
+    selNameApi.setOptions(list.map(s => ({
+      value: String(s.id),
+      label: (s.seat ? '[' + s.seat + '] ' : '') + s.name
+    })));
+    if(App._loginStuId) selNameApi.setValue(String(App._loginStuId));
   }
-  selCls.addEventListener('change', () => {
-    App._loginCls = selCls.value;
+  selClsApi.setOnChange(() => {
+    App._loginCls = selClsApi.getValue();
     App._loginStuId = '';
     refreshNameList();
     iPw.value = '';
   });
-  selName.addEventListener('change', () => {
-    App._loginStuId = selName.value;
+  selNameApi.setOnChange(() => {
+    App._loginStuId = selNameApi.getValue();
     iPw.focus();
   });
   refreshNameList();
