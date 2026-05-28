@@ -10817,6 +10817,8 @@ function forceSetupRecovery(accountId, opts){
       a.securityA = await hashAnswer(ans);
       a.recoveryCode = await hashAnswer(plainCode);
       a.recoveryCodeSetAt = Date.now();
+      // 重新完成設定 → 清掉「不再提示」標記
+      if(a.dismissedRecovery) delete a.dismissedRecovery;
       saveDB();
       try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
       if(typeof logOp === 'function') logOp('recoverySetup', '老師 ' + a.username + ' 完成復原資訊設定');
@@ -10833,6 +10835,24 @@ function forceSetupRecovery(accountId, opts){
     actions.appendChild(el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: submit }, allowCancel ? '✓ 儲存修改 (產生新恢復碼)' : '產生並儲存恢復碼'));
   } else {
     actions.appendChild(el('button', { class:'btn btn-primary btn-block', onclick: submit }, '產生並儲存恢復碼'));
+    // ★ 新增:強制流程也給「不再提示」選項 — 用戶反映彈窗一直跳很煩
+    //   按下後寫 dismissedRecovery=true,以後就不會 boot 時自動跳
+    actions.appendChild(el('button', {
+      class:'btn btn-sm',
+      style:{marginTop:'8px',background:'transparent',color:'var(--text-muted)',border:'none',textDecoration:'underline',fontSize:'12px'},
+      onclick: async ()=> {
+        const ok = await confirmDlg(
+          '確定要永遠不再提示?\n\n注意:這代表你忘記密碼時無法用本系統的安全問題 + 恢復碼自助重設。\n建議:\n• 若你有用 Google 登入 → 沒問題,Google 帳號可以 recovery\n• 若你用 Email + 密碼 → Firebase 還是能寄重設密碼信給你的 email\n• 若以上都沒有 → 建議完成設定再勾此選項',
+          { danger:true, title:'確認永遠不再提示' }
+        );
+        if(!ok) return;
+        a.dismissedRecovery = true;
+        try { saveDB(); } catch(_){}
+        try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts); } catch(_){}
+        m.close();
+        toast('✓ 已設為不再提示。可在「我的個人資料」→「修改 Email / 安全問題」重新啟用','info', 6000);
+      }
+    }, '🔕 永遠不再提示 (我有其他登入方式)'));
   }
   m.root.appendChild(actions);
   setTimeout(()=> iEmail.focus(), 100);
@@ -26328,7 +26348,20 @@ function boot(){
       if(!acc) return;
       // 副老師不需要 (用 admin 設好的 recovery)
       if(acc.subRole === 'sub') return;
-      if(acc.email && acc.securityQ && acc.securityA && acc.recoveryCode) return;
+      // ★ 跳過條件擴充 (用戶反映:設過 email 還一直跳):
+      //   1. 已完整設定 email/securityQ/A/recoveryCode (原本邏輯)
+      //   2. 已綁 Google (googleEmail) → Google 登入本身就是 recovery
+      //   3. 帳號本身就是 Google 帳號 (username 以 'google:' 開頭)
+      //   4. 帳號本身就是 Firebase Email Auth (username 以 'email:' 開頭) → Firebase 內建 password reset email
+      //   5. 使用者勾選「不再提示」(dismissedRecovery=true)
+      //   6. 已設 email + recoveryCode (有 email 就能收 Firebase 重設信,recoveryCode 是備援)
+      const allSet = acc.email && acc.securityQ && acc.securityA && acc.recoveryCode;
+      const hasGoogle = !!acc.googleEmail;
+      const isGoogleAccount = String(acc.username || '').indexOf('google:') === 0;
+      const isFirebaseEmailAccount = String(acc.username || '').indexOf('email:') === 0;
+      const dismissedForever = !!acc.dismissedRecovery;
+      const goodEnough = acc.email && acc.recoveryCode;  // 有 email + 恢復碼就放行
+      if(allSet || hasGoogle || isGoogleAccount || isFirebaseEmailAccount || dismissedForever || goodEnough) return;
       // 一天內已提示過則跳過
       const LS_RECOV_HINT = 'cms_v3_recov_hint_' + acc.id;
       const last = parseInt(localStorage.getItem(LS_RECOV_HINT) || '0', 10);
@@ -28554,6 +28587,103 @@ function openTeacherProfile(){
   f3.appendChild(i3);
   m.root.appendChild(f3);
 
+  // ☁️ Google 帳號綁定 — 換裝置自動同步 (對齊學生端 rMe)
+  const fGoogle = el('div', { class:'field', style:{marginTop:'8px',padding:'10px',background:'var(--surface-2)',borderRadius:'8px'} });
+  fGoogle.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '☁️ Google 帳號 (換裝置自動同步)'));
+  if(me.googleEmail){
+    fGoogle.appendChild(el('div', { class:'small', style:{padding:'8px 10px',background:'var(--success-soft)',color:'var(--success)',borderRadius:'6px',fontWeight:'500',marginBottom:'8px'} },
+      '✅ 已綁定:' + me.googleEmail));
+    fGoogle.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+      '日後在任何裝置點登入畫面的「用 Google 登入」就能進到這個帳號 (忘記密碼也沒關係)。'));
+    fGoogle.appendChild(el('button', { type:'button', class:'btn btn-sm', style:{background:'var(--danger-soft)',color:'var(--danger)'}, onclick: async ()=> {
+      if(!await confirmDlg('確定解除 Google 綁定?解除後就不能用 Google 登入了。')) return;
+      const oldEmail = me.googleEmail;
+      ensureFirebaseInit();
+      try {
+        const emailKey = String(oldEmail).replace(/[.@]/g, '_').toLowerCase();
+        if(window.firebase && firebase.database && firebase.apps && firebase.apps.length){
+          await firebase.database().ref('cms-v3/google_users/' + emailKey).remove();
+        }
+      } catch(e){ console.warn('[unbind teacher google]', e); }
+      delete me.googleEmail; delete me.firebaseUid;
+      saveDB();
+      try { Sync.setMap('accounts', App.db.accounts); } catch(_){}
+      toast('✅ 已解除 Google 綁定','success');
+      m.close(); rerender();
+    }}, '🔓 解除綁定'));
+  } else {
+    fGoogle.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px',lineHeight:'1.6'} },
+      '綁定後,日後在任何裝置 (手機/平板/電腦) 點登入畫面的「用 Google 登入」就能自動進到這個帳號。即使忘記密碼也能用 Google 登入。'));
+    fGoogle.appendChild(el('button', {
+      type:'button',
+      class:'btn btn-sm',
+      style:{background:'#fff',color:'#3c4043',border:'1px solid #dadce0',display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 12px'},
+      onclick: async function(){
+        if(!window.firebase || !firebase.auth){ toast('Firebase 未載入','danger'); return; }
+        if(!ensureFirebaseInit()){ toast('Firebase 初始化失敗,請重新整理','danger', 6000); return; }
+        try {
+          const provider = new firebase.auth.GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          let result;
+          try { result = await firebase.auth().signInWithPopup(provider); }
+          catch(e){
+            if(e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request'){
+              try { sessionStorage.setItem('_google_pending_role', 'teacher_bind'); } catch(_){}
+              await firebase.auth().signInWithRedirect(provider);
+              return;
+            }
+            if(e.code === 'auth/popup-closed-by-user') return;
+            throw e;
+          }
+          const user = result.user;
+          if(!user || !user.email){ toast('Google 帳號沒有 email','danger'); return; }
+          const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
+          const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+          // 寫 google_users 對應 → 之後同帳號從別台裝置點「用 Google 登入」會自動進到這個 roomCode + 老師身份
+          await firebase.database().ref('cms-v3/google_users/' + emailKey).set({
+            email: user.email,
+            displayName: user.displayName || me.name || '',
+            photoURL: user.photoURL || '',
+            roomCode: rc,
+            firebaseUid: user.uid,
+            accountId: me.id,
+            role: 'teacher',
+            createdAt: firebase.database.ServerValue.TIMESTAMP,
+            lastLoginAt: firebase.database.ServerValue.TIMESTAMP
+          });
+          // 本地 account 也記
+          me.googleEmail = user.email;
+          me.firebaseUid = user.uid;
+          if(user.photoURL && !me.photoURL) me.photoURL = user.photoURL;
+          saveDB();
+          try { Sync.setMap('accounts', App.db.accounts); } catch(_){}
+          toast('🎉 已綁定 ' + user.email + '!下次可在任何裝置用 Google 登入','success', 5000);
+          m.close(); rerender();
+        } catch(e){
+          console.error('[teacher bind google]', e);
+          toast('綁定失敗:' + (e.message || e), 'danger', 5000);
+        }
+      }
+    },
+      el('span', { style:{display:'inline-flex',alignItems:'center'} },
+        ((function(){
+          const wrap = document.createElement('span');
+          wrap.style.cssText = 'display:inline-flex;align-items:center;margin-right:4px';
+          wrap.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 18 18">' +
+            '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>' +
+            '<path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>' +
+            '<path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>' +
+            '<path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>' +
+            '</svg>';
+          return wrap;
+        })())
+      ),
+      el('span', null, '用 Google 綁定')
+    ));
+  }
+  m.root.appendChild(fGoogle);
+
   // 帳號復原資訊 (Email + 安全問題 + 恢復碼) — 可修改
   const fRecov = el('div', { class:'field', style:{marginTop:'8px',padding:'10px',background:'var(--surface-2)',borderRadius:'8px'} });
   fRecov.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '🛡 帳號復原資訊'));
@@ -28561,7 +28691,9 @@ function openTeacherProfile(){
     el('div', null, el('span',{style:{color:'var(--text-muted)'}},'📧 Email: '), el('strong',null,me.email || '(未設定)')),
     el('div', null, el('span',{style:{color:'var(--text-muted)'}},'❓ 問題: '), el('strong',null,me.securityQ || '(未設定)')),
     el('div', null, el('span',{style:{color:'var(--text-muted)'}},'🛡 答案: '), el('strong',null,me.securityA ? '已設定 (hashed)' : '(未設定)')),
-    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'🔑 恢復碼: '), el('strong',null,me.recoveryCode ? '已設定 (hashed, 共 ' + Math.round(((Date.now()-(me.recoveryCodeSetAt||0))/86400000)) + ' 天前)' : '(未設定)'))
+    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'🔑 恢復碼: '), el('strong',null,me.recoveryCode ? '已設定 (hashed, 共 ' + Math.round(((Date.now()-(me.recoveryCodeSetAt||0))/86400000)) + ' 天前)' : '(未設定)')),
+    me.dismissedRecovery ? el('div', { style:{marginTop:'6px',padding:'6px 8px',background:'var(--warn-soft)',color:'var(--warn)',borderRadius:'6px',fontSize:'12px'} },
+      '🔕 已設「不再提示」 — 點下方按鈕可重新啟用') : null
   ));
   fRecov.appendChild(el('button', { type:'button', class:'btn btn-sm', style:{marginTop:'8px'},
     onclick:()=> {
