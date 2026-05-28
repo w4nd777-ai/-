@@ -7080,7 +7080,8 @@ window.addEventListener('hashchange', () => {
     handleQrJoinHash();
     return;
   }
-  const [v, sv] = h.split('/');
+  // 去掉 ?query 部分 (防 PWA shortcut / 外部連結帶 query 壞掉)
+  const [v, sv] = h.split('?')[0].split('/');
   App.view = v;
   App.subview = sv || null;
   rerender();
@@ -8612,25 +8613,23 @@ async function _emailLoginModal(title, role){
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:14px;padding:26px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:system-ui';
+    // 不用 value="..." 內插 (密碼有特殊字元會壞 HTML),改成 innerHTML 後再 set .value
     card.innerHTML =
       '<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:18px">' + title + '</div>' +
-      // (移除 tabs — Email 只負責登入,註冊請走「申請註冊」)
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">Email</label>' +
-      '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" value="' + savedEmail.replace(/"/g,'&quot;') + '" ' +
+      '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:14px" />' +
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">密碼</label>' +
-      '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" value="' + savedPw.replace(/"/g,'&quot;') + '" ' +
+      '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:12px" />' +
-      // 記住我
       '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#444;cursor:pointer;user-select:none;margin-bottom:14px">' +
-      '<input id="__el_remember" type="checkbox" style="width:16px;height:16px;accent-color:#16a34a;cursor:pointer" ' + (shouldCheckRem ? 'checked' : '') + '>' +
+      '<input id="__el_remember" type="checkbox" style="width:16px;height:16px;accent-color:#16a34a;cursor:pointer">' +
       '<span>記住我 <span style="color:#9ca3af;font-size:11px">(下次自動帶入 Email + 密碼)</span></span>' +
       '</label>' +
       '<div style="display:flex;gap:8px">' +
       '<button id="__el_cancel" style="flex:1;padding:11px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#555;cursor:pointer;font-size:14px">取消</button>' +
       '<button id="__el_ok" style="flex:2;padding:11px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px">登入</button>' +
       '</div>';
-      // (移除底部提示文字 — 用戶要求 modal 完全純粹只剩登入,不要任何註冊相關字眼)
     overlay.appendChild(card);
     document.body.appendChild(overlay);
     var iEmail = card.querySelector('#__el_email');
@@ -8638,6 +8637,10 @@ async function _emailLoginModal(title, role){
     var iRem = card.querySelector('#__el_remember');
     var btnOk = card.querySelector('#__el_ok');
     var btnCancel = card.querySelector('#__el_cancel');
+    // 安全 set values (避免 HTML injection)
+    iEmail.value = savedEmail;
+    iPw.value = savedPw;
+    iRem.checked = shouldCheckRem;
 
     // 自動 focus 邏輯
     setTimeout(function(){
@@ -10577,8 +10580,9 @@ function renderLoginStudentStage(){
     return stage;
   }
 
-  // 取得所有班級（去重 + 排序）
-  const classes = [...new Set(App.db.students.map(s => s.cls || '未分班'))].sort((a,b)=> a.localeCompare(b));
+  // 取得所有班級（去重 + 排序）— boot race 防禦 (App.db.students 可能還沒載入)
+  const _allStu = (App.db && App.db.students) || [];
+  const classes = [...new Set(_allStu.map(s => s.cls || '未分班'))].sort((a,b)=> a.localeCompare(b));
 
   // 班級下拉 — 自訂元件 (原生 select 的 dropdown 是 OS 渲染,CSS 無法置中)
   const f1 = el('div', { class:'field' });
@@ -12336,7 +12340,7 @@ function rOv(content){
           }
           const tr = el('tr', { class:'cls-roster-row',
             style:{borderLeft:'4px solid ' + stColor, background: rowBg, transition:'background .15s'} },
-            el('td', { class:'mono', style:{textAlign:'center',fontWeight:'700',color:'var(--text-muted)'} }, s.seat || '—'),
+            el('td', { class:'mono', style:{textAlign:'center',fontWeight:'700',color:'var(--text-muted)'} }, (s.seat != null && s.seat !== '') ? s.seat : '—'),
             el('td', { style:{fontWeight:'600'} }, s.name || '?'),
             el('td', { class:'mono small muted' }, s.sid || '—'),
             el('td', { style:{textAlign:'center'} },
@@ -18230,8 +18234,11 @@ function rSub(content){
         } else {
           asgIds.forEach((aid, asgIdx) => {
             const asg = App.db.assignments.find(x => x.id === aid);
-            if(!asg) return;
             const subs = subsByAsg[aid];
+            // 作業已被刪除:不再隱形,顯示提示讓老師知道有遺留繳交
+            const asgDeleted = !asg;
+            const asgTitle = asg ? (asg.title || '(無標題作業)') : '(作業已刪除)';
+            const asgDue = asg ? asg.due : null;
             const submittedStuIds = new Set(subs.map(x => x.sub.studentId));
             const missingStu = stuInCls.filter(s => !submittedStuIds.has(s.id));
             const submittedCount = submittedStuIds.size;
@@ -18256,8 +18263,9 @@ function rSub(content){
               }
             });
             asgHeader.appendChild(el('span', { style:{fontSize:'11px',display:'inline-block',transform: asgExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
-            asgHeader.appendChild(el('span', { style:{fontWeight:'700',flexShrink:'0'} }, '📋 ' + (asg.title || '(無標題作業)')));
-            if(asg.due) asgHeader.appendChild(el('span', { class:'small muted' }, '期限 ' + asg.due));
+            asgHeader.appendChild(el('span', { style:{fontWeight:'700',flexShrink:'0', color: asgDeleted ? 'var(--text-muted)' : ''} },
+              (asgDeleted ? '⚠️ ' : '📋 ') + asgTitle));
+            if(asgDue) asgHeader.appendChild(el('span', { class:'small muted' }, '期限 ' + asgDue));
             asgHeader.appendChild(el('div', { class:'flex', style:{gap:'6px',marginLeft:'auto',alignItems:'center',flexWrap:'wrap'} },
               el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'10px',fontWeight:'700'} },
                 '已繳 ' + submittedCount + '/' + peopleCount),
@@ -24331,7 +24339,7 @@ function boot(){
   if(!handled){
     const h = location.hash.slice(1);
     if(h && !h.startsWith('att=') && !h.startsWith('join=')){
-      const [v, sv] = h.split('/');
+      const [v, sv] = h.split('?')[0].split('/');  // 去 ?query
       App.view = v; App.subview = sv || null;
     }
   }
