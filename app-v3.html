@@ -22574,6 +22574,151 @@ function rAnPattern(content){
 /* ════════════════════════════════════════════════════════════
    PHASE 4 ▒▒  NEW VIEWS — Storage / Logs / Backup / DataIO
    ──────────────────────────────────────────────────────────── */
+
+// 把目前 RTDB 雲端附件 (學生繳交檔) 批次備份到老師的 Google Drive,
+// 備份成功後改寫對應的 meta (storage:'drive' + driveFileId/driveLink),
+// 最後清空 RTDB 雲端 + 同步出去,讓所有裝置都能直接從 Drive 連結看檔。
+async function _backupAttachmentsToDrive(progressEl){
+  const updateProgress = (text, color) => {
+    if(!progressEl) return;
+    try {
+      let line = progressEl.querySelector('.__backup_line');
+      if(!line){
+        line = el('div', { class:'__backup_line small', style:{marginTop:'10px',fontWeight:'700'} });
+        progressEl.appendChild(line);
+      }
+      line.textContent = text;
+      if(color) line.style.color = color;
+    } catch(_){}
+  };
+
+  try {
+    // 1. 確保 Drive 已授權
+    if(typeof gdIsAuthed !== 'function' || !gdIsAuthed()){
+      try { await gdAuth(); } catch(e){ toast('Drive 授權失敗:' + (e.message||e), 'danger'); return; }
+    }
+    const cfg = (typeof gdConfig === 'function') ? gdConfig() : {};
+    const folderId = cfg && cfg.folderId ? cfg.folderId : '';
+
+    // 2. 蒐集所有用到的 attachment.key → owners[] 對應
+    //    owners 是「指向同一個 meta 物件」的位置,後面直接改 meta 就行
+    const keyToOwners = new Map();
+    const collect = (meta) => {
+      if(!meta || !meta.key) return;
+      // 已經是 Drive 的就跳過
+      if(meta.storage === 'drive' || meta.driveFileId) return;
+      if(!keyToOwners.has(meta.key)) keyToOwners.set(meta.key, []);
+      keyToOwners.get(meta.key).push(meta);
+    };
+    (App.db.submissions || []).forEach(s => {
+      collect(s.attach);
+      if(Array.isArray(s.attaches)) s.attaches.forEach(a => collect(a));
+    });
+    (App.db.assignments || []).forEach(a => collect(a.attach));
+
+    const keys = Array.from(keyToOwners.keys());
+    if(!keys.length){
+      updateProgress('沒有可備份的雲端附件', 'var(--muted)');
+      toast('沒有可備份的附件 (可能都已在 Drive)', 'info');
+      return;
+    }
+
+    updateProgress('開始備份 ' + keys.length + ' 個附件...', 'var(--primary)');
+
+    // 3. 依序處理每個 key
+    let okCount = 0, failCount = 0;
+    const failedKeys = [];
+    for(let i = 0; i < keys.length; i++){
+      const key = keys[i];
+      const owners = keyToOwners.get(key);
+      const meta = owners[0]; // 同一個 key 的 owners 共用同一份 meta 內容
+      const niceName = meta.name || (key + '.bin');
+
+      updateProgress('備份中 ' + (i + 1) + ' / ' + keys.length + ' · ' + niceName, 'var(--primary)');
+
+      try {
+        // 3a. 取得 blob URL (可能來自 IDB / RTDB / 分塊)
+        const url = await attachGetUrl(meta);
+        if(!url){ throw new Error('找不到檔案內容'); }
+        // 3b. 取回 blob
+        const resp = await fetch(url);
+        if(!resp.ok) throw new Error('讀取失敗 ' + resp.status);
+        const blob = await resp.blob();
+        // 3c. 包成 File 後上傳
+        const fileObj = new File([blob], niceName, {
+          type: meta.type || blob.type || 'application/octet-stream'
+        });
+        const driveData = await gdUpload(fileObj, folderId);
+        if(!driveData || !driveData.id) throw new Error('Drive 回應缺少 file id');
+
+        // 3d. 改寫所有 owner 的 meta — 切到 Drive
+        owners.forEach(m => {
+          m.storage = 'drive';
+          m.driveFileId = driveData.id;
+          m.driveLink = driveData.webViewLink || ('https://drive.google.com/file/d/' + driveData.id + '/view');
+          m.driveDownload = driveData.webContentLink || '';
+          // 保留 name/type/size,清掉本地分塊資訊
+          if(!m.name) m.name = driveData.name || niceName;
+          if(!m.size && driveData.size) m.size = parseInt(driveData.size) || m.size;
+          // 不清 key — 留著做 fallback,IDB 還能讀,但 RTDB 那邊會清
+          delete m.chunked;
+          delete m.totalChunks;
+          delete m.dataUri;
+        });
+
+        // 3e. 立即清這個 key 的 RTDB node,釋放雲端額度
+        try {
+          if(App.cfg && App.cfg.roomCode && typeof firebase !== 'undefined'){
+            await firebase.database()
+              .ref('cms-v3/' + App.cfg.roomCode + '/attachments/' + key)
+              .set(null);
+          }
+        } catch(_){}
+
+        okCount++;
+      } catch(e){
+        failCount++;
+        failedKeys.push(niceName + ' (' + (e.message || e) + ')');
+        dbgWarn('[backupToDrive] 失敗', key, e);
+      }
+
+      // 每 5 筆存一次,避免中途中斷全沒寫入
+      if((i + 1) % 5 === 0){
+        try { saveDB(); } catch(_){}
+        try {
+          if(typeof Sync !== 'undefined' && Sync.setMap){
+            Sync.setMap('submissions', App.db.submissions, true);
+            Sync.setMap('assignments', App.db.assignments, true);
+          }
+        } catch(_){}
+      }
+    }
+
+    // 4. 收尾:全部同步 + 通知
+    try { saveDB(); } catch(_){}
+    try {
+      if(typeof Sync !== 'undefined' && Sync.setMap){
+        Sync.setMap('submissions', App.db.submissions, true);
+        Sync.setMap('assignments', App.db.assignments, true);
+      }
+    } catch(_){}
+    try { if(typeof bcNotify === 'function') bcNotify(); } catch(_){}
+
+    if(failCount === 0){
+      updateProgress('✅ 全部 ' + okCount + ' 個附件已備份到 Drive', 'var(--success)');
+      toast('備份完成:' + okCount + ' 個檔案已轉到 Drive','success', 6000);
+    } else {
+      updateProgress('完成 ' + okCount + ' / 失敗 ' + failCount, 'var(--warn)');
+      toast('備份完成 ' + okCount + ' 個,失敗 ' + failCount + ' 個 (詳見 console)','warn', 8000);
+      try { dbgWarn('[backupToDrive] failed list:', failedKeys); } catch(_){}
+    }
+  } catch(e){
+    updateProgress('❌ 備份中止:' + (e.message || e), 'var(--danger)');
+    toast('備份失敗:' + (e.message || e), 'danger');
+    try { dbgWarn('[backupToDrive] fatal', e); } catch(_){}
+  }
+}
+
 function rStorage(content){
   content.appendChild(el('h1', null, '💾 儲存空間'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '本機 localStorage 使用狀況'));
@@ -22722,6 +22867,96 @@ function rStorage(content){
     ));
   })();
   content.appendChild(cardIdb);
+
+  // ═══ Firebase RTDB 雲端附件 (跨裝置同步用) ═══
+  const cardRtdb = el('div', { class:'card', style:{marginTop:'10px'} });
+  cardRtdb.appendChild(el('h3', null, '☁️ 雲端附件 (Firebase RTDB)'));
+  cardRtdb.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '學生繳交檔案自動同步到這裡,讓你跨裝置看到。免費額度 1 GB,單檔最大 100 MB (RTDB 分塊)'));
+  const rtdbBody = el('div', null, el('div', { class:'small muted' }, '正在讀取雲端使用量...'));
+  cardRtdb.appendChild(rtdbBody);
+  // 非同步抓 RTDB 統計
+  (async () => {
+    try {
+      const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+      if(!fbCfg || !fbCfg.databaseURL || typeof firebase === 'undefined'){
+        rtdbBody.innerHTML = '';
+        rtdbBody.appendChild(el('div', { class:'small muted' }, '未啟用 Firebase 同步,雲端統計不可用'));
+        return;
+      }
+      const roomCode = App.cfg?.roomCode || 'DEMO01';
+      const snap = await firebase.database().ref('cms-v3/' + roomCode + '/attachments').once('value');
+      const data = snap.val() || {};
+      let count = 0, bytes = 0, chunkedCount = 0;
+      for(const k of Object.keys(data)){
+        const v = data[k];
+        if(!v) continue;
+        count++;
+        // 大致估算:單 node dataUri 用 .length,分塊 (.meta + cN) 累加
+        if(typeof v === 'string'){
+          bytes += v.length;
+        } else if(v.dataUri){
+          bytes += (v.dataUri.length || 0);
+        } else {
+          // 分塊:遍歷子 keys
+          let isChunked = false;
+          for(const sk of Object.keys(v)){
+            if(sk === 'meta'){
+              isChunked = true;
+            } else if(sk.startsWith('c') && typeof v[sk] === 'string'){
+              bytes += v[sk].length;
+            }
+          }
+          if(isChunked) chunkedCount++;
+        }
+      }
+      const usedMB = (bytes / 1024 / 1024).toFixed(1);
+      const quotaMB = 1024;  // Spark 1 GB
+      const pct = Math.min(100, (bytes / (quotaMB * 1024 * 1024)) * 100).toFixed(1);
+      const barColor = pct > 80 ? 'var(--danger)' : pct > 50 ? 'var(--warn)' : 'var(--success)';
+      rtdbBody.innerHTML = '';
+      rtdbBody.appendChild(el('div', { style:{fontSize:'20px',fontWeight:'700'} }, usedMB + ' MB / 1024 MB'));
+      rtdbBody.appendChild(el('div', { class:'small muted' },
+        '使用率 ' + pct + '% · ' + count + ' 個附件' + (chunkedCount ? ' (' + chunkedCount + ' 個分塊大檔)' : '')));
+      rtdbBody.appendChild(el('div', { style:{height:'8px',background:'var(--surface-2)',borderRadius:'4px',overflow:'hidden',marginTop:'10px'} },
+        el('div', { style:{width: pct + '%', height:'100%', background: barColor, transition:'width .3s'} })
+      ));
+      // 操作按鈕
+      const btns = el('div', { class:'flex', style:{marginTop:'12px',gap:'8px',flexWrap:'wrap'} });
+      const driveAuthed = typeof gdIsAuthed === 'function' && gdIsAuthed();
+      btns.appendChild(el('button', {
+        class:'btn btn-sm btn-primary',
+        title: driveAuthed ? '把雲端附件下載+上傳到你的 Google Drive,清空 RTDB 額度' : '請先在「繳交記錄」頁授權 Drive',
+        disabled: !driveAuthed,
+        onclick: async (ev)=> {
+          const btn = ev.currentTarget;
+          if(!driveAuthed){ toast('請先在「繳交記錄」頁授權 Drive','warn'); return; }
+          if(!await confirmDlg('把所有雲端附件 (' + count + ' 個) 備份到你的 Google Drive?\n\n備份後 RTDB 額度會清空,學生可繼續上傳新檔案。\n備份過程約需 1-5 分鐘 (依大小)。', {})) return;
+          btn.disabled = true; btn.textContent = '備份中...';
+          await _backupAttachmentsToDrive(rtdbBody);
+          btn.disabled = false; btn.textContent = '☁️ 備份到 Drive';
+          rerender();
+        }
+      }, '☁️ 備份到 Drive'));
+      btns.appendChild(el('button', {
+        class:'btn btn-sm btn-danger',
+        title:'清空 RTDB 雲端附件 (本地 IDB 保留)',
+        onclick: async ()=> {
+          if(!await confirmDlg('確定清空所有雲端附件? (' + count + ' 個)\n\n本地 IDB 保留,但其他裝置看不到了。建議先備份到 Drive 再清。', {danger:true})) return;
+          try {
+            await firebase.database().ref('cms-v3/' + roomCode + '/attachments').set(null);
+            toast('已清空雲端附件 ' + count + ' 個','success');
+            rerender();
+          } catch(e){ toast('清空失敗:' + (e.message||e),'danger'); }
+        }
+      }, '🗑 清空雲端'));
+      rtdbBody.appendChild(btns);
+    } catch(e){
+      rtdbBody.innerHTML = '';
+      rtdbBody.appendChild(el('div', { class:'small', style:{color:'var(--danger)'} }, '讀取失敗:' + (e.message||e)));
+    }
+  })();
+  content.appendChild(cardRtdb);
 
   // ═══ Google Drive 雲端儲存 ═══
   const gd = el('div', { class:'card', style:{marginTop:'10px'} });
