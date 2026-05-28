@@ -18265,6 +18265,10 @@ function rSub(content){
     }
   } catch(e){_swallow('auto',e)}
 
+  // 顯示模式 (清單 / 矩陣) — 從 localStorage 載入偏好 (用戶要求)
+  if(!App._subDisplayMode){
+    try { App._subDisplayMode = localStorage.getItem('cms_v3_sub_display_mode') || 'list'; } catch(_){ App._subDisplayMode = 'list'; }
+  }
   const sBox = el('div', { class:'flex', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap',alignItems:'center'} });
   const sInp = el('input', { class:'input', placeholder:'🔎 搜尋學生 / 作業', style:{flex:'1',minWidth:'160px'},
     oninput: e => { App._subSearch = e.target.value.toLowerCase(); renderList(); }});
@@ -18277,6 +18281,20 @@ function rSub(content){
   subClasses.forEach(c => subClsSel.appendChild(el('option', { value:c, selected: c === App._subCls }, c)));
   subClsSel.addEventListener('change', e => { App._subCls = e.target.value; renderList(); });
   sBox.appendChild(subClsSel);
+  // 顯示模式切換按鈕
+  const isMatrix = App._subDisplayMode === 'matrix';
+  sBox.appendChild(el('button', {
+    class:'btn btn-sm',
+    style: isMatrix ? {} : {background:'var(--primary)',color:'#fff'},
+    title:'清單模式 (已繳 row + 未繳 chip grid)',
+    onclick:()=> { App._subDisplayMode = 'list'; try { localStorage.setItem('cms_v3_sub_display_mode', 'list'); } catch(_){} rerender(); }
+  }, '📋 清單'));
+  sBox.appendChild(el('button', {
+    class:'btn btn-sm',
+    style: isMatrix ? {background:'var(--primary)',color:'#fff'} : {},
+    title:'矩陣模式 (整班 chip grid,綠=已繳 紅=未繳,一眼看到)',
+    onclick:()=> { App._subDisplayMode = 'matrix'; try { localStorage.setItem('cms_v3_sub_display_mode', 'matrix'); } catch(_){} rerender(); }
+  }, '🔲 矩陣'));
   content.appendChild(sBox);
 
   const listWrap = el('div');
@@ -18533,46 +18551,32 @@ function rSub(content){
             body.appendChild(asgHeader);
 
             if(asgExpanded){
-              // 已繳 — 依座號排序 (用戶要求),沒座號的排最後
-              const sortedSubs = subs.slice().sort((a, b) => {
-                const sa = findStudent(a.sub.studentId);
-                const sb = findStudent(b.sub.studentId);
-                const seatA = (sa && sa.seat != null && sa.seat !== '') ? Number(sa.seat) : 999;
-                const seatB = (sb && sb.seat != null && sb.seat !== '') ? Number(sb.seat) : 999;
-                if(seatA !== seatB) return seatA - seatB;
-                return (sa?.name || '').localeCompare(sb?.name || '');
-              });
-              sortedSubs.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
+              // 排序 helper
+              const seatOf = s => (s && s.seat != null && s.seat !== '') ? Number(s.seat) : 999;
+              const cmpSeat = (a, b) => {
+                if(seatOf(a) !== seatOf(b)) return seatOf(a) - seatOf(b);
+                return (a.name || '').localeCompare(b.name || '');
+              };
+              const isMatrixMode = App._subDisplayMode === 'matrix';
 
-              // 未繳清單 — grid 排版,每個學生獨立 chip,依座號排序 (用戶要求弄整齊)
-              if(missingStu.length){
-                const sortedMissing = missingStu.slice().sort((a, b) => {
-                  const sA = (a.seat != null && a.seat !== '') ? Number(a.seat) : 999;
-                  const sB = (b.seat != null && b.seat !== '') ? Number(b.seat) : 999;
-                  if(sA !== sB) return sA - sB;
-                  return (a.name || '').localeCompare(b.name || '');
-                });
-                // header
-                const missingBlock = el('div', {
-                  style:{
-                    padding:'10px 14px',
-                    background:'var(--danger-soft)',
-                    borderTop:'1px dashed var(--danger)',
-                    color:'var(--danger)'
-                  }
-                });
-                missingBlock.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'8px',fontSize:'13px'} },
-                  '❌ 未繳 ' + sortedMissing.length + ' 人 (依座號排序)'));
-                // grid 容器:每 chip 「座號 + 姓名」
+              if(isMatrixMode){
+                // 矩陣模式:整班 chip grid,綠=已繳 紅=未繳,一眼看到所有人狀態
+                const sortedExpected = expectedStu.slice().sort(cmpSeat);
+                const submittedMap = new Map(subs.map(x => [x.sub.studentId, x]));
+                const matrixBlock = el('div', { style:{padding:'12px 14px'} });
+                matrixBlock.appendChild(el('div', { style:{fontSize:'12px',color:'var(--text-muted)',marginBottom:'8px'} },
+                  '📊 全班矩陣 — 綠 ✅ 已繳 ' + submittedCount + ' 人 · 紅 ❌ 未繳 ' + missingStu.length + ' 人 (依座號排序)'));
                 const grid = el('div', { style:{
                   display:'grid',
-                  gridTemplateColumns:'repeat(auto-fill, minmax(120px, 1fr))',
+                  gridTemplateColumns:'repeat(auto-fill, minmax(130px, 1fr))',
                   gap:'6px'
                 }});
-                sortedMissing.forEach(s => {
+                sortedExpected.forEach(s => {
+                  const item = submittedMap.get(s.id);
+                  const submitted = !!item;
                   const chip = el('div', { style:{
-                    background:'#fff',
-                    border:'1px solid var(--danger)',
+                    background: submitted ? 'var(--success-soft)' : '#fff',
+                    border: '1px solid ' + (submitted ? 'var(--success)' : 'var(--danger)'),
                     borderRadius:'6px',
                     padding:'6px 10px',
                     fontSize:'13px',
@@ -18582,29 +18586,97 @@ function rSub(content){
                     gap:'6px',
                     overflow:'hidden',
                     textOverflow:'ellipsis',
-                    whiteSpace:'nowrap'
-                  }});
+                    whiteSpace:'nowrap',
+                    cursor: submitted ? 'pointer' : 'default',
+                    transition:'transform .12s'
+                  },
+                    title: submitted ? '點此批改' : '尚未繳交',
+                    onclick: submitted ? (()=> { try { openSubmissionGrade(item.sub, list, item.origIdx); } catch(e){_swallow('mtx-grade',e)} }) : null
+                  });
                   // 座號 badge
                   chip.appendChild(el('span', { style:{
-                    background:'var(--danger)',
-                    color:'#fff',
-                    fontWeight:'700',
-                    fontSize:'11px',
-                    padding:'2px 6px',
-                    borderRadius:'4px',
-                    flexShrink:'0',
-                    minWidth:'24px',
-                    textAlign:'center'
+                    background: submitted ? 'var(--success)' : 'var(--danger)',
+                    color:'#fff', fontWeight:'700', fontSize:'11px',
+                    padding:'2px 6px', borderRadius:'4px',
+                    flexShrink:'0', minWidth:'24px', textAlign:'center'
                   }}, (s.seat != null && s.seat !== '') ? String(s.seat) : '?'));
-                  chip.appendChild(el('span', { style:{
-                    fontWeight:'500',
-                    overflow:'hidden',
-                    textOverflow:'ellipsis'
-                  }}, s.name || '?'));
+                  chip.appendChild(el('span', { style:{fontWeight:'500', overflow:'hidden', textOverflow:'ellipsis'} }, s.name || '?'));
+                  if(submitted){
+                    // 加 ✅ 標記
+                    chip.appendChild(el('span', { style:{marginLeft:'auto', color:'var(--success)', fontWeight:'700', fontSize:'11px'} }, '✓'));
+                  }
                   grid.appendChild(chip);
                 });
-                missingBlock.appendChild(grid);
-                body.appendChild(missingBlock);
+                matrixBlock.appendChild(grid);
+                body.appendChild(matrixBlock);
+              } else {
+                // 清單模式 (原本的)
+
+                // 已繳 — 依座號排序
+                const sortedSubs = subs.slice().sort((a, b) => cmpSeat(findStudent(a.sub.studentId) || {}, findStudent(b.sub.studentId) || {}));
+                sortedSubs.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
+
+                // 未繳清單 — grid + 可摺疊 (用戶要求)
+                if(missingStu.length){
+                  const sortedMissing = missingStu.slice().sort(cmpSeat);
+                  const missingKey = cls + '|' + aid + '|missing';
+                  App._subMissingExpanded = App._subMissingExpanded || {};
+                  const missingExpanded = App._subMissingExpanded[missingKey] !== false;  // 預設展開
+
+                  // header (可點)
+                  const missingBlock = el('div', {
+                    style:{ padding:'10px 14px', background:'var(--danger-soft)',
+                            borderTop:'1px dashed var(--danger)', color:'var(--danger)' }
+                  });
+                  const missingHeader = el('div', {
+                    style:{ fontWeight:'700', fontSize:'13px', cursor:'pointer', userSelect:'none',
+                            display:'flex', alignItems:'center', gap:'6px' },
+                    title: missingExpanded ? '點此收合未繳清單' : '點此展開未繳清單',
+                    onclick:()=> { App._subMissingExpanded[missingKey] = !missingExpanded; renderList(); }
+                  },
+                    el('span', { style:{display:'inline-block',width:'14px',transition:'transform .2s',
+                                        transform: missingExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'} }, '▼'),
+                    el('span', null, '❌ 未繳 ' + sortedMissing.length + ' 人 (依座號排序)')
+                  );
+                  missingBlock.appendChild(missingHeader);
+
+                  if(missingExpanded){
+                    const grid = el('div', { style:{
+                      display:'grid',
+                      gridTemplateColumns:'repeat(auto-fill, minmax(120px, 1fr))',
+                      gap:'6px',
+                      marginTop:'8px'
+                    }});
+                    sortedMissing.forEach(s => {
+                      const chip = el('div', { style:{
+                        background:'#fff',
+                        border:'1px solid var(--danger)',
+                        borderRadius:'6px',
+                        padding:'6px 10px',
+                        fontSize:'13px',
+                        color:'#1f2937',
+                        display:'flex',
+                        alignItems:'center',
+                        gap:'6px',
+                        overflow:'hidden',
+                        textOverflow:'ellipsis',
+                        whiteSpace:'nowrap'
+                      }});
+                      chip.appendChild(el('span', { style:{
+                        background:'var(--danger)', color:'#fff',
+                        fontWeight:'700', fontSize:'11px',
+                        padding:'2px 6px', borderRadius:'4px',
+                        flexShrink:'0', minWidth:'24px', textAlign:'center'
+                      }}, (s.seat != null && s.seat !== '') ? String(s.seat) : '?'));
+                      chip.appendChild(el('span', { style:{
+                        fontWeight:'500', overflow:'hidden', textOverflow:'ellipsis'
+                      }}, s.name || '?'));
+                      grid.appendChild(chip);
+                    });
+                    missingBlock.appendChild(grid);
+                  }
+                  body.appendChild(missingBlock);
+                }
               }
             }
           });
