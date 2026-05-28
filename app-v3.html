@@ -19650,7 +19650,22 @@ function openSubmissionGrade(sub, list=null, idx=0){
       row.appendChild(el('div', { style:{fontSize:'20px',flexShrink:'0'} }, fileIcon));
       row.appendChild(el('div', { style:{flex:'1',minWidth:'0',overflow:'hidden'} },
         el('div', { style:{fontSize:'13px',fontWeight:'600',color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} }, attach.name),
-        el('div', { class:'small muted', style:{fontSize:'11px'} }, sizeKb + (attach.storage ? ' · ' + attach.storage : ''))
+        el('div', { class:'small muted', style:{fontSize:'11px'} }, sizeKb + (function(){
+          // 儲存位置改成友善中文 (原本是 idb/rtdb/drive/fbstorage/catbox 技術代號)
+          const map = {
+            idb: '💾 本機',
+            rtdb: '☁️ 雲端',
+            drive: '☁️ Drive',
+            fbstorage: '☁️ Firebase',
+            catbox: '🌐 外部'
+          };
+          const label = map[attach.storage];
+          // 沒標 storage 但有 chunked = RTDB 分塊
+          if(!label && attach.chunked) return ' · ☁️ 雲端';
+          // 沒標 storage 但有 key = 在 IDB
+          if(!label && attach.key) return ' · 💾 本機';
+          return label ? (' · ' + label) : '';
+        })())
       ));
       row.appendChild(el('button', {
         class:'btn btn-sm btn-primary',
