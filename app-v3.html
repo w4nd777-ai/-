@@ -6495,6 +6495,58 @@ async function gdGetUsage(){
 // 上傳 File，回傳 metadata：依設定智能切換 IDB / Google Drive
 // 🔧 圖片壓縮：超過 800KB 的 image/* 自動降畫質 + 縮 dim → 大幅提升上傳穩定度
 //    (iPhone HEIC 拍照常 5MB+，學生 IDB 配額有限會塞爆)
+// 學生頭像壓縮 helper — 確保每張 < 1 MB (用戶要求)
+// 策略:先用 1024×1024 @ q0.92,若太大降 q 到 0.85→0.75→0.65→0.5
+//      還太大就降尺寸到 768→512,維持 q 0.85
+// 回傳: { dataUrl, size, quality }
+async function _compressAvatarUnder1MB(file){
+  const TARGET_SIZE = 1024 * 1024;  // 1 MB 上限 (base64 字元數)
+  // 1) 讀檔成 Image
+  const dataUri = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = ()=> res(r.result);
+    r.onerror = ()=> rej(new Error('讀取失敗'));
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = ()=> res(i);
+    i.onerror = ()=> rej(new Error('圖片無法讀取(可能是 HEIC)'));
+    i.src = dataUri;
+  });
+  // 2) 嘗試組合:[size, quality] 由高到低,第一個壓出來 < 1 MB 的就用
+  const attempts = [
+    [1024, 0.92], [1024, 0.85], [1024, 0.75],
+    [1024, 0.65], [1024, 0.55],
+    [768, 0.85],  [768, 0.75],
+    [512, 0.85],  [512, 0.75]
+  ];
+  for(const [size, q] of attempts){
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    const ratio = Math.max(size/img.naturalWidth, size/img.naturalHeight);
+    const w = img.naturalWidth * ratio, h = img.naturalHeight * ratio;
+    ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', q);
+    if(dataUrl.length <= TARGET_SIZE){
+      return { dataUrl, size, quality: q };
+    }
+  }
+  // 極端情況:全失敗 → 用最低設定的結果
+  const canvas = document.createElement('canvas');
+  canvas.width = 400; canvas.height = 400;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  const ratio = Math.max(400/img.naturalWidth, 400/img.naturalHeight);
+  const w = img.naturalWidth * ratio, h = img.naturalHeight * ratio;
+  ctx.drawImage(img, (400-w)/2, (400-h)/2, w, h);
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.7), size: 400, quality: 0.7 };
+}
+
 async function _compressImageIfNeeded(file){
   if(!file || !(file.type||'').startsWith('image/')) return file;
   if(file.size <= 800 * 1024) return file;  // <= 800KB 不壓
@@ -17316,37 +17368,13 @@ function rMe(content){
   const avFile = el('input', { type:'file', accept:'image/*' });
   avFile.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    // 提高上傳限制 2MB → 20MB (用戶要求,跟另一條 self-edit 路徑同步)
     if(f.size > 20*1024*1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
-      // 提高解析度 200→1024,品質 0.85→0.92
-      const dataUrl = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = e => {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const size = 1024;
-            canvas.width = size;
-            canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            const ratio = Math.max(size/img.width, size/img.height);
-            const w = img.width * ratio;
-            const h = img.height * ratio;
-            ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
-            res(canvas.toDataURL('image/jpeg', 0.92));
-          };
-          img.onerror = rej;
-          img.src = e.target.result;
-        };
-        reader.onerror = rej;
-        reader.readAsDataURL(f);
-      });
-      me.avatar = dataUrl;
+      const result = await _compressAvatarUnder1MB(f);
+      me.avatar = result.dataUrl;
       saveDB(); Sync.setMap('students', App.db.students); bcNotify();
-      toast('✅ 頭像已更新 (1024×1024 超高解析度)','success');
+      const kb = Math.round(result.dataUrl.length / 1024);
+      toast('✅ 頭像已更新 (' + result.size + '×' + result.size + ' · ' + kb + ' KB · 品質 ' + Math.round(result.quality*100) + '%)','success', 3000);
       rerender();
     } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
   });
@@ -17554,38 +17582,17 @@ function openStudentSelfEdit(){
   const avFile = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
   avFile.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    // 提高上傳限制 10MB → 20MB (用戶要求,單眼/iPhone 高畫質照片直接上傳)
     if(f.size > 20 * 1024 * 1024){ return toast('圖片不可超過 20MB','danger'); }
-    // 提高儲存解析度 512→1024 (面積 4x,老師端看原圖超清晰)
-    // JPEG 品質 0.9→0.92, 壓縮後約 150-300 KB/人, 159 人總計 ~40 MB
     try {
-      avatarData = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = e2 => {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const size = 1024;  // 提高 512→1024 (用戶要求再拉到極限實用解析度)
-            canvas.width = size; canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            // 高品質縮放
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            const ratio = Math.max(size/img.width, size/img.height);
-            const w = img.width * ratio, h = img.height * ratio;
-            ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
-            res(canvas.toDataURL('image/jpeg', 0.92));
-          };
-          img.onerror = ()=> rej(new Error('圖片無法讀取（可能是 HEIC）'));
-          img.src = e2.target.result;
-        };
-        reader.onerror = rej;
-        reader.readAsDataURL(f);
-      });
+      const result = await _compressAvatarUnder1MB(f);
+      avatarData = result.dataUrl;
       avImg.src = avatarData;
       avImg.style.display = 'block';
       avInitials.style.display = 'none';
-      try { toast('已儲存 1024×1024 超高解析度頭像','success', 2000); } catch(_){}
+      try {
+        const kb = Math.round(avatarData.length / 1024);
+        toast('已儲存 ' + result.size + '×' + result.size + ' 頭像 (' + kb + ' KB · 品質 ' + Math.round(result.quality*100) + '%)', 'success', 3000);
+      } catch(_){}
     } catch(err){ toast('讀取失敗：' + (err.message||err), 'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
