@@ -12140,6 +12140,21 @@ function rOv(content){
       toolbar.appendChild(searchInp);
       toolbar.appendChild(clsSel);
       toolbar.appendChild(statSel);
+      // 加「全部展開 / 全部收合」按鈕 (用戶要求班級可展開收合)
+      App._ovAttExpandedCls = App._ovAttExpandedCls || {};
+      toolbar.appendChild(el('button', { class:'btn btn-sm', title:'全部展開所有班級', onclick: ()=> {
+        // 把所有 byClass 的 key 都標為展開 (重新算一次)
+        Object.keys(App._ovAttExpandedCls).forEach(k => { App._ovAttExpandedCls[k] = true; });
+        // 也標可能還沒記錄的班級
+        const allCls = Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean)));
+        allCls.forEach(c => { App._ovAttExpandedCls[c] = true; });
+        renderRows();
+      }}, '全部展開 ▼'));
+      toolbar.appendChild(el('button', { class:'btn btn-sm', title:'全部收合所有班級', onclick: ()=> {
+        const allCls = Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean)));
+        allCls.forEach(c => { App._ovAttExpandedCls[c] = false; });
+        renderRows();
+      }}, '全部收合 ▲'));
       detailCard.appendChild(toolbar);
 
       const wrap = el('div', { style:{overflowX:'auto'} });
@@ -12197,13 +12212,30 @@ function rOv(content){
           const groupItems = byClass[cls];
           const grpIn = groupItems.filter(x => !x.a.outTime).length;
           const grpOut = groupItems.filter(x => x.a.outTime).length;
+          // 該班是否展開:預設展開,曾被收合過就 false
+          const isExpanded = App._ovAttExpandedCls[cls] !== false;
           const headerTr = el('tr');
-          headerTr.appendChild(el('td', { colspan:'7', style:{padding:'10px 12px',background:'var(--surface-2)',borderTop:'2px solid var(--primary)',fontWeight:'700',fontSize:'13px'} },
-            el('span', null, '🏫 ' + cls),
+          const headerTd = el('td', {
+            colspan:'7',
+            style:{padding:'10px 12px',background:'var(--surface-2)',borderTop:'2px solid var(--primary)',fontWeight:'700',fontSize:'13px',cursor:'pointer',userSelect:'none'},
+            title:isExpanded ? '點此收合班級' : '點此展開班級',
+            onclick:()=> { App._ovAttExpandedCls[cls] = !isExpanded; renderRows(); }
+          },
+            // 摺疊箭頭
+            el('span', { style:{display:'inline-block',width:'14px',transition:'transform .2s',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'} }, '▼'),
+            el('span', null, ' 🏫 ' + cls),
             el('span', { class:'small muted', style:{marginLeft:'10px',fontWeight:'400'} },
               '(' + groupItems.length + ' 筆 · 🟢 上課中 ' + grpIn + ' · ✅ 已簽退 ' + grpOut + ')')
-          ));
+          );
+          headerTr.appendChild(headerTd);
           tb.appendChild(headerTr);
+
+          // 收合狀態 → 不渲染該班 rows
+          if(!isExpanded){
+            shown += groupItems.length;  // 仍計入統計
+            groupItems.forEach(({a}) => { if(a.outTime) signedOut++; });
+            return;  // skip 該班學生 rows
+          }
 
           groupItems.forEach(({a, s}) => {
           let dur = '—';
