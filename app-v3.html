@@ -1642,24 +1642,29 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   color:#fff;
   border-bottom-color: var(--lc-primary);
 }
-/* ── Pill 輸入框 ── */
-.login-spotify-card .field{ margin-bottom:10px; }
+/* ── Pill 輸入框 (IG/FB 風 — 乾淨 + 更有層次) ── */
+.login-spotify-card .field{ margin-bottom:12px; }
 .login-spotify-card .label{
   display:block; font-size:11px; font-weight:700;
-  color:rgba(255,255,255,.7); margin-bottom:4px;
-  text-transform:uppercase; letter-spacing:.06em;
+  color:rgba(255,255,255,.6); margin-bottom:6px; padding-left:4px;
+  text-transform:uppercase; letter-spacing:.08em;
 }
 .login-spotify-card .input,
 .login-spotify-card .input.select,
 .login-spotify-card select.input{
   width:100%; box-sizing:border-box;
-  height:44px; padding:0 16px;
-  background:#fff; color:#222;
-  border:1px solid #fff;
+  height:48px; padding:0 18px;
+  background:#fff; color:#1f2937;
+  border:1.5px solid transparent;
   border-radius: var(--lc-input-radius);
-  font-size:14px; outline:none;
-  transition: box-shadow .15s ease, border-color .15s ease;
+  font-size:15px; font-weight:500; outline:none;
+  transition: box-shadow .18s ease, border-color .18s ease, transform .12s ease;
   text-align:left;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04), inset 0 0 0 1px rgba(0,0,0,.04);
+}
+.login-spotify-card .input:hover,
+.login-spotify-card select.input:hover{
+  box-shadow: 0 2px 6px rgba(0,0,0,.08), inset 0 0 0 1px rgba(0,0,0,.06);
 }
 /* select 重設原生樣式 + 自訂下拉箭頭 + 文字置中 (塞滿寬度) */
 .login-spotify-card .input.select,
@@ -1667,40 +1672,51 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   appearance:none;
   -webkit-appearance:none;
   -moz-appearance:none;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  /* 更精緻的箭頭 — 漸層描邊感 */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23667eea' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.5l3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
   background-repeat:no-repeat;
-  background-position:right 14px center;
-  background-size:12px;
-  padding-left:38px;       /* 對稱兩邊 padding 讓內容真正置中 */
-  padding-right:38px;
+  background-position:right 16px center;
+  background-size:14px;
+  padding-left:44px;       /* 對稱兩邊 padding 讓內容真正置中 */
+  padding-right:44px;
   cursor:pointer;
   text-align:center;       /* 主流瀏覽器 */
   text-align-last:center;  /* 顯示中的選項置中 (Chrome/FF/Safari) */
+  font-weight:600;         /* 班級代碼粗一點看得清楚 */
+  letter-spacing:.02em;
+}
+.login-spotify-card .input.select:hover,
+.login-spotify-card select.input:hover{
+  /* hover 時箭頭顏色加深 (用主題色) */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%234f46e5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.5l3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
 }
 .login-spotify-card .input.select option,
 .login-spotify-card select.input option{
   text-align:center;       /* 下拉打開後每個選項也置中 */
-  color:#222;              /* 一般 option 深色 */
+  color:#1f2937;           /* 一般 option 深色 */
+  background:#fff;
+  font-weight:500;
+  padding:8px 12px;
 }
 /* placeholder option 淡灰色 (IG/Discord 風 input placeholder) */
 .login-spotify-card .input.select option[disabled],
 .login-spotify-card select.input option[disabled]{
   color:#9ca3af;
+  font-weight:400;
 }
 .login-spotify-card .input.select:has(option:disabled:checked),
 .login-spotify-card select.input:has(option:disabled:checked){
   color:#9ca3af;           /* 還沒選時 select 自己也顯示灰色 */
-}
-.login-spotify-card .input.select option,
-.login-spotify-card select.input option{
-  background:#fff; color:#222;
+  font-weight:400;         /* placeholder 不要粗 */
 }
 .login-spotify-card .input:focus,
 .login-spotify-card select.input:focus{
   border-color: var(--lc-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc-primary) 30%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--lc-primary) 22%, transparent),
+              0 2px 8px rgba(0,0,0,.08);
+  transform:translateY(-1px);
 }
-.login-spotify-card .input::placeholder{ color:#999; }
+.login-spotify-card .input::placeholder{ color:#9ca3af; font-weight:400; }
 .login-spotify-card .pw-input-wrap{ position:relative; }
 .login-spotify-card .pw-input-wrap .input{ padding-right:48px; }
 .login-spotify-card .pw-toggle{
