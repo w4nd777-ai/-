@@ -8227,37 +8227,7 @@ function renderLogin(root){
     card.appendChild(tabs);
   }
 
-  // ── Last user quick entry (只在沒有 active stage 偏好時顯示一次) ──
-  const lastUser = loadLastUser();
-  if(lastUser && !lc.hideLastUser){
-    const stillExists = (lastUser.role === 'teacher')
-      ? !!App.db.accounts.find(a => a.id === lastUser.id || a.username === lastUser.username)
-      : !!App.db.students.find(s => s.id === lastUser.id);
-    // 僅在 stage 對應 lastUser 角色時顯示，避免老師 tab 顯示學生快速登入
-    if(stillExists && lastUser.role === App._loginStage){
-      const colorIdx = (lastUser.id ? String(lastUser.id).charCodeAt(0) : 0) % 8;
-      const lub = el('div', { class:'last-user-box' });
-      const row = el('div', { class:'last-user-row' },
-        el('div', { class:'last-user-av av-color-' + colorIdx }, initials(lastUser.name || '?')),
-        el('div', { class:'last-user-info' },
-          el('div', { class:'last-user-greet' }, '👋 歡迎回來，' + (lastUser.name || '使用者') + '！'),
-          el('div', { class:'last-user-meta' },
-            (lastUser.role === 'teacher' ? '老師' : '學生') +
-            ' · 上次登入：' + (lastUser.ts ? relTime(lastUser.ts) : '—')
-          )
-        )
-      );
-      lub.appendChild(row);
-      lub.appendChild(el('button', { class:'last-user-quick', onclick: quickContinueAsLast },
-        '👉 以此帳號繼續（需輸入密碼）'
-      ));
-      lub.appendChild(el('button', { class:'last-user-clear', onclick: ()=> {
-        saveLastUser(null); saveRemember(null); rerender();
-        toast('已清除登入紀錄','info');
-      }}, '🔄 切換其他帳號'));
-      card.appendChild(lub);
-    }
-  }
+  // ── (移除「👋 歡迎回來」帶入帳號功能 — 用戶要求,已被「記住我」取代) ──
 
   // ── 表單 stage ──
   let activeStage = null;
