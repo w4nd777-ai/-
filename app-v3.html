@@ -508,6 +508,48 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
 
 /* ---------- student card / list rows ---------- */
 .stu-grid{ display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); }
+/* 條列模式 (用戶偏好版本 — 左色條 + 狀態色背景 + 對齊欄位 + 按鈕靠右) */
+.stu-grid.list-mode{ display:flex; flex-direction:column; gap:6px; }
+.stu-grid.list-mode .stu-card{
+  flex-direction:row;
+  align-items:center;
+  gap:14px;
+  padding:10px 16px 10px 12px;
+  min-height:52px;
+  border-left:4px solid var(--border);
+  background:var(--surface);
+}
+.stu-grid.list-mode .stu-card.signed{ border-left-color:var(--success); background:var(--success-soft); }
+.stu-grid.list-mode .stu-card.late{ border-left-color:var(--warn); background:var(--warn-soft); }
+.stu-grid.list-mode .stu-card.absent{ border-left-color:var(--danger); background:transparent; }
+.stu-grid.list-mode .stu-card.leave{ border-left-color:var(--accent); background:var(--accent-soft); }
+.stu-grid.list-mode .stu-card .name{
+  font-size:15px; font-weight:600;
+  flex:0 0 160px; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.stu-grid.list-mode .stu-card .meta{
+  flex:0 0 100px; font-size:12px;
+}
+.stu-grid.list-mode .stu-card .small,
+.stu-grid.list-mode .stu-card .mono{ flex:1; margin:0; font-size:13px; }
+.stu-grid.list-mode .stu-card .tiny{ flex:1; margin:0; }
+.stu-grid.list-mode .stu-card .actions{
+  margin-top:0; margin-left:auto;
+  flex:0 0 auto;
+}
+/* mobile：條列模式自動換行 */
+@media (max-width:640px){
+  .stu-grid.list-mode .stu-card{
+    flex-wrap:wrap; padding:8px 12px;
+  }
+  .stu-grid.list-mode .stu-card .name{ flex:1 1 auto; min-width:0; }
+  .stu-grid.list-mode .stu-card .meta{ flex:0 0 auto; }
+  .stu-grid.list-mode .stu-card .small,
+  .stu-grid.list-mode .stu-card .mono,
+  .stu-grid.list-mode .stu-card .tiny{ flex:1 1 100%; }
+  .stu-grid.list-mode .stu-card .actions{ margin-left:0; flex:1 1 100%; }
+}
 .stu-card{
   padding:12px; border-radius:var(--r-md);
   background:var(--surface); border:1px solid var(--border);
@@ -11965,7 +12007,7 @@ function rOv(content){
 
       if(isExpanded){
         const body = el('div', { style:{padding:'14px 16px'} });
-        const sgrid = el('div', { class:'stu-grid' });
+        const sgrid = el('div', { class:'stu-grid list-mode' });
         stuInCls.forEach(s => {
           // batch 2-stab: 用預先 build 的 map（同上）
           const att = _todayMaps.signedMap.get(s.id);
