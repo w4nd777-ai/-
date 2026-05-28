@@ -29702,6 +29702,11 @@ function tourKey(role){
   return 'cms_v3_tour_done_' + role + '_' + uid;
 }
 function showTour(role, opts){
+  // 防呆:登入畫面 (session 為空) 不該顯示新手引導
+  // 修 race:maybeShowTour setTimeout 600ms 內若用戶登出,session 變 null,要擋下
+  if(!App.session || !App.session.role){
+    return;
+  }
   role = role || (App.session && App.session.role) || 'teacher';
   const steps = TOUR_STEPS[role];
   if(!steps || !steps.length) return;
