@@ -10777,17 +10777,19 @@ function forceSetupRecovery(accountId, opts){
   ];
 
   const m = modal('', { dismissable: allowCancel });
-  m.root.appendChild(el('h2', null, allowCancel ? '✏️ 修改帳號復原資訊' : '🛡️ 設定帳號復原資訊（首次必填）'));
+  m.root.appendChild(el('h2', null, allowCancel ? '✏️ 修改基本資料' : '🛡️ 設定基本資料 (首次必填)'));
   m.root.appendChild(el('p', { style:{lineHeight:'1.7',fontSize:'14px',color:'var(--text-muted)'} },
-    '為了讓您日後忘記密碼時能安全地自助重設，請設定 Email、安全問題與恢復碼。' +
-    '完成後請務必妥善保存「恢復碼」，這是您忘記 Email 或安全問題時的最後備援。'));
+    'Email 用於登入 + 忘記密碼驗證 (打對就能重設)。' +
+    '安全問題是身份驗證的第二道關卡。恢復碼是兩者都忘了的最後備援,記得妥善保存。'));
 
-  // Email
+  // Email — 登入用 + 忘記密碼驗證用 (不再寄信)
   const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, '📧 復原 Email'));
+  f1.appendChild(el('label', { class:'label' }, '📧 登入 Email'));
   const iEmail = el('input', { class:'input', type:'email',
     placeholder:'name@example.com', value: a.email || '' });
   f1.appendChild(iEmail);
+  f1.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '登入畫面「Email 登入」+ 忘記密碼驗證都用這個。系統不會寄信給你 (不需要)'));
   m.root.appendChild(f1);
 
   // 安全問題
@@ -11531,20 +11533,20 @@ function forceSetupStudentRecovery(studentId, opts){
   const s = (App.db.students || []).find(x => String(x.id) === String(studentId));
   if(!s){ if(!allowCancel) go('checkin'); return; }
   const m = modal('', { dismissable: allowCancel });
-  m.root.appendChild(el('h2', null, allowCancel ? '✏️ 修改帳號復原資訊' : '🛡️ 設定帳號復原資訊'));
+  m.root.appendChild(el('h2', null, allowCancel ? '✏️ 修改基本資料' : '🛡️ 設定基本資料'));
   m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'14px',lineHeight:'1.6',marginBottom:'12px'} },
-    '為了讓你日後忘記密碼時能安全自助重設, 請設定 Email 和一個安全問題。'));
+    'Email 用於登入 + 忘記密碼驗證 (打對就能重設,系統不會寄信)。安全問題是第二道身份驗證。'));
   m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
-    '🧑‍🎓 ' + s.name + (s.sid ? '（學號 ' + s.sid + '）' : '')));
+    '🧑‍🎓 ' + s.name + (s.sid ? '(學號 ' + s.sid + ')' : '')));
 
-  // Email
+  // Email — 登入用 + 忘記密碼驗證用
   const f1 = el('div', { class:'field' });
-  f1.appendChild(el('label', { class:'label' }, '📧 復原 Email'));
+  f1.appendChild(el('label', { class:'label' }, '📧 登入 Email'));
   const iEmail = el('input', { class:'input', type:'email', placeholder:'name@example.com',
     value: s.email || '' });
   f1.appendChild(iEmail);
   f1.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
-    '忘記密碼時, 系統會請你輸入此 Email 進行驗證'));
+    '登入畫面「Email 登入」+ 忘記密碼驗證都用這個 (不會寄信)'));
   m.root.appendChild(f1);
 
   // Security question
@@ -18373,7 +18375,7 @@ function rMe(content){
   // 顯示目前 Email + 安全問題 狀態
   const infoBox = el('div', { style:{padding:'10px',background:'var(--surface-2)',borderRadius:'8px',marginTop:'8px',fontSize:'13px',lineHeight:'1.8'} });
   infoBox.appendChild(el('div', null,
-    el('span', { style:{color:'var(--text-muted)'} }, '📧 復原 Email: '),
+    el('span', { style:{color:'var(--text-muted)'} }, '📧 登入 Email: '),
     el('strong', null, me.email || '(未設定)')
   ));
   infoBox.appendChild(el('div', null,
@@ -28823,11 +28825,13 @@ function openTeacherProfile(){
   }
   m.root.appendChild(fGoogle);
 
-  // 帳號復原資訊 (Email + 安全問題 + 恢復碼) — 可修改
+  // 基本資料 (Email + 安全問題 + 恢復碼) — 可修改
   const fRecov = el('div', { class:'field', style:{marginTop:'8px',padding:'10px',background:'var(--surface-2)',borderRadius:'8px'} });
-  fRecov.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '🛡 帳號復原資訊'));
+  fRecov.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '🔑 登入與找回密碼'));
+  fRecov.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'8px'} },
+    'Email 用於登入 + 忘記密碼驗證 (打對就重設,不寄信)'));
   fRecov.appendChild(el('div', { style:{fontSize:'13px',lineHeight:'1.7'} },
-    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'📧 Email: '), el('strong',null,me.email || '(未設定)')),
+    el('div', null, el('span',{style:{color:'var(--text-muted)'}},'📧 登入 Email: '), el('strong',null,me.email || '(未設定)')),
     el('div', null, el('span',{style:{color:'var(--text-muted)'}},'❓ 問題: '), el('strong',null,me.securityQ || '(未設定)')),
     el('div', null, el('span',{style:{color:'var(--text-muted)'}},'🛡 答案: '), el('strong',null,me.securityA ? '已設定 (hashed)' : '(未設定)')),
     el('div', null, el('span',{style:{color:'var(--text-muted)'}},'🔑 恢復碼: '), el('strong',null,me.recoveryCode ? '已設定 (hashed, 共 ' + Math.round(((Date.now()-(me.recoveryCodeSetAt||0))/86400000)) + ' 天前)' : '(未設定)')),
@@ -28843,7 +28847,7 @@ function openTeacherProfile(){
         }
       }, 200);
     }
-  }, '✏️ 修改 Email / 安全問題 / 重新產生恢復碼'));
+  }, '✏️ 修改登入 Email / 安全問題 / 重新產生恢復碼'));
   m.root.appendChild(fRecov);
 
   // H2: 登出所有裝置（清空所有 loginTokens）
