@@ -8441,8 +8441,32 @@ async function _handleGoogleAuthResult(user){
 // 📧 Email/Password 登入 — Chrome 第三方 cookie 政策不擋這個
 //    100% 純 HTTPS REST API，跨裝置同步無 cookie / popup / iframe 問題
 // ════════════════════════════════════════════════════════════
-async function _emailLoginModal(title){
+// Email 登入「記住我」儲存區 — 每個 role 一份 (teacher/student 不共用避免互相干擾)
+const LS_EMAIL_REMEMBER = LS_KEY + '_email_remember';
+function loadEmailRemember(role){
+  try {
+    const all = JSON.parse(localStorage.getItem(LS_EMAIL_REMEMBER) || '{}');
+    return all[role] || null;
+  } catch(_){ return null; }
+}
+function saveEmailRemember(role, data){
+  try {
+    const all = JSON.parse(localStorage.getItem(LS_EMAIL_REMEMBER) || '{}');
+    if(data) all[role] = data;
+    else delete all[role];
+    localStorage.setItem(LS_EMAIL_REMEMBER, JSON.stringify(all));
+  } catch(_){}
+}
+
+async function _emailLoginModal(title, role){
+  role = role || 'teacher';  // 預設 teacher,呼叫時可傳 'student'
   return new Promise(function(resolve){
+    // 載入「記住我」資料
+    var saved = loadEmailRemember(role);
+    var savedEmail = saved ? (saved.email || '') : '';
+    var savedPw = saved ? _deobfuscatePw(saved.pw || '') : '';
+    var shouldCheckRem = !!(saved && saved.email);
+
     var overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
     var card = document.createElement('div');
@@ -8455,11 +8479,16 @@ async function _emailLoginModal(title){
       '<button id="__el_tab_reg" type="button" style="flex:1;padding:10px;border:0;background:transparent;cursor:pointer;font-size:14px;font-weight:600;color:#888;border-bottom:2.5px solid transparent;margin-bottom:-1.5px">註冊</button>' +
       '</div>' +
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">Email</label>' +
-      '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" ' +
+      '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" value="' + savedEmail.replace(/"/g,'&quot;') + '" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:14px" />' +
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">密碼 (至少 6 字)</label>' +
-      '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" ' +
-      'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:18px" />' +
+      '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" value="' + savedPw.replace(/"/g,'&quot;') + '" ' +
+      'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:12px" />' +
+      // 記住我
+      '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#444;cursor:pointer;user-select:none;margin-bottom:14px">' +
+      '<input id="__el_remember" type="checkbox" style="width:16px;height:16px;accent-color:#16a34a;cursor:pointer" ' + (shouldCheckRem ? 'checked' : '') + '>' +
+      '<span>記住我 <span style="color:#9ca3af;font-size:11px">(下次自動帶入 Email + 密碼)</span></span>' +
+      '</label>' +
       '<div style="display:flex;gap:8px">' +
       '<button id="__el_cancel" style="flex:1;padding:11px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#555;cursor:pointer;font-size:14px">取消</button>' +
       '<button id="__el_ok" style="flex:2;padding:11px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px">登入</button>' +
@@ -8469,6 +8498,7 @@ async function _emailLoginModal(title){
     document.body.appendChild(overlay);
     var iEmail = card.querySelector('#__el_email');
     var iPw = card.querySelector('#__el_pw');
+    var iRem = card.querySelector('#__el_remember');
     var btnOk = card.querySelector('#__el_ok');
     var btnCancel = card.querySelector('#__el_cancel');
     var tabLogin = card.querySelector('#__el_tab_login');
@@ -8500,7 +8530,15 @@ async function _emailLoginModal(title){
     tabLogin.onclick = function(){ setMode('login'); };
     tabReg.onclick = function(){ setMode('reg'); };
 
-    setTimeout(function(){ try { iEmail.focus(); } catch(_){} }, 100);
+    // 自動 focus 邏輯: 有記住 email + 密碼 → focus 「登入」按鈕讓直接 Enter; 否則 focus email
+    setTimeout(function(){
+      try {
+        if(savedEmail && savedPw) btnOk.focus();
+        else if(savedEmail) iPw.focus();
+        else iEmail.focus();
+      } catch(_){}
+    }, 100);
+
     function close(val){ try { document.body.removeChild(overlay); } catch(_){} resolve(val); }
     iEmail.addEventListener('keydown', function(e){ if(e.key==='Enter') iPw.focus(); });
     iPw.addEventListener('keydown', function(e){ if(e.key==='Enter') btnOk.click(); if(e.key==='Escape') btnCancel.click(); });
@@ -8509,7 +8547,13 @@ async function _emailLoginModal(title){
       var pw = iPw.value || '';
       if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ iEmail.style.borderColor='#dc2626'; iEmail.focus(); return; }
       if(!pw || pw.length < 6){ iPw.style.borderColor='#dc2626'; iPw.focus(); return; }
-      close({email: email, password: pw, mode: mode});
+      // 處理「記住我」
+      if(iRem.checked){
+        saveEmailRemember(role, { email: email, pw: _obfuscatePw(pw), ts: Date.now() });
+      } else {
+        saveEmailRemember(role, null);
+      }
+      close({email: email, password: pw, mode: mode, remember: !!iRem.checked});
     };
     btnCancel.onclick = function(){ close(null); };
   });
@@ -8520,7 +8564,7 @@ async function _emailSignInStudent(ev){
     try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
-  const input = await _emailLoginModal('學生 Email 登入');
+  const input = await _emailLoginModal('學生 Email 登入', 'student');
   if(!input) return;
   const email = input.email, password = input.password, mode = input.mode || 'login';
   try {
@@ -8569,7 +8613,7 @@ async function _emailSignInTeacher(ev){
     try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
-  const input = await _emailLoginModal('老師 Email 登入');
+  const input = await _emailLoginModal('老師 Email 登入', 'teacher');
   if(!input) return;
   const email = input.email, password = input.password, mode = input.mode || 'login';
   try {
