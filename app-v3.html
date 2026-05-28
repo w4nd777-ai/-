@@ -6691,27 +6691,8 @@ async function attachUpload(file){
     if(msg){ try { toast(msg, type||'success', 3000); } catch(_){} }
   };
 
-  // ★ 超大檔 (>50 MB) 走免費匿名圖床 (0x0.st 優先,catbox.moe 備援)
-  if(file.size > 50 * 1024 * 1024 && file.size <= 512 * 1024 * 1024){
-    try {
-      try { toast('☁️ 大檔 (' + Math.round(file.size/1024/1024) + ' MB) 上傳到免費圖床中(可能需 1-2 分鐘)...', 'info', 8000); } catch(_){}
-      const result = await _bigFileUpload(file);
-      _doneProgress('✅ 已上傳到 ' + result.host + ': ' + file.name, 'success');
-      return {
-        name: file.name,
-        type: file.type || '',
-        size: file.size,
-        storage: 'catbox',         // 維持向後相容的 storage key
-        catboxUrl: result.url,
-        catboxHost: result.host,
-        storedAt: Date.now()
-      };
-    } catch(e){
-      console.warn('[big file upload failed]', e);
-      try { toast('免費圖床上傳失敗:' + (e.message||e) + ' — 改存本機 + 提示貼連結', 'warn', 6000); } catch(_){}
-      // fallthrough → 走 Drive / IDB 路徑
-    }
-  }
+  // 註:免費圖床 (catbox.moe / 0x0.st 等) 實測都不開放 CORS,瀏覽器無法直接上傳。
+  // 大檔走 RTDB 分塊上傳 (見後段),> 100 MB 引導學生改貼雲端連結。
 
   // ★ 優先 Firebase Storage (跨裝置 + 共用同一專案 5GB 免費)
   //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 5 秒 timeout fallback
@@ -6843,7 +6824,7 @@ async function attachUpload(file){
   let totalChunks = 0;
   const RTDB_SMALL_LIMIT = 4 * 1024 * 1024;    // 4 MB 走單一 node
   const RTDB_CHUNK_SIZE = 750 * 1024;          // 750 KB raw → ~1 MB base64,RTDB 安全
-  const RTDB_CHUNK_LIMIT = 50 * 1024 * 1024;   // 50 MB 走分塊上傳
+  const RTDB_CHUNK_LIMIT = 100 * 1024 * 1024;  // 100 MB 走分塊上傳 (拉高 50 → 100 MB)
 
   if(file.size < RTDB_SMALL_LIMIT){
     // 小檔:單一 node 寫入
@@ -6908,9 +6889,9 @@ async function attachUpload(file){
       try { toast('分塊上傳失敗,大檔將只存本機:' + (e.message||e), 'warn', 5000); } catch(_){}
     }
   } else {
-    // 超過 50 MB 提示
+    // 超過 100 MB 引導改貼連結
     try {
-      toast('⚠️ ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MB) 超過 50 MB,只存本機,老師可能看不到。請壓縮或改貼雲端連結 (Drive/Dropbox)', 'warn', 8000);
+      toast('⚠️ ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MB) 超過 100 MB,只存本機,老師看不到。\n建議:上傳到 Google Drive / YouTube / Dropbox,然後改貼連結到「外部繳交連結」欄位', 'warn', 12000);
     } catch(_){}
   }
 
@@ -7066,8 +7047,8 @@ async function attachPreview(meta){
   if(!url){
     // 跨裝置看不到 → 友善訊息提示
     const sizeMB = meta.size ? Math.round(meta.size/1024/1024 * 10) / 10 : null;
-    if(sizeMB && sizeMB > 50){
-      toast('⚠️ 此附件 ' + sizeMB + ' MB,超過 50 MB 上限,只存在學生上傳的裝置。請學生改用較小檔案或貼 Drive/Dropbox 連結','danger', 9000);
+    if(sizeMB && sizeMB > 100){
+      toast('⚠️ 此附件 ' + sizeMB + ' MB,超過 100 MB 上限,只存在學生上傳的裝置。請學生改用較小檔案或貼 Drive/Dropbox 連結','danger', 9000);
     } else {
       toast('附件無法載入。請學生在同一裝置重新繳交,或重新上傳會自動分塊同步雲端','danger', 7000);
     }
