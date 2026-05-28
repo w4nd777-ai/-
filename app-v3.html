@@ -6116,7 +6116,7 @@ function markDMRead(otherId){
    ──────────────────────────────────────────────────────────── */
 // 預設上傳限制 — 老師可在「設定 → 學生上傳限制」覆寫
 const DEFAULT_FILE_LIMIT_MB = 1;       // 內嵌圖片/頭像 (base64 → 寫進 DB)
-const DEFAULT_ATTACH_MAX_MB = 50;      // 學生作業附件單檔 (IndexedDB)
+const DEFAULT_ATTACH_MAX_MB = 100;     // 學生作業附件單檔 (RTDB 分塊到 100 MB)
 function getUploadCfg(){
   return (App.db && App.db.settings && App.db.settings.upload) || {};
 }
@@ -18423,6 +18423,56 @@ function exportAssignmentsCSV(){
    ──────────────────────────────────────────────────────────── */
 function rSub(content){
   const tab = App.subview || 'pending';
+  // 容量狀態 card (用戶要求:看到還剩多少 + Drive 切換)
+  try {
+    const cap = el('div', { class:'card', style:{
+      marginBottom:'12px',padding:'10px 14px',
+      background:'linear-gradient(to right, rgba(99,102,241,.06), transparent 60%)',
+      border:'1px solid var(--border)',borderRadius:'10px'
+    }});
+    const driveAuthed = (typeof gdIsAuthed === 'function') && gdIsAuthed();
+    const driveEnabled = (typeof gdConfig === 'function') && gdConfig().enabled;
+    const capLine = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'10px',alignItems:'center'} });
+    capLine.appendChild(el('div', { style:{fontWeight:'700'} }, '💾 雲端容量'));
+    capLine.appendChild(el('span', { class:'small', style:{color:'var(--text-muted)'} },
+      '單檔上限 ' + (typeof getAttachMaxMB === 'function' ? getAttachMaxMB() : 100) + ' MB (RTDB 分塊)'));
+    capLine.appendChild(el('span', { class:'pill', style:{
+      background: driveAuthed ? 'var(--success-soft)' : 'var(--surface-2)',
+      color: driveAuthed ? 'var(--success)' : 'var(--text-muted)',
+      fontSize:'11px',fontWeight:'700',padding:'3px 8px',borderRadius:'12px'
+    }}, driveAuthed ? '☁️ Drive 已連接 (+15 GB)' : '☁️ Drive 未連接'));
+    if(!driveAuthed){
+      capLine.appendChild(el('button', {
+        class:'btn btn-sm btn-primary',
+        style:{marginLeft:'auto'},
+        title:'授權後超大檔自動存到你的 Google Drive (15 GB 免費)',
+        onclick: async (ev)=> {
+          const btn = ev.currentTarget;
+          btn.disabled = true; btn.textContent = '授權中...';
+          try {
+            if(typeof gdAuth === 'function'){
+              await gdAuth();
+              toast('✅ Google Drive 已連接,大檔自動切換到 Drive','success', 5000);
+              rerender();
+            } else {
+              toast('Drive 設定不可用','danger');
+            }
+          } catch(e){
+            toast('Drive 授權失敗:' + (e.message || e) + ' (Chrome 可能擋了 popup,試試 Console > Allow popups)','danger', 8000);
+            btn.disabled = false; btn.textContent = '☁️ 授權 Drive';
+          }
+        }
+      }, '☁️ 授權 Drive (+15 GB)'));
+    } else {
+      capLine.appendChild(el('button', {
+        class:'btn btn-sm', style:{marginLeft:'auto'},
+        onclick: ()=> { if(typeof openGoogleDriveSetup === 'function') openGoogleDriveSetup(); }
+      }, '⚙️ Drive 設定'));
+    }
+    cap.appendChild(capLine);
+    content.appendChild(cap);
+  } catch(_){}
+
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '繳交記錄'),
