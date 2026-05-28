@@ -5314,17 +5314,30 @@ const Sync = (() => {
       App.fbRef = firebase.database().ref('cms-v3/' + room);
       App.fbStatus = 'connecting';
       attachListeners();
+      // 連線逾時提示:從 8s 拉到 20s (慢網路 / 手機冷啟動需要時間)
+      // 不再 toast 提示 (已有狀態指示器),改成靜默 error + 自動重試
       connectTimer = setTimeout(()=> {
         if(App.fbStatus === 'connecting'){
           App.fbStatus = 'error';
-          toast('Firebase 連線逾時', 'warn');
+          console.warn('[firebase] 連線逾時 20s,將自動重試');
           rerender();
+          // 30s 後自動重試 (避免一直卡 error 狀態)
+          if(!App._fbRetryTimer){
+            App._fbRetryTimer = setTimeout(()=> {
+              App._fbRetryTimer = null;
+              if(App.fbStatus !== 'online'){
+                console.log('[firebase] 自動重試連線');
+                init();
+              }
+            }, 30000);
+          }
         }
-      }, 8000);
+      }, 20000);
       return true;
     } catch(e){
       App.fbStatus = 'error';
-      toast('Firebase 設定錯誤：' + friendlyError(e), 'danger');
+      console.warn('[firebase] 設定錯誤:', e);
+      // 不再 toast (改用 UI 狀態指示),避免每次重整都看到紅錯訊
       return false;
     }
   }
@@ -6635,6 +6648,10 @@ async function attachUpload(file){
 
   // ★ 優先 Firebase Storage (跨裝置 + 共用同一專案 5GB 免費)
   //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 5 秒 timeout fallback
+  // 從 localStorage 還原「Firebase Storage 已停用」狀態 (避免每次 reload 都重新試 5 秒)
+  if(App._fbStorageDisabled === undefined){
+    try { App._fbStorageDisabled = localStorage.getItem('cms_v3_fb_storage_disabled') === '1'; } catch(_){}
+  }
   if(typeof firebase !== 'undefined' && firebase.storage && file.size < FB_STORAGE_MAX && !App._fbStorageDisabled){
     try {
       const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
@@ -6644,9 +6661,9 @@ async function attachUpload(file){
         const key = _newAttachKey();
         const path = 'cms-v3/' + roomCode + '/attachments/' + key + '_' + file.name.replace(/[^\w.-]/g,'_');
         const ref = storage.ref(path);
-        // 包 5 秒 timeout 避免 Storage 未啟用時無限等待（縮短：10s→5s 加快 fallback）
+        // 3 秒 timeout 避免 Storage 未啟用時無限等待 (持久化停用狀態,只需試一次)
         const uploadPromise = ref.put(file).then(snap => snap.ref.getDownloadURL());
-        const timeoutPromise = new Promise((_, rej) => setTimeout(()=> rej(new Error('Firebase Storage 超時 (可能尚未啟用)')), 5000));
+        const timeoutPromise = new Promise((_, rej) => setTimeout(()=> rej(new Error('Firebase Storage 超時 (可能尚未啟用)')), 3000));
         const url = await Promise.race([uploadPromise, timeoutPromise]);
         dbg('[v3] 已上傳 Firebase Storage:', file.name, Math.round(file.size/1024)+'KB');
         _doneProgress('✅ 已上傳到雲端：' + file.name, 'success');
@@ -6659,11 +6676,14 @@ async function attachUpload(file){
     } catch(e){
       _swallow('fb-storage-upload', e);
       dbgWarn('[fb storage upload failed, fallback]', e);
-      // 若是 storage 未啟用相關錯誤, 整個 session 不再嘗試 fb storage 避免每次都等 10 秒
+      // 若是 storage 未啟用相關錯誤, 整個 session 不再嘗試 fb storage 避免每次都等 5 秒
       const msg = String(e?.message || '');
       if(msg.includes('超時') || msg.includes('storage/unknown') || msg.includes('not found') || msg.includes('storage/object-not-found') || msg.includes('storage/unauthorized')){
         App._fbStorageDisabled = true;
-        try { toast('⚠️ Firebase Storage 未啟用, 改用本機儲存. 請到 Firebase Console 啟用 Storage', 'warn', 6000); } catch(_){}
+        // 持久化到 localStorage,避免每次 reload 都重複試 5 秒卡學生
+        try { localStorage.setItem('cms_v3_fb_storage_disabled', '1'); } catch(_){}
+        // 不再 toast (本機儲存照樣能用,toast 會嚇到學生),只在 console 紀錄
+        console.warn('[fb-storage] 已停用,使用本機儲存 (IDB)。如需啟用請至 Firebase Console');
       }
       // 繼續 fallback 走 Drive / IDB
     }
