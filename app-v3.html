@@ -8898,31 +8898,31 @@ async function _handleGoogleAuthResult(user){
     return;
   }
   const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
-  try { toast('Google 登入成功，連線中...', 'success', 2500); } catch(_){}
-  // 查 google_users → 找對應 roomCode
-  let roomCode = 'DEMO01';
+  // ★ 安全修補:必須先查 google_users 確認已綁定,
+  //   不再自動建立老師帳號 (避免任何 Google 用戶 -> 變老師)
+  let teacherBinding = null;
   try {
-    const userRef = firebase.database().ref('cms-v3/google_users/' + emailKey);
-    const snap = await userRef.once('value');
-    if(snap.exists() && snap.val() && snap.val().roomCode){
-      roomCode = snap.val().roomCode;
-    } else {
-      // 第一次用 Google 登入 → 寫入對應
-      await userRef.set({
-        email: user.email,
-        displayName: user.displayName || user.email,
-        photoURL: user.photoURL || '',
-        roomCode: roomCode,
-        firebaseUid: user.uid,
-        createdAt: firebase.database.ServerValue.TIMESTAMP,
-        lastLoginAt: firebase.database.ServerValue.TIMESTAMP
-      });
-    }
-    // 更新 lastLoginAt
-    try { userRef.child('lastLoginAt').set(firebase.database.ServerValue.TIMESTAMP); } catch(_){}
-  } catch(e){
-    console.warn('[google-signin] google_users 查詢失敗 (續用預設 DEMO01):', e);
+    const snap = await firebase.database().ref('cms-v3/google_users/' + emailKey).once('value');
+    if(snap.exists() && snap.val()) teacherBinding = snap.val();
+  } catch(e){ console.warn('[google-signin] lookup teacher binding:', e); }
+
+  if(!teacherBinding){
+    // 沒綁定 → 拒絕,提示用戶。原本這裡會 auto-create 老師帳號,
+    // 變成「任何 Google 帳號登入 = 變老師」的權限漏洞
+    try {
+      toast('此 Google 帳號還沒綁定老師身份。\n請已登入的老師到「個人資料 → ☁️ Google 帳號」綁定,\n或透過「申請註冊」流程取得審核', 'danger', 10000);
+    } catch(_){}
+    try { if(window.firebase && firebase.auth) await firebase.auth().signOut(); } catch(_){}
+    return;
   }
+
+  try { toast('Google 登入成功,連線中...', 'success', 2500); } catch(_){}
+  const roomCode = teacherBinding.roomCode || 'DEMO01';
+  // 更新 lastLoginAt
+  try {
+    firebase.database().ref('cms-v3/google_users/' + emailKey + '/lastLoginAt')
+      .set(firebase.database.ServerValue.TIMESTAMP);
+  } catch(_){}
   // 設定 cfg
   try {
     App.cfg = App.cfg || {};
@@ -8935,26 +8935,24 @@ async function _handleGoogleAuthResult(user){
   try {
     App.db = App.db || { accounts: [] };
     App.db.accounts = App.db.accounts || [];
-    const existingAcc = App.db.accounts.find(a => a && a.username === 'google:' + user.email);
-    let acc;
-    if(!existingAcc){
-      acc = {
-        id: 'acc_g_' + Date.now(),
-        username: 'google:' + user.email,
-        displayName: user.displayName || user.email,
-        password: '',
-        email: user.email,
-        photoURL: user.photoURL || '',
-        firebaseUid: user.uid,
-        role: 'teacher',
-        createdAt: Date.now()
-      };
-      App.db.accounts.push(acc);
-      try { if(typeof saveDB === 'function') saveDB(true); } catch(_){}
-      try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
-    } else {
-      acc = existingAcc;
+    // 優先找 binding 紀錄的 accountId (新版),其次用 username 匹配 (舊版)
+    let existingAcc = null;
+    if(teacherBinding.accountId){
+      existingAcc = App.db.accounts.find(a => a && a.id === teacherBinding.accountId);
     }
+    if(!existingAcc){
+      existingAcc = App.db.accounts.find(a =>
+        a && (a.username === 'google:' + user.email || a.googleEmail === user.email)
+      );
+    }
+    if(!existingAcc){
+      // google_users 有綁定但 accounts 找不到對應 → 可能舊資料 mismatch
+      // 不再自動建立,改提示用戶
+      try { toast('找到 Google 綁定紀錄,但本地老師帳號不存在 (可能已被刪除)。請聯絡主老師重新綁定。', 'danger', 10000); } catch(_){}
+      try { if(window.firebase && firebase.auth) await firebase.auth().signOut(); } catch(_){}
+      return;
+    }
+    const acc = existingAcc;
     App.session = {
       role: 'teacher',
       account: acc.username,
@@ -9095,7 +9093,8 @@ async function _emailSignInStudent(ev){
       userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
     } catch(e){
       if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
-        try { toast('帳號或密碼錯誤。沒帳號請到登入畫面點「申請註冊」', 'danger', 5000); } catch(_){}
+        // ★ 改更友善的錯誤訊息:大多學生根本沒設過 Email + 密碼,要清楚告知
+        try { toast('查無此 Email 註冊紀錄,或密碼錯誤。\n如果你平常是用「班級 + 姓名 + 密碼」登入,請改用上方表單。', 'danger', 8000); } catch(_){}
       } else if(e.code === 'auth/operation-not-allowed'){
         try { toast('管理員尚未啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
       } else {
@@ -11073,12 +11072,27 @@ function renderLoginStudentStage(){
   } else {
     // 📧 Email/Password 登入 — 跟原本 Google 按鈕一樣的精緻白底樣式
     // Google 按鈕已移除 (Chrome 第三方 cookie 政策擋住 OAuth)
+    // ★ 點之前先確認:大多學生用學號+班級+密碼登入,沒設過 Email 登入密碼
+    //   按下去才確認,避免一進來就跳出 modal 讓不對的人填
     const emailStuBtn = el('button', {
       type:'button',
       style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
       onmouseover: function(){ this.style.background = '#f8f9fa'; },
       onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: _emailSignInStudent
+      onclick: async function(ev){
+        // 先確認是不是有 Email 註冊的學生 (大多沒有)
+        const isFirstTime = !loadEmailRemember('student');
+        if(isFirstTime){
+          const ok = await confirmDlg(
+            '「Email 登入」只給用 Email 註冊過的學生用。\n\n' +
+            '如果你平常是用「班級 + 姓名 + 密碼」登入,請按取消,改回上方表單。\n' +
+            '如果你有用 Email 申請註冊過,按確認繼續。',
+            { title:'確認登入方式' }
+          );
+          if(!ok) return;
+        }
+        return _emailSignInStudent(ev);
+      }
     });
     // Gmail 官方 logo (2020+) — 跟老師端同款
     const emailIconS = document.createElement('span');
@@ -26230,11 +26244,49 @@ function boot(){
           } catch(e){ console.warn('[student_bind redirect]', e); }
           return;
         }
-        if(role === 'student' && typeof _handleGoogleAuthStudent === 'function'){
-          _handleGoogleAuthStudent(result.user);
-        } else if(typeof _handleGoogleAuthResult === 'function'){
-          // 預設走老師（含 role===teacher 或未標記情境）
-          _handleGoogleAuthResult(result.user);
+        // ═════════════════════════════════════════════════════════════
+        // ★ 安全修補:不再「預設走老師」(會讓任何 Google 用戶變老師)
+        //   改成:先查雲端到底是 google_students (學生綁定) 還是 google_users (老師綁定),
+        //   再決定路由。兩邊都沒綁就拒絕登入,不會自動建老師帳號。
+        // ═════════════════════════════════════════════════════════════
+        // 注意:不能用 const u — 上面 student_bind 分支用了 var u (function-scoped 衝突)
+        const gUser = result.user;
+        const gEmailKey = String(gUser.email||'').replace(/[.@]/g, '_').toLowerCase();
+        const gRc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+        let isStudentBound = false, isTeacherBound = false;
+        try {
+          const stuSnap = await firebase.database().ref('cms-v3/' + gRc + '/google_students/' + gEmailKey).once('value');
+          isStudentBound = stuSnap.exists() && stuSnap.val();
+        } catch(e){ console.warn('[google-route] check students:', e); }
+        try {
+          const teaSnap = await firebase.database().ref('cms-v3/google_users/' + gEmailKey).once('value');
+          isTeacherBound = teaSnap.exists() && teaSnap.val();
+        } catch(e){ console.warn('[google-route] check users:', e); }
+
+        if(isStudentBound && !isTeacherBound){
+          // 雲端只有學生綁定 → 學生路徑
+          if(typeof _handleGoogleAuthStudent === 'function') _handleGoogleAuthStudent(gUser);
+        } else if(isTeacherBound && !isStudentBound){
+          // 雲端只有老師綁定 → 老師路徑
+          if(typeof _handleGoogleAuthResult === 'function') _handleGoogleAuthResult(gUser);
+        } else if(isStudentBound && isTeacherBound){
+          // 兩邊都有 → 依 user 點的 tab (role) 走,預設學生 (較安全)
+          if(role === 'teacher'){
+            if(typeof _handleGoogleAuthResult === 'function') _handleGoogleAuthResult(gUser);
+          } else {
+            if(typeof _handleGoogleAuthStudent === 'function') _handleGoogleAuthStudent(gUser);
+          }
+        } else {
+          // 兩邊都沒綁 → 依 role 走 (但不會自動建立老師帳號,見下面 _handleGoogleAuthResult 修補)
+          if(role === 'student' && typeof _handleGoogleAuthStudent === 'function'){
+            _handleGoogleAuthStudent(gUser);
+          } else if(role === 'teacher' && typeof _handleGoogleAuthResult === 'function'){
+            _handleGoogleAuthResult(gUser);
+          } else {
+            // 沒指定 role 又雲端無紀錄 → 拒絕,提示用戶
+            try { toast('此 Google 帳號尚未綁定任何身份。請從學生 / 老師 tab 明確點「用 Google 登入」', 'danger', 8000); } catch(_){}
+            try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
+          }
         }
       }).catch(function(e){
         if(e && e.code) console.warn('[google-redirect]', e.code, e.message);
