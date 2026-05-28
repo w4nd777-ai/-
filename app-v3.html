@@ -18297,13 +18297,32 @@ function rSub(content){
       const asg = App.db.assignments.find(x => x.id === s.assignmentId);
       const late = asg && isSubmissionLate(asg, s);
       const row = el('div', { class:'list-row' });
-      row.appendChild(el('div', { class:'avatar' }, initials(stu?.name||'?')));
-      const _wkS = s.ts ? fmtWeekTag(new Date(s.ts).toISOString().slice(0,10)) : '';
+      // 座號方塊 (取代頭像首字,更清楚)
+      const seatBadge = el('div', { class:'avatar',
+        style:{background:'var(--primary)',color:'#fff',fontWeight:'700',fontSize:'13px'} },
+        (stu && stu.seat != null && stu.seat !== '') ? String(stu.seat) : '?');
+      row.appendChild(seatBadge);
+      // 完整日期時間 (用戶要求)
+      let dtStr = '—';
+      if(s.ts){
+        try {
+          const d = new Date(s.ts);
+          const mm = String(d.getMonth()+1).padStart(2,'0');
+          const dd = String(d.getDate()).padStart(2,'0');
+          const hh = String(d.getHours()).padStart(2,'0');
+          const mi = String(d.getMinutes()).padStart(2,'0');
+          dtStr = d.getFullYear() + '/' + mm + '/' + dd + ' ' + hh + ':' + mi;
+        } catch(_){}
+      }
       row.appendChild(el('div', { class:'info' },
-        el('div', { class:'name' }, (stu?.name||'?') + ' · ' + (asg?.title||'?')),
+        el('div', { class:'name' },
+          // 「(座號) 姓名 · 作業名」
+          (stu && stu.seat != null && stu.seat !== '' ? '(' + stu.seat + ') ' : '') +
+          (stu?.name || '?') + ' · ' + (asg?.title || '?')
+        ),
         el('div', { class:'sub' },
-          '繳交於 ' + relTime(s.ts||0) +
-          (_wkS ? ' · ' + _wkS : '') +
+          '🕑 ' + dtStr +
+          ' (' + relTime(s.ts||0) + ')' +
           (late?' · ⚠遲交':'') +
           (typeof s.score === 'number' ? ' · 分數 ' + s.score + '/' + (asg?.points||100) : '')
         )
@@ -18482,26 +18501,78 @@ function rSub(content){
             body.appendChild(asgHeader);
 
             if(asgExpanded){
-              // 已繳的學生 (一筆繳交 = 一個 row)
-              subs.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
+              // 已繳 — 依座號排序 (用戶要求),沒座號的排最後
+              const sortedSubs = subs.slice().sort((a, b) => {
+                const sa = findStudent(a.sub.studentId);
+                const sb = findStudent(b.sub.studentId);
+                const seatA = (sa && sa.seat != null && sa.seat !== '') ? Number(sa.seat) : 999;
+                const seatB = (sb && sb.seat != null && sb.seat !== '') ? Number(sb.seat) : 999;
+                if(seatA !== seatB) return seatA - seatB;
+                return (sa?.name || '').localeCompare(sb?.name || '');
+              });
+              sortedSubs.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
 
-              // 未繳的學生 — 一行顯示所有未繳姓名
+              // 未繳清單 — grid 排版,每個學生獨立 chip,依座號排序 (用戶要求弄整齊)
               if(missingStu.length){
-                const missingRow = el('div', {
+                const sortedMissing = missingStu.slice().sort((a, b) => {
+                  const sA = (a.seat != null && a.seat !== '') ? Number(a.seat) : 999;
+                  const sB = (b.seat != null && b.seat !== '') ? Number(b.seat) : 999;
+                  if(sA !== sB) return sA - sB;
+                  return (a.name || '').localeCompare(b.name || '');
+                });
+                // header
+                const missingBlock = el('div', {
                   style:{
-                    padding:'10px 14px 10px 36px',
+                    padding:'10px 14px',
                     background:'var(--danger-soft)',
                     borderTop:'1px dashed var(--danger)',
-                    fontSize:'13px',
-                    color:'var(--danger)',
-                    lineHeight:'1.6'
+                    color:'var(--danger)'
                   }
                 });
-                missingRow.appendChild(el('span', { style:{fontWeight:'700',marginRight:'6px'} },
-                  '❌ 未繳 ' + missingStu.length + ' 人:'));
-                missingRow.appendChild(el('span', null,
-                  missingStu.map(s => s.seat ? s.name + '(' + s.seat + ')' : s.name).join(' · ')));
-                body.appendChild(missingRow);
+                missingBlock.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'8px',fontSize:'13px'} },
+                  '❌ 未繳 ' + sortedMissing.length + ' 人 (依座號排序)'));
+                // grid 容器:每 chip 「座號 + 姓名」
+                const grid = el('div', { style:{
+                  display:'grid',
+                  gridTemplateColumns:'repeat(auto-fill, minmax(120px, 1fr))',
+                  gap:'6px'
+                }});
+                sortedMissing.forEach(s => {
+                  const chip = el('div', { style:{
+                    background:'#fff',
+                    border:'1px solid var(--danger)',
+                    borderRadius:'6px',
+                    padding:'6px 10px',
+                    fontSize:'13px',
+                    color:'#1f2937',
+                    display:'flex',
+                    alignItems:'center',
+                    gap:'6px',
+                    overflow:'hidden',
+                    textOverflow:'ellipsis',
+                    whiteSpace:'nowrap'
+                  }});
+                  // 座號 badge
+                  chip.appendChild(el('span', { style:{
+                    background:'var(--danger)',
+                    color:'#fff',
+                    fontWeight:'700',
+                    fontSize:'11px',
+                    padding:'2px 6px',
+                    borderRadius:'4px',
+                    flexShrink:'0',
+                    minWidth:'24px',
+                    textAlign:'center'
+                  }}, (s.seat != null && s.seat !== '') ? String(s.seat) : '?'));
+                  chip.appendChild(el('span', { style:{
+                    fontWeight:'500',
+                    overflow:'hidden',
+                    textOverflow:'ellipsis'
+                  }}, s.name || '?'));
+                  grid.appendChild(chip);
+                });
+                missingBlock.appendChild(grid);
+                body.appendChild(missingBlock);
               }
             }
           });
