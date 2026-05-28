@@ -8985,6 +8985,84 @@ async function _handleGoogleAuthResult(user){
   }, 600);
 }
 
+// ════════════════════════════════════════════════════════════
+// 🧹 清掃權限漏洞遺留:之前 _handleGoogleAuthResult 會在學生用 Google
+//    登入時 auto-create 假老師帳號 acc_g_xxx (role:'teacher') + 寫
+//    cms-v3/google_users/{學生 email} mapping。要把這些清掉:
+//    - App.db.accounts: 把符合「id 開頭 acc_g_」+「username 開頭 google:」
+//      +「email 對到某學生的 googleEmail / email」的條目移除
+//    - 雲端 cms-v3/google_users/{emailKey}: 那筆 mapping 也刪
+//    回傳 { local, cloud, details } 給 UI 顯示
+// ════════════════════════════════════════════════════════════
+async function cleanupPollutedTeacherAccounts(opts){
+  opts = opts || {};
+  const result = { local: 0, cloud: 0, details: [], skipped: 0 };
+  if(!App.db || !App.db.accounts) return result;
+
+  // 1. 蒐集學生 email
+  const studentEmails = new Set();
+  (App.db.students || []).forEach(s => {
+    if(!s) return;
+    if(s.googleEmail) studentEmails.add(String(s.googleEmail).toLowerCase());
+    if(s.email) studentEmails.add(String(s.email).toLowerCase());
+  });
+
+  // 2. 過濾 App.db.accounts — 找出污染條目
+  const removedAccs = [];
+  const accountsBefore = App.db.accounts.length;
+  App.db.accounts = App.db.accounts.filter(a => {
+    if(!a) return false;
+    // 不是 teacher → 一律保留
+    if(a.role !== 'teacher') return true;
+    // admin 主老師 (username:'admin' 或無 google/email 字首) → 保留
+    const accEmail = String(a.email || '').toLowerCase();
+    const username = String(a.username || '');
+    const isAutoCreated = String(a.id || '').indexOf('acc_g_') === 0;
+    const isGoogleUsername = username.indexOf('google:') === 0;
+    const emailIsStudentBound = accEmail && studentEmails.has(accEmail);
+
+    // 污染特徵 (要全部符合才算,避免誤殺):
+    //   - id 開頭 acc_g_ (auto-created)
+    //   - username 開頭 google: (Google 登入產生的)
+    //   - email 在學生 googleEmail 列表 (確實是學生)
+    const polluted = isAutoCreated && isGoogleUsername && emailIsStudentBound;
+    if(polluted){
+      removedAccs.push({ id: a.id, email: a.email, username: a.username, name: a.name });
+      return false;
+    }
+    return true;
+  });
+  result.local = removedAccs.length;
+  result.details = removedAccs;
+
+  if(removedAccs.length === 0) return result;
+
+  // 3. 本地寫回
+  try { saveDB(); } catch(_){}
+  try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
+
+  // 4. 雲端 google_users mapping 也清掉
+  if(window.firebase && firebase.database){
+    for(const r of removedAccs){
+      if(!r.email) continue;
+      try {
+        const emailKey = String(r.email).replace(/[.@]/g, '_').toLowerCase();
+        await firebase.database().ref('cms-v3/google_users/' + emailKey).remove();
+        result.cloud++;
+      } catch(e){
+        console.warn('[cleanup polluted] cloud remove failed for', r.email, e);
+        result.skipped++;
+      }
+    }
+  }
+
+  if(typeof logOp === 'function'){
+    try { logOp('cleanupPolluted', '清掉 ' + result.local + ' 筆假老師 + ' + result.cloud + ' 筆雲端 mapping'); } catch(_){}
+  }
+
+  return result;
+}
+
 // Google 按鈕內容 (含官方 Google logo SVG)
 // ════════════════════════════════════════════════════════════
 // 📧 Email/Password 登入 — Chrome 第三方 cookie 政策不擋這個
@@ -26409,6 +26487,24 @@ function boot(){
   // Phase 4: auto-backup once per day
   try { backupAutoIfNeeded(); } catch(e){_swallow('auto',e)}
 
+  // 🧹 boot 自動清掃權限漏洞遺留的假老師帳號 (老師登入後等 Firebase 同步好再跑)
+  //   只跑一次/build → localStorage flag 紀錄已清過的 build
+  setTimeout(async () => {
+    if(!App.session || App.session.role !== 'teacher') return;
+    const LS_CLEAN_KEY = 'cms_v3_polluted_cleaned';
+    const lastCleaned = localStorage.getItem(LS_CLEAN_KEY) || '';
+    if(lastCleaned === (typeof APP_BUILD !== 'undefined' ? APP_BUILD : 'v1')) return;
+    try {
+      const r = await cleanupPollutedTeacherAccounts();
+      try { localStorage.setItem(LS_CLEAN_KEY, (typeof APP_BUILD !== 'undefined' ? APP_BUILD : 'v1')); } catch(_){}
+      if(r.local > 0){
+        toast('🧹 已自動清掉 ' + r.local + ' 筆學生 Google 綁定意外建立的假老師帳號' +
+              (r.cloud > 0 ? ' (含 ' + r.cloud + ' 筆雲端 mapping)' : ''), 'success', 7000);
+        try { if(typeof rerender === 'function') rerender(); } catch(_){}
+      }
+    } catch(e){ console.warn('[cleanup polluted boot]', e); }
+  }, 4000);  // 4 秒等 Firebase + accounts 同步好
+
   rerender();
 
   // batch 4: 套用背景設定（圖片、顏色、透明度）
@@ -32602,13 +32698,52 @@ function rTeachers(content){
 
   // 主老師
   const c0 = el('div', { class:'card' });
-  c0.appendChild(el('h3', null, '👑 主老師 (admin)'));
+  c0.appendChild(el('div', { class:'flex-between' },
+    el('h3', null, '👑 主老師 (admin)'),
+    // 🧹 手動清掃假老師按鈕 — 補救之前權限漏洞遺留的污染
+    el('button', {
+      class:'btn btn-sm',
+      title:'清掉之前漏洞造成的假老師帳號 (學生 Google 登入意外建立的 acc_g_xxx)',
+      onclick: async ()=> {
+        const ok = await confirmDlg(
+          '掃描並清掉「學生 Google 綁定意外建立的假老師帳號」?\n\n' +
+          '判斷條件 (3 個全符才會清):\n' +
+          '• id 開頭是 acc_g_\n' +
+          '• username 開頭是 google:\n' +
+          '• email 是某學生的 googleEmail / email\n\n' +
+          '雲端 cms-v3/google_users/{email} mapping 也會一併清掉。',
+          { title:'🧹 清掃假老師帳號' }
+        );
+        if(!ok) return;
+        try {
+          const r = await cleanupPollutedTeacherAccounts();
+          if(r.local === 0){
+            toast('✅ 沒有找到假老師帳號,你的系統很乾淨','success', 4000);
+          } else {
+            toast('🧹 清掉 ' + r.local + ' 筆假老師' +
+                  (r.cloud > 0 ? ' + ' + r.cloud + ' 筆雲端 mapping' : ''),
+                  'success', 6000);
+            // log details for transparency
+            try {
+              console.log('[cleanup details]', r.details);
+            } catch(_){}
+            rerender();
+          }
+        } catch(e){ toast('清掃失敗:' + (e.message||e), 'danger'); }
+      }
+    }, '🧹 清掃假老師')
+  ));
   (App.db.accounts || []).forEach(a => {
-    c0.appendChild(el('div', { class:'list-row' },
+    // 標記可疑帳號 (id 開頭 acc_g_ 或 username 開頭 google: 的) 讓用戶看到
+    const isSuspect = String(a.id||'').indexOf('acc_g_') === 0 ||
+                      String(a.username||'').indexOf('google:') === 0;
+    c0.appendChild(el('div', { class:'list-row', style: isSuspect ? {background:'var(--warn-soft)',borderRadius:'8px',padding:'6px'} : null },
       el('div', { class:'avatar' }, initials(a.name)),
       el('div', { class:'info' },
-        el('div', { class:'name' }, a.name + '  @' + a.username),
-        el('div', { class:'sub' }, '主老師（所有班級、所有權限）')
+        el('div', { class:'name' }, a.name + '  @' + a.username + (isSuspect ? ' ⚠️' : '')),
+        el('div', { class:'sub' }, isSuspect
+          ? '⚠️ 疑似漏洞遺留的假帳號 (建議用上方「🧹 清掃假老師」清掉)'
+          : '主老師(所有班級、所有權限)')
       )
     ));
   });
