@@ -247,6 +247,13 @@ html,body{
 }
 body{ min-height:100vh; min-height:100dvh; overflow-x:hidden; }
 html{ overflow-x:hidden; }
+/* ★ Emoji 彩色化:全站 fallback 到系統的「彩色 Emoji 字型」,避免 emoji 變成
+   單色描邊樣式 (用戶反映「📲 icon 是反黑的」就是這個原因 — 預設字型沒有色彩 emoji
+   glyph,瀏覽器找次級字型才有,但找到的是 Segoe UI Symbol 之類的單色版本) */
+body, h1, h2, h3, h4, h5, h6, button, input, select, textarea, .num, .lbl, .ico, .avatar, .stat, .mascot-wrap, code {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif,
+               "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", "EmojiOne Color";
+}
 button,input,select,textarea{ font:inherit; color:inherit; }
 a{ color:var(--primary); text-decoration:none; }
 img{ max-width:100%; display:block; }
@@ -9550,38 +9557,9 @@ function renderLoginTeacherStage(){
       }, '換其他帳號')
     ));
   } else {
-    // 📧 Email/Password 登入 — 跟原本 Google 按鈕一樣的精緻白底樣式
-    // (Google 按鈕已移除，因 Chrome 第三方 cookie 政策擋住 OAuth)
-    const emailBtn = el('button', {
-      type:'button',
-      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
-      onmouseover: function(){ this.style.background = '#f8f9fa'; },
-      onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: _emailSignInTeacher
-    });
-    // Email icon (信封 SVG)
-    // Gmail 風彩色信封 logo (4 色精緻 icon，跟 Google G logo 同等級設計)
-    const emailIcon = document.createElement('span');
-    emailIcon.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
-    // Gmail 官方 logo (2020+) — M 形信封 4 色
-    emailIcon.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
-      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
-      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
-      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
-      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
-      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
-      '</svg>';
-    emailBtn.appendChild(emailIcon);
-    const emailText = document.createElement('span');
-    emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-    emailText.textContent = '使用 Email 登入';
-    emailBtn.appendChild(emailText);
-    // 把 margin-bottom 改 10px (因為下面要接 Google 按鈕)
-    emailBtn.style.marginBottom = '10px';
-    stage.appendChild(emailBtn);
-
-    // ☁️ 用 Google 登入 — 給綁過 Google 的老師
+    // ★ 用戶決定:只留 Google 登入,移除 Email 登入
+    //   理由:1) Email 登入要記新密碼 2) 寄信/改密碼都有 bug 3) 跟 Google 同 email 易混
+    //   保留「申請註冊」(用 Email 註冊後 admin 核准 → 再綁 Google) + 「忘記密碼」(本地帳號)
     if(window.firebase && firebase.auth){
       const googleBtn = el('button', {
         type:'button',
@@ -11190,34 +11168,8 @@ function renderLoginStudentStage(){
       }, '換其他 Google 帳號')
     ));
   }
-  // ★ 用戶要求加回:學生 tab 也要顯示 Email 登入 + Google 登入按鈕
-  //   (跟老師 tab 對齊,有 Email 註冊或 Google 綁定的學生才能用)
+  // ★ 用戶決定:只留 Google 登入,移除 Email 登入 (Email 登入太多 bug + 密碼管理麻煩)
   if(!isStudentBound){
-    // 📧 使用 Email 登入 — 給用 Email 申請註冊的學生
-    const emailStuBtn = el('button', {
-      type:'button',
-      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
-      onmouseover: function(){ this.style.background = '#f8f9fa'; },
-      onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: _emailSignInStudent
-    });
-    const emailIconS = document.createElement('span');
-    emailIconS.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
-    emailIconS.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
-      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
-      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
-      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
-      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
-      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
-      '</svg>';
-    emailStuBtn.appendChild(emailIconS);
-    const emailTextS = document.createElement('span');
-    emailTextS.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-    emailTextS.textContent = '使用 Email 登入';
-    emailStuBtn.appendChild(emailTextS);
-    stage.appendChild(emailStuBtn);
-
     // ☁️ 用 Google 登入 — 給綁過 Google 的學生 (不用記任何密碼)
     if(window.firebase && firebase.auth){
       const googleStuBtn = el('button', {
