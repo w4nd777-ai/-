@@ -12723,16 +12723,17 @@ function openAvatarViewer(s){
     '🖼 ' + s.name + (s.seat ? ' (' + s.seat + '號)' : '') + ' — 頭像'));
   m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
     (s.cls || '') + (s.sid ? ' · 學號 ' + s.sid : '')));
-  // 顯示原圖（max 80vh、自適應寬度）
+  // 顯示原圖（max 88vh、自適應寬度）— 用戶要求顯示更大張
   const img = el('img', { src: s.avatar, alt: s.name + ' 頭像', style:{
     display:'block',
     maxWidth:'100%',
-    maxHeight:'80vh',
+    maxHeight:'88vh',
     width:'auto',
     height:'auto',
     margin:'0 auto',
     borderRadius:'8px',
-    boxShadow:'0 8px 30px rgba(0,0,0,0.3)'
+    boxShadow:'0 8px 30px rgba(0,0,0,0.3)',
+    imageRendering:'auto'  // 確保不被瀏覽器強制壓縮
   }});
   // 顯示原圖解析度
   const dimLabel = el('div', { class:'small muted', style:{textAlign:'center',marginTop:'6px'} }, '載入中…');
@@ -17551,8 +17552,10 @@ function openStudentSelfEdit(){
   const avFile = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
   avFile.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    if(f.size > 5 * 1024 * 1024){ return toast('圖片不可超過 5MB','danger'); }
-    // QA #2: 強制壓縮到 200x200 JPEG，避免 2MB 原圖直接塞 dataURI 到 accounts collection
+    // 提高上傳限制 5MB → 10MB (用戶要求,大手機照片才能上傳)
+    if(f.size > 10 * 1024 * 1024){ return toast('圖片不可超過 10MB','danger'); }
+    // 提高儲存解析度 200→512 (老師端看原圖也會更大張更清楚)
+    // JPEG 品質 0.85→0.9, 壓縮後約 30-60 KB/人, 159 人總計 < 10 MB
     try {
       avatarData = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -17560,13 +17563,16 @@ function openStudentSelfEdit(){
           const img = new Image();
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const size = 200;
+            const size = 512;  // 提高 200→512 (用戶要求原圖解析度提高)
             canvas.width = size; canvas.height = size;
             const ctx = canvas.getContext('2d');
+            // 高品質縮放
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             const ratio = Math.max(size/img.width, size/img.height);
             const w = img.width * ratio, h = img.height * ratio;
             ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
-            res(canvas.toDataURL('image/jpeg', 0.85));
+            res(canvas.toDataURL('image/jpeg', 0.9));
           };
           img.onerror = ()=> rej(new Error('圖片無法讀取（可能是 HEIC）'));
           img.src = e2.target.result;
@@ -17577,6 +17583,7 @@ function openStudentSelfEdit(){
       avImg.src = avatarData;
       avImg.style.display = 'block';
       avInitials.style.display = 'none';
+      try { toast('已儲存 512×512 高解析度頭像','success', 2000); } catch(_){}
     } catch(err){ toast('讀取失敗：' + (err.message||err), 'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
