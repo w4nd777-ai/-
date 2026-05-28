@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-student-email-login';
+const APP_BUILD = '2026-05-29-bugfixes-audit';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8968,8 +8968,9 @@ async function _handleGoogleAuthResult(user){
     const acc = existingAcc;
     App.session = {
       role: 'teacher',
+      id: acc.id,           // ★ 修 BUG #4: 全站很多地方用 App.session.id 找老師帳號
       account: acc.username,
-      accountId: acc.id,
+      accountId: acc.id,    // 向後相容欄位
       username: acc.username,
       name: acc.displayName || user.displayName || user.email,
       displayName: user.displayName || user.email,
@@ -9218,7 +9219,8 @@ async function _emailSignInStudent(ev){
     }
     // 成功 — 查 email_students 找對應學號,然後登入該學生
     const user = userCred.user;
-    const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
+    // ★ BUG #7 修:統一 toLowerCase 順序
+    const emailKey = String(user.email).toLowerCase().replace(/[.@]/g, '_');
     let sid = null, studentId = null;
     const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
     try {
@@ -9233,8 +9235,25 @@ async function _emailSignInStudent(ev){
     if(studentId) stu = (App.db.students||[]).find(s => String(s.id) === String(studentId));
     if(!stu && sid) stu = (App.db.students||[]).find(s => String(s.sid) === String(sid));
     if(!stu) stu = (App.db.students||[]).find(s => String(s.email||'').toLowerCase() === email.toLowerCase());
+    // ★ BUG #3 修:新裝置本地沒學生資料 → 從 Firebase 撈整個 students 名單
+    if(!stu && firebase.database){
+      try {
+        const stuSnap = await firebase.database().ref('cms-v3/' + rc + '/students').once('value');
+        const remoteStudents = stuSnap.val();
+        if(remoteStudents){
+          const arr = Array.isArray(remoteStudents) ? remoteStudents : Object.values(remoteStudents);
+          App.db = App.db || {};
+          App.db.students = arr.filter(s => s && (s.id || s.sid));
+          try { saveDB(true); } catch(_){}
+          // 重試本地查找
+          if(studentId) stu = App.db.students.find(s => String(s.id) === String(studentId));
+          if(!stu && sid) stu = App.db.students.find(s => String(s.sid) === String(sid));
+          if(!stu) stu = App.db.students.find(s => String(s.email||'').toLowerCase() === email.toLowerCase());
+        }
+      } catch(e){ console.warn('[email-signin-student] fetch fallback:', e); }
+    }
     if(!stu){
-      try { toast('找不到對應學生,請先用班級+姓名+密碼登入一次,再到「個人」設定 Email 登入', 'warning', 9000); } catch(_){}
+      try { toast('找不到對應學生。請聯絡老師確認你的學生資料,或先用班級+姓名+密碼登入一次再到「個人」設定 Email 登入', 'warning', 9000); } catch(_){}
       try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
       return;
     }
@@ -9245,8 +9264,9 @@ async function _emailSignInStudent(ev){
     if(typeof saveCfg === 'function') saveCfg(App.cfg);
     App.session = {
       role: 'student',
+      id: stu.id,           // ★ 修 BUG #1: currentStudent() 用 App.session.id 找學生,沒這欄會 broken
       sid: stu.sid,
-      studentId: stu.id,
+      studentId: stu.id,    // 向後相容欄位
       name: stu.name,
       cls: stu.cls,
       email: stu.email,
@@ -9522,8 +9542,9 @@ async function _completeStudentGoogleLogin(stu, user){
   try {
     App.session = {
       role: 'student',
+      id: stu.id,           // ★ 修 BUG #4: currentStudent() 用 App.session.id 找學生,沒這欄會 broken
       sid: stu.sid,
-      studentId: stu.id,
+      studentId: stu.id,    // 向後相容欄位
       name: stu.name,
       cls: stu.cls,
       photoURL: stu.photoURL || user.photoURL || '',
@@ -10955,8 +10976,21 @@ function forceSetupRecovery(accountId, opts){
   const allowCancel = !!o.allowCancel;  // 老師自願修改時 true
   const a = (App.db.accounts || []).find(x => x.id === accountId);
   if(!a) return;
-  // 首登模式: 已完整設定就跳過; 自願修改: 一定彈出
-  if(!allowCancel && a.email && a.securityQ && a.securityA && a.recoveryCode) return;
+  // ★ BUG #11 修:首登模式跳過條件擴充
+  //   - 完整設定 (email + securityQ + A + recoveryCode)
+  //   - 或綁了 Google (Google 帳號本身就是 recovery)
+  //   - 或帳號本身是 google: / email: (Firebase Auth)
+  //   - 或勾了「不再提示」(dismissedRecovery)
+  //   - 或設了 email + recoveryCode 雙保險
+  if(!allowCancel){
+    const allSet = a.email && a.securityQ && a.securityA && a.recoveryCode;
+    const hasGoogle = !!a.googleEmail;
+    const isGoogleAccount = String(a.username || '').indexOf('google:') === 0;
+    const isFirebaseEmailAccount = String(a.username || '').indexOf('email:') === 0;
+    const dismissedForever = !!a.dismissedRecovery;
+    const goodEnough = a.email && a.recoveryCode;
+    if(allSet || hasGoogle || isGoogleAccount || isFirebaseEmailAccount || dismissedForever || goodEnough) return;
+  }
 
   const SECURITY_QUESTIONS = [
     '你媽媽的名字？',
@@ -12549,6 +12583,11 @@ function doLogout(){
     try { saveSession(); } catch(_){}
     App._loginStage = 'choose';
     App._loginPrefill = null;
+    // ★ BUG #8 修:清掉殘留的 Google OAuth flag,避免下次登入路由錯亂
+    try {
+      sessionStorage.removeItem('_google_pending_role');
+      sessionStorage.removeItem('_google_bind_sid');
+    } catch(_){}
     // batch 2-stab: 清掉所有 managed timer
     try { clearAllTimers(); } catch(e){_swallow('auto',e)}
     App.qrTimer = null;
@@ -18288,7 +18327,9 @@ function rMe(content){
   cardEmailSetup.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.7'} },
     '設定 email + 密碼後,可以在任何裝置(手機/平板/電腦)點登入畫面的「使用 Email 登入」進入你的帳號,不用每次選班級+姓名+密碼。'));
 
-  const hasEmailAuth = !!me.firebaseUid && !!me.email;
+  // ★ BUG #2 修:用獨立 flag me.emailAuthSetAt 判斷,不再依賴 firebaseUid
+  //   (firebaseUid 可能是 Google bind 或 recovery email 設定時留下的,跟 Email/Password 無關)
+  const hasEmailAuth = !!me.emailAuthSetAt && !!me.email;
   if(hasEmailAuth){
     cardEmailSetup.appendChild(el('div', { class:'small', style:{padding:'10px 12px',background:'var(--success-soft)',color:'var(--success)',borderRadius:'8px',marginBottom:'10px',fontWeight:'500'} },
       '✅ 已設定 Email 登入:' + me.email));
@@ -18374,14 +18415,34 @@ function rMe(content){
         try { await cred.user.updatePassword(pw); } catch(e){ console.warn('[updatePw]', e); }
       }
       const user = cred && cred.user;
+      // ★ BUG #9 修:檢查雲端 email_students 有沒有指到別的學生 (防 hijack)
+      const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+      const newKey = String(em).toLowerCase().replace(/[.@]/g, '_');
+      try {
+        const collisionSnap = await firebase.database().ref('cms-v3/' + rc + '/email_students/' + newKey).once('value');
+        if(collisionSnap.exists() && collisionSnap.val()){
+          const otherSid = collisionSnap.val().studentId;
+          if(otherSid && String(otherSid) !== String(me.id)){
+            toast('此 Email 已被其他學生設定過 Email 登入,請改用其他 email,或聯絡老師處理','danger', 9000);
+            return;
+          }
+        }
+      } catch(_){}
+      // ★ BUG #5/6 修:email 變了就清掉舊 email_students mapping (避免孤兒記錄)
+      const oldEmail = me.email;
+      if(oldEmail && oldEmail !== em){
+        try {
+          const oldKey = String(oldEmail).toLowerCase().replace(/[.@]/g, '_');
+          await firebase.database().ref('cms-v3/' + rc + '/email_students/' + oldKey).remove();
+        } catch(_){}
+      }
       // 更新學生記錄
       me.email = em;
       if(user){ me.firebaseUid = user.uid; }
-      // 寫 cms-v3/{room}/email_students/{emailKey} 對應 (登入時找學號)
+      me.emailAuthSetAt = Date.now();  // ★ BUG #2 修:獨立 flag 記錄已設過 Email Auth
+      // 寫 cms-v3/{room}/email_students/{emailKey} 對應 (BUG #7 修:統一 toLowerCase)
       try {
-        const emailKey = em.replace(/[.@]/g, '_');
-        const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
-        await firebase.database().ref('cms-v3/' + rc + '/email_students/' + emailKey).set({
+        await firebase.database().ref('cms-v3/' + rc + '/email_students/' + newKey).set({
           sid: me.sid,
           studentId: me.id,
           email: em,
@@ -18391,8 +18452,9 @@ function rMe(content){
           updatedAt: firebase.database.ServerValue.TIMESTAMP
         });
       } catch(e){ console.warn('[email-students write]', e); }
-      saveDB();
-      try { Sync.setMap('students', App.db.students); bcNotify(); } catch(_){}
+      // ★ BUG #12 修:用 saveDB(true) 立即寫入,確保跨裝置看得到
+      saveDB(true);
+      try { Sync.setMap('students', App.db.students, true); bcNotify(); } catch(_){}
       toast('🎉 Email 登入已設定!下次可以用「使用 Email 登入」進去','success', 6000);
       rerender();
     } catch(e){
