@@ -1656,29 +1656,31 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 .login-spotify-card select.input:hover{
   box-shadow: 0 2px 6px rgba(0,0,0,.08), inset 0 0 0 1px rgba(0,0,0,.06);
 }
-/* select 重設原生樣式 + 自訂下拉箭頭 + 文字置中 (塞滿寬度) */
+/* select 重設原生樣式 + 自訂下拉箭頭 + 文字置中 (視覺重平衡:箭頭淡化, padding 對稱) */
 .login-spotify-card .input.select,
 .login-spotify-card select.input{
   appearance:none;
   -webkit-appearance:none;
   -moz-appearance:none;
-  /* 更精緻的箭頭 — 漸層描邊感 */
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23667eea' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.5l3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
+  /* 淡灰色箭頭 — 不搶選中文字的視覺重量 */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23cbd5e1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.5l3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
   background-repeat:no-repeat;
-  background-position:right 16px center;
-  background-size:14px;
-  padding-left:44px;       /* 對稱兩邊 padding 讓內容真正置中 */
-  padding-right:44px;
+  background-position:right 18px center;
+  background-size:12px;    /* 縮小箭頭 14→12 */
+  padding-left:48px;       /* 對稱 padding 讓文字真正置中 */
+  padding-right:48px;
   cursor:pointer;
-  text-align:center;       /* 主流瀏覽器 */
-  text-align-last:center;  /* 顯示中的選項置中 (Chrome/FF/Safari) */
-  font-weight:600;         /* 班級代碼粗一點看得清楚 */
-  letter-spacing:.02em;
+  text-align:center;
+  text-align-last:center;
+  font-size:17px;          /* 選中值大一點 (15→17) 撐起比例感 */
+  font-weight:700;         /* 加粗讓班級代碼更搶眼 */
+  letter-spacing:.04em;    /* 字距拉開讓 3 碼班級看起來更飽滿 */
+  color:#1f2937;
 }
 .login-spotify-card .input.select:hover,
 .login-spotify-card select.input:hover{
-  /* hover 時箭頭顏色加深 (用主題色) */
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%234f46e5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.5l3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
+  /* hover 時箭頭從淡灰變深一點 (但不到主題色那麼搶) */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 5.5l3.5 3.5 3.5-3.5'/%3E%3C/svg%3E");
 }
 .login-spotify-card .input.select option,
 .login-spotify-card select.input option{
@@ -1698,6 +1700,8 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 .login-spotify-card select.input:has(option:disabled:checked){
   color:#9ca3af;           /* 還沒選時 select 自己也顯示灰色 */
   font-weight:400;         /* placeholder 不要粗 */
+  font-size:15px;          /* placeholder 用一般大小,選了之後才大 */
+  letter-spacing:0;        /* placeholder 字距正常 */
 }
 .login-spotify-card .input:focus,
 .login-spotify-card select.input:focus{
