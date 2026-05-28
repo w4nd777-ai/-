@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#2563eb">
 <!-- 🔒 CSP — 限制可載入的資源來源，防止 XSS 注入 (含 'unsafe-inline' 因為大量 inline style/event)
      允許：本站、Firebase、Google Drive、Anthropic、QR 服務 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://apis.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app https://*.gstatic.com wss://*.firebaseio.com wss://*.firebasedatabase.app https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com https://*.firebaseapp.com; media-src 'self' blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://*.gstatic.com https://*.googleapis.com https://accounts.google.com https://apis.google.com https://js.sentry-cdn.com https://browser.sentry-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.firebaseapp.com https://*.firebasestorage.app https://*.googleusercontent.com https://*.googleapis.com https://*.gstatic.com https://api.qrserver.com https://files.catbox.moe; connect-src 'self' https://*.firebaseio.com https://*.firebasedatabase.app https://*.googleapis.com https://*.firebasestorage.app https://*.gstatic.com wss://*.firebaseio.com wss://*.firebasedatabase.app https://api.anthropic.com https://discord.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.sentry.io https://catbox.moe https://files.catbox.moe; frame-src 'self' blob: data: https://drive.google.com https://docs.google.com https://accounts.google.com https://*.firebaseapp.com; media-src 'self' blob: data:;">
 <!-- 🔒 防 clickjacking -->
 <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
 <!-- 🔒 不發送 referrer 給其他網站 -->
@@ -6621,6 +6621,27 @@ async function _compressImageIfNeeded(file){
   }
 }
 
+// 匿名上傳到 catbox.moe (免費 200 MB 永久,無註冊,跨裝置)
+async function _catboxUpload(file){
+  if(file.size > 200 * 1024 * 1024) throw new Error('catbox 上限 200 MB');
+  const fd = new FormData();
+  fd.append('reqtype', 'fileupload');
+  fd.append('fileToUpload', file);
+  // 30s timeout
+  const ctrl = new AbortController();
+  const timeoutId = setTimeout(()=> ctrl.abort(), 30000);
+  let resp;
+  try {
+    resp = await fetch('https://catbox.moe/user/api.php', {
+      method:'POST', body: fd, signal: ctrl.signal
+    });
+  } finally { clearTimeout(timeoutId); }
+  if(!resp.ok) throw new Error('catbox HTTP ' + resp.status);
+  const url = (await resp.text()).trim();
+  if(!url.startsWith('http')) throw new Error('catbox 回傳異常: ' + url.slice(0, 80));
+  return url;
+}
+
 async function attachUpload(file){
   if(!file) throw new Error('沒有檔案');
   const DRIVE_MAX = 1024 * 1024 * 1024; // 1 GB（單檔 Drive 限制；Drive 本身允許更大但保守）
@@ -6645,6 +6666,27 @@ async function attachUpload(file){
   const _doneProgress = (msg, type) => {
     if(msg){ try { toast(msg, type||'success', 3000); } catch(_){} }
   };
+
+  // ★ 超大檔 (>50 MB) 優先走 catbox.moe 免費匿名空間 (用戶要求,免設定 Drive)
+  if(file.size > 50 * 1024 * 1024 && file.size <= 200 * 1024 * 1024){
+    try {
+      try { toast('☁️ 大檔上傳到 catbox.moe (免費 200 MB,匿名)...', 'info', 5000); } catch(_){}
+      const catboxUrl = await _catboxUpload(file);
+      _doneProgress('✅ 已上傳到 catbox.moe: ' + file.name, 'success');
+      return {
+        name: file.name,
+        type: file.type || '',
+        size: file.size,
+        storage: 'catbox',
+        catboxUrl: catboxUrl,
+        storedAt: Date.now()
+      };
+    } catch(e){
+      console.warn('[catbox upload failed]', e);
+      try { toast('catbox 上傳失敗 (' + (e.message||e) + '),改試 Drive', 'warn', 4000); } catch(_){}
+      // fallthrough → 走 Drive / IDB 路徑
+    }
+  }
 
   // ★ 優先 Firebase Storage (跨裝置 + 共用同一專案 5GB 免費)
   //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 5 秒 timeout fallback
@@ -6865,6 +6907,10 @@ async function attachUpload(file){
 // 取得附件的可訪問 URL（IDB → blob: URL；Drive → webViewLink；FB Storage / RTDB → 自動拉回）
 async function attachGetUrl(meta){
   if(!meta) return null;
+  // ★ catbox.moe: 直接回公開 URL (跨裝置自動可用,永久免費)
+  if(meta.storage === 'catbox' && meta.catboxUrl){
+    return meta.catboxUrl;
+  }
   // ★ Firebase Storage: 直接回 download URL (跨裝置自動可用)
   if(meta.storage === 'fbstorage' && meta.fbUrl){
     return meta.fbUrl;
@@ -6952,9 +6998,14 @@ async function attachGetUrl(meta){
   return null;
 }
 
-// 下載附件（新舊版 + Drive 皆可）
+// 下載附件（新舊版 + Drive + catbox 皆可）
 async function attachDownload(meta){
   if(!meta){ toast('找不到附件','danger'); return; }
+  // catbox.moe:直接開連結 (跨域 a.download 屬性無效)
+  if(meta.storage === 'catbox' && meta.catboxUrl){
+    window.open(meta.catboxUrl, '_blank');
+    return;
+  }
   // Drive：直接開連結讓使用者下載
   if(meta.storage === 'drive' || meta.driveFileId){
     const url = meta.driveLink || ('https://drive.google.com/file/d/' + meta.driveFileId + '/view');
