@@ -5290,6 +5290,25 @@ function applyTheme(){
   }
 }
 
+// ★ 通用:若 Firebase scripts 已載入但 app 還沒 init,補做初始化
+//   用於 OAuth / DB 操作前的防呆,避免「No Firebase App '[DEFAULT]' has been created」
+function ensureFirebaseInit(){
+  if(typeof firebase === 'undefined') return false;
+  if(firebase.apps && firebase.apps.length) return true;
+  let cfg = null;
+  try { cfg = JSON.parse(localStorage.getItem(LS_FB) || 'null'); } catch(_){}
+  if(!cfg || !cfg.databaseURL) cfg = (typeof window !== 'undefined' && window.DEFAULT_FB_CFG) || null;
+  if(!cfg || !cfg.databaseURL) return false;
+  try {
+    firebase.initializeApp(cfg);
+    try { if(typeof Sync !== 'undefined' && Sync.init) Sync.init(); } catch(_){}
+    return true;
+  } catch(e){
+    console.warn('[ensureFirebaseInit]', e);
+    return false;
+  }
+}
+
 /* graceful hex -> primary/hover/soft */
 function applyCustomAccent(color){
   const c = (color || '').trim();
@@ -17890,13 +17909,15 @@ function rMe(content){
     cardGoogle.appendChild(el('button', { class:'btn btn-sm', style:{background:'var(--danger-soft)',color:'var(--danger)'}, onclick: async ()=> {
       if(!await confirmDlg('確定解除 Google 綁定？解除後就不能用 Google 登入了，需要回到班級+姓名+密碼方式登入。')) return;
       const oldEmail = me.googleEmail;
+      // 🔧 防呆:確保 Firebase 已初始化 (失敗就只清本地,雲端 google_students 留待下次)
+      ensureFirebaseInit();
       try {
         const emailKey = String(oldEmail).replace(/[.@]/g, '_').toLowerCase();
         const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
-        if(window.firebase && firebase.database){
+        if(window.firebase && firebase.database && firebase.apps && firebase.apps.length){
           await firebase.database().ref('cms-v3/' + rc + '/google_students/' + emailKey).remove();
         }
-        if(window.firebase && firebase.auth){
+        if(window.firebase && firebase.auth && firebase.apps && firebase.apps.length){
           try { await firebase.auth().signOut(); } catch(_){}
         }
       } catch(e){ console.warn('[unbind google]', e); }
@@ -17915,6 +17936,11 @@ function rMe(content){
       style:{background:'#fff',color:'#3c4043',border:'1px solid #dadce0',display:'inline-flex',alignItems:'center',gap:'8px',padding:'10px 16px'},
       onclick: async function(){
         if(!window.firebase || !firebase.auth){ toast('Firebase 未載入','danger'); return; }
+        // 🔧 防呆:Firebase app 沒 init 就先補做
+        if(!ensureFirebaseInit()){
+          toast('Firebase 初始化失敗,請聯絡老師重新整理','danger', 6000);
+          return;
+        }
         try {
           const provider = new firebase.auth.GoogleAuthProvider();
           provider.setCustomParameters({ prompt: 'select_account' });
