@@ -6000,7 +6000,33 @@ function markDMRead(otherId){
 /* ════════════════════════════════════════════════════════════
    PHASE 2: DOMAIN HELPERS
    ──────────────────────────────────────────────────────────── */
-const FILE_LIMIT = 1024 * 1024; // 1MB
+// 預設上傳限制 — 老師可在「設定 → 學生上傳限制」覆寫
+const DEFAULT_FILE_LIMIT_MB = 1;       // 內嵌圖片/頭像 (base64 → 寫進 DB)
+const DEFAULT_ATTACH_MAX_MB = 50;      // 學生作業附件單檔 (IndexedDB)
+function getUploadCfg(){
+  return (App.db && App.db.settings && App.db.settings.upload) || {};
+}
+function getFileLimit(){
+  const mb = Number(getUploadCfg().inlineMaxMB);
+  return (mb > 0 ? mb : DEFAULT_FILE_LIMIT_MB) * 1024 * 1024;
+}
+function getAttachMaxSize(){
+  const mb = Number(getUploadCfg().attachMaxMB);
+  return (mb > 0 ? mb : DEFAULT_ATTACH_MAX_MB) * 1024 * 1024;
+}
+function getAttachMaxMB(){
+  const mb = Number(getUploadCfg().attachMaxMB);
+  return mb > 0 ? mb : DEFAULT_ATTACH_MAX_MB;
+}
+// 副檔名白名單 (空字串=全部允許,可逗號分隔: pdf,doc,docx,jpg,png)
+function checkAllowedExt(filename){
+  const allowed = String(getUploadCfg().allowedExt || '').trim();
+  if(!allowed) return { ok:true };
+  const ext = (filename || '').split('.').pop().toLowerCase();
+  const list = allowed.split(/[,，;；\s]+/).map(s => s.trim().toLowerCase().replace(/^\./,'')).filter(Boolean);
+  if(list.indexOf(ext) >= 0) return { ok:true };
+  return { ok:false, ext, allowed:list.join(', ') };
+}
 
 function defaultWeights(){
   return { att:30, asgn:30, mid:20, final:20 };
@@ -6108,7 +6134,10 @@ function studentRank(studentId){
 function readFileAsBase64(file){
   return new Promise((resolve, reject) => {
     if(!file) return resolve(null);
-    if(file.size > FILE_LIMIT) return reject(new Error('檔案超過 1MB 限制'));
+    const lim = getFileLimit();
+    if(file.size > lim) return reject(new Error('檔案超過 ' + Math.round(lim/1024/1024) + ' MB 限制'));
+    const extCheck = checkAllowedExt(file.name);
+    if(!extCheck.ok) return reject(new Error('不允許的副檔名 ".' + extCheck.ext + '"（允許: ' + extCheck.allowed + '）'));
     const fr = new FileReader();
     fr.onload = () => resolve({
       name: file.name, type: file.type, size: file.size, data: fr.result
@@ -6131,7 +6160,7 @@ function downloadDataUrl(dataUrl, filename){
 const IDB_NAME = 'cms_v3_files';
 const IDB_STORE = 'attachments';
 const IDB_VERSION = 1;
-const ATTACH_MAX_SIZE = 50 * 1024 * 1024; // 50 MB 單檔上限
+// ATTACH_MAX_SIZE 已改成 getAttachMaxSize() — 老師可在設定中調整單檔上限
 let _idbPromise = null;
 
 function idbOpen(){
@@ -6412,6 +6441,17 @@ async function attachUpload(file){
   const DRIVE_MAX = 1024 * 1024 * 1024; // 1 GB（單檔 Drive 限制；Drive 本身允許更大但保守）
   const FB_STORAGE_MAX = 50 * 1024 * 1024; // 50 MB (Storage 單檔上限, 超過走 Drive)
 
+  // 老師設定的副檔名白名單檢查 (若有設定)
+  const extCheck = checkAllowedExt(file.name);
+  if(!extCheck.ok){
+    throw new Error('不允許的副檔名 ".' + extCheck.ext + '"（允許: ' + extCheck.allowed + '）');
+  }
+  // 老師設定的單檔大小硬上限 (預設 50 MB,可在設定中調整)
+  const _attachMax = getAttachMaxSize();
+  if(file.size > _attachMax){
+    throw new Error('檔案太大 ' + Math.round(file.size/1024/1024) + ' MB,超過老師設定的上限 ' + Math.round(_attachMax/1024/1024) + ' MB');
+  }
+
   // 🔧 先壓縮：iPhone 5MB 照片 → 500KB 以下，大幅提升 IDB+Firebase 同步成功率
   file = await _compressImageIfNeeded(file);
 
@@ -6475,8 +6515,9 @@ async function attachUpload(file){
     } catch(e){_swallow('auto',e)}
   }
 
-  // 強制 Drive：超過 IDB 單檔上限
-  if(file.size > ATTACH_MAX_SIZE){
+  // 強制 Drive：超過 IDB 單檔上限 (此時已經通過老師設定的硬上限,只是 IDB 裝不下)
+  const _attachLimit2 = getAttachMaxSize();
+  if(file.size > _attachLimit2){
     if(driveAuthed){
       target = 'drive';
     } else if(driveEnabled){
@@ -6513,7 +6554,7 @@ async function attachUpload(file){
       };
     } catch(e){
       dbgWarn('[Drive upload failed, fallback to IDB]', e);
-      if(file.size > ATTACH_MAX_SIZE){
+      if(file.size > getAttachMaxSize()){
         _doneProgress(null);
         throw new Error('Drive 上傳失敗且本機容量不足：' + e.message);
       }
@@ -15542,6 +15583,111 @@ function openAttendanceStatusEditor(existing, onDone){
   m.root.appendChild(actions);
 }
 
+// ─── 📎 學生上傳限制設定卡 ─────────────────────────────────
+function renderUploadLimitCard(){
+  const card = el('div', { class:'card', style:{marginTop:'12px'} });
+  card.appendChild(el('h3', null, '📎 學生上傳限制'));
+  card.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '控制學生繳交作業時可上傳的檔案大小與類型,寫死的限制改成這裡調'));
+
+  const cur = (App.db.settings && App.db.settings.upload) || {};
+
+  // 作業附件單檔上限
+  const fAttach = el('div', { class:'field' });
+  fAttach.appendChild(el('label', { class:'label' },
+    '🗂️ 作業附件單檔上限（MB)  ',
+    el('span', { class:'tiny muted' }, '預設 ' + DEFAULT_ATTACH_MAX_MB)
+  ));
+  const iAttach = el('input', { class:'input', type:'number', min:'1', max:'1024', step:'1',
+    value: Number(cur.attachMaxMB) > 0 ? cur.attachMaxMB : DEFAULT_ATTACH_MAX_MB,
+    style:{maxWidth:'180px'}
+  });
+  fAttach.appendChild(iAttach);
+  fAttach.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '學生上傳作業附件 (PDF / Word / 圖片 等) 超過此大小會被擋下。如有 Google Drive 授權,超過會自動走 Drive'));
+  card.appendChild(fAttach);
+
+  // 內嵌圖片上限 (頭像 / 小圖)
+  const fInline = el('div', { class:'field', style:{marginTop:'10px'} });
+  fInline.appendChild(el('label', { class:'label' },
+    '🖼️ 內嵌圖片/頭像上限（MB)  ',
+    el('span', { class:'tiny muted' }, '預設 ' + DEFAULT_FILE_LIMIT_MB)
+  ));
+  const iInline = el('input', { class:'input', type:'number', min:'1', max:'10', step:'1',
+    value: Number(cur.inlineMaxMB) > 0 ? cur.inlineMaxMB : DEFAULT_FILE_LIMIT_MB,
+    style:{maxWidth:'180px'}
+  });
+  fInline.appendChild(iInline);
+  fInline.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '頭像、Logo 等會被 base64 編碼塞進資料庫的小圖檔上限。建議 1-3 MB,不要設太大會拖慢同步'));
+  card.appendChild(fInline);
+
+  // 允許的副檔名
+  const fExt = el('div', { class:'field', style:{marginTop:'10px'} });
+  fExt.appendChild(el('label', { class:'label' }, '✅ 允許的副檔名 (留空 = 不限制)'));
+  const iExt = el('input', { class:'input', type:'text',
+    value: cur.allowedExt || '',
+    placeholder: '例: pdf, doc, docx, jpg, jpeg, png, mp4'
+  });
+  fExt.appendChild(iExt);
+  fExt.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '用逗號分隔,不分大小寫,可加可不加點。留空 = 允許所有檔案。範例: pdf, docx, jpg, png'));
+  card.appendChild(fExt);
+
+  // 快捷預設按鈕
+  const presets = el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',marginTop:'6px'} },
+    el('button', { class:'btn btn-sm', type:'button', onclick:()=> {
+      iExt.value = 'pdf, doc, docx, jpg, jpeg, png';
+    }}, '📄 文件 + 圖片'),
+    el('button', { class:'btn btn-sm', type:'button', onclick:()=> {
+      iExt.value = 'jpg, jpeg, png, gif, webp, heic';
+    }}, '🖼️ 只允許圖片'),
+    el('button', { class:'btn btn-sm', type:'button', onclick:()=> {
+      iExt.value = 'pdf';
+    }}, '📕 只允許 PDF'),
+    el('button', { class:'btn btn-sm', type:'button', onclick:()=> {
+      iExt.value = '';
+    }}, '♾️ 全部允許')
+  );
+  card.appendChild(presets);
+
+  // 儲存按鈕
+  card.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'12px'}, onclick:()=> {
+    if(!requirePerm('canEditSettings','編輯設定')) return;
+    const attachMB = parseInt(iAttach.value, 10);
+    const inlineMB = parseInt(iInline.value, 10);
+    if(!(attachMB > 0) || attachMB > 1024){
+      toast('作業附件上限請填 1-1024 之間','warn'); return;
+    }
+    if(!(inlineMB > 0) || inlineMB > 10){
+      toast('內嵌圖片上限請填 1-10 之間','warn'); return;
+    }
+    App.db.settings.upload = {
+      attachMaxMB: attachMB,
+      inlineMaxMB: inlineMB,
+      allowedExt: iExt.value.trim()
+    };
+    saveDB();
+    try { Sync.setNode('settings', App.db.settings); } catch(_){}
+    bcNotify();
+    toast('已儲存上傳限制 (作業 ' + attachMB + ' MB / 內嵌 ' + inlineMB + ' MB)','success');
+  }}, '💾 儲存上傳限制'));
+
+  // 還原預設按鈕
+  card.appendChild(el('button', { class:'btn btn-ghost', style:{marginTop:'8px',marginLeft:'8px'}, onclick:()=> {
+    if(!requirePerm('canEditSettings','編輯設定')) return;
+    if(!confirm('確定還原預設?\n• 作業附件: ' + DEFAULT_ATTACH_MAX_MB + ' MB\n• 內嵌圖片: ' + DEFAULT_FILE_LIMIT_MB + ' MB\n• 副檔名: 全部允許')) return;
+    delete App.db.settings.upload;
+    saveDB();
+    try { Sync.setNode('settings', App.db.settings); } catch(_){}
+    bcNotify();
+    toast('已還原預設','success');
+    rerender();
+  }}, '↺ 還原預設'));
+
+  return card;
+}
+
 function rSettings(content){
   content.appendChild(el('h1', null, '設定'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '系統參數、外觀、帳號'));
@@ -15622,6 +15768,9 @@ function rSettings(content){
 
   // ─── 出席狀態管理（batch 1）─────────────────────────────────
   content.appendChild(renderAttendanceStatusesCard());
+
+  // ─── 📎 學生上傳限制 ────────────────────────────────────────
+  try { content.appendChild(renderUploadLimitCard()); } catch(e){ dbgWarn('[upload limit card]', e); }
 
   // appearance — quick shortcut + inline mini-controls
   const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
