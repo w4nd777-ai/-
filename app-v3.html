@@ -5872,6 +5872,39 @@ function initBC(){
       if(!msg) return;
       if(msg.type === 'db-update'){
         loadDB();
+        // 🔧 修並發登入問題:用戶正在打密碼/帳號時,別的 tab/裝置寫入會打斷
+        try {
+          const a = document.activeElement;
+          const isTyping = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+          // 還沒登入 + 在打字 → 延後 1.5 秒;若還在打字繼續延後
+          if(!App.session && isTyping){
+            if(App._bcTypingTimer){ clearTimeout(App._bcTypingTimer); }
+            App._bcTypingTimer = setTimeout(()=> {
+              App._bcTypingTimer = null;
+              const a2 = document.activeElement;
+              const stillTyping = a2 && (a2.tagName === 'INPUT' || a2.tagName === 'TEXTAREA');
+              if(!stillTyping) rerender();
+            }, 1500);
+            return;
+          }
+          // 還沒登入 + 沒在打字 → 第一次允許, 之後跳過
+          if(!App.session){
+            if(!App._loginInitialRerenderDone){
+              App._loginInitialRerenderDone = true;
+              rerender();
+            }
+            return;
+          }
+          // 已登入 + 在打字 → 也延後
+          if(isTyping){
+            if(App._bcTypingTimer){ clearTimeout(App._bcTypingTimer); }
+            App._bcTypingTimer = setTimeout(()=> {
+              App._bcTypingTimer = null;
+              rerender();
+            }, 1500);
+            return;
+          }
+        } catch(_){}
         rerender();
       }
     };
@@ -12033,10 +12066,12 @@ function rOv(content){
         App._ovAttStat = sFilter;
         const rows = todayAtt.slice().sort((x,y)=> (x.time||'').localeCompare(y.time||''));
         let shown = 0, signedOut = 0;
+
+        // 先 filter 再依班級分組 (用戶要求:簽到退明細也要依班級分組)
+        const byClass = {};
         rows.forEach(a => {
           const s = (App.db.students||[]).find(x => x.id === a.studentId);
           if(!s) return;
-          // filter
           if(cFilter && s.cls !== cFilter) return;
           if(sFilter === 'in' && a.outTime) return;
           if(sFilter === 'out' && !a.outTime) return;
@@ -12046,6 +12081,25 @@ function rOv(content){
                         String(s.seat||'').includes(q);
             if(!hit) return;
           }
+          const cls = s.cls || '未分班';
+          if(!byClass[cls]) byClass[cls] = [];
+          byClass[cls].push({a, s});
+        });
+
+        // 依班級排序渲染:每個班級先一個 header row (跨欄),再該班的學生 rows
+        Object.keys(byClass).sort().forEach(cls => {
+          const groupItems = byClass[cls];
+          const grpIn = groupItems.filter(x => !x.a.outTime).length;
+          const grpOut = groupItems.filter(x => x.a.outTime).length;
+          const headerTr = el('tr');
+          headerTr.appendChild(el('td', { colspan:'7', style:{padding:'10px 12px',background:'var(--surface-2)',borderTop:'2px solid var(--primary)',fontWeight:'700',fontSize:'13px'} },
+            el('span', null, '🏫 ' + cls),
+            el('span', { class:'small muted', style:{marginLeft:'10px',fontWeight:'400'} },
+              '(' + groupItems.length + ' 筆 · 🟢 上課中 ' + grpIn + ' · ✅ 已簽退 ' + grpOut + ')')
+          ));
+          tb.appendChild(headerTr);
+
+          groupItems.forEach(({a, s}) => {
           let dur = '—';
           if(a.time && a.outTime){
             try {
@@ -12060,7 +12114,6 @@ function rOv(content){
           }
           const stTxt = a.outTime ? '✅ 已簽退' : '🟢 上課中';
           const stColor = a.outTime ? 'var(--muted)' : 'var(--success)';
-          if(a.outTime) signedOut++;
           // 頭像 cell（點擊：有頭像 → 放大；沒頭像 → 跳到 profile）
           const avCell = el('td', { style:{padding:'4px'} });
           if(s.avatar){
@@ -12083,7 +12136,9 @@ function rOv(content){
             el('td', { style:{color:stColor,fontWeight:'600'} }, stTxt)
           ));
           shown++;
-        });
+          if(a.outTime) signedOut++;
+          });  // groupItems.forEach
+        });  // byClass forEach
         const total = todayAtt.length;
         const totalSignedOut = todayAtt.filter(a=>a.outTime).length;
         const stillIn = total - totalSignedOut;
@@ -12206,10 +12261,38 @@ function rOv(content){
     // batch 2-stab: O(n) — 預先 build 當日簽到 / 請假 map，下方雙重 forEach 都用 .get(id)
     const _todayMaps = buildTodayMaps(today);
 
-    // 工具列：全展開 / 全收合 (還原 5/20 OK 版本 — 沒有什麼條列/卡片切換)
+    // 顯示模式 (條列 / 矩陣) — 從 localStorage 載入偏好 (用戶要求回來)
+    if(App._ovDisplayMode === undefined){
+      try { App._ovDisplayMode = localStorage.getItem('cms_v3_ov_display_mode') || 'list'; } catch(_){ App._ovDisplayMode = 'list'; }
+    }
+    const isListMode = App._ovDisplayMode === 'list';
+
+    // 工具列:顯示模式切換 + 全展開 / 全收合
     const toolbar = el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
       el('h3', { style:{margin:'0'} }, '今日班況 · 依班級'),
-      el('div', { class:'flex no-print', style:{gap:'6px'} },
+      el('div', { class:'flex no-print', style:{gap:'6px',flexWrap:'wrap'} },
+        // 顯示模式切換
+        el('button', {
+          class:'btn btn-sm',
+          style: isListMode ? {} : {background:'var(--primary)',color:'#fff'},
+          title:'矩陣模式 (學生卡片)',
+          onclick:()=> {
+            App._ovDisplayMode = 'card';
+            try { localStorage.setItem('cms_v3_ov_display_mode', 'card'); } catch(_){}
+            rerender();
+          }
+        }, '▦ 矩陣'),
+        el('button', {
+          class:'btn btn-sm',
+          style: isListMode ? {background:'var(--primary)',color:'#fff'} : {},
+          title:'條列模式 (表格)',
+          onclick:()=> {
+            App._ovDisplayMode = 'list';
+            try { localStorage.setItem('cms_v3_ov_display_mode', 'list'); } catch(_){}
+            rerender();
+          }
+        }, '☰ 條列'),
+        el('span', { style:{width:'6px'} }),
         el('button', { class:'btn btn-sm', onclick:()=> {
           classes.forEach(c => { App._ovExpandedCls[c] = true; });
           rerender();
@@ -12278,7 +12361,44 @@ function rOv(content){
       card.appendChild(header);
 
       if(isExpanded){
-        // 改成真正的表格條列式 (跟上面「今日簽到/簽退明細」同款) — 用戶要求
+        // 條列模式:用 table / 矩陣模式:用 stu-grid 卡片
+        if(!isListMode){
+          // 矩陣 (卡片) 模式
+          const body = el('div', { style:{padding:'14px 16px'} });
+          const sgrid = el('div', { class:'stu-grid' });
+          stuInCls.forEach(s => {
+            const att = _todayMaps.signedMap.get(s.id);
+            const leave = _todayMaps.leaveMap.get(s.id);
+            let scls = 'stu-card';
+            if(leave) scls += ' leave';
+            else if(att) scls += (att.status === 'late' ? ' late' : ' signed');
+            else scls += ' absent';
+            const c = el('div', { class: scls });
+            c.appendChild(el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')));
+            c.appendChild(el('div', { class:'meta' }, '學號 ' + (s.sid || '—')));
+            if(leave){
+              c.appendChild(el('div', { class:'small' }, '📆 ' + (leave.reason || '請假中')));
+            } else if(att){
+              c.appendChild(el('div', { class:'small mono', style:{color:'var(--success)',fontWeight:'700'} }, '✅ ' + att.time));
+              if(att.outTime){
+                c.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)',fontWeight:'700'} }, '👋 ' + att.outTime));
+              } else {
+                c.appendChild(el('div', { class:'tiny muted' }, '尚未簽退'));
+              }
+            } else {
+              const acts = el('div', { class:'actions' });
+              acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> markPresent(s.id) }, '✓ 補簽'));
+              acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假'));
+              c.appendChild(acts);
+            }
+            sgrid.appendChild(c);
+          });
+          body.appendChild(sgrid);
+          card.appendChild(body);
+          content.appendChild(card);
+          return;  // 繼續下一個班級
+        }
+        // 條列 (表格) 模式
         const body = el('div', { style:{padding:'0', overflowX:'auto'} });
         const tbl = el('table', { class:'rep-table cls-roster-tbl', style:{width:'100%', borderCollapse:'collapse'} });
         const thead = el('thead');
@@ -23793,6 +23913,38 @@ function showPwaInstallChip(){
 function rerender(){
   const root = $('#root');
 
+  // 🛡️ 保險:rerender 前若有 input 在 focus,保存 value + caret,完成後嘗試還原
+  let _savedInput = null;
+  try {
+    const a = document.activeElement;
+    if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.value){
+      _savedInput = {
+        // 用 placeholder 跟 type 當識別 (login form 同種 input 通常 placeholder 不同)
+        ph: a.placeholder || '',
+        type: a.type || '',
+        autocomplete: a.autocomplete || '',
+        value: a.value,
+        selStart: a.selectionStart,
+        selEnd: a.selectionEnd
+      };
+    }
+  } catch(_){}
+  const _restoreInputState = () => {
+    if(!_savedInput) return;
+    try {
+      // 找到結構相同的 input — placeholder + type + autocomplete 都要對
+      const candidates = Array.from(document.querySelectorAll('input,textarea')).filter(i =>
+        (i.placeholder||'') === _savedInput.ph &&
+        (i.type||'') === _savedInput.type &&
+        (i.autocomplete||'') === _savedInput.autocomplete
+      );
+      if(candidates.length === 1){
+        candidates[0].value = _savedInput.value;
+        try { candidates[0].focus(); candidates[0].setSelectionRange(_savedInput.selStart, _savedInput.selEnd); } catch(_){}
+      }
+    } catch(_){}
+  };
+
   // L9: 若上次 saveDB 因容量不足做了截斷 → 提示使用者匯出備份
   try {
     if(App.db && App.db._truncWarning && !App._truncShown){
@@ -23819,6 +23971,8 @@ function rerender(){
   // no session → login
   if(!App.session){
     renderLogin(root);
+    // 還原 input 狀態 (修並發登入時打字被刷新的問題)
+    setTimeout(_restoreInputState, 0);
     return;
   }
   // session: must match a real student (if student)
@@ -23966,6 +24120,8 @@ function rerender(){
 
   // batch 3：登入後首次顯示新手引導（已完成過或 tour 仍開著時自動跳過）
   try { maybeShowTour(); } catch(e){_swallow('auto',e)}
+  // 還原 input 狀態 (修並發 sync 時打字被刷新的問題)
+  setTimeout(_restoreInputState, 0);
 }
 
 /* ════════════════════════════════════════════════════════════
