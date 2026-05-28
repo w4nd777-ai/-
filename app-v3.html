@@ -17994,10 +17994,14 @@ function rSub(content){
       listWrap.appendChild(toolbar);
     }
 
+    // 班級裡再依作業分組 — 用戶要求:可以看到每份作業誰繳了誰沒繳
+    App._subExpandedAsg = App._subExpandedAsg || {};  // key: cls|asgId → true/false
     classes.forEach(cls => {
       const items = grouped[cls];
-      const studentIdsInCls = new Set(items.map(x => x.sub.studentId));
-      const peopleCount = studentIdsInCls.size;
+      // 這個班級裡所有學生 (用來算未繳)
+      const stuInCls = App.db.students.filter(s => (s.cls || '未分班') === cls)
+        .sort((a,b) => (a.seat||0) - (b.seat||0));
+      const peopleCount = stuInCls.length;
       const gradedCount = items.filter(x => typeof x.sub.score === 'number').length;
       const pendingCount = items.length - gradedCount;
       const totalCount = items.length;
@@ -18019,7 +18023,7 @@ function rSub(content){
       header.appendChild(el('span', { style:{fontSize:'13px',display:'inline-block',transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
       header.appendChild(el('div', { style:{flex:'1',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'} },
         el('span', { style:{fontWeight:'700',fontSize:'15px'} }, '🏫 ' + cls),
-        el('span', { class:'small muted' }, '（' + peopleCount + ' 人 · ' + totalCount + ' 筆）')
+        el('span', { class:'small muted' }, '（' + peopleCount + ' 人 · ' + totalCount + ' 筆繳交）')
       ));
       header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
         el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'11px',fontWeight:'700'} }, '✅ ' + gradedCount),
@@ -18029,8 +18033,90 @@ function rSub(content){
       listWrap.appendChild(header);
 
       if(isExpanded){
-        const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px'} });
-        items.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
+        const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',overflow:'hidden'} });
+
+        // 把這班的繳交依「作業 ID」再分組
+        const subsByAsg = {};
+        items.forEach(({sub, origIdx}) => {
+          const aid = sub.assignmentId;
+          if(!subsByAsg[aid]) subsByAsg[aid] = [];
+          subsByAsg[aid].push({sub, origIdx});
+        });
+        // 排序作業:依 dueDate (有就先,沒就靠後);沒繳交記錄的作業不顯示
+        const asgIds = Object.keys(subsByAsg).sort((a,b) => {
+          const aA = App.db.assignments.find(x => x.id === a);
+          const aB = App.db.assignments.find(x => x.id === b);
+          return (aA?.due || '9999') < (aB?.due || '9999') ? -1 : 1;
+        });
+
+        if(!asgIds.length){
+          body.appendChild(el('div', { class:'muted small', style:{padding:'14px',textAlign:'center'} },
+            '此班級在目前篩選下沒有繳交記錄'));
+        } else {
+          asgIds.forEach((aid, asgIdx) => {
+            const asg = App.db.assignments.find(x => x.id === aid);
+            if(!asg) return;
+            const subs = subsByAsg[aid];
+            const submittedStuIds = new Set(subs.map(x => x.sub.studentId));
+            const missingStu = stuInCls.filter(s => !submittedStuIds.has(s.id));
+            const submittedCount = submittedStuIds.size;
+            const asgRate = peopleCount ? Math.round(submittedCount / peopleCount * 100) : 0;
+            const asgRateColor = asgRate >= 80 ? 'var(--success)' : asgRate >= 50 ? 'var(--warn)' : 'var(--danger)';
+            const asgKey = cls + '|' + aid;
+            const asgExpanded = App._subExpandedAsg[asgKey] !== false;  // 預設展開
+
+            // 作業 header (子層) — 可摺疊
+            const asgHeader = el('div', {
+              style:{
+                padding:'10px 14px 10px 36px',
+                background:'rgba(0,0,0,.02)',
+                borderBottom: asgIdx < asgIds.length-1 ? '1px solid var(--border)' : 'none',
+                borderTop: asgIdx > 0 ? '1px solid var(--border)' : 'none',
+                cursor:'pointer',
+                display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'
+              },
+              onclick:()=> {
+                App._subExpandedAsg[asgKey] = !asgExpanded;
+                renderList();
+              }
+            });
+            asgHeader.appendChild(el('span', { style:{fontSize:'11px',display:'inline-block',transform: asgExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'} }, '▼'));
+            asgHeader.appendChild(el('span', { style:{fontWeight:'700',flexShrink:'0'} }, '📋 ' + (asg.title || '(無標題作業)')));
+            if(asg.due) asgHeader.appendChild(el('span', { class:'small muted' }, '期限 ' + asg.due));
+            asgHeader.appendChild(el('div', { class:'flex', style:{gap:'6px',marginLeft:'auto',alignItems:'center',flexWrap:'wrap'} },
+              el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'10px',fontWeight:'700'} },
+                '已繳 ' + submittedCount + '/' + peopleCount),
+              missingStu.length ? el('span', { class:'pill', style:{background:'var(--danger-soft)',color:'var(--danger)',fontSize:'10px',fontWeight:'700'} },
+                '未繳 ' + missingStu.length) : null,
+              el('span', { style:{fontWeight:'700',fontSize:'13px',color:asgRateColor} }, asgRate + '%')
+            ));
+            body.appendChild(asgHeader);
+
+            if(asgExpanded){
+              // 已繳的學生 (一筆繳交 = 一個 row)
+              subs.forEach(({sub, origIdx}) => body.appendChild(renderSubRow(sub, origIdx)));
+
+              // 未繳的學生 — 一行顯示所有未繳姓名
+              if(missingStu.length){
+                const missingRow = el('div', {
+                  style:{
+                    padding:'10px 14px 10px 36px',
+                    background:'var(--danger-soft)',
+                    borderTop:'1px dashed var(--danger)',
+                    fontSize:'13px',
+                    color:'var(--danger)',
+                    lineHeight:'1.6'
+                  }
+                });
+                missingRow.appendChild(el('span', { style:{fontWeight:'700',marginRight:'6px'} },
+                  '❌ 未繳 ' + missingStu.length + ' 人:'));
+                missingRow.appendChild(el('span', null,
+                  missingStu.map(s => s.seat ? s.name + '(' + s.seat + ')' : s.name).join(' · ')));
+                body.appendChild(missingRow);
+              }
+            }
+          });
+        }
         listWrap.appendChild(body);
       }
     });
