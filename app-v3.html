@@ -18779,15 +18779,55 @@ function openSubmissionGrade(sub, list=null, idx=0){
     subCard.appendChild(el('div', { style:{whiteSpace:'pre-wrap',marginTop:'6px',fontSize:'13px'} }, sub.text));
   }
   if(sub.link){
-    subCard.appendChild(el('div', { style:{marginTop:'6px'} }, el('a', { href: sub.link, target:'_blank' }, '🔗 ' + sub.link)));
-  }
-  if(sub.attach){
-    subCard.appendChild(el('div', { style:{marginTop:'6px',display:'flex',gap:'6px',flexWrap:'wrap'} },
-      el('button', { class:'btn btn-sm', onclick:()=> attachDownload(sub.attach) }, '⬇ ' + sub.attach.name),
-      el('button', { class:'btn btn-sm', onclick:()=> attachPreview(sub.attach) }, '👁 預覽')
+    subCard.appendChild(el('div', { style:{marginTop:'6px'} },
+      el('a', { href: sub.link, target:'_blank', rel:'noopener', style:{wordBreak:'break-all'} }, '🔗 ' + sub.link)
     ));
   }
-  if(!sub.text && !sub.link && !sub.attach){
+  // 修:支援 sub.attaches 陣列 (學生繳交多檔的存法),向後相容 sub.attach 單檔
+  const allAttaches = (Array.isArray(sub.attaches) && sub.attaches.length)
+    ? sub.attaches
+    : (sub.attach ? [sub.attach] : []);
+  if(allAttaches.length){
+    subCard.appendChild(el('div', { style:{marginTop:'8px',fontSize:'12px',color:'var(--text-muted)'} },
+      '📎 附件 (' + allAttaches.length + ' 個)'));
+    const attachWrap = el('div', { style:{marginTop:'4px',display:'flex',flexDirection:'column',gap:'6px'} });
+    allAttaches.forEach((attach, idx) => {
+      if(!attach || !attach.name) return;
+      const isImage = (attach.type||'').startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|heic)$/i.test(attach.name);
+      const isPdf = (attach.type||'') === 'application/pdf' || /\.pdf$/i.test(attach.name);
+      const fileIcon = isImage ? '🖼' : (isPdf ? '📄' : '📎');
+      const sizeKb = attach.size ? Math.round(attach.size/1024) + ' KB' : '';
+      const row = el('div', { style:{
+        display:'flex',alignItems:'center',gap:'8px',
+        padding:'8px 10px',background:'#fff',
+        border:'1px solid var(--border)',borderRadius:'8px'
+      }});
+      row.appendChild(el('div', { style:{fontSize:'20px',flexShrink:'0'} }, fileIcon));
+      row.appendChild(el('div', { style:{flex:'1',minWidth:'0',overflow:'hidden'} },
+        el('div', { style:{fontSize:'13px',fontWeight:'600',color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} }, attach.name),
+        el('div', { class:'small muted', style:{fontSize:'11px'} }, sizeKb + (attach.storage ? ' · ' + attach.storage : ''))
+      ));
+      row.appendChild(el('button', {
+        class:'btn btn-sm btn-primary',
+        title:'預覽 (圖片/PDF 直接看)',
+        onclick: async ()=> {
+          try { await attachPreview(attach); }
+          catch(e){ toast('預覽失敗:' + (e.message||e), 'danger'); }
+        }
+      }, '👁 預覽'));
+      row.appendChild(el('button', {
+        class:'btn btn-sm',
+        title:'下載到本機',
+        onclick: async ()=> {
+          try { await attachDownload(attach); }
+          catch(e){ toast('下載失敗:' + (e.message||e), 'danger'); }
+        }
+      }, '⬇'));
+      attachWrap.appendChild(row);
+    });
+    subCard.appendChild(attachWrap);
+  }
+  if(!sub.text && !sub.link && !allAttaches.length){
     subCard.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} }, '(無內容)'));
   }
   m.root.appendChild(subCard);
