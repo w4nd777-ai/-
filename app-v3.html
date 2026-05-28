@@ -7165,48 +7165,12 @@ async function joinExisting(){
 function studentRegisterFlow(){
   // 完整註冊：姓名 + 學號 + email + 班級 + 座號 + 密碼
   const m = modal('', { dismissable:false });
-  m.root.appendChild(el('h2', null, '🧑‍🎓 學生註冊'));
+  m.root.appendChild(el('h2', null, '學生註冊'));
   m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'13px',marginBottom:'10px'} },
     '請完整填寫資料，等待老師審核'));
 
-  // ☁️ Google 自動填寫（新增） — 點下去填 Email + 姓名 + 自動綁定 Google
-  // 老師審核通過時會自動建立 google_students 對應，之後學生直接 Google 登入
-  let _gBound = null; // { email, displayName, uid, photoURL }
-  const gFillBtn = el('button', {
-    type:'button',
-    style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;min-height:46px;box-shadow:0 1px 3px rgba(0,0,0,.08)',
-    onclick: async function(ev){
-      ev.preventDefault();
-      const b = ev.currentTarget;
-      b.disabled = true; b.style.opacity = '0.6';
-      try {
-        if(!window.firebase || !firebase.auth){ toast('Firebase 未載入', 'danger'); return; }
-        const provider = new firebase.auth.GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
-        const result = await firebase.auth().signInWithPopup(provider);
-        const u = result.user;
-        if(!u || !u.email){ toast('Google 帳號沒有 email', 'danger'); return; }
-        _gBound = { email: u.email, displayName: u.displayName || '', uid: u.uid, photoURL: u.photoURL || '' };
-        iEmail.value = u.email;
-        if(!iName.value && u.displayName) iName.value = u.displayName;
-        b.innerHTML = '';
-        b.appendChild(_googleBtnContent('✅ 已綁定 ' + u.email + '（點可換）'));
-        toast('✅ Google 已綁定，請繼續填學號 + 班級 + 座號 + 密碼', 'success', 4000);
-        // 不要 signOut — 留著 auth state，submit 後 _gBound 會寫進 pending
-      } catch(e){
-        console.warn('[register-google]', e);
-        if(e.code !== 'auth/popup-closed-by-user'){
-          toast('Google 綁定失敗: ' + (e.message || e), 'danger');
-        }
-        b.disabled = false; b.style.opacity = '1';
-      }
-    }
-  });
-  gFillBtn.appendChild(_googleBtnContent('🌐 用 Google 自動填 Email + 綁定（推薦）'));
-  m.root.appendChild(gFillBtn);
-  m.root.appendChild(el('div', {
-    style:'font-size:11px;color:#888;text-align:center;margin:-4px 0 14px'
-  }, '👆 綁定後忘記密碼也能直接用 Google 登入 / 換手機自動同步'));
+  // (Google 自動填按鈕已移除 — Chrome 第三方 cookie 政策會擋 signInWithPopup 造成錯誤)
+  // 學生請直接填表單,Email 用一般信箱即可
 
   function field(label, input, hint){
     const f = el('div', { class:'field' });
@@ -7235,7 +7199,7 @@ function studentRegisterFlow(){
   );
   m.root.appendChild(row2);
 
-  m.root.appendChild(field('📧 Email *', iEmail, '忘記密碼時可使用此 email 重設'));
+  m.root.appendChild(field('Email *', iEmail, '忘記密碼時可使用此 email 重設'));
   m.root.appendChild(field('密碼 *', iPw, '至少 4 字元'));
   m.root.appendChild(field('確認密碼 *', iPw2));
 
@@ -7273,13 +7237,7 @@ function studentRegisterFlow(){
       mustChangePw: false,  // 自己註冊的不用再改
       ts: Date.now()
     };
-    // ☁️ 若有 Google 綁定，一併寫進 pending（老師審核通過後會自動建立 google_students 對應）
-    if(_gBound && _gBound.email){
-      pending.googleEmail = _gBound.email;
-      pending.firebaseUid = _gBound.uid;
-      pending.photoURL = _gBound.photoURL || '';
-      pending.googleDisplayName = _gBound.displayName || '';
-    }
+    // (Google 綁定區段已移除 — 一併拿掉)
     App.db.pending.push(pending);
     saveDB();
     try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(e){_swallow('auto',e)}
