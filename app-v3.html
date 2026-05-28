@@ -4397,6 +4397,25 @@ function initials(name){
   return name.trim().slice(0,2);
 }
 
+// ★ 全站班級列表 — 從學生 / pending / 作業派發對象 三個來源 union 出來
+// 之前只看 students[].cls,如果用戶建了新班級但還沒派學生,
+// 作業派發 modal 看不到該班 → 用這個 helper 就會看到
+function getAllClassesEverywhere(){
+  const set = new Set();
+  try { (App.db.students || []).forEach(s => { if(s && s.cls) set.add(s.cls); }); } catch(_){}
+  try { (App.db.pending || []).forEach(p => { if(p && p.cls) set.add(p.cls); }); } catch(_){}
+  try { (App.db.assignments || []).forEach(a => {
+    if(a && Array.isArray(a.targetClsList)) a.targetClsList.forEach(c => { if(c) set.add(c); });
+    if(a && a.targetCls) set.add(a.targetCls);
+  }); } catch(_){}
+  // 也支援使用者手動維護的設定 (settings.knownClasses) — 之後可在設定頁加入
+  try {
+    const ks = (App.db.settings && App.db.settings.knownClasses) || [];
+    if(Array.isArray(ks)) ks.forEach(c => { if(c) set.add(c); });
+  } catch(_){}
+  return Array.from(set).sort();
+}
+
 /* ════════════════════════════════════════════════════════════
    H4: 空 catch 共用 helper — 把 swallow 的錯誤集中到 App._silentErrors，
         並於 debug 模式（?debug=1 或 window.__DEBUG）印到 console。
@@ -12240,6 +12259,23 @@ function rOv(content){
       el('div', { class:'muted small' }, ovSub)
     ),
     el('div', { class:'flex no-print' },
+      // 🎯 簡潔模式 — 隱藏次要區塊 (用戶反映「太多東西」)
+      (()=> {
+        // 載入偏好
+        if(App._ovMinimal === undefined){
+          try { App._ovMinimal = localStorage.getItem('cms_v3_ov_minimal') === '1'; } catch(_){ App._ovMinimal = false; }
+        }
+        return el('button', {
+          class:'btn btn-sm',
+          style: App._ovMinimal ? {background:'var(--primary)',color:'#fff'} : {},
+          title: App._ovMinimal ? '已是簡潔模式 — 點此切回完整檢視' : '簡潔模式 — 只顯示出席/繳交/健康三大區塊,隱藏次要面板',
+          onclick: ()=> {
+            App._ovMinimal = !App._ovMinimal;
+            try { localStorage.setItem('cms_v3_ov_minimal', App._ovMinimal ? '1' : '0'); } catch(_){}
+            rerender();
+          }
+        }, App._ovMinimal ? '🎯 簡潔中' : '🎯 簡潔模式');
+      })(),
       el('button', { class:'btn btn-sm', onclick:()=> rerender(), title:'重新載入資料' }, '🔄 重整'),
       el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
       // F-06: 群發通知未到家長
@@ -12705,8 +12741,8 @@ function rOv(content){
     }
   } catch(e){ dbgWarn('[overview today submissions]', e); }
 
-  // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考
-  try {
+  // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考 (簡潔模式時隱藏)
+  if(!App._ovMinimal) try {
     const sideRow = el('div', { class:'grid grid-2', style:{marginBottom:'12px'} });
     // 今日加扣分排行
     const top = getTopBehaviorStudents(5);
@@ -12782,12 +12818,12 @@ function rOv(content){
   }
 
   // today's roster — 班級分組可摺疊（可在介面編輯器隱藏）
-  if(!isOverviewVisible('today')){
-    // 仍然要顯示 overview-bottom 自訂內容
-    content.appendChild(renderCustomBlocks('overview-bottom'));
-    return;
-  }
-  if(App.db.students.length === 0){
+  // 簡潔模式時也跳過 — 上面的「今日簽到明細」+「今日繳交明細」已涵蓋同樣資訊
+  if(!isOverviewVisible('today') || App._ovMinimal){
+    // 完整檢視時若使用者隱藏 today,仍顯示 overview-bottom 自訂內容
+    if(!App._ovMinimal) content.appendChild(renderCustomBlocks('overview-bottom'));
+    // 進到下面的 activity feed / health dashboard,不要 return
+  } else if(App.db.students.length === 0){
     const card = el('div', { class:'card' });
     card.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
       el('h3', null, '今日班況'),
@@ -13029,14 +13065,14 @@ function rOv(content){
     });
   }
 
-  // POLISH-10/5: 即時動態 (顯示在自訂內容之上)
-  try {
+  // POLISH-10/5: 即時動態 (顯示在自訂內容之上) — 簡潔模式時隱藏
+  if(!App._ovMinimal) try {
     const feed = renderActivityFeed();
     if(feed) content.appendChild(feed);
   } catch(e){ _swallow('activity-feed-rOv', e); }
 
-  // 自訂內容（總覽頁底端）
-  content.appendChild(renderCustomBlocks('overview-bottom'));
+  // 自訂內容（總覽頁底端） — 簡潔模式時隱藏
+  if(!App._ovMinimal) content.appendChild(renderCustomBlocks('overview-bottom'));
 
   // 🩺 健康儀表板（讓老師一眼看到系統狀態）
   try {
@@ -18509,7 +18545,10 @@ function openAssignmentEdit(asg){
   // class picker (only when target=class) — 多班級 checkbox + 全選/全清
   const fCls = el('div', { class:'field', style:{display:'none'} });
   fCls.appendChild(el('label', { class:'label' }, '選擇班級（可複選）'));
-  const classes = Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean))).sort();
+  // ★ 改用 getAllClassesEverywhere — 即使新建班級還沒派學生也會出現
+  const classes = (typeof getAllClassesEverywhere === 'function')
+    ? getAllClassesEverywhere()
+    : Array.from(new Set(App.db.students.map(s => s.cls).filter(Boolean))).sort();
   const clsControls = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} },
     el('button', { type:'button', class:'btn btn-sm', onclick:()=> { clsChecks.forEach(cb=> cb.checked=true); }}, '全選'),
     el('button', { type:'button', class:'btn btn-sm', onclick:()=> { clsChecks.forEach(cb=> cb.checked=false); }}, '全清')
@@ -18969,35 +19008,302 @@ function rSub(content){
       return row;
     }
 
-    // 將繳交紀錄按「學生所屬班級」分組
-    App._subExpandedCls = App._subExpandedCls || {};
-    // 給每筆繳交補上學生班級資料
-    const grouped = {};  // cls -> [{sub, origIdx}]
-    list.forEach((s, i) => {
-      const stu = findStudent(s.studentId);
-      const cls = (stu && stu.cls) ? stu.cls : (s.cls || '未分班');
-      if(!grouped[cls]) grouped[cls] = [];
-      grouped[cls].push({ sub:s, origIdx:i });
-    });
-    const classes = Object.keys(grouped).sort();
+    // ════════════════════════════════════════════════════════════════
+    // ★ 新版階層:作業(外) → 班級(內) → 表格/矩陣
+    //   (用戶要求:作業一裡面包含每個班,每個班展開去看誰繳了)
+    // ════════════════════════════════════════════════════════════════
+    App._subExpandedAsg = App._subExpandedAsg || {};      // key: asgId → true/false
+    App._subExpandedAsgCls = App._subExpandedAsgCls || {}; // key: asgId|cls → true/false
 
-    // 全展開 / 全收合工具列
-    if(classes.length > 1){
-      const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end'} },
+    // 按 assignmentId 分組
+    const byAsg = {};
+    list.forEach((s, i) => {
+      const aid = s.assignmentId || '_unknown';
+      if(!byAsg[aid]) byAsg[aid] = [];
+      byAsg[aid].push({ sub:s, origIdx:i });
+    });
+    // 排序:依 dueAt 早到晚,沒 dueAt 排後面
+    const asgIds = Object.keys(byAsg).sort((a, b) => {
+      const aA = App.db.assignments.find(x => x.id === a);
+      const aB = App.db.assignments.find(x => x.id === b);
+      return (aA?.dueAt || aA?.due || '9999') < (aB?.dueAt || aB?.due || '9999') ? -1 : 1;
+    });
+
+    // 全展開 / 全收合工具列 (改成對作業展開)
+    if(asgIds.length > 1){
+      const toolbar = el('div', { class:'flex no-print', style:{margin:'4px 0 10px',gap:'6px',justifyContent:'flex-end',alignItems:'center'} },
+        el('span', { class:'small muted' }, asgIds.length + ' 份作業有繳交記錄'),
         el('button', { class:'btn btn-sm', onclick:()=> {
-          classes.forEach(c => { App._subExpandedCls[c] = true; });
+          asgIds.forEach(a => { App._subExpandedAsg[a] = true; });
           renderList();
         }}, '全部展開 ▼'),
         el('button', { class:'btn btn-sm', onclick:()=> {
-          classes.forEach(c => { App._subExpandedCls[c] = false; });
+          asgIds.forEach(a => { App._subExpandedAsg[a] = false; });
           renderList();
         }}, '全部收合 ▲')
       );
       listWrap.appendChild(toolbar);
     }
 
-    // 班級裡再依作業分組 — 用戶要求:可以看到每份作業誰繳了誰沒繳
-    App._subExpandedAsg = App._subExpandedAsg || {};  // key: cls|asgId → true/false
+    const isMatrixMode = App._subDisplayMode === 'matrix';
+
+    asgIds.forEach(aid => {
+      const asg = App.db.assignments.find(x => x.id === aid);
+      const allSubsForAsg = byAsg[aid];
+      const asgTitle = asg ? (asg.title || '(無標題)') : '(作業已刪除)';
+      const asgDue = asg ? (asg.dueAt || asg.due) : null;
+      const asgPoints = asg?.points || 100;
+
+      // 算這份作業所有的相關班級 (從派發對象 + 已繳學生兩個來源)
+      const targets = asg ? (assignmentTargets(asg) || new Set()) : new Set();
+      const submittedStuIds = new Set(allSubsForAsg.map(x => x.sub.studentId));
+      // expected = 派發到的學生; 沒派發資訊就以已繳交者推回 (向後相容)
+      const expectedStu = asg
+        ? App.db.students.filter(s => targets.has(s.id) || (targets.size === 0 && (asg.target === 'all' || !asg.target)))
+        : App.db.students.filter(s => submittedStuIds.has(s.id));
+      // 全體統計
+      const totalExpected = expectedStu.length || submittedStuIds.size;
+      const totalSubmitted = submittedStuIds.size;
+      const totalGraded = allSubsForAsg.filter(x => typeof x.sub.score === 'number').length;
+      const totalReturned = allSubsForAsg.filter(x => x.sub.returned).length;
+      const totalRate = totalExpected ? Math.round(totalSubmitted / totalExpected * 100) : 0;
+      const rateColor = totalRate >= 80 ? 'var(--success)' : totalRate >= 50 ? 'var(--warn)' : 'var(--danger)';
+
+      const asgExpanded = App._subExpandedAsg[aid] !== false;
+
+      // 作業 card 容器
+      const asgCard = el('div', { style:{
+        marginBottom:'12px',
+        background:'var(--surface)',
+        border:'1px solid var(--border)',
+        borderRadius:'10px',
+        overflow:'hidden'
+      }});
+      // 作業 header
+      const asgHeader = el('div', {
+        style:{
+          padding:'12px 16px',
+          background: asgExpanded ? 'var(--surface-2)' : 'transparent',
+          borderBottom: asgExpanded ? '1px solid var(--border)' : 'none',
+          cursor:'pointer',
+          display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap',
+          userSelect:'none'
+        },
+        title: asgExpanded ? '點此收合' : '點此展開',
+        onclick:()=> { App._subExpandedAsg[aid] = !asgExpanded; renderList(); }
+      });
+      asgHeader.appendChild(el('span', { style:{
+        fontSize:'13px',color:'var(--text-muted)',
+        display:'inline-block',width:'14px',
+        transform: asgExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'
+      } }, '▼'));
+      asgHeader.appendChild(el('span', { style:{fontWeight:'700',fontSize:'15px'} },
+        (asg ? '📋 ' : '⚠️ ') + asgTitle));
+      if(asgDue) asgHeader.appendChild(el('span', {
+        style:{fontSize:'11px',color:'var(--text-muted)',background:'var(--surface-2)',padding:'2px 8px',borderRadius:'10px'}
+      }, '⏱ ' + asgDue));
+      // 右側統計
+      const asgStats = el('div', { style:{marginLeft:'auto',display:'flex',gap:'6px',alignItems:'center',flexWrap:'wrap'} });
+      asgStats.appendChild(el('span', { style:{
+        background:'var(--success-soft)',color:'var(--success)',
+        fontSize:'12px',fontWeight:'700',padding:'3px 9px',borderRadius:'10px'
+      }}, '✅ 已繳 ' + totalSubmitted + ' / ' + totalExpected));
+      if(totalGraded) asgStats.appendChild(el('span', { style:{
+        background:'rgba(99,102,241,.1)',color:'var(--primary)',
+        fontSize:'12px',fontWeight:'700',padding:'3px 9px',borderRadius:'10px'
+      }}, '🟢 已批 ' + totalGraded));
+      if(totalReturned) asgStats.appendChild(el('span', { style:{
+        background:'var(--warn-soft)',color:'var(--warn)',
+        fontSize:'12px',fontWeight:'700',padding:'3px 9px',borderRadius:'10px'
+      }}, '↩ 退回 ' + totalReturned));
+      // 進度條 + 百分比
+      asgStats.appendChild(el('div', {
+        style:{width:'60px',height:'6px',background:'rgba(0,0,0,.08)',borderRadius:'3px',overflow:'hidden'}
+      }, el('div', { style:{width: totalRate + '%',height:'100%',background: rateColor} })));
+      asgStats.appendChild(el('span', { style:{fontWeight:'800',fontSize:'14px',color:rateColor,minWidth:'42px',textAlign:'right'} },
+        totalRate + '%'));
+      asgHeader.appendChild(asgStats);
+      asgCard.appendChild(asgHeader);
+
+      if(asgExpanded){
+        // 對「期望」的學生依 cls 分組
+        const expectedByCls = {};
+        expectedStu.forEach(s => {
+          const c = s.cls || '未分班';
+          if(!expectedByCls[c]) expectedByCls[c] = [];
+          expectedByCls[c].push(s);
+        });
+        // 已繳的學生但已被排除在 expected 之外(例如該生被轉班),也要加進去
+        allSubsForAsg.forEach(({sub}) => {
+          const stu = findStudent(sub.studentId);
+          if(!stu) return;
+          const c = stu.cls || '未分班';
+          if(!expectedByCls[c]) expectedByCls[c] = [];
+          if(!expectedByCls[c].find(x => x.id === stu.id)){
+            expectedByCls[c].push(stu);
+          }
+        });
+        const clsList = Object.keys(expectedByCls).sort();
+        if(!clsList.length){
+          asgCard.appendChild(el('div', { class:'muted small', style:{padding:'14px',textAlign:'center'} },
+            '此作業沒有派發對象'));
+        } else {
+          clsList.forEach(cls => {
+            const stusInCls = expectedByCls[cls].slice().sort((a,b) => (a.seat||999) - (b.seat||999));
+            const subsInCls = allSubsForAsg.filter(({sub}) => {
+              const stu = findStudent(sub.studentId);
+              return stu && (stu.cls || '未分班') === cls;
+            });
+            const submittedInCls = new Set(subsInCls.map(x => x.sub.studentId));
+            const gradedInCls = subsInCls.filter(x => typeof x.sub.score === 'number').length;
+            const returnedInCls = subsInCls.filter(x => x.sub.returned).length;
+            const clsKey = aid + '|' + cls;
+            const clsExpanded = App._subExpandedAsgCls[clsKey] !== false;
+
+            // 班級子區塊
+            const clsBlock = el('div', { style:{borderTop:'1px solid var(--border)'} });
+            const clsHeader = el('div', {
+              style:{
+                padding:'10px 18px',
+                background: clsExpanded ? 'rgba(99,102,241,.04)' : 'transparent',
+                cursor:'pointer',
+                display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap',
+                userSelect:'none',fontSize:'13px'
+              },
+              onclick: ()=> { App._subExpandedAsgCls[clsKey] = !clsExpanded; renderList(); }
+            });
+            clsHeader.appendChild(el('span', { style:{
+              fontSize:'11px',color:'var(--text-muted)',display:'inline-block',width:'12px',
+              transform: clsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s'
+            } }, '▼'));
+            clsHeader.appendChild(el('span', { style:{fontWeight:'700'} }, '🏫 ' + cls));
+            clsHeader.appendChild(el('span', { class:'small muted' },
+              submittedInCls.size + ' / ' + stusInCls.length + ' 已繳' +
+              (gradedInCls ? ' · 🟢 已批 ' + gradedInCls : '') +
+              (returnedInCls ? ' · ↩ 退回 ' + returnedInCls : '')));
+            clsBlock.appendChild(clsHeader);
+
+            if(clsExpanded){
+              // 共用:依 studentId 查找這個班的繳交
+              const subMap = new Map(subsInCls.map(x => [x.sub.studentId, x]));
+              if(isMatrixMode){
+                // ── 矩陣模式 ──
+                const mWrap = el('div', { style:{padding:'10px 18px 14px'} });
+                const grid = el('div', { style:{
+                  display:'grid',
+                  gridTemplateColumns:'repeat(auto-fill, minmax(130px, 1fr))',
+                  gap:'6px'
+                }});
+                stusInCls.forEach(s => {
+                  const item = subMap.get(s.id);
+                  const submitted = !!item;
+                  const isReturned = submitted && item.sub.returned;
+                  let chipBg, chipBorder, badgeBg, checkColor, statusEmoji;
+                  if(isReturned){ chipBg='var(--warn-soft)'; chipBorder='var(--warn)'; badgeBg='var(--warn)'; checkColor='var(--warn)'; statusEmoji='↩'; }
+                  else if(submitted){ chipBg='var(--success-soft)'; chipBorder='var(--success)'; badgeBg='var(--success)'; checkColor='var(--success)'; statusEmoji='✓'; }
+                  else { chipBg='#fff'; chipBorder='var(--danger)'; badgeBg='var(--danger)'; checkColor=''; statusEmoji=''; }
+                  const chip = el('div', {
+                    style:{
+                      background: chipBg, border:'1px solid '+chipBorder, borderRadius:'6px',
+                      padding:'6px 10px', fontSize:'13px', color:'#1f2937',
+                      display:'flex', alignItems:'center', gap:'6px',
+                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                      cursor: submitted ? 'pointer' : 'default'
+                    },
+                    title: isReturned ? '已退回給學生重做 - 點此批改' : (submitted ? '點此批改' : '尚未繳交'),
+                    onclick: submitted ? (()=> { try { openSubmissionGrade(item.sub, list, item.origIdx); } catch(e){_swallow('mtx',e)} }) : null
+                  });
+                  chip.appendChild(el('span', { style:{
+                    background: badgeBg, color:'#fff', fontWeight:'700', fontSize:'11px',
+                    padding:'2px 6px', borderRadius:'4px', flexShrink:'0', minWidth:'24px', textAlign:'center'
+                  }}, (s.seat != null && s.seat !== '') ? String(s.seat) : '?'));
+                  chip.appendChild(el('span', { style:{fontWeight:'500',overflow:'hidden',textOverflow:'ellipsis'} }, s.name || '?'));
+                  if(statusEmoji) chip.appendChild(el('span', { style:{marginLeft:'auto',color:checkColor,fontWeight:'700',fontSize:'12px'} }, statusEmoji));
+                  grid.appendChild(chip);
+                });
+                mWrap.appendChild(grid);
+                clsBlock.appendChild(mWrap);
+              } else {
+                // ── 條列模式 (緊湊表格,對齊簽到明細風格) ──
+                const tWrap = el('div', { style:{padding:'0 0 10px',overflowX:'auto'} });
+                const tbl = el('table', { class:'rep-table', style:{width:'100%'} });
+                const th = el('thead');
+                th.appendChild(el('tr', null,
+                  el('th', { style:{width:'56px',textAlign:'center'} }, '座號'),
+                  el('th', null, '姓名'),
+                  el('th', { style:{width:'130px'} }, '繳交時間'),
+                  el('th', { style:{width:'60px',textAlign:'center'} }, '附件'),
+                  el('th', { style:{width:'80px'} }, '狀態'),
+                  el('th', { style:{width:'120px',textAlign:'right'} }, '')
+                ));
+                tbl.appendChild(th);
+                const tb = el('tbody');
+                tbl.appendChild(tb);
+
+                // 已繳交的依座號排序
+                const submittedSorted = stusInCls
+                  .filter(s => submittedInCls.has(s.id))
+                  .sort((a,b) => (a.seat||999) - (b.seat||999));
+                submittedSorted.forEach(s => {
+                  const item = subMap.get(s.id);
+                  if(!item) return;
+                  const sub = item.sub;
+                  const isReturned = !!sub.returned;
+                  const isGraded = !isReturned && typeof sub.score === 'number';
+                  // 時間
+                  let tStr = '—';
+                  if(sub.ts){ try { const d=new Date(sub.ts); tStr = (d.getMonth()+1)+'/'+d.getDate()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); } catch(_){} }
+                  // 附件數
+                  const attCount = (Array.isArray(sub.attaches) ? sub.attaches.length : 0) || (sub.attach ? 1 : 0);
+                  // 狀態
+                  let stTxt, stColor;
+                  if(isReturned){ stTxt='↩ 退回'; stColor='var(--warn)'; }
+                  else if(isGraded){ stTxt='🟢 ' + sub.score + '/' + asgPoints; stColor='var(--success)'; }
+                  else { stTxt='🔵 待批'; stColor='var(--primary)'; }
+                  const rowBg = isReturned ? 'rgba(245,158,11,.05)' : (isGraded ? 'rgba(16,185,129,.04)' : '');
+                  tb.appendChild(el('tr', { style: rowBg ? {background: rowBg} : null },
+                    el('td', { class:'mono', style:{textAlign:'center',fontWeight:'700',color:'var(--text-muted)'} },
+                      (s.seat != null && s.seat !== '') ? String(s.seat) : '—'),
+                    el('td', null, el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'none'},
+                      onclick: ()=> { App._spId = s.id; go('studentprofile'); }
+                    }, s.name || '')),
+                    el('td', { class:'mono', style:{fontSize:'12px'} }, tStr),
+                    el('td', { style:{textAlign:'center'} }, attCount ? ('📎 ' + attCount) : (sub.link ? '🔗' : '—')),
+                    el('td', { style:{color:stColor,fontWeight:'600',fontSize:'12px'} }, stTxt),
+                    el('td', { style:{textAlign:'right'} },
+                      el('button', {
+                        class:'btn btn-sm btn-primary',
+                        title:'批改 / 退回 / 刪除',
+                        onclick:()=> { try { openSubmissionGrade(sub, list, item.origIdx); } catch(e){_swallow('list-grade',e)} }
+                      }, '✏️'))
+                  ));
+                });
+
+                if(!submittedSorted.length){
+                  tb.appendChild(el('tr', null, el('td', { colspan:'6', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)',fontSize:'13px'} },
+                    '📭 此班尚無學生繳交此作業 — 切「📊 矩陣」可查看誰沒交')));
+                } else if(submittedInCls.size < stusInCls.length){
+                  // 提示還有多少人沒交
+                  tb.appendChild(el('tr', null, el('td', { colspan:'6', style:{textAlign:'center',padding:'8px',color:'var(--text-muted)',fontSize:'12px',background:'var(--surface-2)'} },
+                    '🔴 還有 ' + (stusInCls.length - submittedInCls.size) + ' 位未繳 — 切「📊 矩陣」可查看名單')));
+                }
+
+                tWrap.appendChild(tbl);
+                clsBlock.appendChild(tWrap);
+              }
+            }
+            asgCard.appendChild(clsBlock);
+          });
+        }
+      }
+      listWrap.appendChild(asgCard);
+    });
+
+    // 舊版迴圈不再執行 — 用 return 跳過下面舊 code
+    return;
+  }
+  // ↓ 舊版「班級為外、作業為內」迴圈 (留作備份,實際永遠不執行)
+  function _legacyClassFirstRenderer(grouped, classes){
     classes.forEach(cls => {
       const items = grouped[cls];
       // 這個班級裡所有學生 (用來算未繳)
