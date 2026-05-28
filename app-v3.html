@@ -8565,8 +8565,8 @@ async function _emailLoginModal(title, role){
       '<div style="display:flex;gap:8px">' +
       '<button id="__el_cancel" style="flex:1;padding:11px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#555;cursor:pointer;font-size:14px">取消</button>' +
       '<button id="__el_ok" style="flex:2;padding:11px;border-radius:8px;border:0;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px">登入</button>' +
-      '</div>' +
-      '<div id="__el_hint" style="font-size:11px;color:#888;text-align:center;margin-top:12px;line-height:1.5">沒有帳號?請先到登入畫面點「申請註冊」</div>';
+      '</div>';
+      // (移除底部提示文字 — 用戶要求 modal 完全純粹只剩登入,不要任何註冊相關字眼)
     overlay.appendChild(card);
     document.body.appendChild(overlay);
     var iEmail = card.querySelector('#__el_email');
