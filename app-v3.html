@@ -12274,53 +12274,84 @@ function rOv(content){
       card.appendChild(header);
 
       if(isExpanded){
-        const body = el('div', { style:{padding:'14px 16px'} });
-        const sgrid = el('div', { class:'stu-grid list-mode' });
+        // 改成真正的表格條列式 (跟上面「今日簽到/簽退明細」同款) — 用戶要求
+        const body = el('div', { style:{padding:'0', overflowX:'auto'} });
+        const tbl = el('table', { class:'rep-table cls-roster-tbl', style:{width:'100%', borderCollapse:'collapse'} });
+        const thead = el('thead');
+        thead.appendChild(el('tr', null,
+          el('th', { style:{width:'56px',textAlign:'center'} }, '座號'),
+          el('th', null, '姓名'),
+          el('th', { style:{width:'110px'} }, '學號'),
+          el('th', { style:{width:'100px',textAlign:'center'} }, '狀態'),
+          el('th', { style:{width:'100px',textAlign:'center'} }, '簽到'),
+          el('th', { style:{width:'100px',textAlign:'center'} }, '簽退'),
+          el('th', { style:{width:'160px',textAlign:'right'} }, '動作')
+        ));
+        tbl.appendChild(thead);
+        const tbody = el('tbody');
         stuInCls.forEach(s => {
-          // batch 2-stab: 用預先 build 的 map（同上）
           const att = _todayMaps.signedMap.get(s.id);
           const leave = _todayMaps.leaveMap.get(s.id);
-          let scls = 'stu-card';
-          if(leave) scls += ' leave';
-          else if(att) scls += ' signed';
-          else scls += ' absent';
-          const c = el('div', { class: scls });
-          c.appendChild(el('div', { class:'name' }, s.name + (s.seat ? ` (${s.seat})` : '')));
-          c.appendChild(el('div', { class:'meta' }, '學號 ' + (s.sid || '—')));
+          // 決定狀態 + 顏色
+          let stTxt, stColor, stBg, rowBg;
           if(leave){
-            c.appendChild(el('div', { class:'small' }, '📆 ' + (leave.reason || '請假中')));
+            stTxt = '📆 請假'; stColor = 'var(--accent)'; stBg = 'var(--accent-soft)'; rowBg = 'transparent';
           } else if(att){
-            // 簽到 + 簽退 一起顯示
-            c.appendChild(el('div', { class:'small mono', style:{color:'var(--success)',fontWeight:'700'} }, '✅ 簽到 ' + att.time));
-            if(att.outTime){
-              // 計算上課時長
-              let durTxt = '';
-              try {
-                const [h1,m1] = (att.time||'').split(':').map(Number);
-                const [h2,m2] = (att.outTime||'').split(':').map(Number);
-                if(!isNaN(h1) && !isNaN(h2)){
-                  const min = (h2*60+m2)-(h1*60+m1);
-                  if(min > 0){
-                    const hr = Math.floor(min/60);
-                    const mn = min%60;
-                    durTxt = ' (' + (hr?hr+'h':'') + (mn?mn+'m':'') + ')';
-                  }
-                }
-              } catch(e){_swallow('auto',e)}
-              c.appendChild(el('div', { class:'small mono', style:{color:'var(--accent)',fontWeight:'700',marginTop:'2px'} },
-                '👋 簽退 ' + att.outTime + durTxt));
+            if(att.status === 'late'){
+              stTxt = '🟡 遲到'; stColor = 'var(--warn)'; stBg = 'var(--warn-soft)'; rowBg = 'transparent';
             } else {
-              c.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '尚未簽退'));
+              stTxt = '✅ 簽到'; stColor = 'var(--success)'; stBg = 'var(--success-soft)'; rowBg = 'transparent';
             }
           } else {
-            const acts = el('div', { class:'actions' });
-            acts.appendChild(el('button', { class:'btn btn-sm btn-success', onclick:()=> markPresent(s.id) }, '✓ 補簽'));
-            acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假'));
-            c.appendChild(acts);
+            stTxt = '❌ 未到'; stColor = 'var(--danger)'; stBg = 'var(--danger-soft)'; rowBg = 'transparent';
           }
-          sgrid.appendChild(c);
+          // 簽退時長
+          let outDisplay = att && att.outTime ? att.outTime : '—';
+          if(att && att.outTime && att.time){
+            try {
+              const [h1,m1] = att.time.split(':').map(Number);
+              const [h2,m2] = att.outTime.split(':').map(Number);
+              const min = (h2*60+m2)-(h1*60+m1);
+              if(min > 0){
+                const hr = Math.floor(min/60), mn = min%60;
+                outDisplay = att.outTime + ' (' + (hr?hr+'h':'') + (mn?mn+'m':'') + ')';
+              }
+            } catch(_){}
+          }
+          // 動作:未到 → 補簽 + 請假按鈕;其他 → —
+          let actionsCell;
+          if(!att && !leave){
+            actionsCell = el('td', { style:{textAlign:'right',padding:'6px 8px'} },
+              el('button', { class:'btn btn-sm btn-success', style:{marginRight:'4px'}, onclick:()=> markPresent(s.id) }, '✓ 補簽'),
+              el('button', { class:'btn btn-sm', onclick:()=> openLeaveDialog(s.id) }, '請假')
+            );
+          } else if(leave){
+            actionsCell = el('td', { class:'small muted', style:{textAlign:'right'} }, leave.reason || '請假中');
+          } else if(att && !att.outTime){
+            actionsCell = el('td', { style:{textAlign:'right',padding:'6px 8px'} },
+              el('span', { class:'small', style:{color:'var(--text-muted)'} }, '上課中')
+            );
+          } else {
+            actionsCell = el('td', { class:'small muted', style:{textAlign:'right'} }, '—');
+          }
+          const tr = el('tr', { class:'cls-roster-row',
+            style:{borderLeft:'4px solid ' + stColor, background: rowBg, transition:'background .15s'} },
+            el('td', { class:'mono', style:{textAlign:'center',fontWeight:'700',color:'var(--text-muted)'} }, s.seat || '—'),
+            el('td', { style:{fontWeight:'600'} }, s.name || '?'),
+            el('td', { class:'mono small muted' }, s.sid || '—'),
+            el('td', { style:{textAlign:'center'} },
+              el('span', { class:'pill', style:{background:stBg, color:stColor, fontWeight:'700', fontSize:'11px', padding:'3px 8px', borderRadius:'10px'} }, stTxt)
+            ),
+            el('td', { class:'mono small', style:{textAlign:'center', color: att ? 'var(--text)' : 'var(--text-muted)'} },
+              att ? att.time : '—'),
+            el('td', { class:'mono small', style:{textAlign:'center', color: (att && att.outTime) ? 'var(--accent)' : 'var(--text-muted)', fontWeight: (att && att.outTime) ? '600' : 'normal'} },
+              outDisplay),
+            actionsCell
+          );
+          tbody.appendChild(tr);
         });
-        body.appendChild(sgrid);
+        tbl.appendChild(tbody);
+        body.appendChild(tbl);
         card.appendChild(body);
       }
 
