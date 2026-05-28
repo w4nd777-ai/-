@@ -5392,11 +5392,15 @@ const Sync = (() => {
       App._syncRerTimer = null;
       App._syncBurstCount = 0;
       try {
-        // 🔧 若使用者正在輸入 → 延後 1.2 秒
+        // 🔧 若使用者正在輸入 → 延後 1.2 秒 (用獨立 _syncTypingTimer 避免覆寫 _syncRerTimer 導致 timer leak)
         const a = document.activeElement;
         const isTyping = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
         if(isTyping){
-          App._syncRerTimer = setTimeout(()=> { App._syncRerTimer = null; _scheduleRerender(); }, 1200);
+          if(App._syncTypingTimer){ clearTimeout(App._syncTypingTimer); }
+          App._syncTypingTimer = setTimeout(()=> {
+            App._syncTypingTimer = null;
+            _scheduleRerender();
+          }, 1200);
           return;
         }
         // 登入畫面 — 大多數時候跳過 (避免閃)
@@ -6511,40 +6515,59 @@ async function _compressAvatarUnder1MB(file){
   const img = await new Promise((res, rej) => {
     const i = new Image();
     i.onload = ()=> res(i);
-    i.onerror = ()=> rej(new Error('圖片無法讀取(可能是 HEIC)'));
+    i.onerror = ()=> rej(new Error('圖片無法讀取(可能是 HEIC 或不支援的格式)'));
     i.src = dataUri;
   });
-  // 2) 嘗試組合:[size, quality] 由高到低,第一個壓出來 < 1 MB 的就用
+  // 2) 巨圖防呆:若原圖超過 2048 邊,先縮到 2048 working canvas 釋放記憶體
+  let workImg = img;
+  if(img.naturalWidth > 2048 || img.naturalHeight > 2048){
+    const wc = document.createElement('canvas');
+    const wcRatio = Math.min(2048/img.naturalWidth, 2048/img.naturalHeight);
+    wc.width = Math.round(img.naturalWidth * wcRatio);
+    wc.height = Math.round(img.naturalHeight * wcRatio);
+    const wctx = wc.getContext('2d');
+    wctx.imageSmoothingEnabled = true;
+    wctx.imageSmoothingQuality = 'high';
+    wctx.drawImage(img, 0, 0, wc.width, wc.height);
+    workImg = { naturalWidth: wc.width, naturalHeight: wc.height, _canvas: wc };
+  }
+  // 3) 嘗試組合:[size, quality] 由高到低,第一個 < 1 MB 的就用
   const attempts = [
     [1024, 0.92], [1024, 0.85], [1024, 0.75],
     [1024, 0.65], [1024, 0.55],
     [768, 0.85],  [768, 0.75],
     [512, 0.85],  [512, 0.75]
   ];
-  for(const [size, q] of attempts){
+  function drawAt(targetSize, q){
     const canvas = document.createElement('canvas');
-    canvas.width = size; canvas.height = size;
+    // 小圖防止強制 upscale:輸出尺寸取 min(targetSize, 原圖較長邊)
+    const naturalMax = Math.max(workImg.naturalWidth, workImg.naturalHeight);
+    const outSize = Math.min(targetSize, naturalMax);
+    canvas.width = outSize; canvas.height = outSize;
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    const ratio = Math.max(size/img.naturalWidth, size/img.naturalHeight);
-    const w = img.naturalWidth * ratio, h = img.naturalHeight * ratio;
-    ctx.drawImage(img, (size-w)/2, (size-h)/2, w, h);
+    const ratio = Math.max(outSize/workImg.naturalWidth, outSize/workImg.naturalHeight);
+    const w = workImg.naturalWidth * ratio, h = workImg.naturalHeight * ratio;
+    const src = workImg._canvas || img;
+    ctx.drawImage(src, (outSize-w)/2, (outSize-h)/2, w, h);
     const dataUrl = canvas.toDataURL('image/jpeg', q);
+    // 釋放 canvas
+    canvas.width = canvas.height = 0;
+    return { dataUrl, outSize };
+  }
+  for(const [size, q] of attempts){
+    const { dataUrl, outSize } = drawAt(size, q);
     if(dataUrl.length <= TARGET_SIZE){
-      return { dataUrl, size, quality: q };
+      return { dataUrl, size: outSize, quality: q };
     }
   }
-  // 極端情況:全失敗 → 用最低設定的結果
-  const canvas = document.createElement('canvas');
-  canvas.width = 400; canvas.height = 400;
-  const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  const ratio = Math.max(400/img.naturalWidth, 400/img.naturalHeight);
-  const w = img.naturalWidth * ratio, h = img.naturalHeight * ratio;
-  ctx.drawImage(img, (400-w)/2, (400-h)/2, w, h);
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.7), size: 400, quality: 0.7 };
+  // 極端情況:全失敗 → 400x400 q0.5 再不行就 throw
+  const fallback = drawAt(400, 0.5);
+  if(fallback.dataUrl.length > TARGET_SIZE){
+    throw new Error('此圖片無法壓縮到 1 MB 以下,請換張較簡單的照片');
+  }
+  return { dataUrl: fallback.dataUrl, size: fallback.outSize, quality: 0.5 };
 }
 
 async function _compressImageIfNeeded(file){
@@ -9225,8 +9248,19 @@ function renderLoginTeacherStage(){
       try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
       return;
     }
+    // 安全:擋下「email:xxx」格式 — 這是 Email 登入專用的 username,沒密碼欄,
+    // 若用一般帳密表單輸入會跑到密碼自動升級分支造成認證旁路
+    if(u.startsWith('email:') || u.startsWith('google:')){
+      toast('此帳號為 Email/Google 登入,請改用「使用 Email 登入」按鈕','warning', 5000);
+      return;
+    }
     // username 不分大小寫比對
     const candidate = App.db.accounts.find(x => String(x.username||'').toLowerCase() === u);
+    // 再次安全擋下:即便比對到,若帳號是 email: 或沒 password (新審核老師),擋下不讓 attemptLogin 處理
+    if(candidate && (!candidate.password || String(candidate.username||'').startsWith('email:') || String(candidate.username||'').startsWith('google:'))){
+      toast('此帳號為 Email/Google 登入,請改用「使用 Email 登入」按鈕','warning', 5000);
+      return;
+    }
     if(!candidate){
       // L1: 帳號不存在也計入鎖定（避免暴力枚舉帳號）
       const l = incForgotLock(u);
@@ -12191,8 +12225,11 @@ function rOv(content){
           if(a.outTime) signedOut++;
           });  // groupItems.forEach
         });  // byClass forEach
-        const total = todayAtt.length;
-        const totalSignedOut = todayAtt.filter(a=>a.outTime).length;
+        // 修:用「人數」(去重 studentId) 而非「筆數」,避免重複簽到誤算
+        const totalStuIds = new Set(todayAtt.map(a => a.studentId));
+        const total = totalStuIds.size;
+        const signedOutStuIds = new Set(todayAtt.filter(a => a.outTime).map(a => a.studentId));
+        const totalSignedOut = signedOutStuIds.size;
         const stillIn = total - totalSignedOut;
         summary.innerHTML = '';
         summary.appendChild(el('span', null, '今日已簽到 ' + total + ' 人 · 上課中 ' + stillIn + ' · 已簽退 ' + totalSignedOut));
@@ -12200,6 +12237,7 @@ function rOv(content){
           summary.appendChild(el('span', { style:{marginLeft:'8px',color:'var(--primary)'} }, '· 篩選後顯示 ' + shown + ' 筆'));
         }
         if(shown === 0){
+          tb.innerHTML = '';  // 清掉殘留的班級 header
           tb.appendChild(el('tr', null, el('td', { colspan:'7', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)'} }, '🔍 沒有符合條件的紀錄')));
         }
       }
@@ -16109,11 +16147,12 @@ function renderUploadLimitCard(){
     const attachMB = parseInt(iAttach.value, 10);
     const inlineMB = parseInt(iInline.value, 10);
     if(!(attachMB > 0) || attachMB > 1024){
-      toast('作業附件上限請填 1-1024 之間','warn'); return;
+      toast('作業附件上限請填 1-1024 之間','warning'); return;
     }
     if(!(inlineMB > 0) || inlineMB > 10){
-      toast('內嵌圖片上限請填 1-10 之間','warn'); return;
+      toast('內嵌圖片上限請填 1-10 之間','warning'); return;
     }
+    App.db.settings = App.db.settings || {};  // 防 null/undefined
     App.db.settings.upload = {
       attachMaxMB: attachMB,
       inlineMaxMB: inlineMB,
@@ -16125,10 +16164,12 @@ function renderUploadLimitCard(){
     toast('已儲存上傳限制 (作業 ' + attachMB + ' MB / 內嵌 ' + inlineMB + ' MB)','success');
   }}, '💾 儲存上傳限制'));
 
-  // 還原預設按鈕
-  card.appendChild(el('button', { class:'btn btn-ghost', style:{marginTop:'8px',marginLeft:'8px'}, onclick:()=> {
+  // 還原預設按鈕 — 用 confirmDlg (async) 取代原生 confirm (手機 PWA 有時被擋)
+  card.appendChild(el('button', { class:'btn btn-ghost', style:{marginTop:'8px',marginLeft:'8px'}, onclick: async ()=> {
     if(!requirePerm('canEditSettings','編輯設定')) return;
-    if(!confirm('確定還原預設?\n• 作業附件: ' + DEFAULT_ATTACH_MAX_MB + ' MB\n• 內嵌圖片: ' + DEFAULT_FILE_LIMIT_MB + ' MB\n• 副檔名: 全部允許')) return;
+    const ok = await confirmDlg('確定還原預設?\n• 作業附件: ' + DEFAULT_ATTACH_MAX_MB + ' MB\n• 內嵌圖片: ' + DEFAULT_FILE_LIMIT_MB + ' MB\n• 副檔名: 全部允許', { title:'還原預設' });
+    if(!ok) return;
+    App.db.settings = App.db.settings || {};
     delete App.db.settings.upload;
     saveDB();
     try { Sync.setNode('settings', App.db.settings); } catch(_){}
@@ -17367,7 +17408,9 @@ function rMe(content){
   cardAv.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} }, '上傳自己的照片當作頭像'));
   const avFile = el('input', { type:'file', accept:'image/*' });
   avFile.addEventListener('change', async e => {
-    const f = e.target.files[0]; if(!f) return;
+    const f = e.target.files[0];
+    e.target.value = '';  // 修:重選同檔失效
+    if(!f) return;
     if(f.size > 20*1024*1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
       const result = await _compressAvatarUnder1MB(f);
@@ -17581,7 +17624,9 @@ function openStudentSelfEdit(){
   avBox.appendChild(avInitials);
   const avFile = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
   avFile.addEventListener('change', async e => {
-    const f = e.target.files[0]; if(!f) return;
+    const f = e.target.files[0];
+    e.target.value = '';  // 修:重選同檔失效
+    if(!f) return;
     if(f.size > 20 * 1024 * 1024){ return toast('圖片不可超過 20MB','danger'); }
     try {
       const result = await _compressAvatarUnder1MB(f);
@@ -18374,11 +18419,16 @@ function rSub(content){
             // 作業已被刪除:不再隱形,顯示提示讓老師知道有遺留繳交
             const asgDeleted = !asg;
             const asgTitle = asg ? (asg.title || '(無標題作業)') : '(作業已刪除)';
-            const asgDue = asg ? asg.due : null;
+            // 修:讀 dueAt (作業實際存的欄位),不是 due
+            const asgDue = asg ? (asg.dueAt || asg.due) : null;
             const submittedStuIds = new Set(subs.map(x => x.sub.studentId));
-            const missingStu = stuInCls.filter(s => !submittedStuIds.has(s.id));
+            // 修 Critical bug 3-A:用 assignmentTargets 篩出真正被指派的學生
+            const targets = asg ? (assignmentTargets(asg) || new Set()) : new Set();
+            const expectedStu = stuInCls.filter(s => targets.has(s.id) || targets.size === 0);  // targets 空 → 全班 (向後兼容)
+            const missingStu = expectedStu.filter(s => !submittedStuIds.has(s.id));
+            const expectedCount = expectedStu.length || stuInCls.length;
             const submittedCount = submittedStuIds.size;
-            const asgRate = peopleCount ? Math.round(submittedCount / peopleCount * 100) : 0;
+            const asgRate = expectedCount ? Math.round(submittedCount / expectedCount * 100) : 0;
             const asgRateColor = asgRate >= 80 ? 'var(--success)' : asgRate >= 50 ? 'var(--warn)' : 'var(--danger)';
             const asgKey = cls + '|' + aid;
             const asgExpanded = App._subExpandedAsg[asgKey] !== false;  // 預設展開
@@ -18404,7 +18454,7 @@ function rSub(content){
             if(asgDue) asgHeader.appendChild(el('span', { class:'small muted' }, '期限 ' + asgDue));
             asgHeader.appendChild(el('div', { class:'flex', style:{gap:'6px',marginLeft:'auto',alignItems:'center',flexWrap:'wrap'} },
               el('span', { class:'pill', style:{background:'var(--success-soft)',color:'var(--success)',fontSize:'10px',fontWeight:'700'} },
-                '已繳 ' + submittedCount + '/' + peopleCount),
+                '已繳 ' + submittedCount + '/' + expectedCount),
               missingStu.length ? el('span', { class:'pill', style:{background:'var(--danger-soft)',color:'var(--danger)',fontSize:'10px',fontWeight:'700'} },
                 '未繳 ' + missingStu.length) : null,
               el('span', { style:{fontWeight:'700',fontSize:'13px',color:asgRateColor} }, asgRate + '%')
