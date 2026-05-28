@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-28-placeholder';
+const APP_BUILD = '2026-05-29-google-only';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8881,8 +8881,14 @@ async function _googleSignInTeacher(ev){
     try { toast('Firebase 未載入，請重新整理頁面', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
+  // 🔧 確保 Firebase app 已 init
+  if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
+    try { toast('Firebase 初始化失敗,請重新整理', 'danger', 5000); } catch(_){}
+    return;
+  }
   const btn = (ev && ev.currentTarget) || null;
-  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = '導向 Google 登入...'; }
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
+  try { toast('🔐 開啟 Google 登入視窗...', 'info', 3000); } catch(_){}
   try {
     // 🔧 改用 redirect 模式為主 (不再用 popup) — 更穩定，不被 Chrome popup blocker 擋
     try { sessionStorage.setItem('_google_pending_role', 'teacher'); } catch(_){}
@@ -9338,8 +9344,14 @@ async function _googleSignInStudent(ev){
     try { toast('Firebase 未載入，請重新整理頁面', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
+  // 🔧 確保 Firebase app 已 init
+  if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
+    try { toast('Firebase 初始化失敗,請重新整理', 'danger', 5000); } catch(_){}
+    return;
+  }
   const btn = (ev && ev.currentTarget) || null;
-  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; btn.textContent = '導向 Google 登入...'; }
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.6'; }
+  try { toast('🔐 開啟 Google 登入視窗...', 'info', 3000); } catch(_){}
   try {
     // 🔧 改用 redirect 模式為主 (不再用 popup) — 更穩定不被擋
     try { sessionStorage.setItem('_google_pending_role', 'student'); } catch(_){}
@@ -26329,23 +26341,33 @@ function boot(){
           return;
         }
         // ═════════════════════════════════════════════════════════════
-        // ★ 安全修補:不再「預設走老師」(會讓任何 Google 用戶變老師)
-        //   改成:先查雲端到底是 google_students (學生綁定) 還是 google_users (老師綁定),
-        //   再決定路由。兩邊都沒綁就拒絕登入,不會自動建老師帳號。
+        // ★ 安全修補:先查雲端綁定狀態決定路由
+        //   M6 修:加 timeout + 失敗時信任 role + 顯示處理中 toast 不讓用戶以為按了沒反應
         // ═════════════════════════════════════════════════════════════
-        // 注意:不能用 const u — 上面 student_bind 分支用了 var u (function-scoped 衝突)
+        try { toast('🔐 處理 Google 登入中...', 'info', 4000); } catch(_){}
         const gUser = result.user;
         const gEmailKey = String(gUser.email||'').replace(/[.@]/g, '_').toLowerCase();
         const gRc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+        console.log('[google-redirect] user:', gUser.email, 'role:', role, 'room:', gRc);
+
+        // 並行查兩個綁定,各 8 秒 timeout (Firebase 慢的話不會卡死)
+        const _withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
         let isStudentBound = false, isTeacherBound = false;
         try {
-          const stuSnap = await firebase.database().ref('cms-v3/' + gRc + '/google_students/' + gEmailKey).once('value');
-          isStudentBound = stuSnap.exists() && stuSnap.val();
+          const stuSnap = await _withTimeout(
+            firebase.database().ref('cms-v3/' + gRc + '/google_students/' + gEmailKey).once('value'),
+            8000
+          );
+          isStudentBound = !!(stuSnap && stuSnap.exists && stuSnap.exists() && stuSnap.val());
         } catch(e){ console.warn('[google-route] check students:', e); }
         try {
-          const teaSnap = await firebase.database().ref('cms-v3/google_users/' + gEmailKey).once('value');
-          isTeacherBound = teaSnap.exists() && teaSnap.val();
+          const teaSnap = await _withTimeout(
+            firebase.database().ref('cms-v3/google_users/' + gEmailKey).once('value'),
+            8000
+          );
+          isTeacherBound = !!(teaSnap && teaSnap.exists && teaSnap.exists() && teaSnap.val());
         } catch(e){ console.warn('[google-route] check users:', e); }
+        console.log('[google-redirect] bindings:', { student: isStudentBound, teacher: isTeacherBound });
 
         if(isStudentBound && !isTeacherBound){
           // 雲端只有學生綁定 → 學生路徑
@@ -26361,15 +26383,13 @@ function boot(){
             if(typeof _handleGoogleAuthStudent === 'function') _handleGoogleAuthStudent(gUser);
           }
         } else {
-          // 兩邊都沒綁 → 依 role 走 (但不會自動建立老師帳號,見下面 _handleGoogleAuthResult 修補)
-          if(role === 'student' && typeof _handleGoogleAuthStudent === 'function'){
-            _handleGoogleAuthStudent(gUser);
-          } else if(role === 'teacher' && typeof _handleGoogleAuthResult === 'function'){
-            _handleGoogleAuthResult(gUser);
+          // 兩邊都沒查到 — 可能是 Firebase 連線沒準備好 (race), 也可能真的沒綁
+          // ★ 不再 signOut 退出 — 信任 role + 讓 handler 自己處理 (學生 handler 會跳「綁學號」UI)
+          if(role === 'teacher' && typeof _handleGoogleAuthResult === 'function'){
+            _handleGoogleAuthResult(gUser);  // 老師 handler 會拒絕並提示綁定
           } else {
-            // 沒指定 role 又雲端無紀錄 → 拒絕,提示用戶
-            try { toast('此 Google 帳號尚未綁定任何身份。請從學生 / 老師 tab 明確點「用 Google 登入」', 'danger', 8000); } catch(_){}
-            try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
+            // 預設走學生 (學生 handler 友善:沒綁會跳「綁學號」UI,不會直接拒絕)
+            if(typeof _handleGoogleAuthStudent === 'function') _handleGoogleAuthStudent(gUser);
           }
         }
       }).catch(function(e){
