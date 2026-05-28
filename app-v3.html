@@ -12162,12 +12162,13 @@ function rOv(content){
       const th = el('thead');
       th.appendChild(el('tr', null,
         el('th', { style:{width:'40px'} }, ''),
+        el('th', { style:{width:'56px',textAlign:'center'} }, '座號'),
         el('th', null, '姓名'),
-        el('th', null, '班級'),
-        el('th', null, '簽到時間'),
-        el('th', null, '簽退時間'),
-        el('th', null, '時長'),
-        el('th', null, '狀態')
+        el('th', { style:{width:'80px'} }, '班級'),
+        el('th', { style:{width:'90px'} }, '簽到時間'),
+        el('th', { style:{width:'90px'} }, '簽退時間'),
+        el('th', { style:{width:'70px'} }, '時長'),
+        el('th', { style:{width:'90px'} }, '狀態')
       ));
       tbl.appendChild(th);
       const tb = el('tbody');
@@ -12209,6 +12210,13 @@ function rOv(content){
 
         // 依班級排序渲染:每個班級先一個 header row (跨欄),再該班的學生 rows
         Object.keys(byClass).sort().forEach(cls => {
+          // 同班內依座號排序 (用戶要求座號顯示後,順序更整齊)
+          byClass[cls].sort((A, B) => {
+            const seatA = (A.s.seat != null && A.s.seat !== '') ? Number(A.s.seat) : 999;
+            const seatB = (B.s.seat != null && B.s.seat !== '') ? Number(B.s.seat) : 999;
+            if(seatA !== seatB) return seatA - seatB;
+            return (A.a.time||'').localeCompare(B.a.time||'');
+          });
           const groupItems = byClass[cls];
           const grpIn = groupItems.filter(x => !x.a.outTime).length;
           const grpOut = groupItems.filter(x => x.a.outTime).length;
@@ -12216,7 +12224,7 @@ function rOv(content){
           const isExpanded = App._ovAttExpandedCls[cls] !== false;
           const headerTr = el('tr');
           const headerTd = el('td', {
-            colspan:'7',
+            colspan:'8',
             style:{padding:'10px 12px',background:'var(--surface-2)',borderTop:'2px solid var(--primary)',fontWeight:'700',fontSize:'13px',cursor:'pointer',userSelect:'none'},
             title:isExpanded ? '點此收合班級' : '點此展開班級',
             onclick:()=> { App._ovAttExpandedCls[cls] = !isExpanded; renderRows(); }
@@ -12265,6 +12273,9 @@ function rOv(content){
           }
           tb.appendChild(el('tr', null,
             avCell,
+            // 座號 cell (用戶要求顯示)
+            el('td', { class:'mono', style:{textAlign:'center',fontWeight:'700',color:'var(--text-muted)'} },
+              (s.seat != null && s.seat !== '') ? String(s.seat) : '—'),
             el('td', null, el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'none'}, onclick: ()=> { App._spId = s.id; go('studentprofile'); }}, s.name || '')),
             el('td', null, s.cls || ''),
             el('td', { class:'mono' }, a.time || '—'),
@@ -12290,7 +12301,7 @@ function rOv(content){
         }
         if(shown === 0){
           tb.innerHTML = '';  // 清掉殘留的班級 header
-          tb.appendChild(el('tr', null, el('td', { colspan:'7', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)'} }, '🔍 沒有符合條件的紀錄')));
+          tb.appendChild(el('tr', null, el('td', { colspan:'8', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)'} }, '🔍 沒有符合條件的紀錄')));
         }
       }
       searchInp.addEventListener('input', renderRows);
