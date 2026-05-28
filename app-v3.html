@@ -6648,9 +6648,15 @@ async function attachUpload(file){
 
   // ★ 優先 Firebase Storage (跨裝置 + 共用同一專案 5GB 免費)
   //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 5 秒 timeout fallback
-  // 從 localStorage 還原「Firebase Storage 已停用」狀態 (避免每次 reload 都重新試 5 秒)
+  // 從 localStorage 還原「Firebase Storage 已停用」狀態 (避免每次 reload 都重新試)
+  // 但 24 小時自動過期重試,讓用戶啟用 Storage 後不用手動清
   if(App._fbStorageDisabled === undefined){
-    try { App._fbStorageDisabled = localStorage.getItem('cms_v3_fb_storage_disabled') === '1'; } catch(_){}
+    try {
+      const disabledAt = parseInt(localStorage.getItem('cms_v3_fb_storage_disabled_at') || '0', 10);
+      const stillFresh = disabledAt && (Date.now() - disabledAt < 24 * 3600 * 1000);
+      App._fbStorageDisabled = localStorage.getItem('cms_v3_fb_storage_disabled') === '1' && stillFresh;
+      if(!stillFresh){ try { localStorage.removeItem('cms_v3_fb_storage_disabled'); } catch(_){} }
+    } catch(_){}
   }
   if(typeof firebase !== 'undefined' && firebase.storage && file.size < FB_STORAGE_MAX && !App._fbStorageDisabled){
     try {
@@ -6680,8 +6686,11 @@ async function attachUpload(file){
       const msg = String(e?.message || '');
       if(msg.includes('超時') || msg.includes('storage/unknown') || msg.includes('not found') || msg.includes('storage/object-not-found') || msg.includes('storage/unauthorized')){
         App._fbStorageDisabled = true;
-        // 持久化到 localStorage,避免每次 reload 都重複試 5 秒卡學生
-        try { localStorage.setItem('cms_v3_fb_storage_disabled', '1'); } catch(_){}
+        // 持久化到 localStorage,24 小時內不再重試
+        try {
+          localStorage.setItem('cms_v3_fb_storage_disabled', '1');
+          localStorage.setItem('cms_v3_fb_storage_disabled_at', String(Date.now()));
+        } catch(_){}
         // 不再 toast (本機儲存照樣能用,toast 會嚇到學生),只在 console 紀錄
         console.warn('[fb-storage] 已停用,使用本機儲存 (IDB)。如需啟用請至 Firebase Console');
       }
@@ -6763,7 +6772,9 @@ async function attachUpload(file){
   //   讓老師其他裝置打開時, 從 Firebase 拉回再寫入本地 IDB
   //   (從 500KB 放寬到 1.5MB 配合壓縮後的圖片 — 提高學生上傳跨裝置成功率)
   let dataUri = null;
-  if(file.size < 1500 * 1024){
+  // 提高同步閾值 1500 KB → 4 MB (用戶反映:大於此會跨裝置看不到)
+  // Firebase RTDB 單筆 node 上限 ~16 MB,4 MB base64 ≈ 5.3 MB JSON,安全
+  if(file.size < 4 * 1024 * 1024){
     try {
       dataUri = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -6780,6 +6791,11 @@ async function attachUpload(file){
         dbg('[v3] 小檔自動同步 Firebase: ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)');
       }
     } catch(e){ _swallow('attach-fb-sync', e); }
+  } else {
+    // 大於 4 MB 提示
+    try {
+      toast('⚠️ ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MB) 超過 4 MB,只存在本機,老師可能看不到。建議:壓縮圖片到 4 MB 以下,或請管理員啟用 Firebase Storage', 'warn', 8000);
+    } catch(_){}
   }
 
   _doneProgress('✅ 已儲存：' + file.name + (dataUri ? ' (已同步雲端)' : ' (本機)'), 'success');
@@ -6810,25 +6826,37 @@ async function attachGetUrl(meta){
     try {
       const blob = await idbGet(meta.key);
       if(blob) return URL.createObjectURL(blob);
-      // ★ 本機沒檔但被標記為 fbSynced → 從 Firebase 拉回
-      if(meta.fbSynced){
-        try {
-          const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
-          if(fbCfg && fbCfg.databaseURL && typeof firebase !== 'undefined'){
-            const snap = await firebase.app().database().ref('cms-v3/' + App.cfg.roomCode + '/attachments/' + meta.key).once('value');
-            const data = snap.val();
-            if(data && data.dataUri){
-              // 寫回本地 IDB 給下次用
-              try {
-                const resp = await fetch(data.dataUri);
-                const blob2 = await resp.blob();
-                await idbPut(meta.key, blob2);
-                return URL.createObjectURL(blob2);
-              } catch(e){ _swallow('attach-restore', e); return data.dataUri; }
-            }
+      // ★ 本機沒檔 → 先試從 Firebase RTDB 拉 (小檔 dataUri)
+      // 注意:即便 fbSynced 沒標,也試一下 (歷史資料相容)
+      try {
+        const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
+        if(fbCfg && fbCfg.databaseURL && typeof firebase !== 'undefined'){
+          const snap = await firebase.app().database().ref('cms-v3/' + App.cfg.roomCode + '/attachments/' + meta.key).once('value');
+          const data = snap.val();
+          if(data && data.dataUri){
+            // 寫回本地 IDB 給下次用
+            try {
+              const resp = await fetch(data.dataUri);
+              const blob2 = await resp.blob();
+              await idbPut(meta.key, blob2);
+              return URL.createObjectURL(blob2);
+            } catch(e){ _swallow('attach-restore', e); return data.dataUri; }
           }
-        } catch(e){ _swallow('attach-fb-fetch', e); }
-      }
+        }
+      } catch(e){ _swallow('attach-fb-fetch', e); }
+      // ★ 最後一招:試 Firebase Storage (即使 meta 沒標 storage='fbstorage' 也試)
+      try {
+        if(typeof firebase !== 'undefined' && firebase.storage && App.cfg && App.cfg.roomCode){
+          const safeName = (meta.name||'file').replace(/[^\w.-]/g,'_');
+          const path = 'cms-v3/' + App.cfg.roomCode + '/attachments/' + meta.key + '_' + safeName;
+          const ref = firebase.app().storage().ref(path);
+          const url = await Promise.race([
+            ref.getDownloadURL(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('storage timeout')), 3000))
+          ]);
+          if(url) return url;
+        }
+      } catch(_){}
       return null;
     } catch(e){ return null; }
   }
@@ -6874,7 +6902,16 @@ async function attachPreview(meta){
   try { toast('📂 載入中...', 'info', 1500); } catch(_){}
   let url;
   try { url = await attachGetUrl(meta); } catch(e){ toast('讀取失敗：' + (e.message||e), 'danger'); return; }
-  if(!url){ toast('附件不存在或已被刪除','danger', 4000); return; }
+  if(!url){
+    // 大檔 + 跨裝置看不到 → 友善訊息提示
+    const sizeMB = meta.size ? Math.round(meta.size/1024/1024 * 10) / 10 : null;
+    if(sizeMB && sizeMB > 4){
+      toast('⚠️ 此附件 ' + sizeMB + ' MB,超過 4 MB 上限,只存在學生上傳的裝置。請學生在原裝置重新繳交較小的檔案,或啟用 Firebase Storage 跨裝置同步','danger', 9000);
+    } else {
+      toast('附件無法載入。檔案可能在原裝置 IDB 中,跨裝置看不到。請聯絡學生重新上傳','danger', 7000);
+    }
+    return;
+  }
 
   // 判斷檔案類型
   const name = meta.name || 'file';
