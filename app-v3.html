@@ -29575,9 +29575,13 @@ function closeTour(markDone){
 function maybeShowTour(){
   // 登入後檢查；若尚未完成過，自動顯示
   try {
-    if(!App.session) return;
+    if(!App.session || !App.session.role){
+      // 沒登入 → 確保 tour 不殘留在登入畫面 (用戶報告: 登入畫面右下角還看到操作步驟)
+      const stale = document.getElementById('tour-card');
+      if(stale) stale.remove();
+      return;
+    }
     const role = App.session.role;
-    if(!role) return;
     if(localStorage.getItem(tourKey(role))) return;
     // 避免每次 rerender 都重複塞
     if(document.getElementById('tour-card')) return;
