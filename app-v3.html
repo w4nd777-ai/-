@@ -9437,8 +9437,17 @@ function renderLoginTeacherStage(){
   const stage = el('div', { class:'login-stage' });
 
   // 📧 偵測是否已用 Email/Google 登入 → 顯示「點此繼續」按鈕
+  // ★ 用戶要求:只在「目前 Google 用戶是老師綁定」時才顯示這個按鈕
+  //   (學生綁定的 Google 不該在老師 tab 出現繼續按鈕,反之亦然)
   const fbUser = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-  if(fbUser && fbUser.email){
+  const fbUserEmail = (fbUser && fbUser.email) || '';
+  const isTeacherBound = fbUserEmail && (App.db && App.db.accounts || []).some(function(a){
+    if(!a) return false;
+    if(a.googleEmail && String(a.googleEmail).toLowerCase() === fbUserEmail.toLowerCase()) return true;
+    if(a.username && String(a.username).toLowerCase() === 'google:' + fbUserEmail.toLowerCase()) return true;
+    return false;
+  });
+  if(fbUser && fbUser.email && isTeacherBound){
     // 已登入狀態
     const continueBtn = el('button', {
       type:'button',
@@ -11045,8 +11054,13 @@ function renderLoginStudentStage(){
   const stage = el('div', { class:'login-stage' });
 
   // ☁️ 偵測是否已用 Google 登入 → 顯示「點此繼續」綠色按鈕
+  // ★ 用戶要求:只在「目前 Google 用戶是學生綁定」時才顯示這個按鈕
   const fbUserS = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
-  if(fbUserS && fbUserS.email){
+  const fbUserSEmail = (fbUserS && fbUserS.email) || '';
+  const isStudentBound = fbUserSEmail && (App.db && App.db.students || []).some(function(s){
+    return s && s.googleEmail && String(s.googleEmail).toLowerCase() === fbUserSEmail.toLowerCase();
+  });
+  if(fbUserS && fbUserS.email && isStudentBound){
     const continueBtnS = el('button', {
       type:'button',
       style:'width:100%;padding:11px 14px;border-radius:10px;border:0;background:#16a34a;color:#fff;cursor:pointer;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px;font-weight:600;font-size:14px;box-shadow:0 2px 6px rgba(22,163,74,.25)',
@@ -11069,49 +11083,11 @@ function renderLoginStudentStage(){
         }
       }, '換其他 Google 帳號')
     ));
-  } else {
-    // 📧 Email/Password 登入 — 跟原本 Google 按鈕一樣的精緻白底樣式
-    // Google 按鈕已移除 (Chrome 第三方 cookie 政策擋住 OAuth)
-    // ★ 點之前先確認:大多學生用學號+班級+密碼登入,沒設過 Email 登入密碼
-    //   按下去才確認,避免一進來就跳出 modal 讓不對的人填
-    const emailStuBtn = el('button', {
-      type:'button',
-      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
-      onmouseover: function(){ this.style.background = '#f8f9fa'; },
-      onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: async function(ev){
-        // 先確認是不是有 Email 註冊的學生 (大多沒有)
-        const isFirstTime = !loadEmailRemember('student');
-        if(isFirstTime){
-          const ok = await confirmDlg(
-            '「Email 登入」只給用 Email 註冊過的學生用。\n\n' +
-            '如果你平常是用「班級 + 姓名 + 密碼」登入,請按取消,改回上方表單。\n' +
-            '如果你有用 Email 申請註冊過,按確認繼續。',
-            { title:'確認登入方式' }
-          );
-          if(!ok) return;
-        }
-        return _emailSignInStudent(ev);
-      }
-    });
-    // Gmail 官方 logo (2020+) — 跟老師端同款
-    const emailIconS = document.createElement('span');
-    emailIconS.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
-    emailIconS.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
-      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
-      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
-      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
-      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
-      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
-      '</svg>';
-    emailStuBtn.appendChild(emailIconS);
-    const emailTextS = document.createElement('span');
-    emailTextS.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-    emailTextS.textContent = '使用 Email 登入';
-    emailStuBtn.appendChild(emailTextS);
-    stage.appendChild(emailStuBtn);
   }
+  // ★ 用戶要求:學生 tab 不顯示「使用 Email 登入」按鈕
+  //   (這是給用 Email 註冊的學生用的,但大多學生用班級+姓名+密碼,
+  //    放這個按鈕會讓人誤點 + 跟老師那邊的 Email 登入混淆)
+  //   如果未來有用 Email 註冊的學生,他們可以從上方「☁️ 繼續以 X」走
 
   // 細分隔線 — 不要文字
   stage.appendChild(el('div', {
