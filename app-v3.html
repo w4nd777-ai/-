@@ -134,6 +134,19 @@
 [data-accent="indigo"] { --primary:#4f46e5; --primary-hover:#4338ca; --primary-soft:#e0e7ff;}
 [data-accent="pink"]   { --primary:#db2777; --primary-hover:#be185d; --primary-soft:#fce7f3;}
 [data-accent="rose"]   { --primary:#e11d48; --primary-hover:#be123c; --primary-soft:#ffe4e6;}
+/* 新增 12 色 */
+[data-accent="fuchsia"]{ --primary:#c026d3; --primary-hover:#a21caf; --primary-soft:#fae8ff;}
+[data-accent="purple"] { --primary:#9333ea; --primary-hover:#7e22ce; --primary-soft:#f3e8ff;}
+[data-accent="sky"]    { --primary:#0ea5e9; --primary-hover:#0284c7; --primary-soft:#e0f2fe;}
+[data-accent="lime"]   { --primary:#65a30d; --primary-hover:#4d7c0f; --primary-soft:#ecfccb;}
+[data-accent="yellow"] { --primary:#ca8a04; --primary-hover:#a16207; --primary-soft:#fef9c3;}
+[data-accent="stone"]  { --primary:#78716c; --primary-hover:#57534e; --primary-soft:#f5f5f4;}
+[data-accent="slate"]  { --primary:#475569; --primary-hover:#334155; --primary-soft:#f1f5f9;}
+[data-accent="zinc"]   { --primary:#52525b; --primary-hover:#3f3f46; --primary-soft:#f4f4f5;}
+[data-accent="coral"]  { --primary:#ef4444; --primary-hover:#dc2626; --primary-soft:#fee2e2;}
+[data-accent="mint"]   { --primary:#14b8a6; --primary-hover:#0d9488; --primary-soft:#ccfbf1;}
+[data-accent="lavender"]{ --primary:#8b5cf6; --primary-hover:#7c3aed; --primary-soft:#ede9fe;}
+[data-accent="gold"]   { --primary:#d97706; --primary-hover:#b45309; --primary-soft:#fef3c7;}
 
 /* ════════════════════════════════════════════════════════════
    ▼ DESIGN SYSTEM 2.0 — 新版 tokens（與舊 token 共存，不破壞）
@@ -5328,6 +5341,37 @@ function applyCustomAccent(color){
   root.style.setProperty('--primary-soft', `rgba(${r},${g},${b},0.15)`);
 }
 
+// ★ 通用:算 hex / rgb / color 的相對亮度 (0=黑, 1=白) → 用來決定文字該白還是黑
+function _getColorLuminance(color){
+  if(!color) return null;
+  const c = String(color).trim();
+  // 試解析 hex
+  let r, g, b;
+  const hexM = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if(hexM){
+    let h = hexM[1];
+    if(h.length === 3) h = h.split('').map(x => x+x).join('');
+    r = parseInt(h.slice(0,2),16);
+    g = parseInt(h.slice(2,4),16);
+    b = parseInt(h.slice(4,6),16);
+  } else {
+    // 試解析 rgb(...) / rgba(...)
+    const rgbM = c.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if(rgbM){ r = +rgbM[1]; g = +rgbM[2]; b = +rgbM[3]; }
+    else return null;
+  }
+  // sRGB → linear
+  const f = v => { v /= 255; return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); };
+  return 0.2126*f(r) + 0.7152*f(g) + 0.0722*f(b);
+}
+// 判斷某色當背景時,文字該用淺色 (true) 還是深色 (false)
+function _shouldUseLightText(bgColor){
+  const L = _getColorLuminance(bgColor);
+  if(L == null) return true;
+  // 亮度 > 0.5 → 用深色文字; ≤ → 用淺色
+  return L <= 0.5;
+}
+
 /* ════════════════════════════════════════════════════════════
    FIREBASE SYNC
    ──────────────────────────────────────────────────────────── */
@@ -8586,7 +8630,21 @@ function applyLoginCustomStyle(shell, lc){
   if(lc.cardRadius != null) s.setProperty('--lc-card-radius', String(lc.cardRadius) + 'px');
   // data 屬性：給 CSS 選擇器用
   shell.setAttribute('data-login-layout', lc.layout || 'centered');
-  shell.setAttribute('data-login-card-tone', lc.cardTone || 'dark');
+  // ★ 自動偵測卡片亮度 → 文字色自動翻轉
+  //   用戶選了淺色 cardBg 但忘了把 cardTone 切成 light 時,文字會看不見 (常見 bug)
+  //   邏輯:lc.cardTone === 'auto' 或沒設 → 看 cardBg 亮度決定
+  let resolvedTone = lc.cardTone;
+  if(!resolvedTone || resolvedTone === 'auto'){
+    if(lc.cardBg){
+      try {
+        const useLightText = (typeof _shouldUseLightText === 'function') ? _shouldUseLightText(lc.cardBg) : true;
+        resolvedTone = useLightText ? 'dark' : 'light';  // dark tone = 深底白字; light tone = 淺底深字
+      } catch(_){ resolvedTone = 'dark'; }
+    } else {
+      resolvedTone = 'dark';  // 預設深底
+    }
+  }
+  shell.setAttribute('data-login-card-tone', resolvedTone);
   shell.setAttribute('data-login-input-dark', lc.inputDark ? 'true' : 'false');
 }
 
@@ -18049,29 +18107,72 @@ function rMe(content){
   // ─── 2. 背景顏色 / 主題色 ───
   const cardColor = el('div', { class:'card', style:{marginTop:'12px'} });
   cardColor.appendChild(el('h3', null, '🎨 主題顏色'));
-  cardColor.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} }, '選擇你喜歡的顏色'));
-  const colorRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'10px'} });
+  cardColor.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} }, '選擇你喜歡的顏色 · 24 種預設 + 自訂'));
+  const colorRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px'} });
+  // ★ 擴充到 24 種預設色 (原本只有 12)
   const ACCENTS = [
+    // 經典色
     {key:'blue', color:'#2563eb'}, {key:'green', color:'#16a34a'},
     {key:'violet', color:'#8b5cf6'}, {key:'red', color:'#dc2626'},
     {key:'orange', color:'#ea580c'}, {key:'amber', color:'#d97706'},
     {key:'emerald', color:'#10b981'}, {key:'teal', color:'#0d9488'},
     {key:'cyan', color:'#0891b2'}, {key:'indigo', color:'#4f46e5'},
-    {key:'pink', color:'#db2777'}, {key:'rose', color:'#e11d48'}
+    {key:'pink', color:'#db2777'}, {key:'rose', color:'#e11d48'},
+    // 新增 12 色:粉嫩 / 暗色 / 中性
+    {key:'fuchsia', color:'#c026d3'}, {key:'purple', color:'#9333ea'},
+    {key:'sky', color:'#0ea5e9'}, {key:'lime', color:'#84cc16'},
+    {key:'yellow', color:'#eab308'}, {key:'stone', color:'#78716c'},
+    {key:'slate', color:'#475569'}, {key:'zinc', color:'#52525b'},
+    {key:'coral', color:'#ff6b6b'}, {key:'mint', color:'#5eead4'},
+    {key:'lavender', color:'#a78bfa'}, {key:'gold', color:'#f59e0b'}
   ];
   ACCENTS.forEach(a => {
+    const isActive = (App.accent === a.key && App.accent !== 'custom');
     const sw = el('button', {
-      style:{width:'48px',height:'48px',borderRadius:'12px',background:a.color,cursor:'pointer',
-        border: App.accent === a.key ? '3px solid var(--text)' : '2px solid var(--border)',
-        position:'relative'},
-      onclick:()=> { App.accent = a.key; applyTheme(); if(typeof saveAppearance==='function') saveAppearance(); rerender(); }
+      title: a.key,
+      style:{width:'42px',height:'42px',borderRadius:'10px',background:a.color,cursor:'pointer',
+        border: isActive ? '3px solid var(--text)' : '2px solid var(--border)',
+        position:'relative',padding:'0',flexShrink:'0'},
+      onclick:()=> {
+        App.accent = a.key; App._customAccent = null;
+        applyTheme();
+        if(typeof saveAppearance==='function') saveAppearance();
+        rerender();
+      }
     });
-    if(App.accent === a.key){
-      sw.appendChild(el('span', { style:{position:'absolute',top:'4px',right:'4px',color:'#fff',fontSize:'14px'} }, '✓'));
+    if(isActive){
+      sw.appendChild(el('span', {
+        style:{position:'absolute',top:'2px',right:'4px',color:'#fff',fontSize:'13px',
+               fontWeight:'700',textShadow:'0 1px 2px rgba(0,0,0,.5)'}
+      }, '✓'));
     }
     colorRow.appendChild(sw);
   });
   cardColor.appendChild(colorRow);
+
+  // ★ 自訂顏色 picker — 學生也能挑任何色 (原本只有老師有)
+  const customWrap = el('div', { style:{marginTop:'12px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap',padding:'10px',background:'var(--surface-2)',borderRadius:'10px'} });
+  customWrap.appendChild(el('label', { class:'small', style:{fontWeight:'600'} }, '🎨 自訂顏色:'));
+  const colorInpStu = el('input', {
+    type:'color',
+    value: (App._customAccent && /^#[0-9a-f]{6}$/i.test(App._customAccent)) ? App._customAccent : '#2563eb',
+    style:{width:'52px',height:'38px',border:'1px solid var(--border)',borderRadius:'8px',cursor:'pointer',padding:'2px',background:'var(--surface)'}
+  });
+  colorInpStu.addEventListener('input', e => {
+    App._customAccent = e.target.value;
+    App.accent = 'custom';
+    applyCustomAccent(e.target.value);
+  });
+  colorInpStu.addEventListener('change', () => {
+    if(typeof saveAppearance==='function') saveAppearance();
+    rerender();
+  });
+  customWrap.appendChild(colorInpStu);
+  customWrap.appendChild(el('span', {
+    class:'small ' + (App.accent==='custom' ? '' : 'muted'),
+    style: App.accent==='custom' ? {color:'var(--primary)',fontWeight:'700'} : {}
+  }, App.accent==='custom' ? ('已啟用 ' + (App._customAccent||'')) : '點上方色塊開啟 →'));
+  cardColor.appendChild(customWrap);
 
   // 亮暗模式
   cardColor.appendChild(el('div', { style:{marginTop:'14px',fontSize:'13px',fontWeight:'600'} }, '亮 / 暗模式'));
@@ -28541,7 +28642,20 @@ const APPEARANCE_ACCENTS = [
   { key:'cyan',    color:'#0891b2', label:'青' },
   { key:'indigo',  color:'#4f46e5', label:'靛' },
   { key:'pink',    color:'#db2777', label:'粉' },
-  { key:'rose',    color:'#e11d48', label:'玫瑰' }
+  { key:'rose',    color:'#e11d48', label:'玫瑰' },
+  // 新增 12 色 — 與學生端對齊
+  { key:'fuchsia', color:'#c026d3', label:'桃紫' },
+  { key:'purple',  color:'#9333ea', label:'紫羅蘭' },
+  { key:'sky',     color:'#0ea5e9', label:'天空' },
+  { key:'lime',    color:'#84cc16', label:'萊姆' },
+  { key:'yellow',  color:'#eab308', label:'黃' },
+  { key:'stone',   color:'#78716c', label:'石灰' },
+  { key:'slate',   color:'#475569', label:'石板' },
+  { key:'zinc',    color:'#52525b', label:'鋅灰' },
+  { key:'coral',   color:'#ff6b6b', label:'珊瑚' },
+  { key:'mint',    color:'#5eead4', label:'薄荷' },
+  { key:'lavender',color:'#a78bfa', label:'薰衣草' },
+  { key:'gold',    color:'#f59e0b', label:'金' }
 ];
 
 function rAppearance(content){
