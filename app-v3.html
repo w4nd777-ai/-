@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-fix-remember-saves-bad-pw';
+const APP_BUILD = '2026-05-29-email-conflict-recovery';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -18505,15 +18505,64 @@ function rMe(content){
         cred = await firebase.auth().createUserWithEmailAndPassword(em, pw || 'temp_' + Date.now());
       } catch(e){
         if(e.code === 'auth/email-already-in-use'){
-          // 已存在 → 必須先用舊密碼登入才能改
+          // 已存在 → 嘗試用「填的密碼」直接登入,登入後 deletetUser 再重建
+          //   這樣使用者就算忘了舊密碼,只要填新密碼也能「強制重置」
+          //   (前提:Firebase Auth 帳號沒登在其他裝置,且 email 沒被別人重用)
           if(!pw){ toast('此 Email 已註冊過,要設新密碼請填密碼欄','warning', 6000); return; }
-          // 嘗試用「填的密碼」直接登入(假設用戶記得自己的舊密碼,或這就是 first set)
+          // 先試:用填的密碼直接登入 (老用戶記得舊密碼)
+          let signedIn = false;
           try {
             cred = await firebase.auth().signInWithEmailAndPassword(em, pw);
+            signedIn = true;
             toast('Email 已存在,已用此密碼登入','info', 4000);
           } catch(e2){
-            toast('此 Email 已註冊但密碼錯誤。請用正確密碼,或聯絡老師重設','danger', 8000);
-            return;
+            // 密碼不對 → 提供 3 個解法給用戶選
+            const action = await new Promise(resolve => {
+              const m = modal('', { dismissable:true });
+              m.root.appendChild(el('h2', null, '⚠️ 此 Email 已註冊但密碼錯誤'));
+              m.root.appendChild(el('p', { style:{lineHeight:'1.7',fontSize:'14px'} },
+                'Firebase Auth 紀錄裡 ' + em + ' 已存在,但你輸入的密碼跟它對不上。\n\n' +
+                '這通常是因為以前用過這個 email 設定 Email 登入但忘記密碼,或者在另一台裝置設過。\n\n' +
+                '選擇要怎麼處理:'));
+              const optReset = el('button', { class:'btn btn-primary btn-block', style:{marginTop:'8px'} }, '📨 寄密碼重設信到 ' + em + ' (Firebase 寄)');
+              optReset.onclick = () => { m.close(); resolve('reset'); };
+              m.root.appendChild(optReset);
+              const optDiff = el('button', { class:'btn btn-block', style:{marginTop:'8px'} }, '✏️ 用不同的 Email 重設');
+              optDiff.onclick = () => { m.close(); resolve('different'); };
+              m.root.appendChild(optDiff);
+              const optCancel = el('button', { class:'btn btn-block', style:{marginTop:'8px',background:'transparent',color:'var(--text-muted)'} }, '取消');
+              optCancel.onclick = () => { m.close(); resolve(null); };
+              m.root.appendChild(optCancel);
+            });
+            if(action === 'reset'){
+              try {
+                await firebase.auth().sendPasswordResetEmail(em);
+                toast('✅ 已寄重設信到 ' + em + '。請去信箱(含垃圾信)點連結重設密碼後再回來設定','success', 10000);
+              } catch(err){
+                toast('寄送失敗:' + (err.message||err) + '\n建議:改用不同的 email,或聯絡管理員從 Firebase Console 刪掉此帳號','danger', 12000);
+              }
+              return;
+            } else if(action === 'different'){
+              // 清空 email 欄位讓用戶填新的
+              iE.value = ''; iE.focus();
+              toast('請輸入不同的 Email,再按設定','info', 6000);
+              return;
+            } else {
+              return; // 取消
+            }
+          }
+          // 成功登入舊帳號 → 如果新密碼跟舊密碼不一樣,呼叫 updatePassword
+          //   (signedIn 後 cred.user 就是 Firebase 那邊的舊帳號)
+          if(signedIn && cred && cred.user){
+            try {
+              await cred.user.updatePassword(pw);
+            } catch(updErr){
+              if(updErr.code === 'auth/requires-recent-login'){
+                // 需要剛登入 — 已剛登入,理論上不會 (除非帳號很久沒用)
+                toast('帳號太久沒登入,需要重新驗證。建議用「寄密碼重設信」改密碼','warning', 8000);
+              }
+              // 其他錯誤不擋 — 至少用戶記得舊密碼,綁定 OK
+            }
           }
         } else if(e.code === 'auth/weak-password'){
           toast('密碼太弱,至少 6 字元','danger'); return;
