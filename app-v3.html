@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-welcome-back-card';
+const APP_BUILD = '2026-05-29-teacher-tab-form-only';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9671,65 +9671,9 @@ function renderLoginTeacherStage(){
         }
       }, '換其他帳號')
     ));
-  } else {
-    // ★ 用戶決定 (M7):老師兩個都留 — Email 登入 + Google 登入
-    //   老師可以二選一或都用 (個人頁設 Email + 密碼,或綁 Google)
-    // 📧 使用 Email 登入
-    const emailBtn = el('button', {
-      type:'button',
-      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
-      onmouseover: function(){ this.style.background = '#f8f9fa'; },
-      onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: _emailSignInTeacher
-    });
-    const emailIcon = document.createElement('span');
-    emailIcon.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
-    emailIcon.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
-      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
-      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
-      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
-      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
-      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
-      '</svg>';
-    emailBtn.appendChild(emailIcon);
-    const emailText = document.createElement('span');
-    emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-    emailText.textContent = '使用 Email 登入';
-    emailBtn.appendChild(emailText);
-    stage.appendChild(emailBtn);
-
-    // ☁️ 用 Google 登入 (給綁過 Google 的老師)
-    if(window.firebase && firebase.auth){
-      const googleBtn = el('button', {
-        type:'button',
-        style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
-        onmouseover: function(){ this.style.background = '#f8f9fa'; },
-        onmouseout: function(){ this.style.background = '#fff'; },
-        onclick: _googleSignInTeacher
-      });
-      const gIconT = document.createElement('span');
-      gIconT.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
-      gIconT.innerHTML =
-        '<svg width="22" height="22" viewBox="0 0 18 18">' +
-        '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>' +
-        '<path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>' +
-        '<path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>' +
-        '<path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>' +
-        '</svg>';
-      googleBtn.appendChild(gIconT);
-      const gTextT = document.createElement('span');
-      gTextT.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-      gTextT.textContent = '用 Google 登入';
-      googleBtn.appendChild(gTextT);
-      stage.appendChild(googleBtn);
-    }
   }
-
-  // 細分隔線 — 不要文字
-  stage.appendChild(el('div', {
-    style:'height:1px;background:rgba(255,255,255,.1);margin:0 0 14px'
-  }));
+  // ★ 用戶要求:老師 tab 拿掉「使用 Email 登入」+「用 Google 登入」按鈕
+  //   只保留下方的 帳號 + 密碼 表單 (跟「申請註冊」+「忘記密碼」連結)
 
   const prefill = App._loginPrefill || {};
   const rememberSaved = loadRemember();
