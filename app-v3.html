@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-welcome-with-relative-time';
+const APP_BUILD = '2026-05-29-fix-remember-saves-bad-pw';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9178,11 +9178,13 @@ async function _emailLoginModal(title, role){
       var pw = iPw.value || '';
       if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ iEmail.style.borderColor='#dc2626'; iEmail.focus(); return; }
       if(!pw || pw.length < 6){ iPw.style.borderColor='#dc2626'; iPw.focus(); return; }
-      // 處理「記住我」
-      if(iRem.checked){
-        saveEmailRemember(role, { email: email, pw: _obfuscatePw(pw), ts: Date.now() });
-      } else {
-        saveEmailRemember(role, null);
+      // ★ 修:不要在這裡 saveEmailRemember (Firebase auth 還沒驗證)
+      //   改成在 _emailSignInStudentWith / _emailSignInTeacher 成功後才寫
+      //   原本 bug:輸入錯密碼 + 勾記住我 → 也會存進去 →
+      //   下次歡迎卡顯示但密碼還是錯,陷入循環
+      // 若取消勾「記住我」 → 主動清掉舊紀錄
+      if(!iRem.checked){
+        try { saveEmailRemember(role, null); } catch(_){}
       }
       // mode 一律 'login' (移除 tabs 之後沒有註冊模式)
       close({email: email, password: pw, mode: 'login', remember: !!iRem.checked});
@@ -9202,11 +9204,13 @@ async function _emailSignInStudent(ev){
   }
   const input = await _emailLoginModal('學生 Email 登入', 'student');
   if(!input) return;
-  return _emailSignInStudentWith(input.email, input.password);
+  return _emailSignInStudentWith(input.email, input.password, input.remember);
 }
 
 // 共用 helper:給 welcome-back 卡 / modal 用,執行實際 Firebase 登入 + 學生路由
-async function _emailSignInStudentWith(email, password){
+//   remember=true 才會把 email + pw + name + ... 寫進 LS_EMAIL_REMEMBER (welcome 卡用)
+async function _emailSignInStudentWith(email, password, remember){
+  if(remember === undefined) remember = true; // welcome 卡呼叫沒帶 → 預設保留
   if(!window.firebase || !firebase.auth){ toast('Firebase 未載入','danger'); return; }
   if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
     toast('Firebase 初始化失敗,請重整','danger'); return;
@@ -9283,18 +9287,22 @@ async function _emailSignInStudentWith(email, password){
       authMethod: 'email'
     };
     if(typeof saveSession === 'function') saveSession(App.session);
-    // ★ 把 name + sid + photoURL 也存到 LS_EMAIL_REMEMBER,下次顯示 welcome-back 卡用
-    try {
-      const existing = loadEmailRemember('student') || {};
-      saveEmailRemember('student', {
-        email: email,
-        pw: existing.pw || '',  // 保留之前記住的 pw (welcome 卡會要求重新輸入)
-        name: stu.name,
-        sid: stu.sid,
-        photoURL: stu.photoURL || '',
-        ts: Date.now()
-      });
-    } catch(_){}
+    // ★ Firebase auth 驗證成功才寫 LS_EMAIL_REMEMBER (避免錯密碼也存)
+    if(remember){
+      try {
+        saveEmailRemember('student', {
+          email: email,
+          pw: _obfuscatePw(password),  // 也存混淆密碼 (歡迎卡也能 fallback)
+          name: stu.name,
+          sid: stu.sid,
+          photoURL: stu.photoURL || '',
+          ts: Date.now()
+        });
+      } catch(_){}
+    } else {
+      // 不勾記住我 → 清掉
+      try { saveEmailRemember('student', null); } catch(_){}
+    }
     try { toast('🎉 歡迎 ' + stu.name, 'success', 3000); } catch(_){}
     try { rerender(); } catch(_){ setTimeout(()=> location.reload(), 600); }
   } catch(e){
@@ -9341,6 +9349,19 @@ async function _emailSignInTeacher(ev){
       return;
     }
     // 已核准 → 進系統
+    // ★ 修:Firebase auth 驗證成功且 accounts 對得上,才寫 LS_EMAIL_REMEMBER
+    if(input.remember){
+      try {
+        saveEmailRemember('teacher', {
+          email: email,
+          pw: _obfuscatePw(password),
+          name: acc.name || acc.displayName || email,
+          ts: Date.now()
+        });
+      } catch(_){}
+    } else {
+      try { saveEmailRemember('teacher', null); } catch(_){}
+    }
     await _completeEmailLogin(userCred.user, 'teacher');
   } catch(e){
     console.error('[email-signin-teacher]', e);
