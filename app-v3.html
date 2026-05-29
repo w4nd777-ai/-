@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-teacher-email-only-no-google';
+const APP_BUILD = '2026-05-29-welcome-with-relative-time';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11308,7 +11308,7 @@ function renderLoginStudentStage(){
       borderRadius:'12px',
       marginBottom:'14px'
     }});
-    // 頭像 + 姓名 + email
+    // 頭像 + 「歡迎回來，xxx！」 + 「學生 · 上次登入：N 分前」
     const headerRow = el('div', { style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'10px'} });
     if(studentRem.photoURL){
       headerRow.appendChild(el('img', { src: studentRem.photoURL, referrerpolicy:'no-referrer',
@@ -11319,14 +11319,15 @@ function renderLoginStudentStage(){
                display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px',fontWeight:'700',flexShrink:'0'}
       }, (studentRem.name || studentRem.email || '?').slice(0,1)));
     }
+    const lastTs = studentRem.ts || Date.now();
+    const lastTimeStr = (typeof relTime === 'function') ? relTime(lastTs) : '剛剛';
     headerRow.appendChild(el('div', { style:{flex:'1',minWidth:'0',overflow:'hidden'} },
-      el('div', { style:{color:'rgba(255,255,255,.65)',fontSize:'11px',marginBottom:'2px'} }, '👋 歡迎回來'),
-      el('div', { style:{color:'#fff',fontSize:'15px',fontWeight:'700',marginBottom:'1px',
+      el('div', { style:{color:'#fff',fontSize:'15px',fontWeight:'700',marginBottom:'2px',
                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
-        studentRem.name || studentRem.email),
-      el('div', { style:{color:'rgba(255,255,255,.5)',fontSize:'11px',
+        '👋 歡迎回來,' + (studentRem.name || studentRem.email) + '!'),
+      el('div', { style:{color:'rgba(255,255,255,.65)',fontSize:'12px',
                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
-        studentRem.email)
+        '學生 · 上次登入:' + lastTimeStr)
     ));
     welcomeCard.appendChild(headerRow);
 
