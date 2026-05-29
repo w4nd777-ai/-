@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-bugfixes-audit';
+const APP_BUILD = '2026-05-29-welcome-back-card';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9202,7 +9202,15 @@ async function _emailSignInStudent(ev){
   }
   const input = await _emailLoginModal('學生 Email 登入', 'student');
   if(!input) return;
-  const email = input.email, password = input.password;
+  return _emailSignInStudentWith(input.email, input.password);
+}
+
+// 共用 helper:給 welcome-back 卡 / modal 用,執行實際 Firebase 登入 + 學生路由
+async function _emailSignInStudentWith(email, password){
+  if(!window.firebase || !firebase.auth){ toast('Firebase 未載入','danger'); return; }
+  if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
+    toast('Firebase 初始化失敗,請重整','danger'); return;
+  }
   try {
     let userCred;
     try {
@@ -9275,6 +9283,18 @@ async function _emailSignInStudent(ev){
       authMethod: 'email'
     };
     if(typeof saveSession === 'function') saveSession(App.session);
+    // ★ 把 name + sid + photoURL 也存到 LS_EMAIL_REMEMBER,下次顯示 welcome-back 卡用
+    try {
+      const existing = loadEmailRemember('student') || {};
+      saveEmailRemember('student', {
+        email: email,
+        pw: existing.pw || '',  // 保留之前記住的 pw (welcome 卡會要求重新輸入)
+        name: stu.name,
+        sid: stu.sid,
+        photoURL: stu.photoURL || '',
+        ts: Date.now()
+      });
+    } catch(_){}
     try { toast('🎉 歡迎 ' + stu.name, 'success', 3000); } catch(_){}
     try { rerender(); } catch(_){ setTimeout(()=> location.reload(), 600); }
   } catch(e){
@@ -11301,10 +11321,107 @@ function renderLoginStudentStage(){
       }, '換其他 Google 帳號')
     ));
   }
-  // ★ 用戶決定 (M7):學生不用 Google,改用 Email + 密碼登入
-  //   (學生個人頁要先設定 email + 密碼,設完之後從這裡 Email 登入)
-  if(!isStudentBound){
-    // 📧 使用 Email 登入 — 給已在個人頁設定過 email + 密碼的學生
+  // ★ 用戶要求:有「記住我」資料 → 顯示歡迎回來卡 + 密碼欄,並隱藏「使用 Email 登入」按鈕
+  const studentRem = (typeof loadEmailRemember === 'function') ? loadEmailRemember('student') : null;
+  const showStudentWelcome = !!(studentRem && studentRem.email);
+
+  if(showStudentWelcome){
+    // 歡迎回來卡片
+    const welcomeCard = el('div', { style:{
+      padding:'14px 16px',
+      background:'rgba(22,163,74,.12)',
+      border:'1px solid rgba(22,163,74,.35)',
+      borderRadius:'12px',
+      marginBottom:'14px'
+    }});
+    // 頭像 + 姓名 + email
+    const headerRow = el('div', { style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'10px'} });
+    if(studentRem.photoURL){
+      headerRow.appendChild(el('img', { src: studentRem.photoURL, referrerpolicy:'no-referrer',
+        style:{width:'44px',height:'44px',borderRadius:'50%',objectFit:'cover',flexShrink:'0'} }));
+    } else {
+      headerRow.appendChild(el('div', {
+        style:{width:'44px',height:'44px',borderRadius:'50%',background:'rgba(22,163,74,.25)',color:'#fff',
+               display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px',fontWeight:'700',flexShrink:'0'}
+      }, (studentRem.name || studentRem.email || '?').slice(0,1)));
+    }
+    headerRow.appendChild(el('div', { style:{flex:'1',minWidth:'0',overflow:'hidden'} },
+      el('div', { style:{color:'rgba(255,255,255,.65)',fontSize:'11px',marginBottom:'2px'} }, '👋 歡迎回來'),
+      el('div', { style:{color:'#fff',fontSize:'15px',fontWeight:'700',marginBottom:'1px',
+                         overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
+        studentRem.name || studentRem.email),
+      el('div', { style:{color:'rgba(255,255,255,.5)',fontSize:'11px',
+                         overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
+        studentRem.email)
+    ));
+    welcomeCard.appendChild(headerRow);
+
+    welcomeCard.appendChild(el('div', { style:{color:'rgba(255,255,255,.7)',fontSize:'12px',marginBottom:'8px'} },
+      '輸入密碼以繼續'));
+
+    // 密碼欄 (with eye)
+    const pwWrap = el('div', { style:{position:'relative'} });
+    const pwInput = el('input', {
+      type:'password',
+      class:'input',
+      placeholder:'密碼',
+      autocomplete:'current-password',
+      autocapitalize:'off',
+      autocorrect:'off',
+      spellcheck:'false'
+    });
+    pwInput.style.cssText = 'width:100%;padding:11px 44px 11px 14px;border-radius:8px;border:1.5px solid rgba(255,255,255,.15);background:rgba(255,255,255,.9);color:#1f2937;font-size:15px;box-sizing:border-box';
+    const pwEye = el('button', {
+      type:'button',
+      'aria-label':'顯示或隱藏密碼',
+      tabindex:'-1',
+      style:'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:0;cursor:pointer;padding:6px;color:#6b7280;display:inline-flex;align-items:center'
+    });
+    pwEye.innerHTML = _eyeSvg();
+    pwEye.onclick = (e) => {
+      e.preventDefault();
+      if(pwInput.type === 'password'){ pwInput.type = 'text'; pwEye.innerHTML = _eyeOffSvg(); }
+      else { pwInput.type = 'password'; pwEye.innerHTML = _eyeSvg(); }
+    };
+    pwWrap.appendChild(pwInput);
+    pwWrap.appendChild(pwEye);
+    welcomeCard.appendChild(pwWrap);
+
+    // 繼續按鈕
+    const continueBtn = el('button', {
+      type:'button',
+      style:'width:100%;padding:11px;border-radius:24px;border:0;background:#16a34a;color:#fff;font-weight:700;cursor:pointer;margin-top:12px;font-size:15px'
+    }, '✅ 繼續');
+    const doContinue = async () => {
+      const pw = pwInput.value || '';
+      if(!pw){ pwInput.focus(); toast('請輸入密碼','warning'); return; }
+      continueBtn.disabled = true; continueBtn.style.opacity = '0.7'; continueBtn.textContent = '登入中...';
+      try {
+        await _emailSignInStudentWith(studentRem.email, pw);
+      } finally {
+        continueBtn.disabled = false; continueBtn.style.opacity = '1'; continueBtn.textContent = '✅ 繼續';
+      }
+    };
+    continueBtn.onclick = doContinue;
+    pwInput.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); doContinue(); } });
+    welcomeCard.appendChild(continueBtn);
+
+    // 換其他帳號
+    welcomeCard.appendChild(el('div', { style:{textAlign:'center',marginTop:'10px'} },
+      el('a', {
+        href:'javascript:void(0)',
+        style:'color:rgba(255,255,255,.55);font-size:11px;text-decoration:underline',
+        onclick: () => {
+          if(typeof saveEmailRemember === 'function') saveEmailRemember('student', null);
+          try { rerender(); } catch(_){ location.reload(); }
+        }
+      }, '← 換其他帳號')
+    ));
+
+    stage.appendChild(welcomeCard);
+    setTimeout(() => { try { pwInput.focus(); } catch(_){} }, 150);
+  } else if(!isStudentBound){
+    // 📧 使用 Email 登入 — 沒記住任何帳號才顯示這個按鈕
     const emailStuBtn = el('button', {
       type:'button',
       style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
