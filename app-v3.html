@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-email-priv-escalation-fix';
+const APP_BUILD = '2026-05-29-email-defense-4-layers';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9044,6 +9044,16 @@ async function cleanupPollutedTeacherAccounts(opts){
       removedAccs.push({ id: a.id, email: a.email, username: a.username, name: a.name });
       return false;
     }
+    // ★ 也清掉舊版 _completeEmailLogin 留下的學生 fallback 條目:
+    //   id='acc_e_*' + username='email:xxx' + email 是某學生 (本地或雲端)
+    //   role 即使是 'teacher' 也要清,因為 email 本來就屬於學生 (可能被 mismatch
+    //   或舊 code 寫亂)
+    const isEmailUsername = username.indexOf('email:') === 0;
+    const isAccE = String(a.id || '').indexOf('acc_e_') === 0;
+    if(isEmailUsername && isAccE && emailIsStudentBound){
+      removedAccs.push({ id: a.id, email: a.email, username: a.username, name: a.name, kind: 'acc_e_student' });
+      return false;
+    }
     return true;
   });
   result.local = removedAccs.length;
@@ -9333,13 +9343,57 @@ async function _emailSignInTeacher(ev){
       }
       return;
     }
-    // 檢查是否已被管理員審核通過 (accounts 內有對應 entry)
+    // ═════════════════════════════════════════════════════════════
+    // ★ 安全修補 (4 層防線,前任何一條成立就拒絕老師登入):
+    //
+    //  防線 1:雲端 cms-v3/{room}/email_students/{emailKey} 有紀錄
+    //          → 這 email 屬於學生,絕對不准登入老師後台
+    //  防線 2:本地 App.db.students 找到 s.email === email 的學生
+    //          → 也是學生 email
+    //  防線 3:本地 App.db.accounts 找到的 acc.role !== 'teacher'
+    //          → 不是老師帳號 (可能是舊版 _completeEmailLogin 留下的
+    //             acc_e_xxx role:'student' 條目)
+    //  防線 4:本地沒有對應的 'email:xxx' acc (還沒申請註冊或審核)
+    //          → 拒絕
+    // ═════════════════════════════════════════════════════════════
+    const emailLower = String(email).toLowerCase();
+    const emailKey = emailLower.replace(/[.@]/g, '_');
+    const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+
+    // 防線 1:查雲端 email_students mapping
+    try {
+      if(firebase.database){
+        const stuMapping = await Promise.race([
+          firebase.database().ref('cms-v3/' + rc + '/email_students/' + emailKey).once('value'),
+          new Promise(r => setTimeout(() => r(null), 5000))
+        ]);
+        if(stuMapping && stuMapping.exists && stuMapping.exists()){
+          const val = stuMapping.val();
+          if(val && val.studentId){
+            await firebase.auth().signOut();
+            toast('此 Email 已綁定學生 (學號 ' + (val.sid||val.studentId) + ')\n請改用「學生」tab 的 Email 登入', 'danger', 9000);
+            return;
+          }
+        }
+      }
+    } catch(e){ console.warn('[teacher-login defense 1]', e); }
+
+    // 防線 2:本地 students 表
+    const isStudentEmailLocal = (App.db && App.db.students || []).some(function(s){
+      return s && String(s.email||'').toLowerCase() === emailLower;
+    });
+    if(isStudentEmailLocal){
+      await firebase.auth().signOut();
+      toast('此 Email 是學生 (本地紀錄),請改用「學生」tab','danger', 9000);
+      return;
+    }
+
+    // 防線 3 + 4:檢查 accounts 條目
     const uname = 'email:' + email;
     const acc = (App.db && App.db.accounts || []).find(function(a){ return a && a.username === uname; });
     if(!acc){
       // 還沒審核 → 登出 Firebase + 提示
       try { await firebase.auth().signOut(); } catch(_){}
-      // 檢查是否在 pending 列表
       const pendingEntry = (App.db && App.db.pending || []).find(function(p){ return p && p.role === 'teacher' && p.email === email; });
       if(pendingEntry){
         try { toast('您的申請尚未審核通過,請等候管理員審核', 'warn', 7000); } catch(_){}
@@ -9348,24 +9402,9 @@ async function _emailSignInTeacher(ev){
       }
       return;
     }
-    // ★ 安全修補:確認 acc 真的是老師,不是學生 fallback acc_e_*
-    //   (學生在「個人 → Email 登入設定」之前,如果走過舊版 _completeEmailLogin
-    //    會留下 username='email:xxx' role='student' 的條目。
-    //    這時從老師 tab 用同 email 登入會誤判成老師 → 嚴重權限漏洞)
-    //   再次檢查:email 是不是某學生的(students[].email or email_students),
-    //   是的話也擋掉
     if(acc.role !== 'teacher'){
       try { await firebase.auth().signOut(); } catch(_){}
-      try { toast('此 Email 是學生帳號,不能從老師 tab 登入。\n請改用學生 tab 的「使用 Email 登入」', 'danger', 9000); } catch(_){}
-      return;
-    }
-    // 二次驗證:email 是不是某學生 (即使 acc.role='teacher' 也要看)
-    const isStudentEmail = (App.db && App.db.students || []).some(function(s){
-      return s && String(s.email||'').toLowerCase() === String(email).toLowerCase();
-    });
-    if(isStudentEmail){
-      try { await firebase.auth().signOut(); } catch(_){}
-      try { toast('此 Email 是學生用,請改用學生 tab 的「使用 Email 登入」', 'danger', 9000); } catch(_){}
+      try { toast('此 Email 不是老師帳號 (role=' + acc.role + '),拒絕登入', 'danger', 9000); } catch(_){}
       return;
     }
     // 已核准 → 進系統
