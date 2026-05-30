@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-typing-protect-bulk-select';
+const APP_BUILD = '2026-05-29-audit-fixes-batch1';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4678,7 +4678,7 @@ function modal(content, opts={}){
       host._pendingClearTimer = null;
     }, 180);
   }
-  const handle = { close, root:m };
+  const handle = { close, root:m, dismissable: opts.dismissable !== false };
   App._openModals.push(handle);
   return handle;
 }
@@ -8972,6 +8972,13 @@ async function _handleGoogleAuthResult(user){
       return;
     }
     const acc = existingAcc;
+    // ★ 安全修補:必須驗證 acc.role === 'teacher',
+    //   不能因為 google_users 有綁定就盲信 (避免「綁定指向學生帳號 → 變老師」漏洞)
+    if(acc.role !== 'teacher'){
+      try { if(window.firebase && firebase.auth) await firebase.auth().signOut(); } catch(_){}
+      try { toast('此 Google 帳號角色不符,拒絕登入','danger', 8000); } catch(_){}
+      return;
+    }
     App.session = {
       role: 'teacher',
       id: acc.id,           // ★ 修 BUG #4: 全站很多地方用 App.session.id 找老師帳號
@@ -9463,19 +9470,11 @@ async function _completeEmailLogin(user, role){
     // 學生用 Email 登入: 沒 accounts entry 也可進 (走學號綁定流程不靠 accounts)
     // 老師用 Email 登入: _emailSignInTeacher 已先擋下沒 accounts 的狀況,跑到這裡保證有 acc
     if(!acc && role === 'student'){
-      // 學生 fallback — 建立 stub accounts (學號綁定後會更新)
-      acc = {
-        id: 'acc_e_' + Date.now(),
-        username: uname,
-        email: user.email,
-        firebaseUid: user.uid,
-        name: user.email.split('@')[0],
-        role: 'student',
-        createdAt: Date.now()
-      };
-      App.db.accounts.push(acc);
-      try { if(typeof saveDB === 'function') saveDB(true); } catch(_){}
-      try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
+      // ★ 修「兩裝置 race 互刪 accounts」漏洞:
+      //   學生 Email 登入應走 email_students mapping,不該在 accounts 自動建 stub
+      //   (自動建 stub + Sync.setMap 全表覆蓋 → 兩裝置同時登入會互相蓋掉對方的 entry)
+      console.warn('[email-login] student route should use email_students mapping, not accounts auto-create');
+      return; // skip auto-create — bail gracefully
     }
     if(!acc){ throw new Error('No accounts entry — should not reach here'); }
     // ★ 安全修補:role 必須跟 acc.role 一致,不能讓呼叫端任意指定身份
@@ -14492,6 +14491,8 @@ function rStu(content){
       }
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openStudentEdit(s) }, '✏️'));
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
+        if(!requirePerm('canEditStudents','刪除學生')) return;
+        if(!checkStudentClassPerm(s.id)){ toast('您沒有此學生班級的權限','warning'); return; }
         const ok = await confirmDlg('確定刪除 ' + s.name + '？相關出席紀錄會保留', { danger:true });
         if(!ok) return;
         // 包 C-4：備份 → 刪除 → pushUndo
@@ -17960,13 +17961,15 @@ function rFirebase(content){
   content.appendChild(warnCard);
 
   const myRoom = (App.cfg && App.cfg.roomCode) || 'YOUR_ROOM_CODE';
-  // 基本版：只限定本房間（不開放給其他房間讀寫）
+  // 🚨 安全修正：先前版本使用 ".read": true / ".write": true，
+  // 等於把整個 /cms-v3/<roomCode> 開放給「任何人」讀寫，攻擊者只要知道
+  // databaseURL 就能 dump 你所有學生資料/密碼/出席紀錄，已改為強制需登入。
   const rulesTemplate = '{\n' +
     '  "rules": {\n' +
     '    "cms-v3": {\n' +
     '      "$roomCode": {\n' +
-    '        ".read": true,\n' +
-    '        ".write": true\n' +
+    '        ".read": "auth != null",\n' +
+    '        ".write": "auth != null"\n' +
     '      }\n' +
     '    }\n' +
     '  }\n' +
@@ -17983,6 +17986,32 @@ function rFirebase(content){
     '  }\n' +
     '}';
 
+  // 🚨 醒目紅色警示橫幅：警告先前版本的 .read/.write=true 是 UNSAFE
+  const unsafeBanner = el('div', {
+    class:'card',
+    style:{
+      marginTop:'12px',
+      background:'#fef2f2',
+      borderColor:'#dc2626',
+      borderWidth:'2px',
+      borderStyle:'solid',
+      padding:'14px'
+    }
+  });
+  unsafeBanner.appendChild(el('div', {
+    style:{fontWeight:'800',color:'#dc2626',fontSize:'15px',marginBottom:'6px'}
+  }, '⚠️ 之前版本的 Firebase 規則 .read/.write=true 是 UNSAFE！'));
+  unsafeBanner.appendChild(el('div', {
+    style:{color:'#7f1d1d',lineHeight:'1.7',fontSize:'13px'}
+  },
+    '若你之前已照舊版說明把規則設成 ',
+    el('code', { style:{background:'#fee2e2',padding:'1px 4px',borderRadius:'3px'} }, '".read": true, ".write": true'),
+    '，代表 ',
+    el('b', null, '任何知道你 databaseURL 的人都能下載/竄改你所有學生資料、密碼、出席紀錄'),
+    '。請立即到 Firebase Console → Realtime Database → 規則，改成下面這份新版本（需 auth != null），否則任何人可下載你所有資料。'
+  ));
+  content.appendChild(unsafeBanner);
+
   const rulesCard = el('div', { class:'card', style:{marginTop:'12px'} });
   rulesCard.appendChild(el('h3', null, '📜 套用步驟'));
   rulesCard.appendChild(el('ol', { style:{paddingLeft:'20px',lineHeight:'1.8',margin:'8px 0'} },
@@ -17993,9 +18022,9 @@ function rFirebase(content){
 
   // 標準規則（建議第一步）
   rulesCard.appendChild(el('div', { class:'small', style:{fontWeight:'700',marginTop:'10px',marginBottom:'4px'} },
-    '📘 標準規則（推薦給絕大多數使用者）'));
+    '📘 標準規則（安全版，推薦立即套用）'));
   rulesCard.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} },
-    '功能：限制只能在 /cms-v3/<roomCode> 路徑下讀寫，外部根節點不可被刷取。'));
+    '功能：限制只能在 /cms-v3/<roomCode> 路徑下讀寫，並要求 auth != null（必須登入 Firebase 才能存取），堵死匿名 dump 漏洞。'));
   const ta1 = el('textarea', {
     class:'textarea', rows:9, readonly:true,
     style:{fontFamily:'monospace',fontSize:'12px',width:'100%'}
@@ -22303,19 +22332,51 @@ function handleQrJoinHash(){
     else params[p] = '';
   });
 
-  // 新增 fb 處理：自動寫入 Firebase 設定（在 join 之前，避免換房後再重新 init）
-  let fbApplied = false;
+  // 🔒 安全修補 (2026-05-30)：#fb=PAYLOAD 過去會「靜默」base64 解碼後直接寫入
+  //   localStorage，等同任何人傳一條連結就能把學生/老師的整個 Firebase 同步源切到
+  //   攻擊者控制的資料庫（一鍵教室劫持 / 資料偷竊 / 偽造點名）。
+  //   修補：先解析 payload，**必須**透過 confirmDlg 顯示目的地 databaseURL / projectId
+  //   並讓使用者明確按下「確認」才會寫入；同時在持久化之前先清掉 location.hash，
+  //   避免使用者重新整理頁面時又被重新觸發。
+  let fbApplied = false; // 真正寫入要等使用者確認後（非同步），這裡保持 false
   if(params.fb){
+    let fbCfgPending = null;
     try {
       // 解碼：對應 btoa(unescape(encodeURIComponent(str)))
       const fbJson = decodeURIComponent(escape(atob(params.fb)));
-      const fbCfg = JSON.parse(fbJson);
-      if(fbCfg && fbCfg.databaseURL){
-        localStorage.setItem(LS_FB, JSON.stringify(fbCfg));
-        fbApplied = true;
-        // Sync.init 將在後面（switch room 後）統一觸發；若沒換房，這裡也要重 init
-      }
-    } catch(e){ _swallow('apply-fb-from-url', e); }
+      const cfg = JSON.parse(fbJson);
+      if(cfg && cfg.databaseURL) fbCfgPending = cfg;
+    } catch(e){ _swallow('parse-fb-from-url', e); }
+
+    if(fbCfgPending){
+      // 先清 hash，避免重整 / 返回時又重跑一次（即使使用者按取消也不要再問）
+      try { history.replaceState(null, '', location.pathname + location.search); }
+      catch(e){ try { location.hash = ''; } catch(_e){} }
+
+      // 非同步確認（本函式仍同步返回，att/join 流程照舊）
+      (async () => {
+        try {
+          const dbUrl = String(fbCfgPending.databaseURL || '(未提供)');
+          const projId = String(fbCfgPending.projectId || '(未提供)');
+          const msg = '⚠️ 這條連結要把你裝置上的「跨裝置同步資料庫」切換成以下來源：\n\n'
+            + '• Database URL：' + dbUrl + '\n'
+            + '• Project ID：' + projId + '\n\n'
+            + '若你不認識上面這個來源，請按「取消」。\n'
+            + '一旦確認，你接下來的點名、學生資料都會送到該資料庫。';
+          const ok = await confirmDlg(msg, {
+            title: '⚠️ 確認套用外部同步設定？',
+            okText: '我認識這個來源，套用',
+            cancelText: '取消',
+            danger: true
+          });
+          if(!ok) return;
+          localStorage.setItem(LS_FB, JSON.stringify(fbCfgPending));
+          try { Sync.detachAll(); } catch(e){_swallow('fb-detach-confirm',e)}
+          try { Sync.init(); } catch(e){_swallow('fb-init-confirm',e)}
+          try { toast('✅ 已套用跨裝置同步設定', 'success', 5000); } catch(e){_swallow('fb-toast-ok',e)}
+        } catch(e){ _swallow('apply-fb-confirm', e); }
+      })();
+    }
   }
 
   if(!params.att && !params.join && !params.fb) return false;
@@ -23659,8 +23720,16 @@ function initKeyShortcuts(){
     if(/INPUT|TEXTAREA|SELECT/.test(tag)) return;
     if(e.ctrlKey || e.metaKey || e.altKey) return;
 
-    // Esc closes modal
+    // Esc closes modal — 走 close() 而非直接清 innerHTML（否則 dismissable:false 失效、且會中斷 await）
     if(e.key === 'Escape'){
+      const stack = App._openModals || [];
+      const top = stack[stack.length - 1];
+      if(top){
+        if(top.dismissable === false) return; // 不可關閉 → Esc 沒效
+        try { top.close(); } catch(_){_swallow('esc-close',_);}
+        return;
+      }
+      // 後備：stack 空但 host 還有殘留節點 → 才走 innerHTML 清掉
       const host = $('#modal-host');
       if(host && host.firstChild){ host.innerHTML = ''; return; }
     }
@@ -25707,6 +25776,7 @@ function matrixSetStatus(stuId, status){
   }
   saveDB();
   if(typeof Sync !== 'undefined' && Sync.push) Sync.push('attendance', null);
+  try { Sync.setMap('leaves', App.db.leaves); } catch(_){}
   if(typeof bcNotify === 'function') bcNotify();
 }
 
