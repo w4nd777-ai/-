@@ -4108,7 +4108,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-email-defense-4-layers';
+const APP_BUILD = '2026-05-29-typing-protect-bulk-select';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5500,15 +5500,21 @@ const Sync = (() => {
       App._syncRerTimer = null;
       App._syncBurstCount = 0;
       try {
-        // 🔧 若使用者正在輸入 → 延後 1.2 秒 (用獨立 _syncTypingTimer 避免覆寫 _syncRerTimer 導致 timer leak)
+        // 🔧 強化打字防干擾 (用戶反映「打字一直被打斷」):
+        //   1. 看 activeElement 是不是 input / textarea
+        //   2. 看「最近 6 秒內有沒有打過字」(App._lastInputTs)
+        //   3. 看「有沒有打開 modal」(modal 內通常在編輯重要資料)
+        //   任一條成立 → 延後 5 秒再試
         const a = document.activeElement;
-        const isTyping = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
-        if(isTyping){
+        const isTypingNow = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+        const recentlyTyped = App._lastInputTs && (Date.now() - App._lastInputTs < 6000);
+        const modalOpen = !!document.querySelector('.modal-backdrop, [class*="modal"]:not([class*="modal-actions"])');
+        if(isTypingNow || recentlyTyped || modalOpen){
           if(App._syncTypingTimer){ clearTimeout(App._syncTypingTimer); }
           App._syncTypingTimer = setTimeout(()=> {
             App._syncTypingTimer = null;
             _scheduleRerender();
-          }, 1200);
+          }, 5000);  // 從 1.2s 延到 5s
           return;
         }
         // 登入畫面 — 大多數時候跳過 (避免閃)
@@ -19974,10 +19980,85 @@ function rSub(content){
                 clsBlock.appendChild(mWrap);
               } else {
                 // ── 條列模式 (緊湊表格,對齊簽到明細風格) ──
+                // ★ 新增:勾選 + 批次退回/刪除 (用戶要求)
+                App._subListSel = App._subListSel || {};
+                const selKey = aid + '|' + cls;
+                App._subListSel[selKey] = App._subListSel[selKey] || new Set();
+                const selSet = App._subListSel[selKey];
+
                 const tWrap = el('div', { style:{padding:'0 0 10px',overflowX:'auto'} });
+                // 批次工具列
+                const bulkBar = el('div', { class:'no-print', style:{padding:'8px 12px',background:'var(--surface-2)',borderRadius:'8px 8px 0 0',display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'} });
+                const selCountSpan = el('span', { class:'small muted' }, '已選 0 筆');
+                const updateSelCount = () => {
+                  selCountSpan.textContent = '已選 ' + selSet.size + ' 筆';
+                  bulkReturnBtn.disabled = selSet.size === 0;
+                  bulkDeleteBtn.disabled = selSet.size === 0;
+                };
+                const selectAllChk = el('input', { type:'checkbox', title:'全選/全清', style:{cursor:'pointer'} });
+                selectAllChk.onchange = ()=> {
+                  // 共用 list 取得 sortedSubmittedIds (在下面 renderRows 算出)
+                  if(selectAllChk.checked){
+                    submittedSorted.forEach(s => selSet.add(s.id));
+                  } else {
+                    selSet.clear();
+                  }
+                  // 重新渲染這個區塊以更新 checkbox 狀態
+                  renderList();
+                };
+                bulkBar.appendChild(selectAllChk);
+                bulkBar.appendChild(el('span', { class:'small', style:{fontWeight:'700'} }, '批次操作'));
+                bulkBar.appendChild(selCountSpan);
+                const bulkReturnBtn = el('button', { class:'btn btn-sm', style:{background:'var(--warn-soft)',color:'var(--warn)'},
+                  disabled: true,
+                  onclick: async ()=> {
+                    if(selSet.size === 0) return;
+                    const ok = await confirmDlg('退回選取的 ' + selSet.size + ' 筆繳交給學生重做?', { title:'批次退回' });
+                    if(!ok) return;
+                    let n = 0;
+                    promptDlg('退回原因 (選填,所有人共用)', '', { title:'退回原因' }).then(reason => {
+                      selSet.forEach(stuId => {
+                        const item = subMap.get(stuId);
+                        if(!item) return;
+                        item.sub.returned = true;
+                        item.sub.returnedAt = Date.now();
+                        item.sub.returnedBy = App.session?.name || '老師';
+                        if(reason) item.sub.returnReason = reason;
+                        n++;
+                      });
+                      selSet.clear();
+                      try { saveDB(); Sync.setMap('submissions', App.db.submissions, true); bcNotify(); } catch(_){}
+                      toast('已退回 ' + n + ' 筆','success');
+                      rerender();
+                    });
+                  }
+                }, '↩ 退回選取');
+                bulkBar.appendChild(bulkReturnBtn);
+                const bulkDeleteBtn = el('button', { class:'btn btn-sm btn-danger',
+                  disabled: true,
+                  onclick: async ()=> {
+                    if(selSet.size === 0) return;
+                    const ok = await confirmDlg('永久刪除選取的 ' + selSet.size + ' 筆繳交? 此動作不可復原', { danger:true, title:'批次刪除' });
+                    if(!ok) return;
+                    const idsToDelete = new Set();
+                    selSet.forEach(stuId => {
+                      const item = subMap.get(stuId);
+                      if(item && item.sub && item.sub.id) idsToDelete.add(item.sub.id);
+                    });
+                    App.db.submissions = App.db.submissions.filter(s => !idsToDelete.has(s.id));
+                    selSet.clear();
+                    try { saveDB(); Sync.setMap('submissions', App.db.submissions, true); bcNotify(); } catch(_){}
+                    toast('已刪除 ' + idsToDelete.size + ' 筆','success');
+                    rerender();
+                  }
+                }, '🗑 刪除選取');
+                bulkBar.appendChild(bulkDeleteBtn);
+                tWrap.appendChild(bulkBar);
+
                 const tbl = el('table', { class:'rep-table', style:{width:'100%'} });
                 const th = el('thead');
                 th.appendChild(el('tr', null,
+                  el('th', { style:{width:'36px',textAlign:'center'} }, ''),  // 勾選欄
                   el('th', { style:{width:'56px',textAlign:'center'} }, '座號'),
                   el('th', null, '姓名'),
                   el('th', { style:{width:'130px'} }, '繳交時間'),
@@ -19993,6 +20074,9 @@ function rSub(content){
                 const submittedSorted = stusInCls
                   .filter(s => submittedInCls.has(s.id))
                   .sort((a,b) => (a.seat||999) - (b.seat||999));
+                // 同步 selectAll 狀態
+                selectAllChk.checked = submittedSorted.length > 0 && submittedSorted.every(s => selSet.has(s.id));
+                updateSelCount();
                 submittedSorted.forEach(s => {
                   const item = subMap.get(s.id);
                   if(!item) return;
@@ -20010,7 +20094,17 @@ function rSub(content){
                   else if(isGraded){ stTxt='🟢 ' + sub.score + '/' + asgPoints; stColor='var(--success)'; }
                   else { stTxt='🔵 待批'; stColor='var(--primary)'; }
                   const rowBg = isReturned ? 'rgba(245,158,11,.05)' : (isGraded ? 'rgba(16,185,129,.04)' : '');
+                  // 勾選 checkbox
+                  const chk = el('input', { type:'checkbox', style:{cursor:'pointer'} });
+                  chk.checked = selSet.has(s.id);
+                  chk.onchange = ()=> {
+                    if(chk.checked) selSet.add(s.id);
+                    else selSet.delete(s.id);
+                    updateSelCount();
+                    selectAllChk.checked = submittedSorted.length > 0 && submittedSorted.every(x => selSet.has(x.id));
+                  };
                   tb.appendChild(el('tr', { style: rowBg ? {background: rowBg} : null },
+                    el('td', { style:{textAlign:'center'} }, chk),
                     el('td', { class:'mono', style:{textAlign:'center',fontWeight:'700',color:'var(--text-muted)'} },
                       (s.seat != null && s.seat !== '') ? String(s.seat) : '—'),
                     el('td', null, el('a', { href:'javascript:void(0)', style:{color:'var(--primary)',textDecoration:'none'},
@@ -20029,11 +20123,11 @@ function rSub(content){
                 });
 
                 if(!submittedSorted.length){
-                  tb.appendChild(el('tr', null, el('td', { colspan:'6', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)',fontSize:'13px'} },
+                  tb.appendChild(el('tr', null, el('td', { colspan:'7', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)',fontSize:'13px'} },
                     '📭 此班尚無學生繳交此作業 — 切「📊 矩陣」可查看誰沒交')));
                 } else if(submittedInCls.size < stusInCls.length){
                   // 提示還有多少人沒交
-                  tb.appendChild(el('tr', null, el('td', { colspan:'6', style:{textAlign:'center',padding:'8px',color:'var(--text-muted)',fontSize:'12px',background:'var(--surface-2)'} },
+                  tb.appendChild(el('tr', null, el('td', { colspan:'7', style:{textAlign:'center',padding:'8px',color:'var(--text-muted)',fontSize:'12px',background:'var(--surface-2)'} },
                     '🔴 還有 ' + (stusInCls.length - submittedInCls.size) + ' 位未繳 — 切「📊 矩陣」可查看名單')));
                 }
 
@@ -26538,6 +26632,16 @@ function boot(){
   // L10: 防雙觸發（DOMContentLoaded + readyState 兩個入口同時觸發）
   if(App._booted) return;
   App._booted = true;
+
+  // ★ 全域追蹤「最近打字時間」(用戶反映「打字一直被打斷」)
+  //   _scheduleRerender 會看 App._lastInputTs,6 秒內動過鍵盤就延後 rerender
+  try {
+    document.addEventListener('input', () => { App._lastInputTs = Date.now(); }, true);
+    document.addEventListener('keydown', (e) => {
+      // 只記真正在打字的按鍵 (排除 Tab / Esc / 方向鍵)
+      if(e.key && e.key.length === 1) App._lastInputTs = Date.now();
+    }, true);
+  } catch(_){}
 
   // F-23: online / offline 全域事件
   try {
