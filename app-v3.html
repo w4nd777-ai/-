@@ -761,6 +761,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   transition:all var(--tx); text-align:center;
 }
 .role-card:hover{ border-color:var(--primary); box-shadow:var(--shadow); }
+.role-card:focus-visible{ outline:3px solid var(--primary); outline-offset:2px; border-color:var(--primary); }
 .role-card .ico{ font-size:48px; margin-bottom:8px; }
 .role-card h3{ margin-bottom:4px; }
 
@@ -4108,7 +4109,7 @@ const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-audit-fixes-batch1';
+const APP_BUILD = '2026-05-29-audit-fixes-batch2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4223,6 +4224,13 @@ const LS_LOGIN_STEP = LS_KEY + '_login_step';
 // 已於忘記密碼模組宣告（line 4959 附近），避免重複定義。
 const MSG_HARD_CAP = 500;             // messages 陣列上限
 const FEED_HARD_CAP = 100;            // feeds 陣列上限
+const ATTENDANCE_HARD_CAP = 50000;    // ~ 200 students × 250 sessions
+const LEAVES_HARD_CAP = 5000;
+const PASSWORD_RESETS_HARD_CAP = 500;
+const NOTIFICATIONS_HARD_CAP = 2000;
+function _capArray(arr, cap){
+  if(arr && arr.length > cap) arr.splice(0, arr.length - cap);
+}
 const REMEMBER_DAYS = 7;              // 記住我天數
 const REMEMBER_DAYS_MS = REMEMBER_DAYS * 24 * 3600 * 1000;
 const LOGIN_TOKEN_DAYS = 7;           // session token 有效期
@@ -4377,6 +4385,16 @@ function td(){
   const m = String(d.getMonth()+1).padStart(2,'0');
   const day = String(d.getDate()).padStart(2,'0');
   return `${d.getFullYear()}-${m}-${day}`;
+}
+// 本地日期字串 yyyy-MM-dd (跟 td() 一致,但對任意 Date)
+// 用來取代 toISOString().slice(0,10) (UTC) 造成的時區 off-by-one
+function tdOf(d){
+  if(!d) return '';
+  if(typeof d === 'string') d = new Date(d);
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return y + '-' + m + '-' + day;
 }
 function nt(){
   const d = new Date();
@@ -7512,13 +7530,14 @@ function renderWizard(root){
   card.appendChild(el('p', { class:'muted small' }, '請選擇您的身份'));
 
   const grid = el('div', { class:'grid grid-2', style:{marginTop:'12px'} });
-  grid.appendChild(el('div', { class:'role-card', onclick: ()=> setupTeacher() },
-    el('div', { class:'ico' }, '🧑‍🏫'),
+  const roleCardKeydown = function(e){ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); this.click(); } };
+  grid.appendChild(el('div', { class:'role-card', role:'button', tabindex:'0', 'aria-label':'我是老師', onclick: ()=> setupTeacher(), onkeydown: roleCardKeydown },
+    el('div', { class:'ico', 'aria-hidden':'true' }, '🧑‍🏫'),
     el('h3', null, '我是老師'),
     el('div', { class:'muted tiny' }, '建立課程 · 管理學生 · 點名計分')
   ));
-  grid.appendChild(el('div', { class:'role-card', onclick: ()=> setupStudent() },
-    el('div', { class:'ico' }, '🧑‍🎓'),
+  grid.appendChild(el('div', { class:'role-card', role:'button', tabindex:'0', 'aria-label':'我是學生', onclick: ()=> setupStudent(), onkeydown: roleCardKeydown },
+    el('div', { class:'ico', 'aria-hidden':'true' }, '🧑‍🎓'),
     el('h3', null, '我是學生'),
     el('div', { class:'muted tiny' }, '加入課程 · 簽到 · 看作業')
   ));
@@ -11029,6 +11048,7 @@ function _runForgotFlow(opts){
         status: 'pending',
         ts: Date.now()
       });
+      _capArray(App.db.passwordResets, PASSWORD_RESETS_HARD_CAP);
       saveDB();
       try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){_swallow('auto',e)}
       try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){_swallow('auto',e)}
@@ -13982,6 +14002,7 @@ function markPresent(studentId, options={}){
     status: 'present', method: options.method || 'teacher-mark'
   };
   App.db.attendance.push(rec);
+  _capArray(App.db.attendance, ATTENDANCE_HARD_CAP);
   saveDB();
   // Sync.push 內部用 data.id 作為 Firebase child key，
   // 因此「兩台裝置同時 push 同一 recordKey」會 set 到同一節點而非雙筆（idempotent）
@@ -14008,6 +14029,7 @@ function openLeaveDialog(studentId){
       status: 'approved', ts: Date.now(), reviewer: App.session?.name || '老師'
     };
     App.db.leaves.push(lv);
+    _capArray(App.db.leaves, LEAVES_HARD_CAP);
     saveDB();
     Sync.push('leaves', lv);
     bcNotify();
@@ -14498,6 +14520,18 @@ function rStu(content){
         // 包 C-4：備份 → 刪除 → pushUndo
         const backup = _clone(s);
         App.db.students = App.db.students.filter(x => x.id !== s.id);
+        // 清掉 email_students / google_students 映射，避免新生用同 email 註冊被卡「已被使用」
+        const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+        try {
+          if(s.email && firebase && firebase.database){
+            const ek = String(s.email).toLowerCase().replace(/[.@]/g, '_');
+            firebase.database().ref('cms-v3/'+rc+'/email_students/'+ek).remove().catch(()=>{});
+          }
+          if(s.googleEmail && firebase && firebase.database){
+            const gk = String(s.googleEmail).toLowerCase().replace(/[.@]/g, '_');
+            firebase.database().ref('cms-v3/'+rc+'/google_students/'+gk).remove().catch(()=>{});
+          }
+        } catch(_){}
         saveDB();
         Sync.setMap('students', App.db.students);
         bcNotify();
@@ -15494,6 +15528,7 @@ function rAtt(content){
         pushUndo('已取消 ' + (s.name||'') + ' 的簽到', () => {
           if(!App.db.attendance.find(x => x.id === backup.id)){
             App.db.attendance.push(backup);
+            _capArray(App.db.attendance, ATTENDANCE_HARD_CAP);
             saveDB();
             try { Sync.push('attendance', backup); } catch(_){_swallow('undo-att',_)}
             bcNotify();
@@ -15678,6 +15713,7 @@ function openMassLeave(){
       });
       added++;
     });
+    _capArray(App.db.leaves, LEAVES_HARD_CAP);
     saveDB();
     Sync.setMap('leaves', App.db.leaves);
     bcNotify();
@@ -16007,6 +16043,7 @@ function pushMsg(toId, text, attach, opts){
     rec.anonymous = true;
   }
   App.db.messages.push(rec);
+  _capArray(App.db.messages, MSG_HARD_CAP);
   saveDB();
   Sync.push('messages', rec);
   bcNotify();
@@ -17596,7 +17633,9 @@ function rSettings(content){
         const ok = await confirmDlg('刪除帳號 ' + a.username + '？', { danger:true });
         if(!ok) return;
         App.db.accounts = App.db.accounts.filter(x => x.id !== a.id);
-        saveDB(); toast('已刪除','warn'); rerender();
+        saveDB();
+        try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){ _swallow('sync-del-account', e); }
+        toast('已刪除','warn'); rerender();
       } }, '🗑'));
     }
     row.appendChild(acts);
@@ -18098,9 +18137,9 @@ function rCheckIn(content){
   // batch 5-29：每天首次進入提醒待辦
   try {
     if(typeof syncTodosFromAssignmentsQuizzes === 'function') syncTodosFromAssignmentsQuizzes(me.id);
-    const todayKey = '_b5_todo_remind_' + me.id + '_' + new Date().toISOString().slice(0,10);
+    const todayKey = '_b5_todo_remind_' + me.id + '_' + tdOf(new Date());
     if(!sessionStorage.getItem(todayKey)){
-      const due = (App.db.todos || []).filter(t => t.studentId === me.id && !t.done && t.dueDate === new Date().toISOString().slice(0,10));
+      const due = (App.db.todos || []).filter(t => t.studentId === me.id && !t.done && t.dueDate === tdOf(new Date()));
       if(due.length){
         toast('📌 您有 ' + due.length + ' 項待辦今天到期', 'info', 5000);
       }
@@ -18339,6 +18378,7 @@ function doStudentCheckIn(){
     status:'present', method:'student-self'
   };
   App.db.attendance.push(rec);
+  _capArray(App.db.attendance, ATTENDANCE_HARD_CAP);
   saveDB();
   // Sync.push 用 data.id 作為 Firebase child key → 同 key 雙端寫入會 set 同一節點（不會雙筆）
   if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
@@ -18416,6 +18456,7 @@ function studentRequestLeave(){
       date: d, reason: r, status:'pending', ts: Date.now()
     };
     App.db.leaves.push(rec);
+    _capArray(App.db.leaves, LEAVES_HARD_CAP);
     saveDB(); Sync.push('leaves', rec); bcNotify();
     triggerWebhook('leave-request', { student: me.name, date: d, reason: r });
     // F-03: 送出後清草稿
@@ -19687,7 +19728,7 @@ function rSub(content){
     if(App._subWeekFilter){
       const wantWeek = App._subWeekFilter === 'cur' ? getCurrentWeek() : parseInt(App._subWeekFilter,10);
       list = list.filter(s => {
-        const dateStr = s.ts ? new Date(s.ts).toISOString().slice(0,10) : '';
+        const dateStr = s.ts ? tdOf(new Date(s.ts)) : '';
         return getWeekNo(dateStr) === wantWeek;
       });
     }
@@ -20713,6 +20754,7 @@ function openSubmissionGrade(sub, list=null, idx=0){
         ts: Date.now(),
         read: false
       });
+      _capArray(App.db.notifications, NOTIFICATIONS_HARD_CAP);
       saveDB();
       Sync.setMap('notifications', App.db.notifications);
     } catch(_){}
@@ -21529,7 +21571,7 @@ function rAnalyticsTrend(content){
   for(let i = 13; i >= 0; i--){
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const ds = d.toISOString().slice(0,10);
+    const ds = tdOf(d);
     dates.push(ds);
   }
   const totalStu = App.db.students.length || 1;
@@ -21765,7 +21807,7 @@ function rSGrade(content){
       filtered.forEach(s => {
         const asg = App.db.assignments.find(x => x.id === s.assignmentId);
         const row = el('div', { class:'list-row' });
-        const _wkG = s.ts ? fmtWeekTag(new Date(s.ts).toISOString().slice(0,10)) : '';
+        const _wkG = s.ts ? fmtWeekTag(tdOf(new Date(s.ts))) : '';
         const sid = s.subjectId || asg?.subjectId || '';
         const sNameTag = sid && typeof getSubjectName === 'function'
           ? el('span', { class:'tag', style:{background: (getSubjectColor(sid)||'var(--surface-2)'), color:'#fff'} }, getSubjectName(sid))
@@ -22484,6 +22526,7 @@ function tryAutoCheckin(){
     status:'present', method:'qr', code
   };
   App.db.attendance.push(rec);
+  _capArray(App.db.attendance, ATTENDANCE_HARD_CAP);
   markQrUsed(code, me.id);
   saveDB();
   // batch 2-stab: 用 Sync.push（會 mark echo + 用 recordKey 作 child key），多裝置同碼 = 同節點 set
@@ -23233,9 +23276,30 @@ async function backupRestore(key){
     const ok = await confirmDlg('還原這份備份？目前的資料會被覆蓋（建議先匯出）',
       { danger:true, title:'⚠ 確認還原 ' + (key.slice(LS_BACKUP_PREFIX.length)) });
     if(!ok) return false;
+    // 二次確認：要求輸入 roomCode（避免另一台裝置剛加的學生 / email_students / google_students / attachments 被誤蓋）
+    const roomCode = (App.cfg && App.cfg.roomCode) || 'local';
+    const typed = await promptDlg(
+      '此動作會覆蓋目前課程的核心資料（學生、出席、作業…）。\n' +
+      '請輸入課程代碼「' + roomCode + '」以確認還原。\n' +
+      '（email_students / google_students / 附件 不會被覆蓋）',
+      '',
+      { title:'⚠ 最終確認', placeholder: roomCode }
+    );
+    if(typed === null) return false;
+    if((typed||'').trim() !== roomCode){
+      toast('課程代碼不符，已取消還原','warn');
+      return false;
+    }
     App.db = Object.assign(defaultDB(), obj.db);
     logOp('restore','還原備份 ' + key);
-    saveDB(); Sync.setNode('', App.db); bcNotify();
+    saveDB();
+    // 改用 per-collection setMap，避免 setNode('') 整個 room 覆蓋
+    // 保留雲端 email_students / google_students / attachments（不在此清單）
+    const NODES = ['students','accounts','attendance','leaves','assignments','submissions','announcements','scores','evals','feeds','groups','messages','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications','subjects','timetable'];
+    NODES.forEach(n => {
+      if(App.db[n]) try { Sync.setMap(n, App.db[n]); } catch(_){}
+    });
+    bcNotify();
     toast('已還原','success');
     rerender();
     return true;
@@ -23290,10 +23354,31 @@ async function importFullJSON(file){
 
     const acts = el('div', { class:'modal-actions' });
     acts.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-    acts.appendChild(el('button', { class:'btn btn-danger', onclick:()=> {
+    acts.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+      // 二次確認：要求輸入 roomCode（避免另一台裝置剛加的學生 / email_students / google_students / attachments 被誤蓋）
+      const roomCode = (App.cfg && App.cfg.roomCode) || 'local';
+      const typed = await promptDlg(
+        '此動作會覆蓋目前課程的核心資料（學生、出席、作業…）。\n' +
+        '請輸入課程代碼「' + roomCode + '」以確認匯入。\n' +
+        '（email_students / google_students / 附件 不會被覆蓋）',
+        '',
+        { title:'⚠ 最終確認', placeholder: roomCode }
+      );
+      if(typed === null) return;
+      if((typed||'').trim() !== roomCode){
+        toast('課程代碼不符，已取消匯入','warn');
+        return;
+      }
       App.db = Object.assign(defaultDB(), db);
       logOp('import','匯入完整 JSON');
-      saveDB(); Sync.setNode('', App.db); bcNotify();
+      saveDB();
+      // 改用 per-collection setMap，避免 setNode('') 整個 room 覆蓋
+      // 保留雲端 email_students / google_students / attachments（不在此清單）
+      const NODES = ['students','accounts','attendance','leaves','assignments','submissions','announcements','scores','evals','feeds','groups','messages','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications','subjects','timetable'];
+      NODES.forEach(n => {
+        if(App.db[n]) try { Sync.setMap(n, App.db[n]); } catch(_){}
+      });
+      bcNotify();
       m.close();
       toast('已匯入並覆蓋','success');
       rerender();
@@ -23771,7 +23856,7 @@ function rAnHeatmap(content){
   const dates = [];
   for(let i = 29; i >= 0; i--){
     const d = new Date(); d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().slice(0,10));
+    dates.push(tdOf(d));
   }
   content.appendChild(el('h2', null, '🔥 30 日出席熱圖'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'10px'} },
@@ -23895,11 +23980,11 @@ function rAnTrend(content){
   const days = [];
   for(let i = 29; i >= 0; i--){
     const d = new Date(); d.setDate(d.getDate() - i);
-    days.push(d.toISOString().slice(0,10));
+    days.push(tdOf(d));
   }
   const data = days.map(ds => {
     const subs = App.db.submissions.filter(s => typeof s.score === 'number' &&
-      s.ts && new Date(s.ts).toISOString().slice(0,10) === ds);
+      s.ts && tdOf(new Date(s.ts)) === ds);
     const avg = subs.length ? Math.round(subs.reduce((t,s)=> t+s.score, 0)/subs.length) : null;
     return { label: ds.slice(5), value: avg||0, n: subs.length };
   });
@@ -25774,6 +25859,8 @@ function matrixSetStatus(stuId, status){
   } else {
     // absent: already cleared
   }
+  _capArray(App.db.attendance, ATTENDANCE_HARD_CAP);
+  _capArray(App.db.leaves, LEAVES_HARD_CAP);
   saveDB();
   if(typeof Sync !== 'undefined' && Sync.push) Sync.push('attendance', null);
   try { Sync.setMap('leaves', App.db.leaves); } catch(_){}
@@ -27674,7 +27761,7 @@ function getSmartReminders(){
     try {
       // 1. 明天到期的作業 + 未交人數
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
-      const tomorrowStr = tomorrow.toISOString().slice(0,10);
+      const tomorrowStr = tdOf(tomorrow);
       const dueTomorrow = (App.db.assignments||[]).filter(a => a.dueDate === tomorrowStr);
       dueTomorrow.forEach(a => {
         const subs = a.submissions || {};
@@ -27695,7 +27782,7 @@ function getSmartReminders(){
       const recent = [];
       for(let i=0;i<3;i++){
         const d = new Date(); d.setDate(d.getDate()-i);
-        recent.push(d.toISOString().slice(0,10));
+        recent.push(tdOf(d));
       }
       const att = App.db.attendance || [];
       const absentees = [];
@@ -27718,7 +27805,7 @@ function getSmartReminders(){
     try {
       // 3. 明天有小考
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
-      const tStr = tomorrow.toISOString().slice(0,10);
+      const tStr = tdOf(tomorrow);
       const quizzes = (App.db.quizzes || []).filter(q => q.scheduledDate === tStr || q.date === tStr);
       quizzes.forEach(q => {
         out.push({
@@ -28924,7 +29011,7 @@ function rAttReport(content){
 
 function initAttRange(){
   const d = new Date();
-  const fmt = x => x.toISOString().slice(0,10);
+  const fmt = x => tdOf(x);
   const first = new Date(d.getFullYear(), d.getMonth(), 1);
   return { from: fmt(first), to: td() };
 }
@@ -33238,7 +33325,7 @@ function rMyBehavior(content){
       .sort((a,b) => (a.ts || 0) - (b.ts || 0));
     for(let i = days - 1; i >= 0; i--){
       const d = new Date(today.getTime() - i * 86400000);
-      const ds = d.toISOString().slice(0,10);
+      const ds = tdOf(d);
       const dayPts = sorted.filter(b => b.date === ds)
         .reduce((sum, b) => sum + ((b.type === 'neg' ? -1 : 1) * Math.abs(b.points || 0)), 0);
       cum += dayPts;
@@ -33999,7 +34086,7 @@ function syncQuizScore(sub, quiz){
     title: quiz.title,
     score: sub.score,
     maxScore: (quiz.questions||[]).reduce((s,q) => s + (q.points||0), 0),
-    date: (new Date(sub.submittedAt || Date.now())).toISOString().slice(0,10)
+    date: tdOf(new Date(sub.submittedAt || Date.now()))
   };
   if(exist) Object.assign(exist, ent);
   else App.db.scores.push(ent);
@@ -34387,7 +34474,7 @@ function exportStudentReport(studentId){
   let subRows = '';
   subs.forEach(sb => {
     const asg = (App.db.assignments || []).find(a => a.id === sb.assignmentId);
-    const dateStr = sb.ts ? new Date(sb.ts).toISOString().slice(0,10) : '';
+    const dateStr = sb.ts ? tdOf(new Date(sb.ts)) : '';
     const wkTag = (typeof fmtWeekTag === 'function' && dateStr) ? fmtWeekTag(dateStr) : '';
     subRows += '<tr>'
       + '<td>' + _b5EscapeHtml(asg ? asg.title : '?') + '</td>'
@@ -34413,7 +34500,7 @@ function exportStudentReport(studentId){
   let qRows = '';
   qsubs.forEach(q => {
     const quiz = (App.db.quizzes || []).find(x => x.id === q.quizId);
-    const dateStr = q.submittedAt ? new Date(q.submittedAt).toISOString().slice(0,10) : '';
+    const dateStr = q.submittedAt ? tdOf(new Date(q.submittedAt)) : '';
     qRows += '<tr>'
       + '<td>' + _b5EscapeHtml(quiz ? quiz.title : '?') + '</td>'
       + '<td>' + _b5EscapeHtml(String(q.score)) + '</td>'
@@ -34427,7 +34514,7 @@ function exportStudentReport(studentId){
     .sort((a,b)=> (b.ts||0)-(a.ts||0)).slice(0,5);
   let fbHtml = '';
   fbs.forEach(f => {
-    fbHtml += '<div class="fb-item">「' + _b5EscapeHtml(f.text) + '」<span class="fb-meta">— ' + _b5EscapeHtml(new Date(f.ts||0).toISOString().slice(0,10)) + '</span></div>';
+    fbHtml += '<div class="fb-item">「' + _b5EscapeHtml(f.text) + '」<span class="fb-meta">— ' + _b5EscapeHtml(tdOf(new Date(f.ts||0))) + '</span></div>';
   });
   // 老師評語（學期成績）
   const tComment = (App.db.grades && App.db.grades[s.id] && App.db.grades[s.id].comment) || '';
@@ -34473,7 +34560,7 @@ function exportStudentReport(studentId){
     + '<button onclick="window.close()">關閉</button>'
     + '</div>'
     + '<h1>' + _b5EscapeHtml(school) + ' — 學期成績單</h1>'
-    + '<div class="subtitle">' + _b5EscapeHtml(semLabel) + '　·　產出日期：' + new Date().toISOString().slice(0,10) + '</div>'
+    + '<div class="subtitle">' + _b5EscapeHtml(semLabel) + '　·　產出日期：' + tdOf(new Date()) + '</div>'
     + '<h2>👤 學生資訊</h2>'
     + '<div class="meta">'
     + '<div><span>姓名</span>' + _b5EscapeHtml(s.name) + '</div>'
@@ -34660,7 +34747,7 @@ function checkAndAwardBadges(studentId){
     });
   });
   if(awarded > 0){
-    try { saveDB(); } catch(_) {_swallow('auto',_)}
+    try { _capArray(App.db.notifications, NOTIFICATIONS_HARD_CAP); saveDB(); } catch(_) {_swallow('auto',_)}
     // POLISH-10/3: 學生本人取得新徽章時灑彩屑
     try {
       if(App.session && App.session.role === 'student' && App.session.id === studentId){
@@ -34677,7 +34764,7 @@ function renderBadgeCard(badge){
   return el('div', { class:'card', style:{textAlign:'center',padding:'12px',background:'var(--surface)',borderColor:color} },
     el('div', { style:{fontSize:'32px'} }, def.icon),
     el('div', { style:{fontWeight:'700',color:color,fontSize:'13px'} }, BADGE_LEVEL_LABEL[badge.level] + ' ' + def.label),
-    el('div', { class:'tiny muted' }, badge.earnedAt ? new Date(badge.earnedAt).toISOString().slice(0,10) : '')
+    el('div', { class:'tiny muted' }, badge.earnedAt ? tdOf(new Date(badge.earnedAt)) : '')
   );
 }
 
@@ -34815,7 +34902,7 @@ function rTeacherNotes(content){
       card.appendChild(el('div', { class:'flex-between' },
         el('div', { style:{fontWeight:'700',fontSize:'15px'} },
           (n.pinned ? '📌 ' : '') + (n.title || '（無標題）')),
-        el('span', { class:'tiny muted' }, n.updatedAt ? new Date(n.updatedAt).toISOString().slice(0,10) : '')
+        el('span', { class:'tiny muted' }, n.updatedAt ? tdOf(new Date(n.updatedAt)) : '')
       ));
       if(n.category) card.appendChild(el('div', { class:'tiny', style:{marginTop:'2px'} }, '🏷️ ' + n.category));
       const preview = (n.content || '').slice(0, 160);
@@ -35041,7 +35128,7 @@ function rMyNotes(content){
         el('div', { style:{fontWeight:'700',fontSize:'15px'} },
           (n.pinned ? '📌 ' : '') + (n.title || '（無標題）')
         ),
-        el('span', { class:'tiny muted' }, n.updatedAt ? new Date(n.updatedAt).toISOString().slice(0,10) : '')
+        el('span', { class:'tiny muted' }, n.updatedAt ? tdOf(new Date(n.updatedAt)) : '')
       );
       card.appendChild(head);
       if(n.category) card.appendChild(el('div', { class:'tiny', style:{marginTop:'2px'} }, '🏷️ ' + n.category));
@@ -35186,7 +35273,7 @@ function openNoteEditor(note){
    5-29：待辦事項
    ──────────────────────────────────────────────────────────── */
 function _b5TodoToday(){
-  return new Date().toISOString().slice(0,10);
+  return tdOf(new Date());
 }
 function _b5DaysDiff(dateStr){
   if(!dateStr) return 999;
@@ -35216,7 +35303,7 @@ function syncTodosFromAssignmentsQuizzes(studentId){
       id: nid(),
       studentId,
       title: '作業：' + (a.title || '未命名'),
-      dueDate: new Date(a.dueAt).toISOString().slice(0,10),
+      dueDate: tdOf(new Date(a.dueAt)),
       priority: 'med',
       done: false,
       source: 'assignment',
@@ -35239,7 +35326,7 @@ function syncTodosFromAssignmentsQuizzes(studentId){
       id: nid(),
       studentId,
       title: '小考：' + (q.title || '未命名'),
-      dueDate: q.dueAt ? new Date(q.dueAt).toISOString().slice(0,10) : '',
+      dueDate: q.dueAt ? tdOf(new Date(q.dueAt)) : '',
       priority: 'high',
       done: false,
       source: 'quiz',
@@ -35589,7 +35676,7 @@ function _b5StudentScoreSeries(studentId, subject, period){
   }).sort((a,b) => (a.ts||a.gradedAt||0) - (b.ts||b.gradedAt||0));
   return rows.map(s => {
     const asg = (App.db.assignments || []).find(a => a.id === s.assignmentId);
-    const dateStr = (s.ts || s.gradedAt) ? new Date(s.ts || s.gradedAt).toISOString().slice(0,10) : '';
+    const dateStr = (s.ts || s.gradedAt) ? tdOf(new Date(s.ts || s.gradedAt)) : '';
     const wk = (typeof getWeekNo === 'function' && dateStr) ? getWeekNo(dateStr) : 0;
     const label = wk ? ('W' + wk) : dateStr.slice(5);
     // 百分制：score / points * 100
@@ -35623,7 +35710,7 @@ function _b5ClassAvgSeries(subject, period){
         if(!t.includes(subject)) return;
       }
     }
-    const dateStr = (s.ts || s.gradedAt) ? new Date(s.ts || s.gradedAt).toISOString().slice(0,10) : '';
+    const dateStr = (s.ts || s.gradedAt) ? tdOf(new Date(s.ts || s.gradedAt)) : '';
     const wk = (typeof getWeekNo === 'function' && dateStr) ? getWeekNo(dateStr) : 0;
     const label = wk ? ('W' + wk) : dateStr.slice(5);
     const max = (asg && asg.points) || 100;
