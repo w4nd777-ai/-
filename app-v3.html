@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-trash-bin';
+const APP_BUILD = '2026-06-01-drive-auth-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2878,9 +2878,34 @@ function gdIsAuthed(){
   return !!_gdToken && Date.now() < _gdTokenExpiry;
 }
 
+// ★ FIX: popup blocker — 預先 preload 不要等到 click 後才下載 Google scripts
+//   原本流程: click → await gdLoadScripts() (網路) → requestAccessToken()
+//             user gesture 在 await 之間就過期了 → 瀏覽器封鎖 popup
+//   新流程:  頁面 render 時就 gdPreload() (背景下載) →
+//             click → 如果還沒 ready 提示用戶等一下 → ready 後直接 requestAccessToken()
+//             (sync 部分 → 在 user gesture 內,瀏覽器允許 popup)
+let _gdPreloadPromise = null;
+function gdPreload(){
+  if(_gdPreloadPromise) return _gdPreloadPromise;
+  _gdPreloadPromise = gdLoadScripts().catch(e => {
+    _gdPreloadPromise = null;   // 失敗讓下次有機會再試
+    throw e;
+  });
+  return _gdPreloadPromise;
+}
+function gdIsReady(){
+  return _gapiReady && _gisReady;
+}
+
 // 授權登入（取得 access token）
 async function gdAuth(){
-  await gdLoadScripts();
+  // 如果腳本還沒 load 完 — 不要在這裡 await (會打斷 user gesture)
+  // 直接 throw,讓 UI 顯示提示
+  if(!gdIsReady()){
+    // 順便在背景觸發 preload (下次點就 ready)
+    gdPreload().catch(()=>{});
+    throw new Error('Google 服務還在載入中,請等 3-5 秒後再點一次');
+  }
   const cfg = gdConfig();
   if(!cfg.clientId) throw new Error('未設定 Google Client ID');
   return new Promise((res, rej) => {
@@ -2895,6 +2920,16 @@ async function gdAuth(){
           try { gapi.client.setToken({ access_token: _gdToken }); } catch(e){_swallow('auto',e)}
           res(resp);
         },
+        // ★ 加 error_callback 處理 popup 被擋的狀況
+        error_callback: (err) => {
+          if(err && err.type === 'popup_closed'){
+            rej(new Error('授權視窗被關閉,請重新嘗試'));
+          } else if(err && err.type === 'popup_failed_to_open'){
+            rej(new Error('瀏覽器封鎖了授權視窗 — 請允許彈出視窗 (網址列右側圖示) 後再試'));
+          } else {
+            rej(new Error('授權失敗: ' + (err && (err.message || err.type) || '未知錯誤')));
+          }
+        }
       });
       client.requestAccessToken({ prompt: cfg.skipPrompt ? '' : 'consent' });
     } catch(e){ rej(e); }
@@ -16162,6 +16197,14 @@ function exportAssignmentsCSV(){
 // ════════════════════════════════════════════════════════════════
 function renderSubCapacityCard(content){
   try {
+    // ★ FIX popup blocker: 進頁面就背景 preload Google 腳本,讓 click 那一刻直接呼叫 popup
+    //   (沒先 preload → click 後要 await 載 script → user gesture 已過 → 瀏覽器擋 popup)
+    try {
+      const _cfg = (typeof gdConfig === 'function') ? gdConfig() : {};
+      if(_cfg && _cfg.clientId && typeof gdPreload === 'function' && typeof gdIsReady === 'function' && !gdIsReady()){
+        gdPreload().catch(()=>{});
+      }
+    } catch(_){}
     const cap = el('div', { class:'card', style:{
       marginBottom:'12px',padding:'10px 14px',
       background:'linear-gradient(to right, rgba(99,102,241,.06), transparent 60%)',
@@ -16179,27 +16222,42 @@ function renderSubCapacityCard(content){
       fontSize:'11px',fontWeight:'700',padding:'3px 8px',borderRadius:'12px'
     }}, driveAuthed ? '☁️ Drive 已連接 (+15 GB)' : '☁️ Drive 未連接'));
     if(!driveAuthed){
-      capLine.appendChild(el('button', {
+      // ★ 改:click handler 完全同步 (沒 await) → 瀏覽器不擋 popup
+      //   如果 scripts 還沒 ready (剛開頁面)就提示用戶等一下 + 自動 preload
+      const authBtn = el('button', {
         class:'btn btn-sm btn-primary',
         style:{marginLeft:'auto'},
         title:'授權後超大檔自動存到你的 Google Drive (15 GB 免費)',
-        onclick: async (ev)=> {
+        onclick: (ev)=> {
           const btn = ev.currentTarget;
-          btn.disabled = true; btn.textContent = '授權中...';
-          try {
-            if(typeof gdAuth === 'function'){
-              await gdAuth();
-              toast('✅ Google Drive 已連接,大檔自動切換到 Drive','success', 5000);
-              rerender();
-            } else {
-              toast('Drive 設定不可用','danger');
+          if(typeof gdAuth !== 'function'){ toast('Drive 設定不可用','danger'); return; }
+          if(typeof gdIsReady === 'function' && !gdIsReady()){
+            // scripts 還沒 ready → 先 preload + 提示
+            btn.disabled = true; btn.textContent = '⏳ 準備中...';
+            if(typeof gdPreload === 'function'){
+              gdPreload().then(()=> {
+                btn.disabled = false; btn.textContent = '✅ 點此完成授權';
+                toast('Google 服務已就緒,請再點一次授權按鈕','info', 4000);
+              }).catch(e => {
+                btn.disabled = false; btn.textContent = '☁️ 授權 Drive (+15 GB)';
+                toast('Google 服務載入失敗: ' + (e.message||e),'danger', 6000);
+              });
             }
-          } catch(e){
-            toast('Drive 授權失敗:' + (e.message || e) + ' (Chrome 可能擋了 popup,試試 Console > Allow popups)','danger', 8000);
-            btn.disabled = false; btn.textContent = '☁️ 授權 Drive';
+            return;
           }
+          // scripts ready → 同步呼叫 popup (在 user gesture 內,瀏覽器允許)
+          btn.disabled = true; btn.textContent = '授權中...';
+          gdAuth().then(()=> {
+            toast('✅ Google Drive 已連接,大檔自動切換到 Drive','success', 5000);
+            rerender();
+          }).catch(e => {
+            const msg = e && e.message || String(e);
+            toast('Drive 授權失敗: ' + msg, 'danger', 9000);
+            btn.disabled = false; btn.textContent = '☁️ 授權 Drive (+15 GB)';
+          });
         }
-      }, '☁️ 授權 Drive (+15 GB)'));
+      }, '☁️ 授權 Drive (+15 GB)');
+      capLine.appendChild(authBtn);
     } else {
       capLine.appendChild(el('button', {
         class:'btn btn-sm', style:{marginLeft:'auto'},
@@ -16558,6 +16616,27 @@ function rSub(content){
           asgCard.appendChild(el('div', { class:'muted small', style:{padding:'14px',textAlign:'center'} },
             '此作業沒有派發對象'));
         } else {
+          // ★ 用戶要求:作業內的「展開所有班 / 收合所有班」按鈕 (只有 >1 班才顯示)
+          if(clsList.length > 1){
+            const clsToolbar = el('div', { class:'no-print', style:{
+              display:'flex',gap:'6px',justifyContent:'flex-end',alignItems:'center',
+              padding:'6px 14px',background:'rgba(0,0,0,.02)',
+              borderTop:'1px solid var(--border)'
+            }},
+              el('span', { class:'tiny muted' }, clsList.length + ' 個班'),
+              el('button', { class:'btn btn-sm', onclick:(ev)=> {
+                ev.stopPropagation();
+                clsList.forEach(c => { App._subExpandedAsgCls[aid + '|' + c] = true; });
+                renderList();
+              }}, '▼ 展開所有班'),
+              el('button', { class:'btn btn-sm', onclick:(ev)=> {
+                ev.stopPropagation();
+                clsList.forEach(c => { App._subExpandedAsgCls[aid + '|' + c] = false; });
+                renderList();
+              }}, '▲ 收合所有班')
+            );
+            asgCard.appendChild(clsToolbar);
+          }
           clsList.forEach(cls => {
             const stusInCls = expectedByCls[cls].slice().sort((a,b) => (a.seat||999) - (b.seat||999));
             const subsInCls = allSubsForAsg.filter(({sub}) => {
@@ -16568,7 +16647,9 @@ function rSub(content){
             const gradedInCls = subsInCls.filter(x => typeof x.sub.score === 'number').length;
             const returnedInCls = subsInCls.filter(x => x.sub.returned).length;
             const clsKey = aid + '|' + cls;
-            const clsExpanded = App._subExpandedAsgCls[clsKey] !== false;
+            // ★ 用戶要求:作業內每個班也預設收合,讓老師能個別點開
+            //   例外:有搜尋字串/週次篩選 → 自動展開
+            const clsExpanded = _autoExpand || App._subExpandedAsgCls[clsKey] === true;
 
             // 班級子區塊
             const clsBlock = el('div', { style:{borderTop:'1px solid var(--border)'} });
