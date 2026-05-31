@@ -59,7 +59,7 @@
             // 🔒 過濾敏感字串避免把密碼/token 送出去
             beforeSend: function(event) {
               try {
-                var blob = (event.message || '') + ' ' + JSON.stringify(event.exception || '') + ' ' + JSON.stringify(event.breadcrumbs || '');
+                const blob = (event.message || '') + ' ' + JSON.stringify(event.exception || '') + ' ' + JSON.stringify(event.breadcrumbs || '');
                 if (/password|密碼|secret|api[_-]?key|access[_-]?token|authorization/i.test(blob)) return null;
               } catch(_) {}
               return event;
@@ -4123,7 +4123,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-audit-fixes-batch5';
+const APP_BUILD = '2026-05-29-audit-fixes-final';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4381,6 +4381,30 @@ function _eyeSvg(){
 }
 function _eyeOffSvg(){
   return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><path d="M14.12 14.12a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+}
+
+// 🔧 給密碼 input 套上眼睛 toggle 按鈕,回傳包好的 wrapper div
+//    用法:wrap = _pwInputWithEye(input); parent.appendChild(wrap);
+//    可選 opts: { rightPx: 8, btnSize: 'sm'|'md' }
+function _pwInputWithEye(input, opts){
+  opts = opts || {};
+  const rightPx = (opts.rightPx != null) ? opts.rightPx : 8;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative';
+  wrap.appendChild(input);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.tabIndex = -1;
+  btn.setAttribute('aria-label', '顯示或隱藏密碼');
+  btn.style.cssText = 'position:absolute;right:' + rightPx + 'px;top:50%;transform:translateY(-50%);background:transparent;border:0;cursor:pointer;color:#6b7280;padding:6px;display:inline-flex;align-items:center';
+  btn.innerHTML = _eyeSvg();
+  btn.onclick = function(e){
+    e.preventDefault();
+    if(input.type === 'password'){ input.type = 'text'; btn.innerHTML = _eyeOffSvg(); }
+    else { input.type = 'password'; btn.innerHTML = _eyeSvg(); }
+  };
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 function el(tag, attrs, ...children){
@@ -5223,7 +5247,7 @@ function ensureDefaultsAndDemo(){
       // 延遲 5 秒，給 Sync.init 的 child_added + once('value') fallback 時間抓資料
       setTimeout(function(){
         try {
-          var hasAdmin = (App.db.accounts || []).some(function(a){
+          const hasAdmin = (App.db.accounts || []).some(function(a){
             return a && String(a.username||'').toLowerCase() === 'admin';
           });
           if(hasAdmin){
@@ -5261,7 +5285,7 @@ function ensureDefaultsAndDemo(){
     }
   } else {
     // 已有 accounts，但檢查是否有 admin（防止 accounts 有資料但 admin 被誤刪）
-    var hasAdmin = App.db.accounts.some(function(a){
+    const hasAdmin = App.db.accounts.some(function(a){
       return a && String(a.username||'').toLowerCase() === 'admin';
     });
     if(!hasAdmin){
@@ -5802,36 +5826,36 @@ const Sync = (() => {
   async function _fetchAllFromFirebase(){
     if(!App.cfg || !App.cfg.roomCode) return 0;
     if(!window.firebase || !firebase.database || !firebase.database().app) return 0;
-    var dbURL = firebase.database().app.options.databaseURL;
+    const dbURL = firebase.database().app.options.databaseURL;
     if(!dbURL) return 0;
-    var url = dbURL.replace(/\/$/, '') + '/cms-v3/' + App.cfg.roomCode + '.json';
-    var r;
+    const url = dbURL.replace(/\/$/, '') + '/cms-v3/' + App.cfg.roomCode + '.json';
+    let r;
     try { r = await fetch(url, { cache: 'no-store' }); } catch(e){ throw e; }
     if(!r.ok) throw new Error('HTTP ' + r.status);
-    var data = await r.json();
+    const data = await r.json();
     if(!data || data.error){ throw new Error(data && data.error ? data.error : 'no data'); }
 
-    var updated = 0;
-    var ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','_qrCodes','subjects','notifications','attachments','timetable','teachers','groups','courses'];
+    let updated = 0;
+    const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','_qrCodes','subjects','notifications','attachments','timetable','teachers','groups','courses'];
     ARR_NODES.forEach(function(node){
       if(!_shouldSubscribe(node)) return;
-      var v = data[node];
+      const v = data[node];
       if(!v) return;
-      var arr = Array.isArray(v) ? v : Object.values(v);
+      let arr = Array.isArray(v) ? v : Object.values(v);
       arr = arr.filter(function(x){ return x && (x.id != null || x.sid != null); });
       // 用 id 合併，本地剛新增的不覆蓋
-      var existing = App.db[node] || [];
-      var byId = {};
+      const existing = App.db[node] || [];
+      const byId = {};
       existing.forEach(function(x){ if(x && x.id != null) byId[x.id] = x; });
       arr.forEach(function(x){
         if(x && x.id != null && !byId[x.id]){ byId[x.id] = x; }
         else if(x && x.id == null && x.sid != null){
           // 學生用 sid 比對
-          var existed = Object.values(byId).find(function(e){ return e && e.sid == x.sid; });
+          const existed = Object.values(byId).find(function(e){ return e && e.sid == x.sid; });
           if(!existed) byId['_sid_' + x.sid] = x;
         }
       });
-      var merged = Object.values(byId);
+      const merged = Object.values(byId);
       if(merged.length > existing.length){
         App.db[node] = merged;
         updated++;
@@ -9315,14 +9339,14 @@ async function _emailLoginModal(title, role){
   role = role || 'teacher';  // 預設 teacher,呼叫時可傳 'student'
   return new Promise(function(resolve){
     // 載入「記住我」資料
-    var saved = loadEmailRemember(role);
-    var savedEmail = saved ? (saved.email || '') : '';
-    var savedPw = saved ? _deobfuscatePw(saved.pw || '') : '';
-    var shouldCheckRem = !!(saved && saved.email);
+    const saved = loadEmailRemember(role);
+    const savedEmail = saved ? (saved.email || '') : '';
+    const savedPw = saved ? _deobfuscatePw(saved.pw || '') : '';
+    const shouldCheckRem = !!(saved && saved.email);
 
-    var overlay = document.createElement('div');
+    const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
-    var card = document.createElement('div');
+    const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:14px;padding:26px;max-width:400px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:system-ui';
     // 不用 value="..." 內插 (密碼有特殊字元會壞 HTML),改成 innerHTML 後再 set .value
     card.innerHTML =
@@ -9331,15 +9355,8 @@ async function _emailLoginModal(title, role){
       '<input id="__el_email" type="email" autocomplete="email" inputmode="email" placeholder="name@example.com" ' +
       'style="width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;margin-bottom:14px" />' +
       '<label style="font-size:13px;color:#444;font-weight:600;display:block;margin-bottom:6px">密碼</label>' +
-      // ★ 密碼欄加眼睛圖示 (show/hide)
-      '<div style="position:relative;margin-bottom:12px">' +
-      '<input id="__el_pw" type="password" autocomplete="current-password" placeholder="輸入密碼" ' +
-      'style="width:100%;padding:11px 44px 11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box" />' +
-      '<button id="__el_pw_eye" type="button" tabindex="-1" aria-label="顯示或隱藏密碼" ' +
-      'style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent;border:0;cursor:pointer;padding:8px;color:#888;display:inline-flex;align-items:center">' +
-      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>' +
-      '</button>' +
-      '</div>' +
+      // ★ 密碼欄占位 (稍後用 _pwInputWithEye 插入,避免內聯 HTML 重複)
+      '<div id="__el_pw_slot" style="margin-bottom:12px"></div>' +
       '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#444;cursor:pointer;user-select:none;margin-bottom:14px">' +
       '<input id="__el_remember" type="checkbox" style="width:16px;height:16px;accent-color:#16a34a;cursor:pointer">' +
       '<span>記住我 <span style="color:#9ca3af;font-size:11px">(下次自動帶入 Email + 密碼)</span></span>' +
@@ -9350,24 +9367,19 @@ async function _emailLoginModal(title, role){
       '</div>';
     overlay.appendChild(card);
     document.body.appendChild(overlay);
-    var iEmail = card.querySelector('#__el_email');
-    var iPw = card.querySelector('#__el_pw');
-    var iRem = card.querySelector('#__el_remember');
-    var btnOk = card.querySelector('#__el_ok');
-    var btnCancel = card.querySelector('#__el_cancel');
-    var btnEye = card.querySelector('#__el_pw_eye');
-    // 眼睛 toggle:顯示/隱藏密碼
-    var _pwVisible = false;
-    if(btnEye){
-      btnEye.onclick = function(e){
-        e.preventDefault();
-        _pwVisible = !_pwVisible;
-        iPw.type = _pwVisible ? 'text' : 'password';
-        btnEye.innerHTML = _pwVisible
-          ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><path d="M14.12 14.12a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
-          : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
-      };
-    }
+    // 用 _pwInputWithEye helper 建密碼欄 (取代原本內聯 HTML + 手寫 toggle)
+    const iPw = document.createElement('input');
+    iPw.id = '__el_pw';
+    iPw.type = 'password';
+    iPw.autocomplete = 'current-password';
+    iPw.placeholder = '輸入密碼';
+    iPw.style.cssText = 'width:100%;padding:11px 44px 11px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box';
+    const pwSlot = card.querySelector('#__el_pw_slot');
+    if(pwSlot) pwSlot.appendChild(_pwInputWithEye(iPw, { rightPx: 6 }));
+    const iEmail = card.querySelector('#__el_email');
+    const iRem = card.querySelector('#__el_remember');
+    const btnOk = card.querySelector('#__el_ok');
+    const btnCancel = card.querySelector('#__el_cancel');
     // 安全 set values (避免 HTML injection)
     iEmail.value = savedEmail;
     iPw.value = savedPw;
@@ -9386,8 +9398,8 @@ async function _emailLoginModal(title, role){
     iEmail.addEventListener('keydown', function(e){ if(e.key==='Enter') iPw.focus(); });
     iPw.addEventListener('keydown', function(e){ if(e.key==='Enter') btnOk.click(); if(e.key==='Escape') btnCancel.click(); });
     btnOk.onclick = function(){
-      var email = (iEmail.value||'').trim();
-      var pw = iPw.value || '';
+      const email = (iEmail.value||'').trim();
+      const pw = iPw.value || '';
       if(!email || !EMAIL_RE.test(email)){ iEmail.style.borderColor='#dc2626'; iEmail.focus(); return; }
       if(!pw || pw.length < MIN_PW_TEACHER){ iPw.style.borderColor='#dc2626'; iPw.focus(); return; }
       // ★ 修:不要在這裡 saveEmailRemember (Firebase auth 還沒驗證)
@@ -9876,9 +9888,9 @@ async function _completeStudentGoogleLogin(stu, user){
 async function _promptStudentSidBinding(user){
   return new Promise(function(resolve){
     // 建立 modal-like overlay
-    var overlay = document.createElement('div');
+    const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
-    var card = document.createElement('div');
+    const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:system-ui,-apple-system,sans-serif';
     card.innerHTML =
       '<div style="text-align:center;margin-bottom:16px">' +
@@ -9898,9 +9910,9 @@ async function _promptStudentSidBinding(user){
       '</div>';
     overlay.appendChild(card);
     document.body.appendChild(overlay);
-    var input = card.querySelector('#__sid_input');
-    var btnOk = card.querySelector('#__sid_ok');
-    var btnCancel = card.querySelector('#__sid_cancel');
+    const input = card.querySelector('#__sid_input');
+    const btnOk = card.querySelector('#__sid_ok');
+    const btnCancel = card.querySelector('#__sid_cancel');
     setTimeout(function(){ try { input.focus(); } catch(_){} }, 100);
     function close(val){
       try { document.body.removeChild(overlay); } catch(_){}
@@ -9911,7 +9923,7 @@ async function _promptStudentSidBinding(user){
       if(e.key === 'Escape'){ btnCancel.click(); }
     });
     btnOk.onclick = function(){
-      var v = String(input.value || '').trim();
+      const v = String(input.value || '').trim();
       if(!v){ input.style.borderColor = '#dc2626'; input.focus(); return; }
       close(v);
     };
@@ -26760,7 +26772,7 @@ function boot(){
     //    用戶反映原本會清掉 localStorage 導致資料消失 → 改成只清快取
     //    要全清要用 ?nuclear=hard 並且本頁會自動下載備份
     if(location.search.indexOf('nuclear=1') >= 0 || location.search.indexOf('nuclear=hard') >= 0){
-      var isHard = location.search.indexOf('nuclear=hard') >= 0;
+      const isHard = location.search.indexOf('nuclear=hard') >= 0;
       // 🔒 資安：?nuclear=hard 會清光 localStorage / Firebase 登入 / IndexedDB,
       //    若被釣魚連結誘導點擊將造成不可復原的資料遺失,故先加二次確認。
       if(isHard){
@@ -26769,7 +26781,7 @@ function boot(){
           return;
         }
       }
-      var msg = isHard
+      const msg = isHard
         ? '清光中 (含本地資料 + 已自動下載備份)...'
         : '正在重置介面快取 (你的資料保留)...';
       document.body.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui;color:#666;font-size:14px;gap:10px"><div style="font-size:28px">🔧</div><div>' + msg + '</div></div>';
@@ -26777,20 +26789,20 @@ function boot(){
         // ① HARD 模式:先自動下載一份 DB 備份避免資料遺失
         if(isHard){
           try {
-            var dbStr = localStorage.getItem('cms_v3_db');
+            const dbStr = localStorage.getItem('cms_v3_db');
             if(dbStr){
-              var roomCode = '';
-              try { var cfg = JSON.parse(localStorage.getItem('cms_v3_cfg')||'null'); if(cfg) roomCode = cfg.roomCode || ''; } catch(_){}
-              var backup = {
+              let roomCode = '';
+              try { const cfg = JSON.parse(localStorage.getItem('cms_v3_cfg')||'null'); if(cfg) roomCode = cfg.roomCode || ''; } catch(_){}
+              const backup = {
                 version:'v3',
                 ts: Date.now(),
                 reason:'nuclear-hard-auto-backup',
                 room: roomCode,
                 db: JSON.parse(dbStr)
               };
-              var blob = new Blob([JSON.stringify(backup,null,2)], { type:'application/json' });
-              var url = URL.createObjectURL(blob);
-              var aTag = document.createElement('a');
+              const blob = new Blob([JSON.stringify(backup,null,2)], { type:'application/json' });
+              const url = URL.createObjectURL(blob);
+              const aTag = document.createElement('a');
               aTag.href = url;
               aTag.download = 'cms-v3-backup-BEFORE-RESET-' + new Date().toISOString().slice(0,19).replace(/[:T]/g,'-') + '.json';
               document.body.appendChild(aTag);
@@ -26801,12 +26813,12 @@ function boot(){
         }
         try {
           if('serviceWorker' in navigator){
-            var regs = await navigator.serviceWorker.getRegistrations();
-            for(var i=0;i<regs.length;i++){ try { await regs[i].unregister(); } catch(_){} }
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for(let i=0;i<regs.length;i++){ try { await regs[i].unregister(); } catch(_){} }
           }
           if('caches' in window){
-            var names = await caches.keys();
-            for(var j=0;j<names.length;j++){ try { await caches.delete(names[j]); } catch(_){} }
+            const names = await caches.keys();
+            for(let j=0;j<names.length;j++){ try { await caches.delete(names[j]); } catch(_){} }
           }
           try { sessionStorage.clear(); } catch(_){}
           if(isHard){
@@ -26814,8 +26826,8 @@ function boot(){
             try { if(window.firebase && firebase.auth) await firebase.auth().signOut(); } catch(_){}
             try {
               if(window.indexedDB && indexedDB.databases){
-                var dbs = await indexedDB.databases();
-                for(var d=0;d<dbs.length;d++){ try { indexedDB.deleteDatabase(dbs[d].name); } catch(_){} }
+                const dbs = await indexedDB.databases();
+                for(let d=0;d<dbs.length;d++){ try { indexedDB.deleteDatabase(dbs[d].name); } catch(_){} }
               }
             } catch(_){}
           }
@@ -26880,9 +26892,9 @@ function boot(){
   // 加 onAuthStateChanged 監聽：auth state 變化時，若在登入頁 → rerender 顯示「已登入為 xxx」UI
   try {
     if(window.firebase && firebase.auth){
-      var _lastAuthEmail = null;
+      let _lastAuthEmail = null;
       firebase.auth().onAuthStateChanged(function(user){
-        var newEmail = user && user.email || null;
+        const newEmail = user && user.email || null;
         if(newEmail === _lastAuthEmail) return; // 沒變化不 rerender
         _lastAuthEmail = newEmail;
         // 只在登入頁 (沒 App.session) 時重 render，避免進系統後又被打斷
@@ -26899,8 +26911,8 @@ function boot(){
     if(window.firebase && firebase.auth){
       firebase.auth().getRedirectResult().then(async function(result){
         if(!result || !result.user) return;
-        var role = '';
-        var bindSid = '';
+        let role = '';
+        let bindSid = '';
         try {
           role = sessionStorage.getItem('_google_pending_role') || '';
           bindSid = sessionStorage.getItem('_google_bind_sid') || '';
@@ -26910,9 +26922,9 @@ function boot(){
         // 學生個人頁「綁定 Google」走的分支 — 寫綁定後 reload
         if(role === 'student_bind' && bindSid){
           try {
-            var u = result.user;
-            var emailKey = String(u.email||'').replace(/[.@]/g, '_').toLowerCase();
-            var rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
+            const u = result.user;
+            const emailKey = String(u.email||'').replace(/[.@]/g, '_').toLowerCase();
+            const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
             await firebase.database().ref('cms-v3/' + rc + '/google_students/' + emailKey).set({
               sid: bindSid,
               email: u.email,
@@ -26922,7 +26934,7 @@ function boot(){
               createdAt: firebase.database.ServerValue.TIMESTAMP,
               lastLoginAt: firebase.database.ServerValue.TIMESTAMP
             });
-            var stu = (App.db.students||[]).find(function(s){ return String(s.sid) === String(bindSid); });
+            const stu = (App.db.students||[]).find(function(s){ return String(s.sid) === String(bindSid); });
             if(stu){
               stu.googleEmail = u.email;
               stu.firebaseUid = u.uid;
