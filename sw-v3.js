@@ -1,6 +1,6 @@
 /* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
 // M3: CACHE_NAME 動態化 — 每次部署 bump BUILD 字串即可強制取得新版資源
-const BUILD = '2026-05-30-audit-batch7-h67-perf';
+const BUILD = '2026-05-30-audit-batch8-h17';
 const CACHE_NAME = 'cms-v3-' + BUILD;
 const CORE_ASSETS = [
   'manifest.json',

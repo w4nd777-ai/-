@@ -4123,7 +4123,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-30-audit-batch7-h67-perf';
+const APP_BUILD = '2026-05-30-audit-batch8-h17';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -15705,7 +15705,7 @@ function rAtt(content){
       const acts = el('div', { class:'actions' });
       acts.appendChild(el('button', { class:'btn btn-sm', onclick:()=> {
         App.db.leaves = App.db.leaves.filter(x => x.id !== lv.id);
-        saveDB(); Sync.setMap('leaves', App.db.leaves); bcNotify(); rerender();
+        saveDB(); try { Sync.removeRow('leaves', lv.id); } catch(_){ Sync.setMap('leaves', App.db.leaves); } bcNotify(); rerender();
       }}, '撤銷'));
       card.appendChild(acts);
     } else if(a){
@@ -15983,7 +15983,7 @@ function rLeave(content){
         const ok = await confirmDlg('刪除這筆請假？', { danger:true });
         if(!ok) return;
         App.db.leaves = App.db.leaves.filter(x => x.id !== l.id);
-        saveDB(); Sync.setMap('leaves', App.db.leaves); bcNotify();
+        saveDB(); try { Sync.removeRow('leaves', l.id); } catch(_){ Sync.setMap('leaves', App.db.leaves); } bcNotify();
         rerender();
       } }, '🗑'));
     }
@@ -19746,7 +19746,7 @@ function openAssignmentEdit(asg){
     try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_) {}
     if(isNew) App.db.assignments.push(rec);
     saveDB();
-    Sync.setMap('assignments', App.db.assignments);
+    try { Sync.setRow('assignments', rec.id, rec); } catch(_){ Sync.setMap('assignments', App.db.assignments); }
     bcNotify();
     toast(isNew?'已新增':'已更新','success');
     m.close();
@@ -19771,7 +19771,7 @@ async function deleteAssignment(asg){
   App.db.assignments = App.db.assignments.filter(a => a.id !== asg.id);
   App.db.submissions = App.db.submissions.filter(s => s.assignmentId !== asg.id);
   saveDB();
-  Sync.setMap('assignments', App.db.assignments);
+  try { Sync.removeRow('assignments', asg.id); } catch(_){ Sync.setMap('assignments', App.db.assignments); }
   Sync.setMap('submissions', App.db.submissions);
   bcNotify();
   pushUndo('已刪除作業「' + asg.title + '」', () => {
@@ -19783,7 +19783,7 @@ async function deleteAssignment(asg){
       if(!App.db.submissions.find(x => x.id === s.id)) App.db.submissions.push(s);
     });
     saveDB();
-    Sync.setMap('assignments', App.db.assignments);
+    try { Sync.setRow('assignments', asgBackup.id, asgBackup); } catch(_){ Sync.setMap('assignments', App.db.assignments); }
     Sync.setMap('submissions', App.db.submissions);
     bcNotify();
     toast('已復原作業「' + asgBackup.title + '」', 'success');
@@ -20030,11 +20030,11 @@ function rSub(content){
         if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
         App.db.submissions = App.db.submissions.filter(x => x.id !== s.id);
         saveDB();
-        Sync.setMap('submissions', App.db.submissions);
+        try { Sync.removeRow('submissions', s.id); } catch(_){ Sync.setMap('submissions', App.db.submissions); }
         bcNotify();
         pushUndo('已刪除繳交', () => {
           if(!App.db.submissions.find(x => x.id === backup.id)) App.db.submissions.push(backup);
-          saveDB(); Sync.setMap('submissions', App.db.submissions); bcNotify();
+          saveDB(); try { Sync.setRow('submissions', backup.id, backup); } catch(_){ Sync.setMap('submissions', App.db.submissions); } bcNotify();
           toast('已復原','success'); rerender();
         });
         setTimeout(() => {
@@ -20995,7 +20995,7 @@ function openSubmissionGrade(sub, list=null, idx=0){
     }
     App.db.submissions = App.db.submissions.filter(x => x.id !== sub.id);
     saveDB();
-    Sync.setMap('submissions', App.db.submissions);
+    try { Sync.removeRow('submissions', sub.id); } catch(_){ Sync.setMap('submissions', App.db.submissions); }
     bcNotify();
     m.close();
     pushUndo('已刪除 ' + stu.name + ' 的繳交', () => {
@@ -21004,7 +21004,7 @@ function openSubmissionGrade(sub, list=null, idx=0){
         App.db.submissions.push(subBackup);
       }
       saveDB();
-      Sync.setMap('submissions', App.db.submissions);
+      try { Sync.setRow('submissions', subBackup.id, subBackup); } catch(_){ Sync.setMap('submissions', App.db.submissions); }
       bcNotify();
       toast('已復原繳交', 'success');
       rerender();
@@ -21505,7 +21505,7 @@ function rAnn(content){
             const ok = await confirmDlg('刪除這則公告？', { danger:true });
             if(!ok) return;
             App.db.announcements = App.db.announcements.filter(x => x.id !== a.id);
-            saveDB(); Sync.setMap('announcements', App.db.announcements); bcNotify();
+            saveDB(); try { Sync.removeRow('announcements', a.id); } catch(_){ Sync.setMap('announcements', App.db.announcements); } bcNotify();
             toast('已刪除','warn'); rerender();
           }}, '🗑')
         )
@@ -21586,7 +21586,7 @@ function openAnnouncementEdit(a){
     rec.author = App.session?.name || '老師';
     if(isNew) App.db.announcements.push(rec);
     saveDB();
-    Sync.setMap('announcements', App.db.announcements);
+    try { Sync.setRow('announcements', rec.id, rec); } catch(_){ Sync.setMap('announcements', App.db.announcements); }
     bcNotify();
     if(isNew) triggerWebhook('announcement', { title: rec.title, author: rec.author });
     toast(isNew?'已發布':'已更新','success');
@@ -25241,7 +25241,7 @@ function rSAsgnDetailV2(content, asg, me){
           if(!ok) return;
           App.db.submissions = App.db.submissions.filter(x => x.id !== existing.id);
           logOp('submit','刪除繳交：' + asg.title);
-          saveDB(); Sync.setMap('submissions', App.db.submissions); bcNotify();
+          saveDB(); try { Sync.removeRow('submissions', existing.id); } catch(_){ Sync.setMap('submissions', App.db.submissions); } bcNotify();
           toast('已刪除','warn'); rerender();
         }}, '🗑 刪除繳交')
       ));
