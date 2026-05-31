@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-remember-pw-back';
+const APP_BUILD = '2026-06-01-teacher-welcome-card';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5754,14 +5754,16 @@ async function _emailSignInStudentWith(email, password, remember){
   }
 }
 
-async function _emailSignInTeacher(ev){
+async function _emailSignInTeacherWith(email, password, remember){
+  if(remember === undefined) remember = true; // welcome 卡呼叫沒帶 → 預設保留
   if(!window.firebase || !firebase.auth){
     try { toast('Firebase 未載入', 'danger'); } catch(_){ alert('Firebase 未載入'); }
     return;
   }
-  const input = await _emailLoginModal('老師 Email 登入', 'teacher');
-  if(!input) return;
-  const email = input.email, password = input.password;
+  if(typeof ensureFirebaseInit === 'function' && !ensureFirebaseInit()){
+    try { toast('Firebase 初始化失敗,請重整','danger'); } catch(_){}
+    return;
+  }
   try {
     let userCred;
     try {
@@ -5844,7 +5846,7 @@ async function _emailSignInTeacher(ev){
     // ★ 修:Firebase auth 驗證成功且 accounts 對得上,才寫 LS_EMAIL_REMEMBER
     // 🔒 SECURITY (HIGH fix):不再寫入 _obfuscatePw(password) 明文混淆密碼。
     //   改用 loginToken — 詳見 _obfuscatePw 註解區的「完整移除計畫」。
-    if(input.remember){
+    if(remember){
       try {
         const tok = genLoginToken();
         await _addLoginToken(acc, tok);
@@ -5877,6 +5879,13 @@ async function _emailSignInTeacher(ev){
     console.error('[email-signin-teacher]', e);
     try { toast('Email 登入失敗: ' + (e.message || e), 'danger', 6000); } catch(_){}
   }
+}
+
+// 薄殼: 開 modal → 拿 email/password/remember → 呼叫 _emailSignInTeacherWith
+async function _emailSignInTeacher(ev){
+  const input = await _emailLoginModal('老師 Email 登入', 'teacher');
+  if(!input) return;
+  await _emailSignInTeacherWith(input.email, input.password, input.remember);
 }
 
 async function _completeEmailLogin(user, role){
@@ -6208,32 +6217,193 @@ function renderLoginTeacherStage(){
       }, '換其他帳號')
     ));
   } else {
-    // ★ 用戶要求 (M8):老師 tab 留「使用 Email 登入」,拿掉「用 Google 登入」
-    //   (Google 綁定改成只在「老師後台 → 個人資料」內可用,不在登入頁直接登入)
-    // 📧 使用 Email 登入
-    const emailBtn = el('button', {
-      type:'button',
-      style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
-      onmouseover: function(){ this.style.background = '#f8f9fa'; },
-      onmouseout: function(){ this.style.background = '#fff'; },
-      onclick: _emailSignInTeacher
-    });
-    const emailIcon = document.createElement('span');
-    emailIcon.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
-    emailIcon.innerHTML =
-      '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
-      '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
-      '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
-      '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
-      '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
-      '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
-      '</svg>';
-    emailBtn.appendChild(emailIcon);
-    const emailText = document.createElement('span');
-    emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
-    emailText.textContent = '使用 Email 登入';
-    emailBtn.appendChild(emailText);
-    stage.appendChild(emailBtn);
+    // ★ 用戶要求:有「記住我」資料 → 顯示歡迎回來卡 (跟學生 tab 一致),並隱藏「使用 Email 登入」按鈕
+    const teacherRem = (typeof loadEmailRemember === 'function') ? loadEmailRemember('teacher') : null;
+    const showTeacherWelcome = !!(teacherRem && teacherRem.email);
+
+    if(showTeacherWelcome){
+      // ====== 老師歡迎回來卡 (模仿學生 tab 的卡片) ======
+      const welcomeCardT = el('div', { style:{
+        padding:'14px 16px',
+        background:'rgba(22,163,74,.12)',
+        border:'1px solid rgba(22,163,74,.35)',
+        borderRadius:'12px',
+        marginBottom:'14px'
+      }});
+      // 頭像 + 「歡迎回來,xxx」 + 「老師 · 上次登入:N 分前」
+      const headerRowT = el('div', { style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'10px'} });
+      if(teacherRem.photoURL){
+        headerRowT.appendChild(lazyImg({ src: teacherRem.photoURL, referrerpolicy:'no-referrer',
+          style:{width:'44px',height:'44px',borderRadius:'50%',objectFit:'cover',flexShrink:'0',contain:'layout style',minHeight:'44px'} }));
+      } else {
+        headerRowT.appendChild(el('div', {
+          style:{width:'44px',height:'44px',borderRadius:'50%',background:'rgba(22,163,74,.25)',color:'#fff',
+                 display:'flex',alignItems:'center',justifyContent:'center',fontSize:'18px',fontWeight:'700',flexShrink:'0'}
+        }, (teacherRem.name || teacherRem.email || '?').slice(0,1)));
+      }
+      const lastTsT = teacherRem.ts || Date.now();
+      const lastTimeStrT = (typeof relTime === 'function') ? relTime(lastTsT) : '剛剛';
+      headerRowT.appendChild(el('div', { style:{flex:'1',minWidth:'0',overflow:'hidden'} },
+        el('div', { style:{color:'#fff',fontSize:'15px',fontWeight:'700',marginBottom:'2px',
+                           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
+          '👋 歡迎回來,' + (teacherRem.name || teacherRem.email) + '!'),
+        el('div', { style:{color:'var(--lc-muted-fg, rgba(255,255,255,.85))',fontSize:'12px',
+                           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
+          '老師 · 上次登入:' + lastTimeStrT)
+      ));
+      welcomeCardT.appendChild(headerRowT);
+
+      welcomeCardT.appendChild(el('div', { style:{color:'var(--lc-muted-weak, rgba(255,255,255,.7))',fontSize:'12px',marginBottom:'8px'} },
+        '輸入密碼以繼續'));
+
+      // 密碼欄 (有眼睛)
+      const pwWrapT = el('div', { style:{position:'relative'} });
+      const pwInputT = el('input', {
+        type:'password',
+        class:'input',
+        placeholder:'密碼',
+        autocomplete:'current-password',
+        autocapitalize:'off',
+        autocorrect:'off',
+        spellcheck:'false'
+      });
+      pwInputT.style.cssText = 'width:100%;padding:11px 44px 11px 14px;border-radius:8px;border:1.5px solid rgba(255,255,255,.15);background:rgba(255,255,255,.9);color:#1f2937;font-size:15px;box-sizing:border-box';
+      // 用戶要求:歡迎卡也要記住密碼 — 從 LS 把混淆密碼解出來預填
+      try {
+        const _savedPwT = teacherRem && teacherRem.pw ? _deobfuscatePw(teacherRem.pw) : '';
+        if(_savedPwT) pwInputT.value = _savedPwT;
+      } catch(_){}
+      const pwEyeT = el('button', {
+        type:'button',
+        'aria-label':'顯示或隱藏密碼',
+        tabindex:'-1',
+        style:'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:0;cursor:pointer;padding:6px;color:#6b7280;display:inline-flex;align-items:center'
+      });
+      pwEyeT.innerHTML = _eyeSvg();
+      pwEyeT.onclick = function(e){
+        e.preventDefault();
+        if(pwInputT.type === 'password'){ pwInputT.type = 'text'; pwEyeT.innerHTML = _eyeOffSvg(); }
+        else { pwInputT.type = 'password'; pwEyeT.innerHTML = _eyeSvg(); }
+      };
+      pwWrapT.appendChild(pwInputT);
+      pwWrapT.appendChild(pwEyeT);
+      welcomeCardT.appendChild(pwWrapT);
+
+      // 繼續按鈕
+      const continueBtnT = el('button', {
+        type:'button',
+        style:'width:100%;padding:11px;border-radius:24px;border:0;background:#16a34a;color:#fff;font-weight:700;cursor:pointer;margin-top:12px;font-size:15px'
+      }, '✅ 繼續');
+      const doContinueT = async function(){
+        const pw = pwInputT.value || '';
+        continueBtnT.disabled = true; continueBtnT.style.opacity = '0.7'; continueBtnT.textContent = '登入中...';
+        try {
+          // 🔒 優先用 loginToken 驗證 (不需要密碼)
+          //   token 對得上 → 直接設 session 進老師後台,不用送 Firebase / 不用 pw
+          //   token 對不上或沒 token → fallback 走 _emailSignInTeacherWith (firebase email+pw)
+          const savedTokT = teacherRem && teacherRem.token;
+          if(savedTokT){
+            // 找本地 account (優先用 accountId,fallback 用 email:xxx username)
+            let acc = null;
+            if(teacherRem.accountId){
+              acc = (App.db.accounts||[]).find(function(a){ return a && String(a.id) === String(teacherRem.accountId); });
+            }
+            if(!acc && teacherRem.email){
+              const _un = 'email:' + teacherRem.email;
+              acc = (App.db.accounts||[]).find(function(a){ return a && a.username === _un; });
+            }
+            if(acc && acc.role === 'teacher'){
+              const okT = await _verifyLoginToken(acc, savedTokT);
+              if(okT){
+                // token 驗證通過 → 直接登入,不需要 Firebase auth round-trip
+                try { saveDB(true); } catch(_){}    // 更新 token ts
+                try { Sync.setRow('accounts', acc.id, acc); } catch(_){}
+                // 刷新 LS_EMAIL_REMEMBER 的 ts (welcome 卡會顯示「上次登入」)
+                try {
+                  saveEmailRemember('teacher', Object.assign({}, teacherRem, { ts: Date.now() }));
+                } catch(_){}
+                // 設定 cfg + session
+                App.cfg = App.cfg || {};
+                if(!App.cfg.roomCode) App.cfg.roomCode = 'DEMO01';
+                App.cfg.role = 'teacher';
+                try { if(typeof saveCfg === 'function') saveCfg(App.cfg); } catch(_){}
+                App.session = {
+                  role: acc.role,
+                  account: acc.username,
+                  accountId: acc.id,
+                  id: acc.id,
+                  username: acc.username,
+                  name: acc.name,
+                  email: teacherRem.email,
+                  firebaseUid: null,       // token 路徑沒走 firebase auth
+                  loginAt: Date.now(),
+                  authMethod: 'email-token'
+                };
+                try { if(typeof saveSession === 'function') saveSession(App.session); } catch(_){}
+                try { toast('🎉 已用 ' + teacherRem.email + ' 登入','success', 3000); } catch(_){}
+                try { rerender(); } catch(_){ location.reload(); }
+                return;
+              }
+              // token 不 match (過期或被「登出所有裝置」清掉) → fallback
+            }
+          }
+          // 沒 token / token fail / 找不到 acc → 必須輸入密碼
+          if(!pw){
+            pwInputT.focus();
+            try { toast('請輸入密碼 (記住我已過期,需重新登入)','warning', 4500); } catch(_){}
+            return;
+          }
+          await _emailSignInTeacherWith(teacherRem.email, pw, true);
+        } finally {
+          continueBtnT.disabled = false; continueBtnT.style.opacity = '1'; continueBtnT.textContent = '✅ 繼續';
+        }
+      };
+      continueBtnT.onclick = doContinueT;
+      pwInputT.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); doContinueT(); } });
+      welcomeCardT.appendChild(continueBtnT);
+
+      // 換其他帳號
+      welcomeCardT.appendChild(el('div', { style:{textAlign:'center',marginTop:'10px'} },
+        el('a', {
+          href:'javascript:void(0)',
+          style:'color:var(--lc-muted-fg, rgba(255,255,255,.85));font-size:11px;text-decoration:underline',
+          onclick: function(){
+            if(typeof saveEmailRemember === 'function') saveEmailRemember('teacher', null);
+            try { rerender(); } catch(_){ location.reload(); }
+          }
+        }, '← 換其他帳號')
+      ));
+
+      stage.appendChild(welcomeCardT);
+      setTimeout(function(){ try { pwInputT.focus(); } catch(_){} }, 150);
+    } else {
+      // 沒記住任何老師帳號 → 原本的「使用 Email 登入」按鈕
+      // ★ 用戶要求 (M8):老師 tab 留「使用 Email 登入」,拿掉「用 Google 登入」
+      //   (Google 綁定改成只在「老師後台 → 個人資料」內可用,不在登入頁直接登入)
+      const emailBtn = el('button', {
+        type:'button',
+        style: 'width:100%;padding:11px 14px;border-radius:10px;border:1px solid #dadce0;background:#fff;cursor:pointer;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:all .15s;display:flex;align-items:center;justify-content:center;gap:10px;min-height:46px',
+        onmouseover: function(){ this.style.background = '#f8f9fa'; },
+        onmouseout: function(){ this.style.background = '#fff'; },
+        onclick: _emailSignInTeacher
+      });
+      const emailIcon = document.createElement('span');
+      emailIcon.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;flex-shrink:0';
+      emailIcon.innerHTML =
+        '<svg width="22" height="22" viewBox="0 0 256 193" xmlns="http://www.w3.org/2000/svg">' +
+        '<path d="M58.18 192.05V93.14L27.5 65.08 0 49.5v125.09c0 9.66 7.83 17.46 17.46 17.46h40.72z" fill="#4285F4"/>' +
+        '<path d="M197.82 192.05h40.72c9.66 0 17.46-7.83 17.46-17.46V49.5l-31.16 17.84-27.02 25.8v98.91z" fill="#34A853"/>' +
+        '<path d="M58.18 93.14l-4.17-38.65 4.17-37L128 69.87l69.82-52.36 4.67 33.6-4.67 42.03L128 145.5z" fill="#EA4335"/>' +
+        '<path d="M197.82 17.5V93.14L256 49.5V26.23c0-21.58-24.64-33.9-41.89-20.94L197.82 17.5z" fill="#FBBC04"/>' +
+        '<path d="M0 49.5l26.76 20.07L58.18 93.14V17.5L41.89 5.29C24.61-7.66 0 4.65 0 26.23z" fill="#C5221F"/>' +
+        '</svg>';
+      emailBtn.appendChild(emailIcon);
+      const emailText = document.createElement('span');
+      emailText.style.cssText = 'font-weight:600;font-size:14px;color:#3c4043;white-space:nowrap';
+      emailText.textContent = '使用 Email 登入';
+      emailBtn.appendChild(emailText);
+      stage.appendChild(emailBtn);
+    }
   }
 
   // 細分隔線 — 不要文字
