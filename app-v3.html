@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-30-audit-batch11-low-rest';
+const APP_BUILD = '2026-06-01-remember-pw-back';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -5707,9 +5707,10 @@ async function _emailSignInStudentWith(email, password, remember){
     };
     if(typeof saveSession === 'function') saveSession(App.session);
     // ★ Firebase auth 驗證成功才寫 LS_EMAIL_REMEMBER (避免錯密碼也存)
-    // 🔒 SECURITY (HIGH fix):不再寫入 _obfuscatePw(password) 明文混淆密碼。
-    //   改用 loginToken (高熵隨機 + server-side hash + 7 天過期) — 詳見
-    //   _obfuscatePw 註解區的「完整移除計畫」。
+    // 🔒 SECURITY trade-off:用戶要求「記住我」也要記住密碼 (方便性 > 安全性)
+    //   密碼用 _obfuscatePw (XOR + 裝置指紋) 混淆存 localStorage,本機被翻可解。
+    //   同時也存 loginToken (welcome 卡 token 路徑) 給 fallback
+    //   公用裝置請勿勾「記住我」 — 已寫進 _obfuscatePw 註解區的警告
     if(remember){
       try {
         // 產生 loginToken 並存入該 student 的 loginTokens (saveDB + 同步)
@@ -5719,20 +5720,21 @@ async function _emailSignInStudentWith(email, password, remember){
         try { Sync.setRow('students', stu.id, stu); } catch(_){}
         saveEmailRemember('student', {
           email: email,
-          // pw 欄位不再寫入 (見上方 SECURITY 註解)
-          token: tok,                // 新:登入 token,welcome 卡可一鍵免密碼登入
+          pw: _obfuscatePw(password),  // 用戶要求:記住密碼 (XOR 混淆存)
+          token: tok,                  // token 一併存,welcome 卡可走 token 免密碼路徑
           name: stu.name,
           sid: stu.sid,
-          studentId: stu.id,         // 一併存,welcome 卡 token-verify 用
+          studentId: stu.id,
           photoURL: stu.photoURL || '',
           ts: Date.now()
         });
       } catch(e){
         try { _swallow('stu-email-issue-token', e); } catch(_){}
-        // token 寫失敗 → 至少存 email,使用者下次仍需要重打密碼 (符合 fail-safe)
+        // token 寫失敗 → 至少存 email + 混淆 pw,modal 下次仍能 prefill
         try {
           saveEmailRemember('student', {
             email: email,
+            pw: _obfuscatePw(password),
             name: stu.name,
             sid: stu.sid,
             photoURL: stu.photoURL || '',
@@ -5850,7 +5852,7 @@ async function _emailSignInTeacher(ev){
         try { Sync.setRow('accounts', acc.id, acc); } catch(_){}
         saveEmailRemember('teacher', {
           email: email,
-          // pw 欄位不再寫入 (見上方 SECURITY 註解)
+          pw: _obfuscatePw(password),  // 用戶要求:記住密碼 (XOR 混淆存)
           token: tok,
           accountId: acc.id,
           name: acc.name || acc.displayName || email,
@@ -5861,6 +5863,7 @@ async function _emailSignInTeacher(ev){
         try {
           saveEmailRemember('teacher', {
             email: email,
+            pw: _obfuscatePw(password),
             name: acc.name || acc.displayName || email,
             ts: Date.now()
           });
@@ -7610,6 +7613,11 @@ function renderLoginStudentStage(){
       spellcheck:'false'
     });
     pwInput.style.cssText = 'width:100%;padding:11px 44px 11px 14px;border-radius:8px;border:1.5px solid rgba(255,255,255,.15);background:rgba(255,255,255,.9);color:#1f2937;font-size:15px;box-sizing:border-box';
+    // 用戶要求:歡迎卡也要記住密碼 — 從 LS 把混淆密碼解出來預填
+    try {
+      const _savedPw = studentRem && studentRem.pw ? _deobfuscatePw(studentRem.pw) : '';
+      if(_savedPw) pwInput.value = _savedPw;
+    } catch(_){}
     const pwEye = el('button', {
       type:'button',
       'aria-label':'顯示或隱藏密碼',
