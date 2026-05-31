@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sub-default-collapse';
+const APP_BUILD = '2026-06-01-returned-alert';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9168,8 +9168,9 @@ function markFeedbackRead(){
 function studentNewAssignmentCount(){
   if(!App.session || App.session.role !== 'student') return 0;
   const me = currentStudent(); if(!me) return 0;
-  const subs = new Set(App.db.submissions.filter(s => s.studentId === me.id).map(s => s.assignmentId));
-  return App.db.assignments.filter(a => assignmentTargets(a).has(me.id) && !subs.has(a.id) && !isAssignmentOverdue(a)).length;
+  // ★ 修:被老師退回的作業也算「未繳」,讓側邊欄紅點+作業 tab 數字提醒學生重做
+  const doneAsgIds = new Set(App.db.submissions.filter(s => s.studentId === me.id && !s.returned).map(s => s.assignmentId));
+  return App.db.assignments.filter(a => assignmentTargets(a).has(me.id) && !doneAsgIds.has(a.id) && !isAssignmentOverdue(a)).length;
 }
 function studentUnreadAnnouncements(){
   if(!App.session || App.session.role !== 'student') return 0;
@@ -18133,12 +18134,15 @@ function rSAsgn(content){
   const all = App.db.assignments.filter(a => assignmentTargets(a).has(me.id));
   const subs = App.db.submissions.filter(s => s.studentId === me.id);
   const subMap = new Map(subs.map(s => [s.assignmentId, s]));
+  // ★ 退回作業視同「未繳」(學生要重做) — 用兩個 helper 區分
+  const isPendingState = (a) => { const s = subMap.get(a.id); return !s || s.returned; };
+  const isDoneState    = (a) => { const s = subMap.get(a.id); return s && !s.returned; };
 
   const tabs = el('div', { class:'tabs-line' });
   const counts = {
-    pending: all.filter(a => !subMap.has(a.id) && !isAssignmentOverdue(a)).length,
-    done: all.filter(a => subMap.has(a.id)).length,
-    overdue: all.filter(a => !subMap.has(a.id) && isAssignmentOverdue(a)).length,
+    pending: all.filter(a => isPendingState(a) && !isAssignmentOverdue(a)).length,
+    done: all.filter(a => isDoneState(a)).length,
+    overdue: all.filter(a => isPendingState(a) && isAssignmentOverdue(a)).length,
     all: all.length
   };
   [['pending','未繳','urgent'],['done','已繳','ok'],['overdue','逾期','urgent'],['all','全部','']].forEach(([v,t,p]) => {
@@ -18149,10 +18153,14 @@ function rSAsgn(content){
   content.appendChild(tabs);
 
   let list = all.slice();
-  if(tab === 'pending') list = list.filter(a => !subMap.has(a.id) && !isAssignmentOverdue(a));
-  else if(tab === 'done') list = list.filter(a => subMap.has(a.id));
-  else if(tab === 'overdue') list = list.filter(a => !subMap.has(a.id) && isAssignmentOverdue(a));
+  if(tab === 'pending') list = list.filter(a => isPendingState(a) && !isAssignmentOverdue(a));
+  else if(tab === 'done') list = list.filter(a => isDoneState(a));
+  else if(tab === 'overdue') list = list.filter(a => isPendingState(a) && isAssignmentOverdue(a));
   list.sort((a,b) => {
+    // ★ 退回作業排最上面 (最緊急)
+    const aRet = subMap.get(a.id)?.returned ? 0 : 1;
+    const bRet = subMap.get(b.id)?.returned ? 0 : 1;
+    if(aRet !== bRet) return aRet - bRet;
     const da = a.dueAt ? new Date(a.dueAt).getTime() : Infinity;
     const db = b.dueAt ? new Date(b.dueAt).getTime() : Infinity;
     return da - db;
@@ -18168,19 +18176,38 @@ function rSAsgn(content){
   }
   list.forEach(a => {
     const sub = subMap.get(a.id);
+    const isReturned = !!(sub && sub.returned);
     const soon = isAssignmentDueSoon(a);
-    const overdue = isAssignmentOverdue(a) && !sub;
-    const card = el('div', { class:'card card-hover', style:{marginBottom:'8px', borderColor: soon&&!sub ? 'var(--danger)' : ''}, onclick:()=> go('sasgn', a.id) });
+    const overdue = isAssignmentOverdue(a) && !isDoneState(a);
+    // ★ 退回 → 紅邊 + 紅左邊條 + 紅淡底,搶眼提醒學生
+    const cardStyle = { marginBottom:'8px' };
+    if(isReturned){
+      cardStyle.borderColor = 'var(--danger)';
+      cardStyle.background = 'var(--danger-soft)';
+      cardStyle.borderLeft = '4px solid var(--danger)';
+    } else if(soon && !sub){
+      cardStyle.borderColor = 'var(--danger)';
+    }
+    const card = el('div', { class:'card card-hover', style: cardStyle, onclick:()=> go('sasgn', a.id) });
     card.appendChild(el('div', { class:'flex-between' },
-      el('h3', null, a.title || ''),
-      sub ?
+      el('h3', null, (isReturned ? '⚠ ' : '') + (a.title || '')),
+      isReturned ? el('span', { class:'pill urgent', style:{fontWeight:'700'} }, '↩ 已退回 · 請重做')
+      : sub ?
         (typeof sub.score === 'number' ? el('span', { class:'pill ok' }, '✓ 已批 ' + sub.score + '/' + (a.points||100))
                                        : el('span', { class:'pill warn' }, '已繳·待批'))
       : overdue ? el('span', { class:'pill urgent' }, '已逾期')
       : soon ? el('span', { class:'pill urgent' }, '⚠ 24h 內到期')
       : el('span', { class:'pill' }, '未繳')
     ));
-    if(a.desc) card.appendChild(el('div', { class:'small muted', style:{margin:'4px 0',whiteSpace:'pre-wrap'} }, (a.desc||'').slice(0,80)));
+    // 退回原因預覽 (有就顯示,沒有就顯示一般說明)
+    if(isReturned && sub.returnReason){
+      card.appendChild(el('div', { style:{margin:'6px 0',padding:'8px 10px',background:'var(--surface)',borderRadius:'6px',borderLeft:'3px solid var(--danger)'} },
+        el('div', { class:'small', style:{fontWeight:'700',color:'var(--danger)',marginBottom:'2px'} }, '💬 老師說:'),
+        el('div', { class:'small', style:{whiteSpace:'pre-wrap'} }, (sub.returnReason||'').slice(0,100) + ((sub.returnReason||'').length > 100 ? '...' : ''))
+      ));
+    } else if(a.desc){
+      card.appendChild(el('div', { class:'small muted', style:{margin:'4px 0',whiteSpace:'pre-wrap'} }, (a.desc||'').slice(0,80)));
+    }
     card.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px',fontSize:'12px'} },
       el('span', { class:'tag' }, '⏰ ' + (a.dueAt ? new Date(a.dueAt).toLocaleString('zh-TW',{hour12:false}) : '無截止')),
       el('span', { class:'tag' }, '💯 ' + (a.points||100))
