@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-returned-alert';
+const APP_BUILD = '2026-06-01-ann-schedule';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2215,6 +2215,8 @@ function dispatchInboundNotify(node, v){
   }
   if(node === 'announcements'){
     if(role !== 'student') return;
+    // ★ FEATURE #8: 排程未到的公告不發通知 (時間到後 student 重 render 才會看到)
+    if(v && typeof isAnnouncementScheduled === 'function' && isAnnouncementScheduled(v)) return;
     notify('📢 新公告：' + (v.title || ''), (v.body || '').slice(0, 160), {
       type:'announcement', tag:'ann-' + v.id, url:'sannouncements'
     });
@@ -9177,7 +9179,8 @@ function studentUnreadAnnouncements(){
   const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + App.session.id;
   let last = 0;
   try { last = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e){_swallow('auto',e)}
-  return App.db.announcements.filter(a => (a.ts||0) > last && !isAnnouncementExpired(a)).length;
+  // ★ FEATURE #8: 排程中的公告對學生不可見,不算未讀
+  return App.db.announcements.filter(a => (announcementEffectiveTs(a) > last) && !isAnnouncementExpired(a) && !isAnnouncementScheduled(a)).length;
 }
 function studentPendingPeerCount(){
   if(!App.session || App.session.role !== 'student') return 0;
@@ -17779,9 +17782,14 @@ function rAnn(content){
     }
     list.forEach(a => {
       const expired = isAnnouncementExpired(a);
-      const card = el('div', { class:'ann-card' + (a.pinned?' pinned':'') });
+      const scheduled = isAnnouncementScheduled(a);   // ★ FEATURE #8
+      const card = el('div', { class:'ann-card' + (a.pinned?' pinned':''),
+        style: scheduled ? { borderStyle:'dashed', borderColor:'var(--primary)', background:'rgba(99,102,241,.05)' } : {}
+      });
+      const titlePrefix = (a.pinned?'📌 ':'') + (scheduled?'⏰ ':'');
+      const titleSuffix = expired ? ' (已過期)' : (scheduled ? ' (排程中)' : '');
       card.appendChild(el('div', { class:'flex-between' },
-        el('h4', null, (a.pinned?'📌 ':'') + (a.title||'') + (expired?' (已過期)':'')),
+        el('h4', null, titlePrefix + (a.title||'') + titleSuffix),
         el('div', { class:'flex', style:{gap:'4px'} },
           el('button', { class:'btn btn-sm', onclick:()=> openAnnouncementEdit(a) }, '✏️'),
           el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
@@ -17794,8 +17802,14 @@ function rAnn(content){
         )
       ));
       if(a.body) card.appendChild(el('div', { class:'small', style:{marginTop:'4px',whiteSpace:'pre-wrap'} }, a.body));
+      // ★ 排程中 → 顯示 "預約於 X 月 Y 日 H:M 發送" 醒目提示
+      if(scheduled){
+        const dStr = (function(){ try { return new Date(a.scheduledAt).toLocaleString('zh-TW',{hour12:false}); } catch(_){ return a.scheduledAt; } })();
+        card.appendChild(el('div', { class:'small', style:{marginTop:'6px',padding:'6px 10px',background:'rgba(99,102,241,.1)',borderRadius:'6px',color:'var(--primary)',fontWeight:'600'} },
+          '⏰ 預約於 ' + dStr + ' 自動發送 (現在學生看不到)'));
+      }
       card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
-        relTime(a.ts||0) + ' · 由 ' + (a.author||'老師') + ' 發布' +
+        relTime(a.ts||0) + ' · 由 ' + (a.author||'老師') + (scheduled?' 建立':' 發布') +
         (a.expireAt ? ' · 期限 ' + a.expireAt : '')
       ));
       // 包 C-3：已讀統計
@@ -17856,23 +17870,67 @@ function openAnnouncementEdit(a){
   fP.appendChild(lblP); row.appendChild(fP);
   m.root.appendChild(row);
 
+  // ★ FEATURE #8 公告排程:預約發送時間 (留空 = 立即發布)
+  //   - datetime-local 格式: YYYY-MM-DDTHH:MM
+  //   - 排程時間到之前:學生看不到、不會收通知、不會 webhook
+  const fSched = el('div', { class:'field' });
+  fSched.appendChild(el('label', { class:'label' }, '⏰ 預約發送時間 (留空 = 立即發布)'));
+  let _schedInit = '';
+  if(a && a.scheduledAt){
+    try {
+      const _d = new Date(a.scheduledAt);
+      if(!isNaN(_d.getTime())){
+        const _pad = n => String(n).padStart(2,'0');
+        _schedInit = _d.getFullYear() + '-' + _pad(_d.getMonth()+1) + '-' + _pad(_d.getDate()) +
+                     'T' + _pad(_d.getHours()) + ':' + _pad(_d.getMinutes());
+      }
+    } catch(_){}
+  }
+  const iSched = el('input', { class:'input', type:'datetime-local', value: _schedInit });
+  fSched.appendChild(iSched);
+  fSched.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '排程時間到之前,學生看不到這則公告,也不會收到通知。'));
+  m.root.appendChild(fSched);
+
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
     const t = iT.value.trim();
     if(!t) return toast('標題必填','danger');
+    // ★ 解析排程時間
+    let _scheduledAt = '';
+    const _schedRaw = iSched.value.trim();
+    if(_schedRaw){
+      const _t = new Date(_schedRaw).getTime();
+      if(!Number.isFinite(_t)){
+        toast('預約時間格式錯誤','danger'); return;
+      }
+      if(_t <= Date.now()){
+        const _ok = await confirmDlg('預約時間已過,要直接立即發布嗎?', { title:'時間已過' });
+        if(!_ok) return;
+        _scheduledAt = '';
+      } else {
+        _scheduledAt = _schedRaw;
+      }
+    }
     const rec = isNew ? { id:nid(), ts:Date.now() } : a;
     rec.title = t;
     rec.body = iB.value;
     rec.expireAt = iE.value;
     rec.pinned = iP.checked;
+    rec.scheduledAt = _scheduledAt;
     rec.author = App.session?.name || '老師';
     if(isNew) App.db.announcements.push(rec);
     saveDB();
     try { Sync.setRow('announcements', rec.id, rec); } catch(_){ Sync.setMap('announcements', App.db.announcements); }
     bcNotify();
-    if(isNew) triggerWebhook('announcement', { title: rec.title, author: rec.author });
-    toast(isNew?'已發布':'已更新','success');
+    if(isNew && !_scheduledAt) triggerWebhook('announcement', { title: rec.title, author: rec.author });
+    if(_scheduledAt){
+      const _dStr = new Date(_scheduledAt).toLocaleString('zh-TW',{hour12:false});
+      toast('已排程於 ' + _dStr + ' 發送','success', 4000);
+    } else {
+      toast(isNew?'已發布':'已更新','success');
+    }
     m.close(); rerender();
   }}, isNew?'發布':'儲存'));
   m.root.appendChild(actions);
@@ -18469,18 +18527,21 @@ function rSAnn(content){
   content.appendChild(el('h1', null, '📢 公告'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '老師發布的最新訊息'));
 
-  // mark read on entry
+  // mark read on entry — 排程中的不算
   try {
     const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + me.id;
-    const latest = App.db.announcements.reduce((m,a)=> Math.max(m, a.ts||0), 0);
+    const latest = App.db.announcements.reduce((m,a)=> {
+      if(isAnnouncementScheduled(a)) return m;
+      return Math.max(m, announcementEffectiveTs(a));
+    }, 0);
     localStorage.setItem(key, String(latest));
   } catch(e){_swallow('auto',e)}
 
-  // 包 C-3：把所有未過期公告寫入 readBy
+  // 包 C-3：把所有「已可見且未過期」公告寫入 readBy — 排程中的略過
   try {
     let touched = false;
     (App.db.announcements||[]).forEach(a => {
-      if(!a || isAnnouncementExpired(a)) return;
+      if(!a || isAnnouncementExpired(a) || isAnnouncementScheduled(a)) return;
       if(!Array.isArray(a.readBy)) a.readBy = [];
       if(!a.readBy.includes(me.id)){ a.readBy.push(me.id); touched = true; }
     });
@@ -18490,8 +18551,9 @@ function rSAnn(content){
     }
   } catch(_){_swallow('ann-readby',_)}
 
-  let list = App.db.announcements.slice().sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (b.ts||0)-(a.ts||0));
-  list = list.filter(a => !isAnnouncementExpired(a));
+  let list = App.db.announcements.slice().sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (announcementEffectiveTs(b))-(announcementEffectiveTs(a)));
+  // ★ 排程未到 → 學生不可見
+  list = list.filter(a => !isAnnouncementExpired(a) && !isAnnouncementScheduled(a));
   if(list.length === 0){
     content.appendChild(el('div', { class:'empty card' },
       el('div', { class:'ico' }, '📭'),
@@ -18503,8 +18565,9 @@ function rSAnn(content){
     const card = el('div', { class:'ann-card' + (a.pinned?' pinned':'') });
     card.appendChild(el('h4', null, (a.pinned?'📌 ':'') + (a.title||'')));
     if(a.body) card.appendChild(el('div', { class:'small', style:{marginTop:'4px',whiteSpace:'pre-wrap'} }, a.body));
+    // ★ FEATURE #8: 有排程的公告顯示 scheduledAt 而非建立時間
     card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px'} },
-      relTime(a.ts||0) + ' · 由 ' + (a.author||'老師')
+      relTime(announcementEffectiveTs(a)) + ' · 由 ' + (a.author||'老師')
     ));
     content.appendChild(card);
   });
@@ -24269,9 +24332,11 @@ function collectRecentActivities(limit){
       });
     });
   } catch(_){}
-  // 公告
+  // 公告 — 排程未到的不算進「最近活動」
   try {
-    (App.db.announcements || []).slice().sort((a,b)=> (b.ts||0) - (a.ts||0)).slice(0,5).forEach(a => {
+    (App.db.announcements || [])
+      .filter(a => a && !(typeof isAnnouncementScheduled === 'function' && isAnnouncementScheduled(a)))
+      .slice().sort((a,b)=> (b.ts||0) - (a.ts||0)).slice(0,5).forEach(a => {
       if(!a.ts) return;
       out.push({
         ico:'📣', ts:a.ts,
