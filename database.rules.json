@@ -1,0 +1,34 @@
+{
+  "rules": {
+    "cms-v3": {
+      ".read": "auth != null",
+      "$roomCode": {
+        ".write": "auth != null",
+        "students": {
+          ".indexOn": ["sid", "cls", "email"]
+        },
+        "submissions": {
+          ".indexOn": ["studentId", "assignmentId", "ts"]
+        },
+        "attendance": {
+          ".indexOn": ["studentId", "date"]
+        },
+        "messages": {
+          ".indexOn": ["ts"]
+        },
+        "behavior": {
+          ".indexOn": ["studentId", "ts"]
+        },
+        "leaves": {
+          ".indexOn": ["studentId", "date"]
+        }
+      },
+      "google_users": {
+        "$emailKey": {
+          ".read": "auth != null && auth.token.email != null && auth.token.email.toLowerCase().replace('.', '_').replace('@', '_') == $emailKey",
+          ".write": "auth != null && auth.token.email != null && auth.token.email.toLowerCase().replace('.', '_').replace('@', '_') == $emailKey"
+        }
+      }
+    }
+  }
+}
