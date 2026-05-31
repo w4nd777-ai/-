@@ -4123,7 +4123,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-audit-fixes-final';
+const APP_BUILD = '2026-05-30-audit-batch7-h67-perf';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4426,6 +4426,55 @@ function el(tag, attrs, ...children){
     else e.appendChild(c);
   });
   return e;
+}
+
+/* ── PERF: 學生/帳號頭像 lazy-load helper ──
+   200 個學生頭像若用 dataURI 同步塞進 <img src>,會卡死主執行緒。
+   這個 helper 預設加 loading="lazy" + decoding="async",讓瀏覽器
+   在 viewport 外延遲 decode。對 dataURI 也有效(只要還沒進畫面)。
+   另外 >50KB 的 dataURI 用 IntersectionObserver 延後 src assign。
+   用法跟 el('img', opts) 一樣,callsite 從 el('img',{src,...}) 換 lazyImg({src,...})。
+*/
+function lazyImg(opts){
+  const o = Object.assign({}, opts || {});
+  const src = o.src || '';
+  const HEAVY = 50 * 1024; // 50KB threshold for IntersectionObserver path
+  // 判斷是否為「重型 dataURI」(>50KB)
+  const isHeavy = typeof src === 'string'
+    && src.startsWith('data:')
+    && src.length > HEAVY;
+  // 預設帶 lazy + async,讓瀏覽器自行排程 decode
+  const baseAttrs = { loading: 'lazy', decoding: 'async' };
+  if(isHeavy){
+    // 重型:先不塞 src,放 data-src,IntersectionObserver 進畫面再塞
+    const attrs = Object.assign({}, baseAttrs, o);
+    delete attrs.src;
+    const img = el('img', attrs);
+    img.setAttribute('data-src', src);
+    try {
+      if(typeof IntersectionObserver !== 'undefined'){
+        const io = new IntersectionObserver((entries, obs) => {
+          entries.forEach(en => {
+            if(en.isIntersecting){
+              const tgt = en.target;
+              const ds = tgt.getAttribute('data-src');
+              if(ds){ tgt.src = ds; tgt.removeAttribute('data-src'); }
+              obs.unobserve(tgt);
+            }
+          });
+        }, { rootMargin: '200px' });
+        // 等下一輪 microtask, img 被 append 進 DOM 後再 observe
+        Promise.resolve().then(() => { try { io.observe(img); } catch(_){} });
+      } else {
+        // 不支援 IO → fallback 直接塞 src
+        img.src = src;
+      }
+    } catch(_){ img.src = src; }
+    return img;
+  }
+  // 輕型:直接走 el('img'),但補上 lazy/async
+  const attrs = Object.assign({}, baseAttrs, o);
+  return el('img', attrs);
 }
 
 /* ── Reg form helpers — shared by studentRegisterFlow & teacherRegisterFlow ── */
@@ -5238,6 +5287,79 @@ function ensureDefaultsAndDemo(){
 
   let changed = false;
 
+  // 🔐 SEC: 一次性遷移 — 任何 username='admin' + 仍是明文 'admin123'（非 v2$ 雜湊）的舊安裝，
+  // 強制標記 mustChangePw=true，讓下次登入彈出非可關閉的改密碼 modal。
+  // 這對應 ensureDefaultsAndDemo HIGH：預設帳密為公開值，存在已知公開憑證風險。
+  try {
+    if(Array.isArray(App.db.accounts)){
+      let migrated = 0;
+      for(const acc of App.db.accounts){
+        if(!acc) continue;
+        const uname = String(acc.username||'').toLowerCase();
+        if(uname === 'admin' && acc.password === 'admin123' && !isPasswordV2(acc.password)){
+          if(!acc.mustChangePw){
+            acc.mustChangePw = true;
+            migrated++;
+          }
+        }
+      }
+      if(migrated > 0){
+        changed = true;
+        dbg('[v3 SEC] 遷移 ' + migrated + ' 個舊明文 admin 帳號 → mustChangePw=true');
+      }
+    }
+  } catch(e){ _swallow('admin-plain-pw-migrate', e); }
+
+  // 🔐 SEC helper：建一個 admin 帳號，密碼以 hashPassword 雜湊，並標記 mustChangePw
+  // 用 async IIFE — hashPassword 是 async，但本函式呼叫端不能改成 async（boot 同步流程）
+  function _createDefaultAdmin(reason){
+    (async function(){
+      try {
+        const hashed = await hashPassword('admin123');
+        const acc = {
+          id: nid(),
+          username: 'admin',
+          password: hashed,             // SEC: 雜湊（而非明文）
+          name: '管理員',
+          role: 'teacher',
+          mustChangePw: true,           // SEC: 強制下次登入改密碼
+          createdAt: Date.now()
+        };
+        App.db.accounts = App.db.accounts || [];
+        // 再次去重 — 避免在 async gap 內被別處塞進 admin
+        const dup = App.db.accounts.some(a => a && String(a.username||'').toLowerCase() === 'admin');
+        if(dup){ dbg('[v3 SEC] admin 已存在（async race），略過 ' + reason); return; }
+        App.db.accounts.push(acc);
+        if(typeof saveDB === 'function') saveDB();
+        try { if(typeof Sync !== 'undefined' && Sync.setRow) Sync.setRow('accounts', acc.id, acc); } catch(_){}
+        try { rerender(); } catch(_){}
+        dbg('[v3 SEC] 建立預設管理員 admin / admin123 (雜湊+mustChangePw) — ' + reason);
+      } catch(e){
+        // hashPassword 失敗（非 HTTPS / 舊瀏覽器）→ 仍 fallback 建明文，但 mustChangePw=true 仍會強制改
+        try {
+          const acc = {
+            id: nid(),
+            username: 'admin',
+            password: 'admin123',
+            name: '管理員',
+            role: 'teacher',
+            mustChangePw: true,         // SEC: 即使 hash 失敗也強制改密碼
+            createdAt: Date.now()
+          };
+          App.db.accounts = App.db.accounts || [];
+          const dup = App.db.accounts.some(a => a && String(a.username||'').toLowerCase() === 'admin');
+          if(!dup){
+            App.db.accounts.push(acc);
+            if(typeof saveDB === 'function') saveDB();
+            try { if(typeof Sync !== 'undefined' && Sync.setRow) Sync.setRow('accounts', acc.id, acc); } catch(_){}
+            try { rerender(); } catch(_){}
+            dbg('[v3 SEC] hashPassword 失敗 → fallback 明文 admin（但仍 mustChangePw=true）— ' + reason);
+          }
+        } catch(e2){ console.warn('[v3 SEC] _createDefaultAdmin fallback 失敗', e2); }
+      }
+    })();
+  }
+
   // 預設管理員帳號
   // 🔧 重要修復：避免每次 nuclear 後重複建 admin (Firebase 上累積 5 個重複 entry)
   // 1. 若 Firebase 已連線 → 等 5 秒讓 Sync listener 抓回再判斷，沒抓到才建
@@ -5254,34 +5376,13 @@ function ensureDefaultsAndDemo(){
             dbg('[v3] Firebase 已有 admin，不重複建立');
             return;
           }
-          // Firebase 上也沒 admin → 真的建一個
-          App.db.accounts = App.db.accounts || [];
-          App.db.accounts.push({
-            id: nid(),
-            username: 'admin',
-            password: 'admin123',
-            name: '管理員',
-            role: 'teacher',
-            createdAt: Date.now()
-          });
-          if(typeof saveDB === 'function') saveDB();
-          try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts, true); } catch(_){}
-          try { rerender(); } catch(_){}
-          dbg('[v3] 5 秒後 Firebase 仍無 admin，建立預設帳號 admin / admin123');
+          // Firebase 上也沒 admin → 真的建一個（SEC：雜湊 + mustChangePw）
+          _createDefaultAdmin('5 秒後 Firebase 仍無 admin');
         } catch(e){ console.warn('[ensureDefaults deferred]', e); }
       }, 5000);
     } else {
-      // 純本地模式 (沒連 Firebase) → 立即建
-      App.db.accounts = [{
-        id: nid(),
-        username: 'admin',
-        password: 'admin123',
-        name: '管理員',
-        role: 'teacher',
-        createdAt: Date.now()
-      }];
-      changed = true;
-      dbg('[v3] 建立本地預設管理員帳號 admin / admin123 (無 Firebase)');
+      // 純本地模式 (沒連 Firebase) → 立即建（SEC：雜湊 + mustChangePw）
+      _createDefaultAdmin('本地模式無 Firebase');
     }
   } else {
     // 已有 accounts，但檢查是否有 admin（防止 accounts 有資料但 admin 被誤刪）
@@ -5289,16 +5390,7 @@ function ensureDefaultsAndDemo(){
       return a && String(a.username||'').toLowerCase() === 'admin';
     });
     if(!hasAdmin){
-      App.db.accounts.push({
-        id: nid(),
-        username: 'admin',
-        password: 'admin123',
-        name: '管理員',
-        role: 'teacher',
-        createdAt: Date.now()
-      });
-      changed = true;
-      dbg('[v3] accounts 有資料但缺 admin → 補建一個');
+      _createDefaultAdmin('accounts 有資料但缺 admin');
     }
   }
 
@@ -6471,17 +6563,54 @@ function defaultWeights(){
   return { att:30, asgn:30, mid:20, final:20 };
 }
 
+// ════════════════════════════════════════════════════════════
+// PERF: render-scoped cache — cleared at top of rerender()
+// Eliminates O(students² × assignments) hot paths by memoizing
+// expensive aggregates (e.g. targetsByAsg, subsByStudent, attDates,
+// attByStudent, leaveByStudent, rankedTotals) for the duration of
+// a single render pass. Functions stay shape-compatible — internal
+// optimization only, no signature changes.
+// ════════════════════════════════════════════════════════════
+const _renderCache = {
+  get(key, factory){
+    if(!this[key]) this[key] = factory();
+    return this[key];
+  },
+  clear(){ for(const k in this){ if(k!=='get' && k!=='clear') delete this[k]; } }
+};
+
 function attendanceRate(studentId){
   // total days = unique dates with at least one attendance
-  const allDates = Array.from(new Set(App.db.attendance.map(a=>a.date))).sort();
-  if(!allDates.length) return 0;
-  const myDays = new Set(App.db.attendance.filter(a => a.studentId === studentId).map(a=>a.date));
-  const leaveDays = new Set(App.db.leaves.filter(l => l.studentId === studentId && l.status === 'approved').map(l=>l.date));
+  const attDates = _renderCache.get('attDates', () => {
+    const s = new Set();
+    (App.db.attendance||[]).forEach(a => s.add(a.date));
+    return s;
+  });
+  if(!attDates.size) return 0;
+  const attByStudent = _renderCache.get('attByStudent', () => {
+    const m = new Map();
+    (App.db.attendance||[]).forEach(a => {
+      if(!m.has(a.studentId)) m.set(a.studentId, new Set());
+      m.get(a.studentId).add(a.date);
+    });
+    return m;
+  });
+  const leaveByStudent = _renderCache.get('leaveByStudent', () => {
+    const m = new Map();
+    (App.db.leaves||[]).forEach(l => {
+      if(l.status !== 'approved') return;
+      if(!m.has(l.studentId)) m.set(l.studentId, new Set());
+      m.get(l.studentId).add(l.date);
+    });
+    return m;
+  });
+  const myDays = attByStudent.get(studentId) || new Set();
+  const leaveDays = leaveByStudent.get(studentId) || new Set();
   let attended = 0;
-  allDates.forEach(d => {
+  attDates.forEach(d => {
     if(myDays.has(d) || leaveDays.has(d)) attended++;
   });
-  return Math.round(100 * attended / allDates.length);
+  return Math.round(100 * attended / attDates.size);
 }
 
 function submissionAvg(studentId){
@@ -6500,13 +6629,36 @@ function submissionAvg(studentId){
 }
 
 function submissionRate(studentId){
-  const total = App.db.assignments.filter(a => assignmentTargets(a).has(studentId)).length;
+  const targetsByAsg = _renderCache.get('targetsByAsg', () => {
+    const m = new Map();
+    (App.db.assignments||[]).forEach(a => m.set(a.id, assignmentTargets(a)));
+    return m;
+  });
+  const subsByStudent = _renderCache.get('subsByStudent', () => {
+    const m = new Map();
+    (App.db.submissions||[]).forEach(s => {
+      if(!m.has(s.studentId)) m.set(s.studentId, []);
+      m.get(s.studentId).push(s);
+    });
+    return m;
+  });
+  let total = 0;
+  (App.db.assignments||[]).forEach(a => {
+    const t = targetsByAsg.get(a.id);
+    if(t && t.has(studentId)) total++;
+  });
   if(!total) return 0;
-  const sent = App.db.submissions.filter(s => s.studentId === studentId).length;
+  const sent = (subsByStudent.get(studentId) || []).length;
   return Math.round(100 * sent / total);
 }
 
 function assignmentTargets(asg){
+  // PERF: memoize per-asg.id for this render pass (no recursion risk —
+  // the compute below does not call assignmentTargets)
+  const cacheMap = _renderCache.get('assignmentTargetsById', () => new Map());
+  const key = asg && asg.id;
+  if(key != null && cacheMap.has(key)) return cacheMap.get(key);
+
   // returns Set of studentIds this assignment applies to
   const set = new Set();
   if(!asg || !asg.target || asg.target === 'all'){
@@ -6521,6 +6673,7 @@ function assignmentTargets(asg){
   } else {
     App.db.students.forEach(s => set.add(s.id));
   }
+  if(key != null) cacheMap.set(key, set);
   return set;
 }
 
@@ -6564,10 +6717,16 @@ function calcGrade(studentId){
 }
 
 function studentRank(studentId){
-  const rows = App.db.students.map(s => ({ id:s.id, total: calcGrade(s.id).total }))
-    .sort((a,b) => b.total - a.total);
-  const idx = rows.findIndex(r => r.id === studentId);
-  return { rank: idx < 0 ? null : idx+1, of: rows.length };
+  // PERF: memoize the full sorted ranking + id→rank index for this render pass
+  const rankInfo = _renderCache.get('studentRankInfo', () => {
+    const rows = (App.db.students||[]).map(s => ({ id:s.id, total: calcGrade(s.id).total }))
+      .sort((a,b) => b.total - a.total);
+    const idx = new Map();
+    rows.forEach((r,i) => idx.set(r.id, i+1));
+    return { idx, of: rows.length };
+  });
+  const rank = rankInfo.idx.get(studentId);
+  return { rank: rank == null ? null : rank, of: rankInfo.of };
 }
 
 function readFileAsBase64(file){
@@ -8128,6 +8287,30 @@ function _getDeviceKey(){
     return k;
   } catch(_){ return 'fallback-key-' + (navigator.userAgent||'x').slice(0,16); }
 }
+/* ════════════════════════════════════════════════════════════════════
+ * ⚠️ DEPRECATED — _obfuscatePw / _deobfuscatePw
+ * ─────────────────────────────────────────────────────────────────────
+ *  這兩個函式只是 XOR + base64,key 來自 navigator.userAgent 等 device
+ *  資訊,公開可推,等於明文。任何拿到瀏覽器 localStorage 的人 (惡意瀏覽器
+ *  擴充、共用電腦、被竊存檔) 都能 5 秒內解出原始密碼。
+ *
+ *  ▸ 不再寫入新值:_emailSignInStudentWith / _emailSignInTeacher /
+ *    老師後台登入 / 學生班+姓名登入 皆已改用 loginToken (見下方
+ *    _addLoginToken / _verifyLoginToken) — 高熵 32 bytes 隨機 +
+ *    server-side hashed + 7 天過期。
+ *
+ *  ▸ 為何保留:LS 內仍可能殘留舊「pw」欄位 (使用者上次登入時寫的)。
+ *    保留 _deobfuscatePw 供舊資料 fallback 讀取,避免使用者下次
+ *    必須重新輸入。等所有使用者下次成功登入 (refresh token) 後,
+ *    新寫入會用 token,舊 pw 自然會被覆蓋。
+ *
+ *  ▸ 完整移除計畫:
+ *      1) (DONE)  停止寫入新「pw」  ← 目前階段
+ *      2) (TODO)  ~ 1-2 個月後,觀察 token 涵蓋率 > 95%,刪掉 modal
+ *                 prefill 的 _deobfuscatePw 呼叫 (讓使用者重打一次)
+ *      3) (TODO)  再過 1 個月,直接刪掉這兩個函式,並寫一段 migration
+ *                 把 LS_EMAIL_REMEMBER[*].pw 欄位移除
+ * ════════════════════════════════════════════════════════════════════ */
 function _obfuscatePw(pw){
   try {
     if(!pw) return '';
@@ -9512,17 +9695,39 @@ async function _emailSignInStudentWith(email, password, remember){
     };
     if(typeof saveSession === 'function') saveSession(App.session);
     // ★ Firebase auth 驗證成功才寫 LS_EMAIL_REMEMBER (避免錯密碼也存)
+    // 🔒 SECURITY (HIGH fix):不再寫入 _obfuscatePw(password) 明文混淆密碼。
+    //   改用 loginToken (高熵隨機 + server-side hash + 7 天過期) — 詳見
+    //   _obfuscatePw 註解區的「完整移除計畫」。
     if(remember){
       try {
+        // 產生 loginToken 並存入該 student 的 loginTokens (saveDB + 同步)
+        const tok = genLoginToken();
+        await _addLoginToken(stu, tok);
+        try { saveDB(true); } catch(_){}
+        try { Sync.setRow('students', stu.id, stu); } catch(_){}
         saveEmailRemember('student', {
           email: email,
-          pw: _obfuscatePw(password),  // 也存混淆密碼 (歡迎卡也能 fallback)
+          // pw 欄位不再寫入 (見上方 SECURITY 註解)
+          token: tok,                // 新:登入 token,welcome 卡可一鍵免密碼登入
           name: stu.name,
           sid: stu.sid,
+          studentId: stu.id,         // 一併存,welcome 卡 token-verify 用
           photoURL: stu.photoURL || '',
           ts: Date.now()
         });
-      } catch(_){}
+      } catch(e){
+        try { _swallow('stu-email-issue-token', e); } catch(_){}
+        // token 寫失敗 → 至少存 email,使用者下次仍需要重打密碼 (符合 fail-safe)
+        try {
+          saveEmailRemember('student', {
+            email: email,
+            name: stu.name,
+            sid: stu.sid,
+            photoURL: stu.photoURL || '',
+            ts: Date.now()
+          });
+        } catch(_){}
+      }
     } else {
       // 不勾記住我 → 清掉
       try { saveEmailRemember('student', null); } catch(_){}
@@ -9623,15 +9828,32 @@ async function _emailSignInTeacher(ev){
     }
     // 已核准 → 進系統
     // ★ 修:Firebase auth 驗證成功且 accounts 對得上,才寫 LS_EMAIL_REMEMBER
+    // 🔒 SECURITY (HIGH fix):不再寫入 _obfuscatePw(password) 明文混淆密碼。
+    //   改用 loginToken — 詳見 _obfuscatePw 註解區的「完整移除計畫」。
     if(input.remember){
       try {
+        const tok = genLoginToken();
+        await _addLoginToken(acc, tok);
+        try { saveDB(true); } catch(_){}
+        try { Sync.setRow('accounts', acc.id, acc); } catch(_){}
         saveEmailRemember('teacher', {
           email: email,
-          pw: _obfuscatePw(password),
+          // pw 欄位不再寫入 (見上方 SECURITY 註解)
+          token: tok,
+          accountId: acc.id,
           name: acc.name || acc.displayName || email,
           ts: Date.now()
         });
-      } catch(_){}
+      } catch(e){
+        try { _swallow('teacher-email-issue-token', e); } catch(_){}
+        try {
+          saveEmailRemember('teacher', {
+            email: email,
+            name: acc.name || acc.displayName || email,
+            ts: Date.now()
+          });
+        } catch(_){}
+      }
     } else {
       try { saveEmailRemember('teacher', null); } catch(_){}
     }
@@ -11341,8 +11563,8 @@ function renderLoginStudentStage(){
     // 頭像 + 「歡迎回來，xxx！」 + 「學生 · 上次登入：N 分前」
     const headerRow = el('div', { style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'10px'} });
     if(studentRem.photoURL){
-      headerRow.appendChild(el('img', { src: studentRem.photoURL, referrerpolicy:'no-referrer',
-        style:{width:'44px',height:'44px',borderRadius:'50%',objectFit:'cover',flexShrink:'0'} }));
+      headerRow.appendChild(lazyImg({ src: studentRem.photoURL, referrerpolicy:'no-referrer',
+        style:{width:'44px',height:'44px',borderRadius:'50%',objectFit:'cover',flexShrink:'0',contain:'layout style',minHeight:'44px'} }));
     } else {
       headerRow.appendChild(el('div', {
         style:{width:'44px',height:'44px',borderRadius:'50%',background:'rgba(22,163,74,.25)',color:'#fff',
@@ -11399,9 +11621,47 @@ function renderLoginStudentStage(){
     }, '✅ 繼續');
     const doContinue = async () => {
       const pw = pwInput.value || '';
-      if(!pw){ pwInput.focus(); toast('請輸入密碼','warning'); return; }
       continueBtn.disabled = true; continueBtn.style.opacity = '0.7'; continueBtn.textContent = '登入中...';
       try {
+        // 🔒 SECURITY:優先用 loginToken 驗證 (不需要密碼)
+        //   token 對得上 → 直接 finishStudentLogin,不用送 Firebase / 不用 pw
+        //   token 對不上或沒 token → fallback 走原本 Firebase email+pw 路徑
+        const savedTok = studentRem && studentRem.token;
+        if(savedTok){
+          // 找本地學生 (優先用 studentId,fallback 用 sid / email)
+          let stu = null;
+          if(studentRem.studentId){
+            stu = (App.db.students||[]).find(x => String(x.id) === String(studentRem.studentId));
+          }
+          if(!stu && studentRem.sid){
+            stu = (App.db.students||[]).find(x => String(x.sid) === String(studentRem.sid));
+          }
+          if(!stu && studentRem.email){
+            const _em = String(studentRem.email).toLowerCase();
+            stu = (App.db.students||[]).find(x => String(x.email||'').toLowerCase() === _em);
+          }
+          if(stu){
+            const ok = await _verifyLoginToken(stu, savedTok);
+            if(ok){
+              // token 驗證通過 → 直接登入,不需要密碼/Firebase auth
+              try { saveDB(true); } catch(_){}        // 更新 token ts
+              try { Sync.setRow('students', stu.id, stu); } catch(_){}
+              // 刷新 LS_EMAIL_REMEMBER 的 ts (welcome 卡會顯示「上次登入」)
+              try {
+                saveEmailRemember('student', Object.assign({}, studentRem, { ts: Date.now() }));
+              } catch(_){}
+              finishStudentLogin(stu);
+              return;
+            }
+            // token 不 match (過期或被「登出所有裝置」清掉) → fallback
+          }
+        }
+        // 沒 token 或 token fail → 必須輸入密碼
+        if(!pw){
+          pwInput.focus();
+          toast('請輸入密碼 (記住我已過期,需重新登入)','warning', 4500);
+          return;
+        }
         await _emailSignInStudentWith(studentRem.email, pw);
       } finally {
         continueBtn.disabled = false; continueBtn.style.opacity = '1'; continueBtn.textContent = '✅ 繼續';
@@ -12743,160 +13003,11 @@ function doLogout(){
 }
 
 /* ════════════════════════════════════════════════════════════
-   TEACHER: OVERVIEW (rOv)
+   TEACHER: OVERVIEW (rOv) — helpers extracted to shrink god-function
+   renderOvAttendanceDetail / renderOvSubmissionDetail keep behavior
+   identical to the original inline blocks; just hoisted out.
    ──────────────────────────────────────────────────────────── */
-function rOv(content){
-  const stats = computeTodayStats();
-  const today = td();
-
-  // 跨裝置同步未啟用 → 顯眼提示橫條（可一鍵跳到設定 / 永久關閉）
-  try {
-    const dismissed = localStorage.getItem('cms_v3_sync_warn_dismissed') === '1';
-    const hasFb = !!localStorage.getItem(LS_FB);
-    if(!dismissed && (App.fbStatus !== 'online' || !hasFb)){
-      const banner = el('div', { class:'card', style:{
-        background:'var(--warn-soft)', borderColor:'var(--warn)',
-        marginBottom:'12px', padding:'12px 14px'
-      }});
-      banner.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} },
-        '⚠️ 跨裝置同步未啟用'));
-      banner.appendChild(el('div', { class:'small', style:{lineHeight:'1.6',marginBottom:'10px'} },
-        '你的資料目前只存在這台裝置，其他電腦 / 平板 / 手機看不到，學生也無法即時收到你的更新。建議現在設定 Firebase 同步（免費）。'));
-      banner.appendChild(el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap'} },
-        el('button', { class:'btn btn-primary btn-sm', onclick:()=> go('firebase') }, '⚙️ 去設定'),
-        el('button', { class:'btn btn-sm', onclick:()=> {
-          try { localStorage.setItem('cms_v3_sync_warn_dismissed', '1'); } catch(e){}
-          toast('已關閉提醒，可至「同步設定」隨時開啟','info');
-          rerender();
-        }}, '我知道了，不再提醒')
-      ));
-      content.appendChild(banner);
-    }
-  } catch(e){ _swallow('sync-warn-banner', e); }
-
-  // 自訂內容（總覽頁頂端）
-  content.appendChild(renderCustomBlocks('overview-top'));
-
-  // hello bar (time-aware greeting)
-  if(isOverviewVisible('helloBar')){
-    const hb = renderHelloBar();
-    if(hb) content.appendChild(hb);
-  }
-
-  // 自訂歡迎詞（附在 hello bar 之下）
-  try {
-    const extra = App._uiCustom?.overview?.welcomeExtra;
-    if(extra){
-      content.appendChild(el('div', { class:'card', style:{
-        background:'var(--primary-soft)', borderColor:'var(--primary)',
-        padding:'10px 14px', marginBottom:'10px'
-      } },
-        el('div', { style:{whiteSpace:'pre-wrap',fontSize:'14px',lineHeight:'1.7'} }, extra)
-      ));
-    }
-  } catch(e){_swallow('auto',e)}
-
-  // quick-start CTA (only when no students)
-  if(isOverviewVisible('quickstart')){
-    const qs = renderQuickStart();
-    if(qs) content.appendChild(qs);
-  }
-
-  // welcome journey card (auto-hides after completion)
-  if(isOverviewVisible('journey')){
-    const j = renderWelcomeJourney();
-    if(j) content.appendChild(j);
-  }
-
-  // POLISH-10/6: 智能提醒 (老師端)
-  try {
-    const sr = renderSmartReminders();
-    if(sr) content.appendChild(sr);
-  } catch(e){ _swallow('smart-reminders-rOv', e); }
-
-  // POLISH-10/3: 進入 overview 檢查慶祝事件
-  try { setTimeout(checkCelebrationTriggers, 400); } catch(_){}
-
-  const ovTitle = getPageTitle('overview', '今日總覽').replace(/^📊\s*/, '');
-  const ovSubDefault = '掌握今天整班的出席狀況 · ' + today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' });
-  const ovSub = getPageSub('overview', ovSubDefault);
-  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
-    el('div', null,
-      el('h1', null, ovTitle),
-      el('div', { class:'muted small' }, ovSub)
-    ),
-    el('div', { class:'flex no-print' },
-      // 🎯 簡潔模式 — 隱藏次要區塊 (用戶反映「太多東西」)
-      (()=> {
-        // 載入偏好
-        if(App._ovMinimal === undefined){
-          try { App._ovMinimal = localStorage.getItem('cms_v3_ov_minimal') === '1'; } catch(_){ App._ovMinimal = false; }
-        }
-        return el('button', {
-          class:'btn btn-sm',
-          style: App._ovMinimal ? {background:'var(--primary)',color:'#fff'} : {},
-          title: App._ovMinimal ? '已是簡潔模式 — 點此切回完整檢視' : '簡潔模式 — 只顯示出席/繳交/健康三大區塊,隱藏次要面板',
-          onclick: ()=> {
-            App._ovMinimal = !App._ovMinimal;
-            try { localStorage.setItem('cms_v3_ov_minimal', App._ovMinimal ? '1' : '0'); } catch(_){}
-            rerender();
-          }
-        }, App._ovMinimal ? '🎯 簡潔中' : '🎯 簡潔模式');
-      })(),
-      el('button', { class:'btn btn-sm', onclick:()=> rerender(), title:'重新載入資料' }, '🔄 重整'),
-      el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
-      // F-06: 群發通知未到家長
-      stats.absent > 0 ? el('button', { class:'btn btn-sm', style:{background:'var(--danger-soft)',color:'var(--danger)'},
-        onclick: notifyAbsentParents, title:'用 mailto 寄信給今日缺席學生的家長' }, '📧 通知未到家長') : null,
-      el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('attendance'), title:'進入點名頁面' }, '✅ 點名 →')
-    )
-  ));
-
-  // stat tiles (with subtitles explaining each) — 各卡片可獨立隱藏
-  const grid = el('div', { class:'grid grid-4', style:{marginBottom:'16px'} });
-  if(isOverviewVisible('signed')){
-    grid.appendChild(el('div', { class:'stat s-success card-hover', onclick:()=> go('attendance','signed'), title:'點此查看已簽到名單' },
-      el('div', { class:'num' }, String(stats.signed)),
-      el('div', { class:'lbl' }, '已簽到 / ' + stats.total + ' 人')
-    ));
-  }
-  if(isOverviewVisible('absent')){
-    grid.appendChild(el('div', { class:'stat s-danger card-hover', onclick:()=> go('attendance','absent'), title:'點此查看尚未到課學生' },
-      el('div', { class:'num' }, String(stats.absent)),
-      el('div', { class:'lbl' }, '未簽到 · 待處理')
-    ));
-  }
-  if(isOverviewVisible('leave')){
-    grid.appendChild(el('div', { class:'stat s-accent card-hover', onclick:()=> go('leave'), title:'點此管理請假' },
-      el('div', { class:'num' }, String(stats.leave)),
-      el('div', { class:'lbl' }, '請假中 · 已批准')
-    ));
-  }
-  if(isOverviewVisible('late')){
-    grid.appendChild(el('div', { class:'stat s-warn card-hover', onclick:()=> go('attendance','late'), title:'點此查看遲到名單' },
-      el('div', { class:'num' }, String(stats.late)),
-      el('div', { class:'lbl' }, '今日遲到')
-    ));
-  }
-  if(grid.childNodes.length){
-    content.appendChild(grid);
-    // POLISH-10/9: 首次進入總覽時數字 tween 從 0 動畫到目標值 (每個 session 只動畫一次)
-    try {
-      if(!App._ovStatsTweened){
-        App._ovStatsTweened = true;
-        setTimeout(()=> {
-          const nums = grid.querySelectorAll('.num');
-          nums.forEach(n => {
-            const target = parseInt(n.textContent, 10);
-            if(isNaN(target)) return;
-            n.textContent = '0';
-            tweenNumber(n, 0, target, 600);
-          });
-        }, 50);
-      }
-    } catch(_){ _swallow('tween-stats',_); }
-  }
-
+function renderOvAttendanceDetail(content){
   // 今日簽到簽退明細 — 加搜尋 + 班級篩選 + 頭像（點擊放大下載）
   // 改：永遠顯示這個條列式表格 (即使 0 筆也顯示工具列,讓老師知道功能存在)
   try {
@@ -13051,9 +13162,9 @@ function rOv(content){
           // 頭像 cell（點擊：有頭像 → 放大；沒頭像 → 跳到 profile）
           const avCell = el('td', { style:{padding:'4px'} });
           if(s.avatar){
-            avCell.appendChild(el('img', {
+            avCell.appendChild(lazyImg({
               src: s.avatar, title:'點擊放大下載原圖',
-              style:{width:'32px',height:'32px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',display:'block'},
+              style:{width:'32px',height:'32px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',display:'block',contain:'layout style',minHeight:'32px'},
               onclick: ()=> openAvatarViewer(s)
             }));
           } else {
@@ -13104,7 +13215,9 @@ function rOv(content){
       content.appendChild(detailCard);
     }
   } catch(e){ dbgWarn('[overview today detail]', e); }
+}
 
+function renderOvSubmissionDetail(content){
   // 今日繳交明細 — 條列式 + 班級分組 + 展開收合 (對齊簽到明細風格,用戶要求)
   try {
     const todayStr2 = td();
@@ -13249,9 +13362,9 @@ function rOv(content){
             // 頭像
             const avCell = el('td', { style:{padding:'4px'} });
             if(s.avatar){
-              avCell.appendChild(el('img', {
+              avCell.appendChild(lazyImg({
                 src: s.avatar, title:'點擊放大下載原圖',
-                style:{width:'32px',height:'32px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',display:'block'},
+                style:{width:'32px',height:'32px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',display:'block',contain:'layout style',minHeight:'32px'},
                 onclick: ()=> openAvatarViewer(s)
               }));
             } else {
@@ -13317,6 +13430,165 @@ function rOv(content){
       content.appendChild(sCard);
     }
   } catch(e){ dbgWarn('[overview today submissions]', e); }
+}
+
+function rOv(content){
+  const stats = computeTodayStats();
+  const today = td();
+
+  // 跨裝置同步未啟用 → 顯眼提示橫條（可一鍵跳到設定 / 永久關閉）
+  try {
+    const dismissed = localStorage.getItem('cms_v3_sync_warn_dismissed') === '1';
+    const hasFb = !!localStorage.getItem(LS_FB);
+    if(!dismissed && (App.fbStatus !== 'online' || !hasFb)){
+      const banner = el('div', { class:'card', style:{
+        background:'var(--warn-soft)', borderColor:'var(--warn)',
+        marginBottom:'12px', padding:'12px 14px'
+      }});
+      banner.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} },
+        '⚠️ 跨裝置同步未啟用'));
+      banner.appendChild(el('div', { class:'small', style:{lineHeight:'1.6',marginBottom:'10px'} },
+        '你的資料目前只存在這台裝置，其他電腦 / 平板 / 手機看不到，學生也無法即時收到你的更新。建議現在設定 Firebase 同步（免費）。'));
+      banner.appendChild(el('div', { class:'flex', style:{gap:'8px',flexWrap:'wrap'} },
+        el('button', { class:'btn btn-primary btn-sm', onclick:()=> go('firebase') }, '⚙️ 去設定'),
+        el('button', { class:'btn btn-sm', onclick:()=> {
+          try { localStorage.setItem('cms_v3_sync_warn_dismissed', '1'); } catch(e){}
+          toast('已關閉提醒，可至「同步設定」隨時開啟','info');
+          rerender();
+        }}, '我知道了，不再提醒')
+      ));
+      content.appendChild(banner);
+    }
+  } catch(e){ _swallow('sync-warn-banner', e); }
+
+  // 自訂內容（總覽頁頂端）
+  content.appendChild(renderCustomBlocks('overview-top'));
+
+  // hello bar (time-aware greeting)
+  if(isOverviewVisible('helloBar')){
+    const hb = renderHelloBar();
+    if(hb) content.appendChild(hb);
+  }
+
+  // 自訂歡迎詞（附在 hello bar 之下）
+  try {
+    const extra = App._uiCustom?.overview?.welcomeExtra;
+    if(extra){
+      content.appendChild(el('div', { class:'card', style:{
+        background:'var(--primary-soft)', borderColor:'var(--primary)',
+        padding:'10px 14px', marginBottom:'10px'
+      } },
+        el('div', { style:{whiteSpace:'pre-wrap',fontSize:'14px',lineHeight:'1.7'} }, extra)
+      ));
+    }
+  } catch(e){_swallow('auto',e)}
+
+  // quick-start CTA (only when no students)
+  if(isOverviewVisible('quickstart')){
+    const qs = renderQuickStart();
+    if(qs) content.appendChild(qs);
+  }
+
+  // welcome journey card (auto-hides after completion)
+  if(isOverviewVisible('journey')){
+    const j = renderWelcomeJourney();
+    if(j) content.appendChild(j);
+  }
+
+  // POLISH-10/6: 智能提醒 (老師端)
+  try {
+    const sr = renderSmartReminders();
+    if(sr) content.appendChild(sr);
+  } catch(e){ _swallow('smart-reminders-rOv', e); }
+
+  // POLISH-10/3: 進入 overview 檢查慶祝事件
+  try { setTimeout(checkCelebrationTriggers, 400); } catch(_){}
+
+  const ovTitle = getPageTitle('overview', '今日總覽').replace(/^📊\s*/, '');
+  const ovSubDefault = '掌握今天整班的出席狀況 · ' + today + ' · ' + new Date().toLocaleDateString('zh-TW', { weekday:'long' });
+  const ovSub = getPageSub('overview', ovSubDefault);
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'14px'} },
+    el('div', null,
+      el('h1', null, ovTitle),
+      el('div', { class:'muted small' }, ovSub)
+    ),
+    el('div', { class:'flex no-print' },
+      // 🎯 簡潔模式 — 隱藏次要區塊 (用戶反映「太多東西」)
+      (()=> {
+        // 載入偏好
+        if(App._ovMinimal === undefined){
+          try { App._ovMinimal = localStorage.getItem('cms_v3_ov_minimal') === '1'; } catch(_){ App._ovMinimal = false; }
+        }
+        return el('button', {
+          class:'btn btn-sm',
+          style: App._ovMinimal ? {background:'var(--primary)',color:'#fff'} : {},
+          title: App._ovMinimal ? '已是簡潔模式 — 點此切回完整檢視' : '簡潔模式 — 只顯示出席/繳交/健康三大區塊,隱藏次要面板',
+          onclick: ()=> {
+            App._ovMinimal = !App._ovMinimal;
+            try { localStorage.setItem('cms_v3_ov_minimal', App._ovMinimal ? '1' : '0'); } catch(_){}
+            rerender();
+          }
+        }, App._ovMinimal ? '🎯 簡潔中' : '🎯 簡潔模式');
+      })(),
+      el('button', { class:'btn btn-sm', onclick:()=> rerender(), title:'重新載入資料' }, '🔄 重整'),
+      el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
+      // F-06: 群發通知未到家長
+      stats.absent > 0 ? el('button', { class:'btn btn-sm', style:{background:'var(--danger-soft)',color:'var(--danger)'},
+        onclick: notifyAbsentParents, title:'用 mailto 寄信給今日缺席學生的家長' }, '📧 通知未到家長') : null,
+      el('button', { class:'btn btn-sm btn-primary', onclick:()=> go('attendance'), title:'進入點名頁面' }, '✅ 點名 →')
+    )
+  ));
+
+  // stat tiles (with subtitles explaining each) — 各卡片可獨立隱藏
+  const grid = el('div', { class:'grid grid-4', style:{marginBottom:'16px'} });
+  if(isOverviewVisible('signed')){
+    grid.appendChild(el('div', { class:'stat s-success card-hover', onclick:()=> go('attendance','signed'), title:'點此查看已簽到名單' },
+      el('div', { class:'num' }, String(stats.signed)),
+      el('div', { class:'lbl' }, '已簽到 / ' + stats.total + ' 人')
+    ));
+  }
+  if(isOverviewVisible('absent')){
+    grid.appendChild(el('div', { class:'stat s-danger card-hover', onclick:()=> go('attendance','absent'), title:'點此查看尚未到課學生' },
+      el('div', { class:'num' }, String(stats.absent)),
+      el('div', { class:'lbl' }, '未簽到 · 待處理')
+    ));
+  }
+  if(isOverviewVisible('leave')){
+    grid.appendChild(el('div', { class:'stat s-accent card-hover', onclick:()=> go('leave'), title:'點此管理請假' },
+      el('div', { class:'num' }, String(stats.leave)),
+      el('div', { class:'lbl' }, '請假中 · 已批准')
+    ));
+  }
+  if(isOverviewVisible('late')){
+    grid.appendChild(el('div', { class:'stat s-warn card-hover', onclick:()=> go('attendance','late'), title:'點此查看遲到名單' },
+      el('div', { class:'num' }, String(stats.late)),
+      el('div', { class:'lbl' }, '今日遲到')
+    ));
+  }
+  if(grid.childNodes.length){
+    content.appendChild(grid);
+    // POLISH-10/9: 首次進入總覽時數字 tween 從 0 動畫到目標值 (每個 session 只動畫一次)
+    try {
+      if(!App._ovStatsTweened){
+        App._ovStatsTweened = true;
+        setTimeout(()=> {
+          const nums = grid.querySelectorAll('.num');
+          nums.forEach(n => {
+            const target = parseInt(n.textContent, 10);
+            if(isNaN(target)) return;
+            n.textContent = '0';
+            tweenNumber(n, 0, target, 600);
+          });
+        }, 50);
+      }
+    } catch(_){ _swallow('tween-stats',_); }
+  }
+
+  // 今日簽到簽退明細 — 抽出為 renderOvAttendanceDetail() 以縮小 rOv 體積 (low-risk extract)
+  renderOvAttendanceDetail(content);
+
+  // 今日繳交明細 — 抽出為 renderOvSubmissionDetail() 以縮小 rOv 體積 (low-risk extract)
+  renderOvSubmissionDetail(content);
 
   // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考 (簡潔模式時隱藏)
   if(!App._ovMinimal) try {
@@ -14047,7 +14319,7 @@ function rStudentProfile(content){
   // 頂列 — 頭像放大到 100x100，且加「📷 查看 / 下載」按鈕
   const avatarBlock = s.avatar
     ? el('div', { style:{position:'relative'} },
-        el('img', { src: s.avatar, title:'點擊放大下載原圖', style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',border:'3px solid var(--primary)',cursor:'zoom-in',display:'block'}, onclick: ()=> openAvatarViewer(s) }),
+        lazyImg({ src: s.avatar, title:'點擊放大下載原圖', style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',border:'3px solid var(--primary)',cursor:'zoom-in',display:'block',contain:'layout style',minHeight:'100px'}, onclick: ()=> openAvatarViewer(s) }),
         // 小角標：明示可放大
         el('div', { style:{position:'absolute',right:'-2px',bottom:'-2px',background:'var(--primary)',color:'#fff',width:'28px',height:'28px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'14px',cursor:'zoom-in',boxShadow:'0 2px 6px rgba(0,0,0,0.3)'}, title:'點擊放大下載', onclick: ()=> openAvatarViewer(s) }, '🔍')
       )
@@ -14354,9 +14626,9 @@ function rStu(content){
       const row = el('div', { class:'list-row' });
       // 學生大頭照（有頭像點擊放大下載；沒頭像顯示 initials）
       if(s.avatar){
-        row.appendChild(el('img', {
+        row.appendChild(lazyImg({
           src: s.avatar, title:'點擊放大下載',
-          style:{width:'40px',height:'40px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',flexShrink:'0'},
+          style:{width:'40px',height:'40px',borderRadius:'50%',objectFit:'cover',cursor:'zoom-in',flexShrink:'0',contain:'layout style',minHeight:'40px'},
           onclick: (ev)=> { ev.stopPropagation(); openAvatarViewer(s); }
         }));
       } else {
@@ -18510,8 +18782,8 @@ function rMe(content){
   // ─── 個人資料卡 ───
   const card = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
   if(me.avatar){
-    card.appendChild(el('img', { src: me.avatar, alt: me.name,
-      style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',margin:'0 auto 12px',display:'block',border:'3px solid var(--primary)'} }));
+    card.appendChild(lazyImg({ src: me.avatar, alt: me.name,
+      style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',margin:'0 auto 12px',display:'block',border:'3px solid var(--primary)',contain:'layout style',minHeight:'100px'} }));
   } else {
     card.appendChild(el('div', { class:'avatar', style:{width:'100px',height:'100px',fontSize:'36px',margin:'0 auto 12px',border:'3px solid var(--primary)'} }, initials(me.name)));
   }
@@ -18970,9 +19242,9 @@ function openStudentSelfEdit(){
   const avBox = el('div', { class:'field', style:{textAlign:'center'} });
   avBox.appendChild(el('label', { class:'label' }, '頭像'));
   let avatarData = me.avatar || '';
-  const avImg = el('img', {
+  const avImg = lazyImg({
     src: avatarData || '',
-    style:{width:'90px',height:'90px',borderRadius:'50%',objectFit:'cover',display: avatarData?'block':'none',margin:'0 auto 8px',border:'2px solid var(--border)'}
+    style:{width:'90px',height:'90px',borderRadius:'50%',objectFit:'cover',display: avatarData?'block':'none',margin:'0 auto 8px',border:'2px solid var(--border)',contain:'layout style',minHeight:'90px'}
   });
   const avInitials = el('div', { class:'avatar', style:{width:'90px',height:'90px',fontSize:'32px',margin:'0 auto 8px',display: avatarData?'none':'flex'} }, initials(me.name));
   avBox.appendChild(avImg);
@@ -26329,6 +26601,11 @@ function showPwaInstallChip(){
 }
 
 function rerender(){
+  // PERF: clear render-scoped memo cache so each render pass sees fresh data
+  // (used by attendanceRate / submissionRate / assignmentTargets / studentRank
+  // to avoid O(students² × assignments) recomputation)
+  try { _renderCache.clear(); } catch(_){}
+
   const root = $('#root');
 
   // 🛡️ 保險:rerender 前若有 input 在 focus,保存 value + caret,完成後嘗試還原
