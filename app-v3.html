@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-30-audit-batch9-m29-css-split';
+const APP_BUILD = '2026-05-30-audit-batch10-l33-split';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -15788,9 +15788,11 @@ function exportAssignmentsCSV(){
 /* ════════════════════════════════════════════════════════════
    PHASE 2 — TEACHER: SUBMISSIONS (rSub)
    ──────────────────────────────────────────────────────────── */
-function rSub(content){
-  const tab = App.subview || 'pending';
-  // 容量狀態 card (用戶要求:看到還剩多少 + Drive 切換)
+// ════════════════════════════════════════════════════════════════
+// rSub 輔助:容量狀態 card (顯示 Drive 連接狀態 + 單檔上限)
+// 從 rSub 抽出,只用 content 參數,保持原行為不變
+// ════════════════════════════════════════════════════════════════
+function renderSubCapacityCard(content){
   try {
     const cap = el('div', { class:'card', style:{
       marginBottom:'12px',padding:'10px 14px',
@@ -15839,21 +15841,15 @@ function rSub(content){
     cap.appendChild(capLine);
     content.appendChild(cap);
   } catch(_){}
+}
 
-  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
-    el('div', null,
-      el('h1', null, '繳交記錄'),
-      el('div', { class:'muted small' }, '共 ' + App.db.submissions.length + ' 筆繳交')
-    )
-  ));
-
-  const tabs = el('div', { class:'tabs-line' });
-  [['pending','🟡 待批改'],['graded','✅ 已批改'],['late','⚠️ 遲交'],['all','全部']].forEach(([v,t]) => {
-    tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('submissions', v) }, t));
-  });
-  content.appendChild(tabs);
-
-  // batch 4-22：依週次篩選
+// ════════════════════════════════════════════════════════════════
+// rSub 輔助:工具列 (搜尋 / 班級篩選 / 顯示模式切換 / 週次篩選)
+// 從 rSub 抽出。renderListCb 為 closure 內的 renderList 回呼
+// (因為它在 rSub 內定義,要透過 callback 傳入)
+// ════════════════════════════════════════════════════════════════
+function renderSubToolbar(content, tab, renderListCb){
+  // batch 4-22:依週次篩選
   try {
     const sem = getSemester();
     if(sem.startDate){
@@ -15866,7 +15862,7 @@ function rSub(content){
       for(let i=1;i<=tw;i++){
         sel.appendChild(el('option', { value:String(i), selected: App._subWeekFilter === String(i) }, '第 ' + i + ' 週'));
       }
-      sel.addEventListener('change', e => { App._subWeekFilter = e.target.value || null; renderList(); });
+      sel.addEventListener('change', e => { App._subWeekFilter = e.target.value || null; renderListCb(); });
       wf.appendChild(sel);
       content.appendChild(wf);
     }
@@ -15878,7 +15874,7 @@ function rSub(content){
   }
   const sBox = el('div', { class:'flex', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap',alignItems:'center'} });
   const sInp = el('input', { class:'input', placeholder:'🔎 搜尋學生 / 作業', style:{flex:'1',minWidth:'160px'},
-    oninput: e => { App._subSearch = e.target.value.toLowerCase(); renderList(); }});
+    oninput: e => { App._subSearch = e.target.value.toLowerCase(); renderListCb(); }});
   if(App._subSearch) sInp.value = App._subSearch;
   sBox.appendChild(sInp);
   // 班級篩選
@@ -15886,7 +15882,7 @@ function rSub(content){
   const subClsSel = el('select', { class:'select', style:{width:'auto'} });
   subClsSel.appendChild(el('option', { value:'' }, '全部班級'));
   subClasses.forEach(c => subClsSel.appendChild(el('option', { value:c, selected: c === App._subCls }, c)));
-  subClsSel.addEventListener('change', e => { App._subCls = e.target.value; renderList(); });
+  subClsSel.addEventListener('change', e => { App._subCls = e.target.value; renderListCb(); });
   sBox.appendChild(subClsSel);
   // 顯示模式切換按鈕
   const isMatrix = App._subDisplayMode === 'matrix';
@@ -15903,6 +15899,29 @@ function rSub(content){
     onclick:()=> { App._subDisplayMode = 'matrix'; try { localStorage.setItem('cms_v3_sub_display_mode', 'matrix'); } catch(_){} rerender(); }
   }, '🔲 矩陣'));
   content.appendChild(sBox);
+}
+
+function rSub(content){
+  const tab = App.subview || 'pending';
+  // 容量狀態 card (抽出至 renderSubCapacityCard)
+  renderSubCapacityCard(content);
+
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
+    el('div', null,
+      el('h1', null, '繳交記錄'),
+      el('div', { class:'muted small' }, '共 ' + App.db.submissions.length + ' 筆繳交')
+    )
+  ));
+
+  const tabs = el('div', { class:'tabs-line' });
+  [['pending','🟡 待批改'],['graded','✅ 已批改'],['late','⚠️ 遲交'],['all','全部']].forEach(([v,t]) => {
+    tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('submissions', v) }, t));
+  });
+  content.appendChild(tabs);
+
+  // 工具列:週次/搜尋/班級/顯示模式 (抽出至 renderSubToolbar)
+  // 注意:renderList 是 closure 內定義,透過 wrapper 延遲解析
+  renderSubToolbar(content, tab, ()=> renderList());
 
   const listWrap = el('div');
   content.appendChild(listWrap);
@@ -27432,16 +27451,10 @@ function renderSidebarEditor(content){
   content.appendChild(cardApply);
 }
 
-/* ─── 區塊 2：登入頁編輯器 ─── */
-function renderLoginEditor(content){
-  App._uiCustom = App._uiCustom || loadUiCustom();
-  App._uiCustom.login = App._uiCustom.login || {};
-  const lc = App._uiCustom.login;
+/* ─── 區塊 2：登入頁編輯器 — sub-card helpers (L33 split) ─── */
 
-  content.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
-    '客製化登入畫面的標題、Logo、身分選擇按鈕與提示。改完設定後，登出即可看到效果。'));
-
-  // ─── 0) 風格預設（7 個一鍵切換） ───
+// 風格預設卡（一鍵切換 7 種大廠風格）
+function renderLoginPresetCard(lc){
   const cardPreset = el('div', { class:'card', style:{marginBottom:'12px',background:'linear-gradient(135deg,rgba(99,102,241,.08),rgba(168,85,247,.08))',borderColor:'rgba(99,102,241,.25)'} });
   cardPreset.appendChild(el('h3', { style:{marginTop:'0'} }, '✨ 風格預設（一鍵套用大廠設計）'));
   cardPreset.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
@@ -27450,13 +27463,11 @@ function renderLoginEditor(content){
   const presetRow = el('div', { class:'flex', style:{gap:'10px',alignItems:'center',flexWrap:'wrap'} });
   presetRow.appendChild(el('label', { class:'small', style:{fontWeight:'600',minWidth:'70px'} }, '預設風格'));
   const presetSel = el('select', { class:'input', style:{flex:'1',minWidth:'200px',maxWidth:'320px'} });
-  // 「自訂」選項
   presetSel.appendChild(el('option', { value:'_custom' }, '── 自訂（不套預設）──'));
   Object.keys(LOGIN_PRESETS).forEach(key => {
     const opt = el('option', { value:key }, LOGIN_PRESETS[key].name);
     presetSel.appendChild(opt);
   });
-  // 目前選擇：lc.preset（沒設 → 預設 spotify）
   const curPreset = lc.preset || 'spotify';
   presetSel.value = (LOGIN_PRESETS[curPreset] ? curPreset : '_custom');
 
@@ -27475,7 +27486,6 @@ function renderLoginEditor(content){
       { title:'套用風格預設' }
     );
     if(!ok){
-      // 還原 select 顯示
       presetSel.value = (LOGIN_PRESETS[lc.preset] ? lc.preset : '_custom');
       return;
     }
@@ -27492,7 +27502,6 @@ function renderLoginEditor(content){
   Object.keys(LOGIN_PRESETS).forEach(key => {
     const p = LOGIN_PRESETS[key];
     const isActive = (lc.preset || 'spotify') === key;
-    // swatch: 顯示卡片 + 主色
     const sw = el('button', {
       type:'button',
       class: 'btn btn-sm' + (isActive ? ' btn-primary' : ''),
@@ -27514,7 +27523,6 @@ function renderLoginEditor(content){
         rerender();
       }
     });
-    // 加色點
     const firstColor = extractFirstColor(String(p.primary)) || p.primary;
     sw.appendChild(el('span', { style:{
       display:'inline-block', width:'10px', height:'10px', borderRadius:'50%',
@@ -27525,10 +27533,11 @@ function renderLoginEditor(content){
     quickRow.appendChild(sw);
   });
   cardPreset.appendChild(quickRow);
+  return cardPreset;
+}
 
-  content.appendChild(cardPreset);
-
-  // a) 標題與 Logo
+// 標題、副標題與 Logo（emoji/圖片）卡
+function renderLoginTitleCard(lc){
   const card1 = el('div', { class:'card' });
   card1.appendChild(el('h3', null, '🏷️ 標題與 Logo'));
 
@@ -27582,7 +27591,6 @@ function renderLoginEditor(content){
       saveUiCustom();
       await refreshLogo();
       toast('Logo 已更新','success');
-      // 觸發重繪讓「移除圖片」按鈕出現
       rerender();
     } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
   });
@@ -27622,9 +27630,11 @@ function renderLoginEditor(content){
   fSub.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '留空則使用：極簡校園管理工具'));
   card1.appendChild(fSub);
 
-  content.appendChild(card1);
+  return card1;
+}
 
-  // b) 身分選擇按鈕
+// 身分選擇按鈕（老師/學生 icon+label+sub 與顯示開關）
+function renderLoginIdentityCard(lc){
   const card2 = el('div', { class:'card', style:{marginTop:'12px'} });
   card2.appendChild(el('h3', null, '👥 身分選擇按鈕'));
 
@@ -27676,9 +27686,11 @@ function renderLoginEditor(content){
     showS, el('span', null, '顯示學生按鈕')));
   card2.appendChild(showRow);
 
-  content.appendChild(card2);
+  return card2;
+}
 
-  // c) 提示與說明文字
+// 提示與說明文字（歡迎訊息 + 5 個隱藏開關）
+function renderLoginHintsCard(lc){
   const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
   card3.appendChild(el('h3', null, '💬 提示與說明文字'));
 
@@ -27693,7 +27705,7 @@ function renderLoginEditor(content){
   fWelcome.appendChild(taWelcome);
   card3.appendChild(fWelcome);
 
-  // 隱藏「預設帳號提示」
+  // 隱藏控制
   const mkChk = (key, label) => {
     const lbl = el('label', { class:'small flex', style:{gap:'8px',alignItems:'center',padding:'8px',background:'var(--surface-2)',borderRadius:'8px',marginTop:'8px',cursor:'pointer'} });
     const chk = el('input', { type:'checkbox' });
@@ -27709,7 +27721,29 @@ function renderLoginEditor(content){
   card3.appendChild(mkChk('hideLastUser',   '隱藏「上次登入快速繼續」卡片'));
   card3.appendChild(mkChk('hideSwitchRoom', '隱藏「← 切換教室」按鈕'));
 
-  content.appendChild(card3);
+  return card3;
+}
+
+/* ─── 區塊 2：登入頁編輯器 ─── */
+function renderLoginEditor(content){
+  App._uiCustom = App._uiCustom || loadUiCustom();
+  App._uiCustom.login = App._uiCustom.login || {};
+  const lc = App._uiCustom.login;
+
+  content.appendChild(el('p', { class:'small muted', style:{marginBottom:'10px'} },
+    '客製化登入畫面的標題、Logo、身分選擇按鈕與提示。改完設定後，登出即可看到效果。'));
+
+  // 0) 風格預設（7 個一鍵切換） — extracted to renderLoginPresetCard
+  content.appendChild(renderLoginPresetCard(lc));
+
+  // a) 標題與 Logo — extracted to renderLoginTitleCard
+  content.appendChild(renderLoginTitleCard(lc));
+
+  // b) 身分選擇按鈕 — extracted to renderLoginIdentityCard
+  content.appendChild(renderLoginIdentityCard(lc));
+
+  // c) 提示與說明文字 — extracted to renderLoginHintsCard
+  content.appendChild(renderLoginHintsCard(lc));
 
   // ─── e) Spotify 風格客製 ───
   const cardSpot = el('div', { class:'card', style:{marginTop:'12px'} });
