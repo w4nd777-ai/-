@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-drive-auth-fix';
+const APP_BUILD = '2026-06-01-batch-transcript';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -17512,10 +17512,12 @@ function rGrades(content){
       el('h1', null, '學期成績'),
       el('div', { class:'muted small' }, '加權公式：出席 ' + w.att + '% + 作業 ' + w.asgn + '% + 期中 ' + w.mid + '% + 期末 ' + w.final + '%')
     ),
-    el('div', { class:'flex' },
+    el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px'} },
       el('button', { class:'btn btn-sm', onclick: openGradeWeights }, '⚖ 加權設定'),
       el('button', { class:'btn btn-sm', onclick: exportGradesCSV }, '📤 CSV'),
-      el('button', { class:'btn btn-sm', onclick: exportGradesPDF }, '📄 PDF')
+      el('button', { class:'btn btn-sm', onclick: exportGradesPDF, title:'班級成績總表 (一頁)' }, '📄 班級總表'),
+      // ★ FEATURE #2: 批次個別成績單 (每位學生一頁)
+      el('button', { class:'btn btn-sm btn-primary', title:'每位學生一頁的完整成績單,一次列印整班', onclick: ()=> openBatchTranscriptDlg() }, '📑 批次成績單')
     )
   ));
 
@@ -17730,6 +17732,55 @@ function exportGradesCSV(){
   });
   downloadCSV(rows, 'grades_' + td() + '.csv');
   toast('已下載','success');
+}
+
+// ★ FEATURE #2: 批次匯出個別成績單 — modal 讓老師選班級 or 全班
+function openBatchTranscriptDlg(){
+  const classes = Array.from(new Set((App.db.students||[]).map(s => s.cls || '未分班'))).sort();
+  const total = (App.db.students||[]).length;
+  if(!total){ toast('沒有學生','warn'); return; }
+
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '📑 批次匯出個別成績單'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px'} },
+    '每位學生的完整成績單(含學期總分/出席/作業/小考/評語)會串成一份,每位一頁,直接列印或另存為 PDF。'));
+
+  // 選班級
+  const fCls = el('div', { class:'field' });
+  fCls.appendChild(el('label', { class:'label' }, '選擇班級'));
+  const selWrap = el('div', { style:{display:'flex',flexDirection:'column',gap:'6px',maxHeight:'260px',overflow:'auto',padding:'10px',border:'1px solid var(--border)',borderRadius:'8px'} });
+  // 「全部學生」選項
+  const radioAll = el('input', { type:'radio', name:'btchcls', value:'__all__', checked:true });
+  const lblAll = el('label', { class:'flex', style:{alignItems:'center',gap:'8px',padding:'4px'} },
+    radioAll,
+    el('span', { style:{fontWeight:'700'} }, '🌐 全部 ('+ total +' 位學生)')
+  );
+  selWrap.appendChild(lblAll);
+  // 每個班級
+  classes.forEach(c => {
+    const cnt = (App.db.students||[]).filter(s => (s.cls||'未分班') === c).length;
+    const r = el('input', { type:'radio', name:'btchcls', value: c });
+    const lbl = el('label', { class:'flex', style:{alignItems:'center',gap:'8px',padding:'4px'} },
+      r, el('span', null, '🏫 ' + c + ' (' + cnt + ' 位)')
+    );
+    selWrap.appendChild(lbl);
+  });
+  fCls.appendChild(selWrap);
+  m.root.appendChild(fCls);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+    const checked = m.root.querySelector('input[name="btchcls"]:checked');
+    const v = checked && checked.value;
+    m.close();
+    if(v === '__all__'){
+      exportClassTranscripts(null);
+    } else if(v){
+      exportClassTranscripts(v);
+    }
+  }}, '📑 產生'));
+  m.root.appendChild(actions);
 }
 
 function exportGradesPDF(){
@@ -31361,6 +31412,215 @@ function _b5EscapeHtml(s){
 /* ════════════════════════════════════════════════════════════
    5-26：PDF 成績單匯出（用 window.print() + 列印樣式）
    ──────────────────────────────────────────────────────────── */
+// ★ FEATURE #2: 把 transcript 渲染拆成可重用的 helper,以便:
+//   - 單一學生 exportStudentReport(id) → 包外殼後 print
+//   - 全班批次 exportClassTranscripts() → 多份用 page-break 串起來一次 print
+// 回傳「不含 <html>/<head>/<style>/操作鈕」的純內文 HTML
+function _b5BuildTranscriptInner(s){
+  if(!s) return '';
+  const g = calcGrade(s.id);
+  const rk = studentRank(s.id);
+  const teacherName = (App.db.settings && App.db.settings.teacherName) || '老師';
+  const myAtt = (App.db.attendance || []).filter(a => a.studentId === s.id);
+  const allDates = Array.from(new Set((App.db.attendance || []).map(a => a.date)));
+  const present = myAtt.filter(a => a.status === 'present').length;
+  const late = myAtt.filter(a => a.status === 'late').length;
+  const early = myAtt.filter(a => a.status === 'early').length;
+  const absent = Math.max(0, allDates.length - myAtt.length - (App.db.leaves || []).filter(l => l.studentId === s.id && l.status === 'approved').length);
+  const leaveCnt = (App.db.leaves || []).filter(l => l.studentId === s.id && l.status === 'approved').length;
+  const attRate = attendanceRate(s.id);
+  const subs = (App.db.submissions || [])
+    .filter(x => x.studentId === s.id && typeof x.score === 'number')
+    .sort((a,b)=> (a.ts||0)-(b.ts||0));
+  let subRows = '';
+  subs.forEach(sb => {
+    const asg = (App.db.assignments || []).find(a => a.id === sb.assignmentId);
+    const dateStr = sb.ts ? tdOf(new Date(sb.ts)) : '';
+    const wkTag = (typeof fmtWeekTag === 'function' && dateStr) ? fmtWeekTag(dateStr) : '';
+    subRows += '<tr>'
+      + '<td>' + _b5EscapeHtml(asg ? asg.title : '?') + '</td>'
+      + '<td>' + _b5EscapeHtml(String(sb.score)) + '</td>'
+      + '<td>' + _b5EscapeHtml(String((asg && asg.points) || 100)) + '</td>'
+      + '<td>' + _b5EscapeHtml(String((asg && asg.weight) || 1)) + '</td>'
+      + '<td>' + _b5EscapeHtml(wkTag || dateStr) + '</td>'
+      + '</tr>';
+  });
+  if(!subRows) subRows = '<tr><td colspan="5" style="text-align:center;color:#888">（無作業成績）</td></tr>';
+  const bhs = (App.db.behavior || []).filter(b => b.studentId === s.id);
+  const bhTotal = bhs.reduce((t,b)=> t + (Number(b.points) || 0) * (b.type === 'neg' ? -1 : 1), 0);
+  const bhPos = bhs.filter(b => b.type !== 'neg').length;
+  const bhNeg = bhs.filter(b => b.type === 'neg').length;
+  const bhPts = bhs.map(b => (Number(b.points) || 0) * (b.type === 'neg' ? -1 : 1));
+  const bhMax = bhPts.length ? Math.max(...bhPts) : 0;
+  const bhMin = bhPts.length ? Math.min(...bhPts) : 0;
+  const qsubs = (App.db.quizSubmissions || []).filter(q => q.studentId === s.id).sort((a,b)=> (a.submittedAt||0)-(b.submittedAt||0));
+  let qRows = '';
+  qsubs.forEach(q => {
+    const quiz = (App.db.quizzes || []).find(x => x.id === q.quizId);
+    const dateStr = q.submittedAt ? tdOf(new Date(q.submittedAt)) : '';
+    qRows += '<tr>'
+      + '<td>' + _b5EscapeHtml(quiz ? quiz.title : '?') + '</td>'
+      + '<td>' + _b5EscapeHtml(String(q.score)) + '</td>'
+      + '<td>' + _b5EscapeHtml(dateStr) + '</td>'
+      + '</tr>';
+  });
+  if(!qRows) qRows = '<tr><td colspan="3" style="text-align:center;color:#888">（無小考紀錄）</td></tr>';
+  const fbs = (App.db.feedbacks || []).filter(f => f.studentId === s.id && f.text)
+    .sort((a,b)=> (b.ts||0)-(a.ts||0)).slice(0,5);
+  let fbHtml = '';
+  fbs.forEach(f => {
+    fbHtml += '<div class="fb-item">「' + _b5EscapeHtml(f.text) + '」<span class="fb-meta">— ' + _b5EscapeHtml(tdOf(new Date(f.ts||0))) + '</span></div>';
+  });
+  const tComment = (App.db.grades && App.db.grades[s.id] && App.db.grades[s.id].comment) || '';
+  if(tComment) fbHtml = '<div class="fb-item"><strong>班導評語：</strong>' + _b5EscapeHtml(tComment) + '</div>' + fbHtml;
+  if(!fbHtml) fbHtml = '<div class="fb-empty">（無評語）</div>';
+
+  return ''
+    + '<h2>👤 學生資訊</h2>'
+    + '<div class="meta">'
+    + '<div><span>姓名</span>' + _b5EscapeHtml(s.name) + '</div>'
+    + '<div><span>班級</span>' + _b5EscapeHtml(s.cls || '-') + '</div>'
+    + '<div><span>學號</span>' + _b5EscapeHtml(s.sid || '-') + '</div>'
+    + '<div><span>座號</span>' + _b5EscapeHtml(s.seat ? String(s.seat) : '-') + '</div>'
+    + '</div>'
+    + '<h2>🎯 學期總分</h2>'
+    + '<div class="big"><div class="num">' + g.total + '</div>'
+    + '<div>加權公式：出席 ' + g.w.att + '% + 作業 ' + g.w.asgn + '% + 期中 ' + g.w.mid + '% + 期末 ' + g.w.final + '%</div>'
+    + (rk.rank ? '<div>班級排名：第 ' + rk.rank + ' / ' + rk.of + ' 名</div>' : '')
+    + '</div>'
+    + '<h2>📅 出席統計</h2>'
+    + '<div class="grid">'
+    + '<div class="stat"><div class="num">' + allDates.length + '</div><div class="lbl">總天數</div></div>'
+    + '<div class="stat"><div class="num">' + present + '</div><div class="lbl">出席</div></div>'
+    + '<div class="stat"><div class="num">' + late + '</div><div class="lbl">遲到</div></div>'
+    + '<div class="stat"><div class="num">' + early + '</div><div class="lbl">早退</div></div>'
+    + '</div>'
+    + '<div class="grid">'
+    + '<div class="stat"><div class="num">' + absent + '</div><div class="lbl">缺席</div></div>'
+    + '<div class="stat"><div class="num">' + leaveCnt + '</div><div class="lbl">請假</div></div>'
+    + '<div class="stat"><div class="num">' + attRate + '%</div><div class="lbl">出席率</div></div>'
+    + '<div class="stat"><div class="num">' + g.asgn + '</div><div class="lbl">作業平均</div></div>'
+    + '</div>'
+    + '<h2>📋 作業成績明細</h2>'
+    + '<table><thead><tr><th>項目</th><th>分數</th><th>滿分</th><th>加權</th><th>第幾週</th></tr></thead>'
+    + '<tbody>' + subRows + '</tbody></table>'
+    + '<h2>⭐ 行為點數</h2>'
+    + '<div class="grid">'
+    + '<div class="stat"><div class="num">' + (bhTotal>=0?'+':'') + bhTotal + '</div><div class="lbl">累積</div></div>'
+    + '<div class="stat"><div class="num">' + bhPos + '</div><div class="lbl">加分次數</div></div>'
+    + '<div class="stat"><div class="num">' + bhNeg + '</div><div class="lbl">扣分次數</div></div>'
+    + '<div class="stat"><div class="num">' + bhMax + ' / ' + bhMin + '</div><div class="lbl">最高 / 最低</div></div>'
+    + '</div>'
+    + '<h2>📝 小考成績</h2>'
+    + '<table><thead><tr><th>題目</th><th>分數</th><th>日期</th></tr></thead>'
+    + '<tbody>' + qRows + '</tbody></table>'
+    + '<h2>💬 老師評語</h2>'
+    + fbHtml
+    + '<div class="sig">'
+    + '<div class="box">班導：' + _b5EscapeHtml(teacherName) + '</div>'
+    + '<div class="box">家長簽名：</div>'
+    + '</div>';
+}
+
+// 共用的列印外殼 + 樣式 (給單份或批次都用)
+function _b5BuildTranscriptShell(title, innerHTML, isBatch){
+  const school = (App.db.settings && App.db.settings.schoolName) || '課程管理系統';
+  const semLabel = (App.db.semester && App.db.semester.label) ||
+    ((App.db.semester && App.db.semester.startDate) ?
+      (App.db.semester.startDate + ' ~ ' + (App.db.semester.endDate || '?'))
+      : '本學期');
+  return '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    + '<title>' + _b5EscapeHtml(title) + '</title>'
+    + '<style>'
+    + 'body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;color:#222;padding:24px;max-width:780px;margin:0 auto;line-height:1.55;}'
+    + 'h1{font-size:22px;text-align:center;margin:6px 0 2px;}'
+    + '.subtitle{text-align:center;color:#666;margin-bottom:18px;font-size:13px;}'
+    + 'h2{font-size:16px;margin:18px 0 6px;border-bottom:2px solid #333;padding-bottom:4px;}'
+    + '.meta{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 18px;font-size:13px;margin-bottom:6px;}'
+    + '.meta div span{color:#666;display:inline-block;min-width:60px;}'
+    + 'table{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;}'
+    + 'th,td{border:1px solid #999;padding:5px 8px;text-align:left;}'
+    + 'th{background:#f0f0f0;font-weight:600;}'
+    + '.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:8px 0;}'
+    + '.stat{border:1px solid #999;padding:8px;text-align:center;border-radius:4px;}'
+    + '.stat .num{font-size:18px;font-weight:700;color:#000;}'
+    + '.stat .lbl{font-size:11px;color:#666;}'
+    + '.big{text-align:center;padding:16px;border:2px solid #333;border-radius:6px;margin:10px 0;}'
+    + '.big .num{font-size:36px;font-weight:700;}'
+    + '.fb-item{padding:6px 10px;border-left:3px solid #999;background:#fafafa;margin:4px 0;font-size:12px;}'
+    + '.fb-meta{color:#888;font-size:11px;margin-left:6px;}'
+    + '.fb-empty{font-size:12px;color:#888;font-style:italic;}'
+    + '.sig{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:30px;font-size:12px;}'
+    + '.sig .box{border-top:1px solid #333;padding-top:6px;text-align:center;}'
+    + '.tr-page{page-break-after:always;margin-bottom:40px;}'
+    + '.tr-page:last-child{page-break-after:auto;}'
+    + '@media print {'
+    + '  body{padding:0;}'
+    + '  h2{page-break-after:avoid;}'
+    + '  table{page-break-inside:auto;}'
+    + '  tr{page-break-inside:avoid;}'
+    + '  .no-print{display:none !important;}'
+    + '}'
+    + '.no-print{text-align:center;margin:14px 0;padding:8px;background:#f8f9fa;border-radius:6px;position:sticky;top:0;z-index:10;}'
+    + '.no-print button{padding:8px 20px;font-size:14px;cursor:pointer;margin:0 4px;}'
+    + '.batch-header{text-align:center;margin-bottom:20px;padding:14px;background:#fff8dc;border:1px dashed #999;border-radius:6px;}'
+    + '</style></head><body>'
+    + '<div class="no-print">'
+    + '<button onclick="window.print()">🖨️ 列印 / 另存 PDF</button>'
+    + '<button onclick="window.close()">關閉</button>'
+    + (isBatch ? '<span style="margin-left:14px;color:#666;font-size:13px;">📑 批次匯出 — 每位學生會在新一頁印出</span>' : '')
+    + '</div>'
+    + '<h1>' + _b5EscapeHtml(school) + ' — 學期成績單</h1>'
+    + '<div class="subtitle">' + _b5EscapeHtml(semLabel) + '　·　產出日期：' + tdOf(new Date()) + '</div>'
+    + innerHTML
+    + '</body></html>';
+}
+
+// ★ FEATURE #2 批次匯出: 多位學生的 transcript 串成一份,每位一頁 (page-break)
+function exportClassTranscripts(filter){
+  let stus = (App.db.students || []).slice();
+  if(filter && typeof filter === 'string'){
+    stus = stus.filter(s => (s.cls||'') === filter);
+  } else if(typeof filter === 'function'){
+    stus = stus.filter(filter);
+  }
+  stus.sort((a,b) => (a.cls||'').localeCompare(b.cls||'') || (a.seat||999) - (b.seat||999));
+  if(!stus.length){ toast('沒有符合條件的學生','warn'); return; }
+  // 每位學生包一個 div.tr-page 用 page-break-after
+  const inner = stus.map(s =>
+    '<div class="tr-page">'
+    + '<div style="background:#f0f8ff;padding:6px 10px;margin-bottom:8px;border-radius:4px;font-size:13px;color:#444">第 ' + (stus.indexOf(s)+1) + ' / ' + stus.length + ' 位</div>'
+    + _b5BuildTranscriptInner(s)
+    + '</div>'
+  ).join('');
+  const titleHint = filter && typeof filter === 'string' ? filter : '全部';
+  const html = _b5BuildTranscriptShell(titleHint + '-成績單合輯', inner, true);
+  _b5OpenPrintWindow(html, '已開啟 ' + stus.length + ' 位學生成績單合輯');
+}
+
+// 共用的開窗 + 列印觸發 (彈窗被擋時退回 iframe)
+function _b5OpenPrintWindow(html, successMsg){
+  let win = null;
+  try { win = window.open('', '_blank', 'width=820,height=900'); } catch(_) {_swallow('auto',_)}
+  if(win){
+    win.document.open(); win.document.write(html); win.document.close();
+    setTimeout(()=> { try { win.focus(); win.print(); } catch(_){_swallow('auto',_)} }, 800);
+    toast(successMsg || '已開啟列印視窗','success');
+  } else {
+    let ifr = document.getElementById('_b5_report_iframe');
+    if(ifr) ifr.remove();
+    ifr = document.createElement('iframe');
+    ifr.id = '_b5_report_iframe';
+    ifr.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(ifr);
+    ifr.contentDocument.open();
+    ifr.contentDocument.write(html);
+    ifr.contentDocument.close();
+    setTimeout(()=> { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch(_){_swallow('auto',_)} }, 800);
+    toast('已產生(彈窗被擋,已用隱藏 iframe)','info');
+  }
+}
+
 function exportStudentReport(studentId){
   const s = (App.db.students || []).find(x => x.id === studentId);
   if(!s){ toast('找不到學生','danger'); return; }
