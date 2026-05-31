@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-ann-schedule';
+const APP_BUILD = '2026-06-01-trash-bin';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -976,6 +976,7 @@ function defaultDB(){
     // 包 B-3：多學期（陣列；當 semesters 存在時優先使用，否則 fallback 到 semester）
     semesters: [],         // [{id, name, startDate, endDate, weekDays, holidays, current, archivedAt, summary}]
     _archives: [],         // 學期歷史封存（safety backup）
+    _trash: [],            // FEATURE #5 資源回收桶 — {id, kind, originalId, payload, deletedAt, deletedBy} 30 天 TTL
     settings: {
       schoolName: '我的課程',
       teacherName: '老師',
@@ -1096,7 +1097,7 @@ function loadDB(){
     App.db = Object.assign(defaultDB(), parsed);
     // ensure all arrays exist
     // Round 2 M2: 'parents' 已從 arrFields 移除
-    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications'];
+    const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications','_trash'];
     arrFields.forEach(f => { if(!Array.isArray(App.db[f])) App.db[f] = []; });
     if(!App.db.settings || typeof App.db.settings !== 'object') App.db.settings = defaultDB().settings;
     if(!App.db.branding || typeof App.db.branding !== 'object') App.db.branding = defaultDB().branding;
@@ -8965,7 +8966,7 @@ function renderTopbar(role){
     evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具',
     qr:'📱 QR Code 簽到', calendar:'📅 行事曆', gantt:'📊 作業甘特圖',
     workspace:'🏢 多教室管理', notify:'📲 通知設定',
-    backup:'💼 備份與還原', logs:'📜 操作紀錄', storage:'💾 儲存空間',
+    backup:'💼 備份與還原', trash:'🗑 資源回收桶', logs:'📜 操作紀錄', storage:'💾 儲存空間',
     peer:'⭐ 學生互評', matrix:'🪑 座位矩陣',
     groups:'👥 分組管理', attreport:'📊 出席報表',
     feedback:'🗳️ 學生回饋',
@@ -9216,6 +9217,84 @@ function announcementEffectiveTs(a){
   }
   return a.ts || 0;
 }
+
+// ════════════════════════════════════════════════════════════
+// FEATURE #5 資源回收桶 — 30 天可救援的刪除
+//   trashAdd(kind, record)    刪除前呼叫,記一份備份
+//   trashRestore(trashId)     把備份還原回原本的集合
+//   trashPurge(trashId)       永久刪除一筆
+//   trashPurgeAll()           清空整個回收桶 (含未過期)
+//   trashPurgeExpired()       自動清掉 >30 天的 (saveDB 時順手做)
+//   TRASH_TTL_MS              預設 30 天
+//   TRASH_KIND_MAP            kind 對應到 App.db 哪個集合 + 顯示名稱
+// ════════════════════════════════════════════════════════════
+const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;   // 30 天
+const TRASH_KIND_MAP = {
+  student:      { coll: 'students',      label: '學生',        ico: '🧑‍🎓' },
+  account:      { coll: 'accounts',      label: '帳號',        ico: '👤' },
+  assignment:   { coll: 'assignments',   label: '作業',        ico: '📋' },
+  submission:   { coll: 'submissions',   label: '繳交',        ico: '📥' },
+  announcement: { coll: 'announcements', label: '公告',        ico: '📢' },
+  attendance:   { coll: 'attendance',    label: '出席紀錄',     ico: '✅' },
+  behavior:     { coll: 'behavior',      label: '行為紀錄',     ico: '⭐' },
+  leave:        { coll: 'leaves',        label: '請假',        ico: '📆' },
+  message:      { coll: 'messages',      label: '訊息',        ico: '💬' },
+  note:         { coll: 'notes',         label: '筆記',        ico: '📒' },
+  quiz:         { coll: 'quizzes',       label: '小考',        ico: '📝' },
+  subject:      { coll: 'subjects',      label: '科目',        ico: '📚' }
+};
+function trashAdd(kind, record){
+  if(!record || !TRASH_KIND_MAP[kind]) return;
+  App.db._trash = App.db._trash || [];
+  App.db._trash.push({
+    id: nid(),
+    kind: kind,
+    originalId: record.id,
+    payload: _clone(record),
+    deletedAt: Date.now(),
+    deletedBy: (App.session && App.session.name) || '系統'
+  });
+  trashPurgeExpired();
+}
+function trashPurgeExpired(){
+  App.db._trash = App.db._trash || [];
+  const cutoff = Date.now() - TRASH_TTL_MS;
+  const before = App.db._trash.length;
+  App.db._trash = App.db._trash.filter(t => (t.deletedAt||0) >= cutoff);
+  return before - App.db._trash.length;
+}
+function trashRestore(trashId){
+  const idx = (App.db._trash||[]).findIndex(t => t.id === trashId);
+  if(idx < 0) return false;
+  const entry = App.db._trash[idx];
+  const map = TRASH_KIND_MAP[entry.kind];
+  if(!map) return false;
+  App.db[map.coll] = App.db[map.coll] || [];
+  // 避免 dup (萬一已有同 id record 存在)
+  const exists = App.db[map.coll].some(r => r && r.id === entry.payload.id);
+  if(!exists){
+    App.db[map.coll].push(_clone(entry.payload));
+    try { Sync.setRow(map.coll, entry.payload.id, entry.payload); } catch(_){ try { Sync.setMap(map.coll, App.db[map.coll]); } catch(_){} }
+  }
+  // 移出回收桶
+  App.db._trash.splice(idx, 1);
+  saveDB(true);
+  return entry;
+}
+function trashPurge(trashId){
+  const idx = (App.db._trash||[]).findIndex(t => t.id === trashId);
+  if(idx < 0) return false;
+  App.db._trash.splice(idx, 1);
+  saveDB(true);
+  return true;
+}
+function trashPurgeAll(){
+  const n = (App.db._trash||[]).length;
+  App.db._trash = [];
+  saveDB(true);
+  return n;
+}
+function trashCount(){ return (App.db._trash||[]).length; }
 
 function toggleTheme(){
   App.theme = App.theme === 'dark' ? 'light' : 'dark';
@@ -10987,6 +11066,8 @@ function rStu(content){
         if(!ok) return;
         // 包 C-4：備份 → 刪除 → pushUndo
         const backup = _clone(s);
+        // ★ FEATURE #5: 加進資源回收桶 (30 天可救援) — pushUndo 是 6 秒,resource bin 是長期
+        try { trashAdd('student', backup); } catch(_){}
         App.db.students = App.db.students.filter(x => x.id !== s.id);
         // 清掉 email_students / google_students 映射，避免新生用同 email 註冊被卡「已被使用」
         const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
@@ -16032,6 +16113,8 @@ async function deleteAssignment(asg){
     if(s.attach && s.attach.key) keysToFree.push(s.attach.key);
     if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
   });
+  // ★ FEATURE #5: 作業 + 所有 submission 都進回收桶
+  try { trashAdd('assignment', asg); subsBackup.forEach(s => trashAdd('submission', s)); } catch(_){}
   App.db.assignments = App.db.assignments.filter(a => a.id !== asg.id);
   App.db.submissions = App.db.submissions.filter(s => s.assignmentId !== asg.id);
   saveDB();
@@ -16311,6 +16394,8 @@ function rSub(content){
         const keysToFree = [];
         if(s.attach && s.attach.key) keysToFree.push(s.attach.key);
         if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
+        // ★ FEATURE #5: 加進資源回收桶
+        try { trashAdd('submission', backup); } catch(_){}
         App.db.submissions = App.db.submissions.filter(x => x.id !== s.id);
         saveDB();
         try { Sync.removeRow('submissions', s.id); } catch(_){ Sync.setMap('submissions', App.db.submissions); }
@@ -17793,11 +17878,13 @@ function rAnn(content){
         el('div', { class:'flex', style:{gap:'4px'} },
           el('button', { class:'btn btn-sm', onclick:()=> openAnnouncementEdit(a) }, '✏️'),
           el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
-            const ok = await confirmDlg('刪除這則公告？', { danger:true });
+            const ok = await confirmDlg('刪除這則公告？(可在資源回收桶 30 天內救回)', { danger:true });
             if(!ok) return;
+            // ★ FEATURE #5: 加進回收桶
+            try { trashAdd('announcement', a); } catch(_){}
             App.db.announcements = App.db.announcements.filter(x => x.id !== a.id);
             saveDB(); try { Sync.removeRow('announcements', a.id); } catch(_){ Sync.setMap('announcements', App.db.announcements); } bcNotify();
-            toast('已刪除','warn'); rerender();
+            toast('已刪除 (可在資源回收桶救回)','warn'); rerender();
           }}, '🗑')
         )
       ));
@@ -21441,6 +21528,107 @@ function rLogs(content){
   }
 }
 
+/* ════════════════════════════════════════════════════════════
+   FEATURE #5 — TEACHER: 資源回收桶 (rTrash)
+   ──────────────────────────────────────────────────────────── */
+function rTrash(content){
+  content.appendChild(el('h1', null, '🗑 資源回收桶'));
+  // 進來時順手清過期
+  try { trashPurgeExpired(); } catch(_){}
+  const list = (App.db._trash || []).slice().sort((a,b)=> (b.deletedAt||0) - (a.deletedAt||0));
+  content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
+    '刪除的項目保留 30 天,過期自動清理。' + (list.length ? '目前有 ' + list.length + ' 筆。' : '目前是空的。')));
+
+  // 篩選 kind 工具列
+  const kindCounts = {};
+  list.forEach(t => { kindCounts[t.kind] = (kindCounts[t.kind]||0) + 1; });
+  const filterRow = el('div', { class:'flex', style:{flexWrap:'wrap',gap:'6px',marginBottom:'14px'} });
+  filterRow.appendChild(el('button', {
+    class: 'btn btn-sm' + (App._trashFilter ? '' : ' btn-primary'),
+    onclick: ()=> { App._trashFilter = null; rerender(); }
+  }, '全部 (' + list.length + ')'));
+  Object.keys(kindCounts).forEach(k => {
+    const map = TRASH_KIND_MAP[k] || { label: k, ico: '📦' };
+    filterRow.appendChild(el('button', {
+      class: 'btn btn-sm' + (App._trashFilter === k ? ' btn-primary' : ''),
+      onclick: ()=> { App._trashFilter = k; rerender(); }
+    }, map.ico + ' ' + map.label + ' (' + kindCounts[k] + ')'));
+  });
+  // 批次:全部還原 / 全部永久刪除
+  if(list.length){
+    filterRow.appendChild(el('div', { style:{flex:'1'} }));    // spacer
+    filterRow.appendChild(el('button', {
+      class:'btn btn-sm btn-danger',
+      onclick: async ()=> {
+        const ok = await confirmDlg('確定永久清空回收桶 ' + list.length + ' 筆? (無法救回)', { danger:true, title:'⚠ 永久清空回收桶' });
+        if(!ok) return;
+        trashPurgeAll();
+        toast('已永久清空回收桶','warn');
+        rerender();
+      }
+    }, '🗑 永久清空回收桶'));
+  }
+  content.appendChild(filterRow);
+
+  const filtered = App._trashFilter ? list.filter(t => t.kind === App._trashFilter) : list;
+  if(filtered.length === 0){
+    content.appendChild(el('div', { class:'empty card' },
+      el('div', { class:'ico' }, '🗑'),
+      el('div', null, '回收桶是空的'),
+      el('div', { class:'small muted', style:{marginTop:'4px'} }, '已刪除的學生 / 作業 / 公告 / 繳交 等會出現在這裡')
+    ));
+    return;
+  }
+
+  filtered.forEach(t => {
+    const map = TRASH_KIND_MAP[t.kind] || { label: t.kind, ico: '📦' };
+    const p = t.payload || {};
+    // 預覽:取 name / title / studentName 等常見欄位
+    let title = p.name || p.title || p.studentName || p.text || p.label || '(無標題)';
+    if(typeof title !== 'string') title = JSON.stringify(title).slice(0, 80);
+    title = String(title).slice(0, 100);
+    const remainingMs = TRASH_TTL_MS - (Date.now() - (t.deletedAt||0));
+    const remainingDays = Math.max(0, Math.ceil(remainingMs / 86400000));
+    const card = el('div', { class:'card', style:{marginBottom:'8px'} });
+    card.appendChild(el('div', { class:'flex-between' },
+      el('div', { style:{flex:'1',minWidth:'0'} },
+        el('div', { style:{fontWeight:'700',marginBottom:'2px'} }, map.ico + ' ' + title),
+        el('div', { class:'small muted' },
+          map.label + ' · ' + relTime(t.deletedAt||0) + ' · 由 ' + (t.deletedBy||'?') + ' 刪除' +
+          ' · 還剩 ' + remainingDays + ' 天')
+      ),
+      el('div', { class:'flex', style:{gap:'6px'} },
+        el('button', {
+          class:'btn btn-sm btn-primary',
+          onclick: async ()=> {
+            const ok = await confirmDlg('還原這筆「' + map.label + '」?', { title:'↩ 還原' });
+            if(!ok) return;
+            const restored = trashRestore(t.id);
+            if(restored){
+              toast('✓ 已還原 — 你可以在「' + map.label + '」頁面找到','success');
+              try { bcNotify(); } catch(_){}
+              rerender();
+            } else {
+              toast('還原失敗','danger');
+            }
+          }
+        }, '↩ 還原'),
+        el('button', {
+          class:'btn btn-sm btn-danger',
+          onclick: async ()=> {
+            const ok = await confirmDlg('永久刪除這筆? (無法救回)', { danger:true });
+            if(!ok) return;
+            trashPurge(t.id);
+            toast('已永久刪除','warn');
+            rerender();
+          }
+        }, '🗑 永久刪除')
+      )
+    ));
+    content.appendChild(card);
+  });
+}
+
 function rBackup(content){
   content.appendChild(el('h1', null, '💼 備份與還原'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} },
@@ -23154,6 +23342,7 @@ function rerender(){
       else if(v === 'help') rHelp(content);
       else if(v === 'install') rInstall(content);
       else if(v === 'teachernotes') rTeacherNotes(content); // F-16
+      else if(v === 'trash') rTrash(content);   // ★ FEATURE #5 資源回收桶
       else { App.view = 'overview'; rOv(content); }
     } else {
       const v = App.view;
@@ -27404,6 +27593,7 @@ function getSidebarItems(role){
       ]},
       data: { label:'📦 資料管理', items: [
         { key:'backup', icon:'💼', label:'備份與還原' },
+        { key:'trash', icon:'🗑', label:'資源回收桶' },
         { key:'exportcenter', icon:'📦', label:'匯出中心' },
         { key:'printcenter', icon:'🖨', label:'列印中心' }
       ]},
