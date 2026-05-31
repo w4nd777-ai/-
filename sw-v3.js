@@ -1,11 +1,12 @@
 /* Service Worker for 課程管理系統 v3 — Phase 5 (Network-first for HTML) */
 // M3: CACHE_NAME 動態化 — 每次部署 bump BUILD 字串即可強制取得新版資源
-const BUILD = '2026-05-30-audit-batch8-h17';
+const BUILD = '2026-05-30-audit-batch9-m29-css-split';
 const CACHE_NAME = 'cms-v3-' + BUILD;
 const CORE_ASSETS = [
   'manifest.json',
   // F-19：把主 HTML 預載到 cache → 離線首訪也能開
   './app-v3.html',
+  './app-v3.css',
   './index.html',
   './',
   'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
