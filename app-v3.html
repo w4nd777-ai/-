@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-alt-login-collapse';
+const APP_BUILD = '2026-06-01-sub-default-collapse';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9197,6 +9197,21 @@ function isAnnouncementExpired(a){
   const t = new Date(a.expireAt).getTime();
   return Number.isFinite(t) && t < Date.now();
 }
+// ★ FEATURE #8 公告排程:回傳 true 代表「排程在未來」=> 學生暫時看不到
+function isAnnouncementScheduled(a){
+  if(!a || !a.scheduledAt) return false;
+  const t = new Date(a.scheduledAt).getTime();
+  return Number.isFinite(t) && t > Date.now();
+}
+// 取得「對學生而言的有效發布時間」:有排程取 scheduledAt,否則 ts
+function announcementEffectiveTs(a){
+  if(!a) return 0;
+  if(a.scheduledAt){
+    const t = new Date(a.scheduledAt).getTime();
+    if(Number.isFinite(t)) return t;
+  }
+  return a.ts || 0;
+}
 
 function toggleTheme(){
   App.theme = App.theme === 'dark' ? 'light' : 'dark';
@@ -16372,7 +16387,10 @@ function rSub(content){
       const totalRate = totalExpected ? Math.round(totalSubmitted / totalExpected * 100) : 0;
       const rateColor = totalRate >= 80 ? 'var(--success)' : totalRate >= 50 ? 'var(--warn)' : 'var(--danger)';
 
-      const asgExpanded = App._subExpandedAsg[aid] !== false;
+      // ★ 用戶要求:預設全部收合,每份作業有自己的展開鈕,點開才看
+      // 例外:有搜尋字串/週次篩選時,自動展開 (不然搜不到東西)
+      const _autoExpand = !!(q || App._subWeekFilter);
+      const asgExpanded = _autoExpand || App._subExpandedAsg[aid] === true;
 
       // 作業 card 容器
       const asgCard = el('div', { style:{
