@@ -4113,7 +4113,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-audit-fixes-batch3';
+const APP_BUILD = '2026-05-29-audit-fixes-batch4';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4293,8 +4293,9 @@ function clearAllTimers(){
   const arr = App._timers || [];
   arr.forEach(id => {
     // id 同時 clearInterval + clearTimeout 都安全（瀏覽器 ID 共用一個池）
-    try { clearInterval(id); } catch(_){_swallow('auto',_)}
-    try { clearTimeout(id); } catch(_){_swallow('auto',_)}
+    // clearInterval/clearTimeout 永遠不會 throw → 不需要 try/catch
+    clearInterval(id);
+    clearTimeout(id);
   });
   App._timers = [];
 }
@@ -4306,8 +4307,9 @@ function setTimeoutManaged(fn, ms){
 }
 function clearManagedTimer(id){
   if(id == null) return;
-  try { clearInterval(id); } catch(_){_swallow('auto',_)}
-  try { clearTimeout(id); } catch(_){_swallow('auto',_)}
+  // clearInterval/clearTimeout 永遠不會 throw → 不需要 try/catch
+  clearInterval(id);
+  clearTimeout(id);
   if(App._timers){
     const i = App._timers.indexOf(id);
     if(i >= 0) App._timers.splice(i, 1);
@@ -4635,19 +4637,73 @@ function isPasswordV2(stored){
 /* ════════════════════════════════════════════════════════════
    TOAST + MODAL + CONFIRM
    ──────────────────────────────────────────────────────────── */
+// Toast dedupe + 上限管理（避免 Firebase 重連風暴造成 toast 牆）
+const _toastShown = new Map();        // key (msg+kind) → { el, hideTimer, removeTimer, shownAt }
+const _toastQueue = [];               // 目前顯示中的 toast (依出現順序)，作為「最舊先移除」用
+const TOAST_DEDUPE_MS = 2000;         // 2 秒內相同 toast 視為重複
+const MAX_TOASTS = 4;                 // 同時最多 4 個
+
+function _toastRemoveImmediate(entry){
+  if(!entry) return;
+  try { clearTimeout(entry.hideTimer); } catch(_){_swallow('toast-clear-hide',_)}
+  try { clearTimeout(entry.removeTimer); } catch(_){_swallow('toast-clear-remove',_)}
+  try { entry.el && entry.el.remove(); } catch(_){_swallow('toast-remove-el',_)}
+  // 從 Map 中移除
+  if(entry.key && _toastShown.get(entry.key) === entry){
+    _toastShown.delete(entry.key);
+  }
+  // 從 queue 中移除
+  const i = _toastQueue.indexOf(entry);
+  if(i >= 0) _toastQueue.splice(i, 1);
+}
+
+function _toastScheduleHide(entry, dur){
+  try { clearTimeout(entry.hideTimer); } catch(_){_swallow('toast-resched-hide',_)}
+  try { clearTimeout(entry.removeTimer); } catch(_){_swallow('toast-resched-remove',_)}
+  entry.hideTimer = setTimeout(()=> {
+    try {
+      entry.el.style.transition = 'all .25s ease-out';
+      entry.el.style.opacity = '0';
+      entry.el.style.transform = 'translateY(-10px)';
+    } catch(_){_swallow('toast-fade',_)}
+    entry.removeTimer = setTimeout(()=> _toastRemoveImmediate(entry), 280);
+  }, dur);
+}
+
 function toast(msg, type='', dur=2400){
   // 統一 warn → warning（避免呼叫端混用造成樣式不一致）
   if(type === 'warn') type = 'warning';
   const host = $('#toast-host');
+  if(!host) return;
+
+  const key = String(msg) + '' + String(type || '');
+  const now = Date.now();
+
+  // 1) Dedupe：2 秒內相同 (msg + kind) 已存在 → 不重複插入，只「續杯」原本的隱藏計時
+  const existing = _toastShown.get(key);
+  if(existing && (now - existing.shownAt) < TOAST_DEDUPE_MS){
+    existing.shownAt = now;
+    _toastScheduleHide(existing, dur);
+    return;
+  }
+  // 若已存在但超過 dedupe 視窗，先把舊的拔掉再放新的（避免兩個一模一樣的同時在畫面上）
+  if(existing){
+    _toastRemoveImmediate(existing);
+  }
+
+  // 2) 上限：超過 MAX_TOASTS → 把最舊的踢掉
+  while(_toastQueue.length >= MAX_TOASTS){
+    _toastRemoveImmediate(_toastQueue[0]);
+  }
+
   const cls = type ? `toast t-${type}` : 'toast';
   const t = el('div', { class: cls }, msg);
   host.appendChild(t);
-  setTimeout(()=> {
-    t.style.transition = 'all .25s ease-out';
-    t.style.opacity = '0';
-    t.style.transform = 'translateY(-10px)';
-    setTimeout(()=> t.remove(), 280);
-  }, dur);
+
+  const entry = { key, el: t, hideTimer: null, removeTimer: null, shownAt: now };
+  _toastShown.set(key, entry);
+  _toastQueue.push(entry);
+  _toastScheduleHide(entry, dur);
 }
 
 function modal(content, opts={}){
@@ -4657,7 +4713,7 @@ function modal(content, opts={}){
   // 🔧 修：取消任何上一個 modal close 的 pending fade timeout
   //    否則 A.close() 後立即 modal() 開 B，180ms 後 A 的 timeout 會清掉 B 的內容（race）
   if(host._pendingClearTimer){
-    try { clearTimeout(host._pendingClearTimer); } catch(_){}
+    clearTimeout(host._pendingClearTimer);
     host._pendingClearTimer = null;
   }
   // 既然 host 一次只放一個 modal，新開時把舊 stack 清空避免 ESC 對著「已被 innerHTML 清掉的舊 modal handle」失效
@@ -4711,7 +4767,7 @@ function closeModal(){
   const host = $('#modal-host');
   // QA: 同步取消任何 pending fade timer，避免 leak
   if(host && host._pendingClearTimer){
-    try { clearTimeout(host._pendingClearTimer); } catch(_){}
+    clearTimeout(host._pendingClearTimer);
     host._pendingClearTimer = null;
   }
   host.innerHTML = '';
@@ -4909,6 +4965,17 @@ function _saveDBNow(){
         lite._truncWarning = '⚠️ 儲存空間曾達上限，部分舊資料已暫時隱藏。請盡快匯出備份後清理舊資料。';
         lite._truncAt = Date.now();
         localStorage.setItem(dbKey(), JSON.stringify(lite));
+        // 🔧 修：同步截短「記憶體中」的 App.db，否則下一次 tick 又會把完整 DB 序列化 → 無限重試迴圈
+        if(App.db.messages && App.db.messages.length > MSG_HARD_CAP){
+          App.db.messages.splice(0, App.db.messages.length - MSG_HARD_CAP);
+        }
+        if(App.db.feeds && App.db.feeds.length > FEED_HARD_CAP){
+          App.db.feeds.splice(0, App.db.feeds.length - FEED_HARD_CAP);
+        }
+        // 提示使用者已自動截短
+        if(typeof toast === 'function'){
+          toast('⚠️ 儲存空間滿,已自動截短歷史訊息','warn', 8000);
+        }
         // 自動觸發匯出備份（如果函式存在）
         if(typeof exportFullJSON === 'function'){
           setTimeout(()=> { try { exportFullJSON(); } catch(_){_swallow('auto',_)} }, 800);
@@ -5307,7 +5374,7 @@ function applyTheme(){
 
   // font family
   const fp = FONT_PRESETS.find(f => f.key === (App.font || 'system')) || FONT_PRESETS[0];
-  try { _loadGoogleFont(fp.gf); } catch(e){_swallow('auto',e)}
+  _loadGoogleFont(fp.gf);
   root.style.setProperty('--font-family', fp.stack);
 
   // custom accent — clear inline overrides first, then re-apply if active
@@ -5631,10 +5698,19 @@ const Sync = (() => {
       const cb = ref.on('value', snap => {
         const v = snap.val();
         if(!v) return;
-        if(node === 'settings'){
-          App.db.settings = Object.assign(defaultDB().settings, App.db.settings || {}, v);
-        } else if(node === 'branding'){
-          App.db.branding = Object.assign(defaultDB().branding, App.db.branding || {}, v);
+        if(node === 'settings' || node === 'branding'){
+          // 🔧 修：比 updatedAt → 本機剛改的不會被雲端舊版蓋掉
+          //    1. 雲端版本較舊 (v.updatedAt < local.updatedAt) → 本機保留 (local wins)
+          //    2. 其他情況 → 雲端覆蓋本機 (cloud wins, 維持原行為)
+          //    3. Object.assign 順序也翻轉：原本 (default, local, v) v 永遠贏；
+          //       改成 (default, v, local) 讓 local 預設贏 — 只有 cloud 較新才反過來
+          const local = App.db[node] || {};
+          const localTs = Number(local.updatedAt) || 0;
+          const cloudTs = Number(v.updatedAt) || 0;
+          const cloudNewer = cloudTs >= localTs;  // 雲端較新 (或本機沒戳記) → cloud wins
+          App.db[node] = cloudNewer
+            ? Object.assign({}, defaultDB()[node], local, v)   // cloud wins (default 行為)
+            : Object.assign({}, defaultDB()[node], v, local);  // local 較新 → local wins
         } else {
           App.db[node] = v;
         }
@@ -5771,6 +5847,16 @@ const Sync = (() => {
     if(_syncTimer){ clearTimeout(_syncTimer); _syncTimer = null; }
   }
   function setNode(node, data, immediate){
+    // 🔧 settings/branding 寫入時自動戳 updatedAt
+    //    listener 端會用這個戳記判斷「雲端 vs 本機誰較新」，避免重連時剛改的設定被舊版蓋掉
+    if((node === 'settings' || node === 'branding') && data && typeof data === 'object'){
+      try {
+        data.updatedAt = Date.now();
+        if(App.db && App.db[node] && App.db[node] !== data){
+          App.db[node].updatedAt = data.updatedAt;
+        }
+      } catch(_){}
+    }
     if(immediate === true){
       _syncQueue.delete(node);
       return _setNodeNow(node, data);
@@ -5926,7 +6012,7 @@ function notify(title, body, options){
       return null;
     }
     n.onclick = () => {
-      try { window.focus(); } catch(_){_swallow('auto',_)}
+      window.focus();
       if(options.url){
         try { location.hash = options.url; } catch(_){_swallow('auto',_)}
       }
@@ -7932,10 +8018,10 @@ async function approveTeacher(pid, silent){
   }
 }
 
-function rejectTeacher(pid){
+async function rejectTeacher(pid){
   const p = App.db.pending.find(x => x.id === pid && x.role === 'teacher');
   if(!p) return;
-  if(!confirm('確定拒絕「' + p.name + '」(' + p.email + ') 的申請?\n注意:Firebase 內已建立的帳號可能仍可登入,但無法進系統 (因為缺少 accounts entry)。建議到 Firebase Console 手動刪除使用者。')) return;
+  if(!await confirmDlg('確定拒絕「' + p.name + '」(' + p.email + ') 的申請?\n注意:Firebase 內已建立的帳號可能仍可登入,但無法進系統 (因為缺少 accounts entry)。建議到 Firebase Console 手動刪除使用者。', { danger: true, title: '警告' })) return;
   App.db.pending = App.db.pending.filter(x => x.id !== pid);
   try { saveDB(); Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
   if(typeof logOp === 'function') logOp('rejectTeacher', '拒絕老師 ' + p.name);
@@ -8728,7 +8814,8 @@ function applyLoginCustomStyle(shell, lc){
 function renderLogin(root){
   root.innerHTML = '';
   // 確保 _uiCustom 已載入（首次登入時可能尚未 boot 到該分支）
-  try { App._uiCustom = App._uiCustom || loadUiCustom(); } catch(e){_swallow('auto',e)}
+  // loadUiCustom 內部已 try/catch，外層多餘
+  App._uiCustom = App._uiCustom || loadUiCustom();
   const lc = (App._uiCustom && App._uiCustom.login) || {};
 
   // ── 外殼：Spotify 風格居中 ──
@@ -9707,7 +9794,7 @@ async function _handleGoogleAuthStudent(user){
     stu.firebaseUid = user.uid;
     if(!stu.photoURL && user.photoURL) stu.photoURL = user.photoURL;
     if(typeof saveDB === 'function') saveDB(true);
-    try { Sync.setMap('students', App.db.students); } catch(_){}
+    try { Sync.setRow('students', stu.id, stu); } catch(_){}
   } catch(e){
     console.warn('[google-student] binding write failed:', e);
     // 即使寫入失敗仍允許本次登入
@@ -9916,13 +10003,13 @@ function renderLoginTeacherStage(){
     if(pw !== (i2.value || '') || u !== (i1.value || '').trim().toLowerCase()){
       console.warn('[login] 已自動清除帳號/密碼中的隱藏空白字元');
     }
-    if(!u || !pw){ toast('請輸入帳號和密碼','danger'); try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return; }
+    if(!u || !pw){ toast('請輸入帳號和密碼','danger'); setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000); return; }
     // L1: 登入前先檢查鎖定狀態（與忘記密碼共用同一個帳號計數器）
     if(isForgotLocked(u)){
       const l = getForgotLock(u);
       const left = Math.max(0, l.lockedUntil - Date.now());
       toast('嘗試次數過多，請於 ' + fmtLockRemain(left) + ' 後再試', 'danger');
-      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
+      setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000);
       return;
     }
     // 安全:擋下「email:xxx」格式 — 這是 Email 登入專用的 username,沒密碼欄,
@@ -9943,7 +10030,7 @@ function renderLoginTeacherStage(){
       const l = incForgotLock(u);
       const remain = Math.max(0, FORGOT_LOCK_MAX - l.count);
       toast('帳號或密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
-      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
+      setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000);
       return;
     }
     const ok = await verifyPassword(pw, candidate.password);
@@ -9956,11 +10043,11 @@ function renderLoginTeacherStage(){
       } else {
         toast('帳號或密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
       }
-      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
+      setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000);
       return;
     }
     // 登入成功 → 吉祥物笑
-    try{setMascotState('success');}catch(_){_swallow('auto',_)}
+    setMascotState('success');
     // L1: 登入成功 → 清除鎖定計數
     clearForgotLock(u);
     // 自動升級：若非 v2$ 新格式（明文 / 'plain:' / 舊 64 hex 共用 salt）→ 升級到 per-account salt
@@ -9968,7 +10055,7 @@ function renderLoginTeacherStage(){
       try {
         candidate.password = await hashPassword(pw);  // 不傳 salt → 自動產生新 salt
         saveDB(true);  // 立即寫入（避免使用者立即關掉視窗）
-        try { Sync.setMap('accounts', App.db.accounts); } catch(e){_swallow('auto',e)}
+        try { Sync.setRow('accounts', candidate.id, candidate); } catch(e){_swallow('auto',e)}
       } catch(e){ _swallow('upgrade-acc-pw', e); }
     }
     const a = candidate;
@@ -10316,12 +10403,13 @@ function showTeacherForgotPassword(){
       el('button', { class:'btn btn-primary', onclick: async ()=> {
         try {
           const hashed = await hashPassword('admin123');
-          App.db.accounts.push({
+          const _newAdmin = {
             id: nid(), username:'admin', password: hashed,
             name:'管理員', role:'teacher', mustChangePw:true, createdAt: Date.now()
-          });
+          };
+          App.db.accounts.push(_newAdmin);
           saveDB();
-          try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+          try { Sync.setRow('accounts', _newAdmin.id, _newAdmin); bcNotify(); } catch(e){_swallow('auto',e)}
           if(typeof logOp === 'function') logOp('teacherInit', '建立預設管理員 admin');
           m0.close();
           toast('✅ 已建立預設管理員，請以 admin / admin123 登入','success', 5000);
@@ -10360,16 +10448,14 @@ function _runForgotFlow(opts){
     if(st.role === 'teacher'){
       if(st.step === 1) return renderTeacherStep1();
       if(st.step === 2) return renderTeacherStep2();
-      if(st.step === 3) return renderTeacherStep3();
-      if(st.step === 4) return renderTeacherStep4();
+      // step 3 / 4 (OTP 寄送 + 輸入) 已移除:Step 2 Email 對上後直接跳 Step 5 安全問題
       if(st.step === 5) return renderTeacherStep5();
       if(st.step === 6) return renderStep6NewPassword();
     } else {
       // student
       if(st.step === 1) return renderStudentStep1();
       if(st.step === 2) return renderStudentStep2();
-      if(st.step === 3) return renderStudentStep3();
-      if(st.step === 4) return renderStudentStep4();
+      // step 3 / 4 (OTP 寄送 + 輸入) 已移除:Step 2 Email 對上後直接跳 Step 5 留言
       if(st.step === 5) return renderStudentStep5MessageThenSubmit();
     }
   }
@@ -10535,157 +10621,12 @@ function _runForgotFlow(opts){
     ));
   }
 
-  /* ── Step 3：寄送 OTP */
-  function renderTeacherStep3(){
-    const whCfg = whLoad();
-    const whReady = !!(whCfg && whCfg.enabled && whCfg.url);
-    const method = whReady
-      ? (whCfg.platform === 'discord' ? 'Discord' : whCfg.platform === 'telegram' ? 'Telegram' : whCfg.platform === 'line' ? 'LINE' : 'Webhook')
-      : '預設郵件 client';
+  /* ── Step 3 / 4 (OTP 寄送 + 輸入) 已移除
+     原因:用戶反映驗證碼不論用 webhook 還是 mailto 都收不到。
+     現流程:Step 2 Email 對上後直接跳 Step 5 安全問題,
+            Email 本身就是身份驗證,加上安全問題已足夠。 */
 
-    header('📨 寄送驗證碼 — 第 3 / 6 步',
-      whReady
-        ? '系統會透過 ' + method + ' Webhook 自動寄出 6 位數驗證碼（即時送達）。'
-        : '系統會產生 6 位數驗證碼，並透過您的預設郵件 client 寄送。');
-
-    // 顯示寄送方式
-    stage.appendChild(el('div', { style:{
-      background: whReady ? 'var(--success-soft)' : 'var(--surface-2)',
-      borderLeft:'3px solid ' + (whReady ? 'var(--success)' : 'var(--warn)'),
-      padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
-    }},
-      whReady
-        ? el('div', null,
-            el('div', { style:{fontWeight:'700',color:'var(--success)'} }, '✅ 已設定 ' + method + ' Webhook'),
-            el('div', { class:'tiny muted', style:{marginTop:'4px'} },
-              '驗證碼會自動寄到您的 ' + method + ' 頻道，無需開信箱')
-          )
-        : el('div', null,
-            el('div', { style:{fontWeight:'700',color:'var(--warn)'} }, '⚠️ 未設定 Webhook，使用備用方式（mailto:）'),
-            el('div', { class:'tiny muted', style:{marginTop:'4px'} },
-              '會跳出您的信箱 APP（草稿模式），您需要按「傳送」才會真的寄出。\n建議在「通知設定」設定 Discord/Telegram Webhook 以更穩定。')
-          ),
-      el('div', { style:{marginTop:'8px'} }, '收件人：', el('strong', null, st.account.email))
-    ));
-
-    // 顯示已寄出的提示（若 sessionStorage 內已有 OTP）
-    let existingOtp = null;
-    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
-    const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
-
-    const sendBtn = el('button', { class:'btn btn-primary btn-block',
-      onclick: async ()=> {
-        const now = Date.now();
-        if(st.lastSent && now - st.lastSent < FORGOT_OTP_RESEND_COOLDOWN){
-          const sec = Math.ceil((FORGOT_OTP_RESEND_COOLDOWN - (now - st.lastSent))/1000);
-          toast('請 ' + sec + ' 秒後再重新寄送','warning', 3000);
-          return;
-        }
-        const code = genOTP6();
-        const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: st.role };
-        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){_swallow('auto',e)}
-        st.lastSent = now;
-        sendBtn.disabled = true;
-        sendBtn.textContent = '⏳ 寄送中...';
-        const result = await sendOtp(st.account.email, code, 'teacher');
-        st.lastSendResult = result;
-        st.lastCode = code;  // 暫存供「顯示驗證碼」用 (僅 UI session, 不寫 LS)
-        if(result === 'webhook'){
-          toast('✅ 驗證碼已透過 ' + method + ' 寄出，請查看您的頻道','success', 5000);
-        } else if(result === 'mailto'){
-          // QA #11: 手機沒裝 mail app 時 mailto: 會悄悄失敗；同時提示「沒收到？點下方按鈕」
-          toast('已開啟郵件 client。手機沒跳出？點下方「沒收到信？點此顯示驗證碼」按鈕','info', 7000);
-        } else {
-          // 完全失敗 → 顯示在畫面上（含警告）
-          st.fallbackOtp = code;
-          toast('Webhook 與郵件都失敗！驗證碼顯示在畫面上','danger', 8000);
-        }
-        if(typeof logOp === 'function') logOp('forgotOtpSent', '老師 ' + st.username + ' 申請 OTP (' + result + ')');
-        // 重新 render 讓「我已收到」按鈕可用
-        setTimeout(render, 300);
-      }
-    }, validExists ? '🔁 重新寄送驗證碼' : '📤 寄出驗證碼');
-    stage.appendChild(sendBtn);
-
-    // mailto 模式應急按鈕：使用者沒看到信箱跳出來或沒收到信時可手動顯示
-    if(st.lastSendResult === 'mailto' && st.lastCode && !st.showCodeOnScreen){
-      stage.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'8px',width:'100%'},
-        onclick: ()=> {
-          if(!confirm('警告：直接顯示驗證碼會降低安全性。\n\n只在「無法收到信」或「信箱 APP 沒跳出」時使用。\n\n確認顯示？')) return;
-          st.showCodeOnScreen = true;
-          st.fallbackOtp = st.lastCode;
-          render();
-        }
-      }, '📋 沒收到信？點此顯示驗證碼（應急）'));
-    }
-
-    if(validExists){
-      stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
-        '✓ 已寄出驗證碼，' + Math.ceil((existingOtp.exp - Date.now())/60000) + ' 分鐘內有效'));
-    }
-
-    // fallback：兩種方式都失敗時直接顯示在畫面
-    if(st.fallbackOtp){
-      stage.appendChild(el('div', { style:{
-        background:'var(--danger-soft)', border:'2px dashed var(--danger)',
-        padding:'14px', borderRadius:'8px', marginTop:'10px', textAlign:'center'
-      }},
-        el('div', { class:'small', style:{color:'var(--danger)',fontWeight:'700',marginBottom:'4px'} }, '⚠️ 緊急模式：驗證碼顯示在畫面上'),
-        el('div', { class:'mono', style:{fontSize:'28px',fontWeight:'700',letterSpacing:'6px'} }, st.fallbackOtp),
-        el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '請複製後立即進入下一步，並儘速設定 Webhook')
-      ));
-    }
-
-    stage.appendChild(actions(
-      el('button', { class:'btn', onclick:()=> { st.step = 2; render(); } }, '← 上一步'),
-      el('button', { class:'btn btn-primary', disabled: !validExists,
-        onclick:()=> { st.step = 4; render(); } }, '我已收到驗證碼 →')
-    ));
-  }
-
-  /* ── Step 4：輸入 OTP */
-  function renderTeacherStep4(){
-    header('🔢 輸入驗證碼 — 第 4 / 6 步',
-      '請輸入您收到的 6 位數驗證碼。');
-    const banner = lockBanner(st.username);
-    if(banner) stage.appendChild(banner);
-
-    const f = el('div', { class:'field' });
-    f.appendChild(el('label', { class:'label' }, '6 位數驗證碼'));
-    const inp = el('input', { class:'input', inputmode:'numeric', maxlength:'6',
-      placeholder:'例：123456', style:{letterSpacing:'4px',fontSize:'20px',textAlign:'center'} });
-    f.appendChild(inp);
-    stage.appendChild(f);
-
-    const next = ()=> {
-      if(isForgotLocked(st.username)){ render(); return; }
-      const v = inp.value.trim();
-      let saved = null;
-      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
-      if(!saved || saved.username !== st.username || saved.exp <= Date.now()){
-        toast('驗證碼已過期，請重新寄送','warning', 4000);
-        st.step = 3;
-        render();
-        return;
-      }
-      if(v !== saved.code){
-        failGeneric(st.username, '驗證碼錯誤');
-        return;
-      }
-      // 通過 → 進入安全問題
-      st.step = 5;
-      render();
-    };
-    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
-    setTimeout(()=> inp.focus(), 80);
-
-    stage.appendChild(actions(
-      el('button', { class:'btn', onclick:()=> { st.step = 3; render(); } }, '← 重新寄送'),
-      el('button', { class:'btn btn-primary', onclick: next }, '驗證 →')
-    ));
-  }
-
-  /* ── Step 5：安全問題 (改稱第 3 步,因為已跳過 OTP) */
+  /* ── Step 5：安全問題 (UI 顯示為第 3 步,因為已跳過 OTP) */
   function renderTeacherStep5(){
     header('❓ 安全問題 — 第 3 / 3 步',
       '請回答您設定的安全問題 (答案不分大小寫)。答對就能設新密碼。');
@@ -10763,7 +10704,7 @@ function _runForgotFlow(opts){
       _clearAllLoginTokens(st.account);
       saveDB(true);  // H3: 密碼變更立即寫入
       // Round 2 M6: 密碼變更 → 立即 sync 不 debounce
-      try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){_swallow('auto',e)}
+      try { Sync.setRow('accounts', st.account.id, st.account); bcNotify(); } catch(e){_swallow('auto',e)}
       try { sessionStorage.removeItem(FORGOT_OTP_KEY); } catch(e){_swallow('auto',e)}
       clearForgotLock(st.username);
       if(typeof logOp === 'function')
@@ -10935,133 +10876,9 @@ function _runForgotFlow(opts){
     ));
   }
 
-  /* ── 學生 Step 3：寄送 OTP */
-  function renderStudentStep3(){
-    const whCfg = whLoad();
-    const whReady = !!(whCfg && whCfg.enabled && whCfg.url);
-    const method = whReady
-      ? (whCfg.platform === 'discord' ? 'Discord' : whCfg.platform === 'telegram' ? 'Telegram' : whCfg.platform === 'line' ? 'LINE' : 'Webhook')
-      : '預設郵件 client';
-
-    header('📨 寄送驗證碼 — 第 3 / 5 步',
-      whReady ? '系統會透過 ' + method + ' 自動寄出驗證碼。' : '系統會透過您的預設郵件 client 寄送。');
-    stage.appendChild(el('div', { style:{
-      background: whReady ? 'var(--success-soft)' : 'var(--surface-2)',
-      borderLeft:'3px solid ' + (whReady ? 'var(--success)' : 'var(--warn)'),
-      padding:'12px',borderRadius:'8px',marginBottom:'10px',fontSize:'13px',lineHeight:'1.7'
-    }},
-      whReady
-        ? el('div', { style:{color:'var(--success)',fontWeight:'700'} }, '✅ 透過 ' + method + ' 即時送達')
-        : el('div', { style:{color:'var(--warn)',fontWeight:'700'} }, '⚠️ 跳出信箱 APP 草稿，需手動按「傳送」'),
-      el('div', { style:{marginTop:'8px'} }, '收件人：', el('strong', null, st.account.email))
-    ));
-
-    let existingOtp = null;
-    try { existingOtp = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
-    const validExists = existingOtp && existingOtp.username === st.username && existingOtp.exp > Date.now();
-
-    const sendBtn = el('button', { class:'btn btn-primary btn-block',
-      onclick: async ()=> {
-        const now = Date.now();
-        if(st.lastSent && now - st.lastSent < FORGOT_OTP_RESEND_COOLDOWN){
-          const sec = Math.ceil((FORGOT_OTP_RESEND_COOLDOWN - (now - st.lastSent))/1000);
-          toast('請 ' + sec + ' 秒後再重新寄送','warning', 3000);
-          return;
-        }
-        const code = genOTP6();
-        const payload = { code, exp: now + FORGOT_OTP_TTL, username: st.username, role: 'student' };
-        try { sessionStorage.setItem(FORGOT_OTP_KEY, JSON.stringify(payload)); } catch(e){_swallow('auto',e)}
-        st.lastSent = now;
-        sendBtn.disabled = true;
-        sendBtn.textContent = '⏳ 寄送中...';
-        const result = await sendOtp(st.account.email, code, 'student');
-        st.lastSendResult = result;
-        st.lastCode = code;
-        if(result === 'webhook'){
-          toast('✅ 驗證碼已透過 ' + method + ' 寄出','success', 5000);
-        } else if(result === 'mailto'){
-          toast('已開啟郵件 client。手機沒跳出？點下方「沒收到信？點此顯示驗證碼」按鈕','info', 7000);
-        } else {
-          st.fallbackOtp = code;
-          toast('Webhook 與郵件都失敗！驗證碼顯示在畫面上','danger', 8000);
-        }
-        setTimeout(render, 300);
-      }
-    }, validExists ? '🔁 重新寄送' : '📤 寄出驗證碼');
-    stage.appendChild(sendBtn);
-
-    if(st.lastSendResult === 'mailto' && st.lastCode && !st.showCodeOnScreen){
-      stage.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'8px',width:'100%'},
-        onclick: ()=> {
-          if(!confirm('警告：直接顯示驗證碼會降低安全性。\n\n只在「無法收到信」時使用。確認顯示？')) return;
-          st.showCodeOnScreen = true;
-          st.fallbackOtp = st.lastCode;
-          render();
-        }
-      }, '📋 沒收到信？點此顯示驗證碼（應急）'));
-    }
-
-    if(validExists){
-      stage.appendChild(el('div', { class:'small', style:{marginTop:'8px',color:'var(--success)'} },
-        '✓ 已寄出，' + Math.ceil((existingOtp.exp - Date.now())/60000) + ' 分鐘內有效'));
-    }
-
-    if(st.fallbackOtp){
-      stage.appendChild(el('div', { style:{
-        background:'var(--danger-soft)', border:'2px dashed var(--danger)',
-        padding:'14px', borderRadius:'8px', marginTop:'10px', textAlign:'center'
-      }},
-        el('div', { class:'small', style:{color:'var(--danger)',fontWeight:'700',marginBottom:'4px'} }, '⚠️ 緊急模式：驗證碼顯示在畫面上'),
-        el('div', { class:'mono', style:{fontSize:'28px',fontWeight:'700',letterSpacing:'6px'} }, st.fallbackOtp)
-      ));
-    }
-
-    stage.appendChild(actions(
-      el('button', { class:'btn', onclick:()=> { st.step = 2; render(); } }, '← 上一步'),
-      el('button', { class:'btn btn-primary', disabled: !validExists,
-        onclick:()=> { st.step = 4; render(); } }, '我已收到驗證碼 →')
-    ));
-  }
-
-  /* ── 學生 Step 4：輸入 OTP */
-  function renderStudentStep4(){
-    header('🔢 輸入驗證碼 — 第 4 / 5 步', '請輸入收到的 6 位數驗證碼。');
-    const banner = lockBanner(st.username);
-    if(banner) stage.appendChild(banner);
-
-    const f = el('div', { class:'field' });
-    f.appendChild(el('label', { class:'label' }, '6 位數驗證碼'));
-    const inp = el('input', { class:'input', inputmode:'numeric', maxlength:'6',
-      placeholder:'123456', style:{letterSpacing:'4px',fontSize:'20px',textAlign:'center'} });
-    f.appendChild(inp);
-    stage.appendChild(f);
-
-    const next = ()=> {
-      if(isForgotLocked(st.username)){ render(); return; }
-      const v = inp.value.trim();
-      let saved = null;
-      try { saved = JSON.parse(sessionStorage.getItem(FORGOT_OTP_KEY) || 'null'); } catch(e){_swallow('auto',e)}
-      if(!saved || saved.username !== st.username || saved.exp <= Date.now()){
-        toast('驗證碼已過期','warning', 4000);
-        st.step = 3;
-        render();
-        return;
-      }
-      if(v !== saved.code){
-        failGeneric(st.username, '驗證碼錯誤');
-        return;
-      }
-      st.step = 5;
-      render();
-    };
-    inp.addEventListener('keydown', e => { if(e.key==='Enter') next(); });
-    setTimeout(()=> inp.focus(), 80);
-
-    stage.appendChild(actions(
-      el('button', { class:'btn', onclick:()=> { st.step = 3; render(); } }, '← 重新寄送'),
-      el('button', { class:'btn btn-primary', onclick: next }, '驗證 →')
-    ));
-  }
+  /* ── 學生 Step 3 / 4 (OTP 寄送 + 輸入) 已移除
+     原因:用戶反映驗證碼根本收不到,且學生流程本來就沒有「安全問題」這層。
+     現流程:Step 2 Email 對上後直接跳 Step 5 留言送出。 */
 
   /* ── 學生 Step 5：留言給老師並送出申請 (跳過 OTP 後直接到此) */
   function renderStudentStep5MessageThenSubmit(){
@@ -11294,7 +11111,7 @@ function forceSetupRecovery(accountId, opts){
       // 重新完成設定 → 清掉「不再提示」標記
       if(a.dismissedRecovery) delete a.dismissedRecovery;
       saveDB();
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      try { Sync.setRow('accounts', a.id, a); bcNotify(); } catch(e){_swallow('auto',e)}
       if(typeof logOp === 'function') logOp('recoverySetup', '老師 ' + a.username + ' 完成復原資訊設定');
       showRecoveryCodeStage(plainCode);
     } catch(e){
@@ -11322,7 +11139,7 @@ function forceSetupRecovery(accountId, opts){
         if(!ok) return;
         a.dismissedRecovery = true;
         try { saveDB(); } catch(_){}
-        try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts); } catch(_){}
+        try { if(typeof Sync !== 'undefined' && Sync.setRow) Sync.setRow('accounts', a.id, a); } catch(_){}
         m.close();
         toast('✓ 已設為不再提示。可在「我的個人資料」→「修改 Email / 安全問題」重新啟用','info', 6000);
       }
@@ -11702,24 +11519,24 @@ function renderLoginStudentStage(){
     // 修: 不要 parseInt — students[].id 可能是字串 (內建 159 學生) 或 nid() 產的字串
     //     需用寬鬆比較 (String 對 String) 才不會找不到
     const sidRaw = selName.value;
-    if(!selCls.value){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請先選擇班級', 'warning'); }
-    if(!sidRaw){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請選擇你的姓名', 'warning'); }
+    if(!selCls.value){ setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000); return toast('請先選擇班級', 'warning'); }
+    if(!sidRaw){ setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000); return toast('請選擇你的姓名', 'warning'); }
     const pw = iPw.value;
-    if(!pw){ try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)} return toast('請輸入密碼', 'warning'); }
+    if(!pw){ setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000); return toast('請輸入密碼', 'warning'); }
     // L1: 學生 lockout key
     const lockKey = 'stu:' + selCls.value + ':' + sidRaw;
     if(isForgotLocked(lockKey)){
       const l = getForgotLock(lockKey);
       const left = Math.max(0, l.lockedUntil - Date.now());
       toast('嘗試次數過多，請於 ' + fmtLockRemain(left) + ' 後再試', 'danger');
-      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
+      setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000);
       return;
     }
     // 寬鬆比對 (字串對字串) — 容納 id 可能是 number/string 混用
     const s = App.db.students.find(x => String(x.id) === String(sidRaw));
     if(!s){
       incForgotLock(lockKey);
-      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
+      setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000);
       return toast('學生不存在','danger');
     }
     const stored = s.password || s.pass || (String(s.sid||'0000').slice(-4));
@@ -11733,13 +11550,13 @@ function renderLoginStudentStage(){
       } else {
         toast('密碼錯誤（剩餘嘗試 ' + remain + ' 次）','danger');
       }
-      try{setMascotState('fail');setTimeout(()=>setMascotState('idle'),2000);}catch(_){_swallow('auto',_)}
+      setMascotState('fail'); setTimeout(()=>setMascotState('idle'),2000);
       iPw.value = '';
       iPw.focus();
       return;
     }
     // 登入成功 → 吉祥物笑
-    try{setMascotState('success');}catch(_){_swallow('auto',_)}
+    setMascotState('success');
     // L1: 登入成功 → 清除鎖定計數
     clearForgotLock(lockKey);
     // 自動升級為 v2$ per-account salt 雜湊
@@ -11750,7 +11567,7 @@ function renderLoginStudentStage(){
         if(!newHash || !newHash.startsWith('v2$')) throw new Error('hash invalid');
         s.password = newHash;
         saveDB(true);  // 立即寫入
-        try { Sync.setMap('students', App.db.students, true); } catch(e){ _swallow('sync-stu',e); }
+        try { Sync.setRow('students', s.id, s); } catch(e){ _swallow('sync-stu',e); }
       } catch(e){ _swallow('upgrade-stu-pw', e); }
     }
     // 記住密碼: 同時存 token + 混淆密碼 (device-key XOR)
@@ -11867,7 +11684,7 @@ function studentTapToLogin(studentId){
         if(!newHash || !newHash.startsWith('v2$')) throw new Error('hash invalid');
         s.password = newHash;
         saveDB(true);
-        try { Sync.setMap('students', App.db.students, true); } catch(e){ _swallow('sync-stu',e); }
+        try { Sync.setRow('students', s.id, s); } catch(e){ _swallow('sync-stu',e); }
       } catch(e){ _swallow('upgradeStudentPw', e); }
     }
     m.close();
@@ -11893,8 +11710,8 @@ function finishStudentLogin(s){
   saveSession();
   saveLastUser({ role:'student', id:s.id, name:s.name, cls:s.cls||'', ts:Date.now() });
   App._loginStage = null;
-  // 套用學生個人背景
-  setTimeout(()=> { try { applyStudentBg(); } catch(e){_swallow('auto',e)} }, 100);
+  // 套用學生個人背景 (applyStudentBg 內部已 try/catch)
+  setTimeout(()=> applyStudentBg(), 100);
   // 第一次登入或老師重設過密碼 → 強制改密碼
   if(s.mustChangePw){
     toast('歡迎，' + s.name + '！首次登入請更新密碼','info', 4000);
@@ -12068,7 +11885,7 @@ function forceSetupStudentRecovery(studentId, opts){
       s.securityQ = sel.value;
       s.securityA = await (typeof hashAnswer === 'function' ? hashAnswer(ans) : hashPassword(ans.toLowerCase()));
       saveDB(true);
-      if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('students', App.db.students, true);
+      if(typeof Sync !== 'undefined' && Sync.setRow) Sync.setRow('students', s.id, s);
       if(typeof logOp === 'function') logOp('studentRecoverySetup', s.name + ' 設定 email + 安全問題');
       m.close();
       toast('✅ 復原資訊已儲存', 'success');
@@ -12152,7 +11969,7 @@ function forceChangeTeacherPassword(accountId){
     a.passwordChangedAt = Date.now();
     _clearAllLoginTokens(a);  // H2: 改密碼 → 清掉所有記住裝置
     saveDB(true);  // H3: 立即寫入
-    try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('accounts', App.db.accounts); } catch(_){_swallow('auto',_)}
+    try { if(typeof Sync !== 'undefined' && Sync.setRow) Sync.setRow('accounts', a.id, a); } catch(_){_swallow('auto',_)}
     if(typeof logOp === 'function') logOp('passwordChange', '老師 ' + a.username + ' 更新預設密碼');
     m.close();
     toast('✅ 密碼已更新，請妥善保管！','success');
@@ -12825,7 +12642,8 @@ function isAnnouncementExpired(a){
 function toggleTheme(){
   App.theme = App.theme === 'dark' ? 'light' : 'dark';
   saveTheme();
-  try { applyBranding(); } catch(e){_swallow('auto',e)}
+  // applyBranding 是 async 且內部已 catch，外層 try/catch 無效
+  applyBranding();
   rerender();
 }
 function doLogout(){
@@ -12840,8 +12658,8 @@ function doLogout(){
       sessionStorage.removeItem('_google_pending_role');
       sessionStorage.removeItem('_google_bind_sid');
     } catch(_){}
-    // batch 2-stab: 清掉所有 managed timer
-    try { clearAllTimers(); } catch(e){_swallow('auto',e)}
+    // batch 2-stab: 清掉所有 managed timer (clearAllTimers 內部已安全)
+    clearAllTimers();
     App.qrTimer = null;
     App._dueReminderTimer = null;
     App._notifyTimer = null;
@@ -12851,7 +12669,7 @@ function doLogout(){
     App._syncBurstStart = null;
     App._syncBurstCount = 0;
     App._bcLastTs = null;
-    if(App._bcQueueTimer){ try { clearTimeout(App._bcQueueTimer); } catch(_){} App._bcQueueTimer = null; }
+    if(App._bcQueueTimer){ clearTimeout(App._bcQueueTimer); App._bcQueueTimer = null; }
     // ★ 修「登出後白屏」bug:rerender 有時因為殘留 DOM / SW 沒切掉,
     //   改成 rerender + 短延遲 location.reload() 雙保險
     let rerendered = false;
@@ -14519,7 +14337,7 @@ function rStu(content){
         _clearAllLoginTokens(s);  // H2
         saveDB(true);  // H3: 立即寫入
         if(typeof logOp === 'function') logOp('passwordReset', '重設 ' + s.name + ' 的密碼');
-        Sync.setMap('students', App.db.students);
+        Sync.setRow('students', s.id, s);
         bcNotify();
         toast('✅ 已重設 ' + s.name + ' 的密碼為 ' + defPw,'success');
         rerender();
@@ -14534,7 +14352,7 @@ function rStu(content){
           if(!await confirmDlg('確定封存 ' + s.name + '？\n封存後預設不顯示在名單，可隨時取消封存。\n出席/作業/成績紀錄會保留。')) return;
           s.status = 'archived';
           s.archivedAt = Date.now();
-          saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+          saveDB(); Sync.setRow('students', s.id, s); bcNotify();
           toast('已封存 ' + s.name, 'success');
           rerender();
         }}, '⏸'));
@@ -14546,7 +14364,7 @@ function rStu(content){
           s.cls = newCls.trim();
           if(!s.classHistory) s.classHistory = [];
           s.classHistory.push({ from: oldCls, to: s.cls, at: Date.now() });
-          saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+          saveDB(); Sync.setRow('students', s.id, s); bcNotify();
           toast(s.name + ' 已轉班：' + oldCls + ' → ' + s.cls, 'success');
           rerender();
         }}, '↔'));
@@ -14556,7 +14374,7 @@ function rStu(content){
           if(!requirePerm('canEditStudents','取消封存')) return;
           s.status = 'active';
           s.archivedAt = null;
-          saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+          saveDB(); Sync.setRow('students', s.id, s); bcNotify();
           toast('已恢復 ' + s.name, 'success');
           rerender();
         }}, '▶'));
@@ -14583,13 +14401,13 @@ function rStu(content){
           }
         } catch(_){}
         saveDB();
-        Sync.setMap('students', App.db.students);
+        Sync.removeRow('students', backup.id);
         bcNotify();
         pushUndo('已刪除學生「' + (backup.name || '') + '」', () => {
           if(!App.db.students.find(x => x.id === backup.id)){
             App.db.students.push(backup);
             saveDB();
-            Sync.setMap('students', App.db.students);
+            Sync.setRow('students', backup.id, backup);
             bcNotify();
           }
           toast('已復原學生「' + (backup.name || '') + '」', 'success');
@@ -14764,7 +14582,7 @@ function quickCreateStudent(){
     };
     App.db.students.push(rec);
     saveDB();
-    try { Sync.setMap('students', App.db.students); bcNotify(); } catch(e){_swallow('auto',e)}
+    try { Sync.setRow('students', rec.id, rec); bcNotify(); } catch(e){_swallow('auto',e)}
     toast('✓ 已建立 ' + name + '（預設密碼 ' + password + '，學生首次登入需改密碼）','success', 3000);
 
     App._quickLastCls = cls;
@@ -14884,7 +14702,15 @@ function openStudentEdit(s=null){
         }
       }
       saveDB(true);  // H3: 密碼變更立即寫入
-      try { Sync.setMap('students', App.db.students); } catch(e){ _swallow('sync-stu', e); }
+      try {
+        if(isNew){
+          // rec 是剛 push 進去的最後一筆
+          const _newRec = App.db.students[App.db.students.length - 1];
+          if(_newRec) Sync.setRow('students', _newRec.id, _newRec);
+        } else {
+          Sync.setRow('students', s.id, s);
+        }
+      } catch(e){ _swallow('sync-stu', e); }
       try { bcNotify(); } catch(_){}
       toast(isNew?'已新增':'已更新','success');
       // POLISH-10/9: 儲存按鈕短暫變綠勾 (給使用者明確視覺反饋)
@@ -17116,8 +16942,8 @@ async function approveStudent(pid, silent){
   App.db.students.push(newStu);
   App.db.pending = App.db.pending.filter(x => x.id !== pid);
   saveDB();
-  Sync.setMap('students', App.db.students);
-  Sync.setMap('pending', App.db.pending);
+  Sync.setRow('students', newStu.id, newStu);
+  Sync.removeRow('pending', pid);
   bcNotify();
   if(typeof logOp === 'function') logOp('approveRegister', '核准 ' + p.name + ' 註冊' + (p.googleEmail ? ' (含 Google 綁定)' : ''));
   if(!silent){
@@ -17142,7 +16968,7 @@ async function approvePwReset(rid){
   r.processedAt = Date.now();
   _clearAllLoginTokens(s);  // H2: 密碼重設 → 清掉所有 loginTokens
   saveDB(true);  // H3: 立即寫入
-  try { Sync.setMap('students', App.db.students); Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){_swallow('auto',e)}
+  try { Sync.setRow('students', s.id, s); Sync.setRow('passwordResets', r.id, r); bcNotify(); } catch(e){_swallow('auto',e)}
   if(typeof logOp === 'function') logOp('pwResetApprove', '核准重設 ' + s.name + ' 密碼為 ' + defPw);
   toast('✅ 已重設 ' + s.name + ' 密碼為 ' + defPw + '，請告知學生','success', 5000);
   rerender();
@@ -17155,7 +16981,7 @@ function rejectPwReset(rid){
     r.status = 'rejected';
     r.processedAt = Date.now();
     saveDB();
-    try { Sync.setMap('passwordResets', App.db.passwordResets); bcNotify(); } catch(e){_swallow('auto',e)}
+    try { Sync.setRow('passwordResets', r.id, r); bcNotify(); } catch(e){_swallow('auto',e)}
     toast('已拒絕請求','warning');
     rerender();
   });
@@ -17165,7 +16991,7 @@ function rejectStudent(pid){
     if(!ok) return;
     App.db.pending = App.db.pending.filter(x => x.id !== pid);
     saveDB();
-    Sync.setMap('pending', App.db.pending);
+    Sync.removeRow('pending', pid);
     bcNotify();
     toast('已拒絕','warn');
     rerender();
@@ -17638,7 +17464,7 @@ function rSettings(content){
       a.mustChangePw = false;
       _clearAllLoginTokens(a);
       saveDB(true);
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      try { Sync.setRow('accounts', a.id, a); bcNotify(); } catch(e){_swallow('auto',e)}
       toast('已更新（已加密儲存）','success');
       rerender();
     } }, '🔑 改密碼'));
@@ -17656,7 +17482,7 @@ function rSettings(content){
       a.mustChangePw = true;
       _clearAllLoginTokens(a);
       saveDB(true);
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      try { Sync.setRow('accounts', a.id, a); bcNotify(); } catch(e){_swallow('auto',e)}
       toast('✅ 已重設為 ' + defPw + '，請告知 ' + a.name,'success', 5000);
       rerender();
     }}, '🔄 重設'));
@@ -17674,7 +17500,7 @@ function rSettings(content){
       a.recoveryCode = '';
       a.recoveryCodeSetAt = 0;
       saveDB(true);
-      try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){_swallow('auto',e)}
+      try { Sync.setRow('accounts', a.id, a); bcNotify(); } catch(e){_swallow('auto',e)}
       toast('✅ 已清空 ' + a.name + ' 的復原資訊','success');
       rerender();
     }}, '📧 清復原'));
@@ -17682,9 +17508,10 @@ function rSettings(content){
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
         const ok = await confirmDlg('刪除帳號 ' + a.username + '？', { danger:true });
         if(!ok) return;
-        App.db.accounts = App.db.accounts.filter(x => x.id !== a.id);
+        const _delId = a.id;
+        App.db.accounts = App.db.accounts.filter(x => x.id !== _delId);
         saveDB();
-        try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){ _swallow('sync-del-account', e); }
+        try { Sync.removeRow('accounts', _delId); bcNotify(); } catch(e){ _swallow('sync-del-account', e); }
         toast('已刪除','warn'); rerender();
       } }, '🗑'));
     }
@@ -17698,9 +17525,10 @@ function rSettings(content){
     const p = await promptDlg('密碼', '', { type:'password' }); if(!p) return;
     const n = await promptDlg('顯示名稱', u); if(n === null) return;
     const hashed = await hashPassword(p);  // H5: 自動 per-account salt
-    App.db.accounts.push({ id:nid(), username:u, password:hashed, name:n||u, role:'teacher', ts:Date.now() });
+    const _newAcc = { id:nid(), username:u, password:hashed, name:n||u, role:'teacher', ts:Date.now() };
+    App.db.accounts.push(_newAcc);
     saveDB(true);  // H3: 建立帳號立即寫入
-    try { Sync.setMap('accounts', App.db.accounts); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
+    try { Sync.setRow('accounts', _newAcc.id, _newAcc); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
     toast('已新增','success'); rerender();
   } }, '＋ 新增老師帳號'));
   content.appendChild(card3);
@@ -18810,7 +18638,7 @@ function rMe(content){
       } catch(e){ console.warn('[email-students write]', e); }
       // ★ BUG #12 修:用 saveDB(true) 立即寫入,確保跨裝置看得到
       saveDB(true);
-      try { Sync.setMap('students', App.db.students, true); bcNotify(); } catch(_){}
+      try { Sync.setRow('students', me.id, me); bcNotify(); } catch(_){}
       toast('🎉 Email 登入已設定!下次可以用「使用 Email 登入」進去','success', 6000);
       rerender();
     } catch(e){
@@ -18835,7 +18663,7 @@ function rMe(content){
     try {
       const result = await _compressAvatarUnder1MB(f);
       me.avatar = result.dataUrl;
-      saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+      saveDB(); Sync.setRow('students', me.id, me); bcNotify();
       const kb = Math.round(result.dataUrl.length / 1024);
       toast('✅ 頭像已更新 (' + result.size + '×' + result.size + ' · ' + kb + ' KB · 品質 ' + Math.round(result.quality*100) + '%)','success', 3000);
       rerender();
@@ -18846,7 +18674,7 @@ function rMe(content){
     cardAv.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'8px'}, onclick: async ()=> {
       if(!await confirmDlg('確定移除頭像？')) return;
       me.avatar = null;
-      saveDB(); Sync.setMap('students', App.db.students); bcNotify();
+      saveDB(); Sync.setRow('students', me.id, me); bcNotify();
       rerender();
     }}, '🗑 移除頭像'));
   }
@@ -19018,7 +18846,7 @@ function rMe(content){
     me.password = await hashPassword(newpw);
     me.passwordChangedAt = Date.now();
     _clearAllLoginTokens(me);
-    saveDB(true); Sync.setMap('students', App.db.students); bcNotify();
+    saveDB(true); Sync.setRow('students', me.id, me); bcNotify();
     toast('密碼已更新','success');
   } }, '🔑 修改密碼'));
 
@@ -19175,7 +19003,7 @@ function openStudentSelfEdit(){
     stu.avatar = avatarData;
     stu.profileUpdatedAt = Date.now();
     saveDB();
-    try { Sync.setMap('students', App.db.students); } catch(e){_swallow('auto',e)}
+    try { Sync.setRow('students', stu.id, stu); } catch(e){_swallow('auto',e)}
     bcNotify();
     if(typeof logOp === 'function') logOp('profileSelfEdit', stu.name + ' 自行更新個人資料');
     toast('✅ 已更新個人資料','success');
@@ -22120,7 +21948,7 @@ function wsSwitchTo(roomCode){
   App._syncBurstStart = null;
   App._syncBurstCount = 0;
   App._bcLastTs = null;
-  if(App._bcQueueTimer){ try { clearTimeout(App._bcQueueTimer); } catch(_){} App._bcQueueTimer = null; }
+  if(App._bcQueueTimer){ clearTimeout(App._bcQueueTimer); App._bcQueueTimer = null; }
   App.cfg = Object.assign({}, App.cfg||{}, { roomCode });
   saveCfg();
   loadDB();
@@ -22477,9 +22305,22 @@ function handleQrJoinHash(){
   let roomSwitched = false;
   if(params.join && (!App.cfg || App.cfg.roomCode !== params.join)){
     if(App.cfg && App.cfg.roomCode){
-      // already in different room: prompt
-      const ok = confirm('要切換到教室 "' + params.join + '" 並嘗試簽到？');
-      if(!ok){ location.hash = ''; return false; }
+      // already in different room: prompt (themed dialog, 非阻塞)
+      // 先清 hash，避免使用者按取消後重整又跳一次
+      try { history.replaceState(null, '', location.pathname + location.search); }
+      catch(e){ try { location.hash = ''; } catch(_e){} }
+      (async () => {
+        const ok = await confirmDlg('要切換到教室 "' + params.join + '" 並嘗試簽到？', { danger: true, title: '警告' });
+        if(!ok) return;
+        try { Sync.detachAll(); } catch(e){_swallow('auto',e)}
+        App.cfg = { roomCode: params.join, role: (App.cfg && App.cfg.role) || 'student' };
+        saveCfg();
+        loadDB();
+        initBC();
+        Sync.init();
+        try { rerender(); } catch(e){_swallow('qr-rerender',e)}
+      })();
+      return false;
     }
     try { Sync.detachAll(); } catch(e){_swallow('auto',e)}
     App.cfg = { roomCode: params.join, role: (App.cfg && App.cfg.role) || 'student' };
@@ -22668,9 +22509,9 @@ function buildStudentContext(me){
   ].join('\n');
 }
 
-function openAIAssistant(){
+async function openAIAssistant(){
   if(!localStorage.getItem(LS_CLAUDE_KEY)){
-    const ok = confirm('尚未設定 Claude API Key，要前往設定頁嗎？');
+    const ok = await confirmDlg('尚未設定 Claude API Key，要前往設定頁嗎？', { danger: true, title: '警告' });
     if(ok) go('settings');
     return;
   }
@@ -26346,7 +26187,7 @@ function _showSwUpdateBanner(beforeReload){
     close.type = 'button';
     close.textContent = '×';
     close.setAttribute('aria-label','關閉提示');
-    close.style.cssText = 'background:transparent;color:#fff;border:none;font-size:18px;cursor:pointer;padding:0 4px;line-height:1;';
+    close.style.cssText = 'background:transparent;color:#fff;border:none;font-size:18px;cursor:pointer;padding:0 4px;line-height:1;min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;';
     close.onclick = ()=> { try { banner.remove(); } catch(_){_swallow('sw-bn-close',_)} };
     banner.appendChild(txt);
     banner.appendChild(btn);
@@ -27034,7 +26875,7 @@ function boot(){
               stu.googleEmail = u.email;
               stu.firebaseUid = u.uid;
               if(typeof saveDB === 'function') saveDB(true);
-              try { Sync.setMap('students', App.db.students); } catch(_){}
+              try { Sync.setRow('students', stu.id, stu); } catch(_){}
             }
             try { toast('🎉 Google 綁定成功：' + u.email, 'success', 4000); } catch(_){}
             setTimeout(function(){ try { rerender(); } catch(_){} }, 300);
@@ -29624,7 +29465,7 @@ function openTeacherProfile(){
       } catch(e){ console.warn('[unbind teacher google]', e); }
       delete me.googleEmail; delete me.firebaseUid;
       saveDB();
-      try { Sync.setMap('accounts', App.db.accounts); } catch(_){}
+      try { Sync.setRow('accounts', me.id, me); } catch(_){}
       toast('✅ 已解除 Google 綁定','success');
       m.close(); rerender();
     }}, '🔓 解除綁定'));
@@ -29673,7 +29514,7 @@ function openTeacherProfile(){
           me.firebaseUid = user.uid;
           if(user.photoURL && !me.photoURL) me.photoURL = user.photoURL;
           saveDB();
-          try { Sync.setMap('accounts', App.db.accounts); } catch(_){}
+          try { Sync.setRow('accounts', me.id, me); } catch(_){}
           toast('🎉 已綁定 ' + user.email + '!下次可在任何裝置用 Google 登入','success', 5000);
           m.close(); rerender();
         } catch(e){
@@ -29745,7 +29586,7 @@ function openTeacherProfile(){
       } catch(e){ _swallow('clearRemember', e); }
       saveDB(true);
       // Round 2 M6: 登出所有裝置 → 立即 sync
-      try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
+      try { Sync.setRow('accounts', me.id, me); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
       toast('已登出所有裝置','success');
     }
   }, '🚪 登出所有裝置'));
@@ -29770,7 +29611,7 @@ function openTeacherProfile(){
     }
     saveDB(true);  // H3: 改密碼 → 立即寫入
     // Round 2 M6: 改密碼 → 立即 sync 不 debounce
-    try { Sync.setMap('accounts', App.db.accounts, true); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
+    try { Sync.setRow('accounts', me.id, me); bcNotify(); } catch(e){ _swallow('sync-accounts', e); }
     if(App.session) App.session.name = me.name;
     try { saveSession(); } catch(e){ _swallow('saveSession', e); }
     toast('已儲存','success');
