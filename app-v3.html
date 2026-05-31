@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-teacher-welcome-card';
+const APP_BUILD = '2026-06-01-alt-login-collapse';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -6180,6 +6180,7 @@ async function _promptStudentSidBinding(user){
 function renderLoginTeacherStage(){
   // Spotify 版：tab 已標示「老師」，stage 內不再放 H3
   const stage = el('div', { class:'login-stage' });
+  let welcomeCardT = null;  // ★ 函式末尾把歡迎卡後面的「admin+密碼」表單收合 — 需要函式作用域 ref
 
   // 📧 偵測是否已用 Email/Google 登入 → 顯示「點此繼續」按鈕
   // ★ 用戶要求:只在「目前 Google 用戶是老師綁定」時才顯示這個按鈕
@@ -6223,7 +6224,7 @@ function renderLoginTeacherStage(){
 
     if(showTeacherWelcome){
       // ====== 老師歡迎回來卡 (模仿學生 tab 的卡片) ======
-      const welcomeCardT = el('div', { style:{
+      welcomeCardT = el('div', { style:{
         padding:'14px 16px',
         background:'rgba(22,163,74,.12)',
         border:'1px solid rgba(22,163,74,.35)',
@@ -6667,6 +6668,34 @@ function renderLoginTeacherStage(){
   i1.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
   i2.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
   setTimeout(()=> { (i1.value ? i2 : i1).focus(); }, 80);
+
+  // ★ 用戶要求:有歡迎卡時 → 把它後面的「admin+密碼+登入+申請註冊…」收合進可展開的 container
+  //   verWrap (版本字 + 重置 + 切換教室) 留在外面,任何狀態都看得到
+  if(welcomeCardT){
+    try {
+      // 先把 verWrap 拉出來 (待會塞到收合區後面)
+      if(verWrap.parentNode === stage) stage.removeChild(verWrap);
+      const altContainer = el('div', { style:'display:none' });
+      const altToggle = el('button', {
+        type:'button',
+        style:'width:100%;padding:9px 12px;border-radius:8px;border:1px dashed rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.75);cursor:pointer;margin:8px 0;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px'
+      }, '▼ 用其他方式登入 (admin)');
+      altToggle.onclick = function(){
+        const collapsed = altContainer.style.display === 'none';
+        altContainer.style.display = collapsed ? '' : 'none';
+        altToggle.textContent = collapsed ? '▲ 收起' : '▼ 用其他方式登入 (admin)';
+      };
+      // 收集 welcomeCardT 後面所有 sibling (此時 verWrap 已 detach,不會被收進去)
+      const after = [];
+      let n = welcomeCardT.nextSibling;
+      while(n){ after.push(n); n = n.nextSibling; }
+      after.forEach(function(node){ altContainer.appendChild(node); });
+      // 接上 toggle + 收合區 + verWrap
+      stage.appendChild(altToggle);
+      stage.appendChild(altContainer);
+      stage.appendChild(verWrap);
+    } catch(e){ console.warn('[teacher-stage] collapse-alt-login:', e); }
+  }
 
   return stage;
 }
@@ -7735,10 +7764,11 @@ function renderLoginStudentStage(){
   // ★ 用戶要求:有「記住我」資料 → 顯示歡迎回來卡 + 密碼欄,並隱藏「使用 Email 登入」按鈕
   const studentRem = (typeof loadEmailRemember === 'function') ? loadEmailRemember('student') : null;
   const showStudentWelcome = !!(studentRem && studentRem.email);
+  let welcomeCard = null;  // ★ 用戶要求:函式末尾把歡迎卡後面的「其他登入方式」收合 — 需要函式作用域 ref
 
   if(showStudentWelcome){
     // 歡迎回來卡片
-    const welcomeCard = el('div', { style:{
+    welcomeCard = el('div', { style:{
       padding:'14px 16px',
       background:'rgba(22,163,74,.12)',
       border:'1px solid rgba(22,163,74,.35)',
@@ -8122,6 +8152,31 @@ function renderLoginStudentStage(){
   }
   if(bottomRow.children.length > 0){
     stage.appendChild(bottomRow);
+  }
+
+  // ★ 用戶要求:有歡迎卡時 → 把它後面的「班級+姓名+密碼+登入+申請註冊…」全部收合進可展開的 container
+  //   預設收合,按鈕「▼ 用其他方式登入」展開,「▲ 收起」收回
+  if(welcomeCard){
+    try {
+      const altContainer = el('div', { style:'display:none' });
+      const altToggle = el('button', {
+        type:'button',
+        style:'width:100%;padding:9px 12px;border-radius:8px;border:1px dashed rgba(255,255,255,.2);background:transparent;color:rgba(255,255,255,.75);cursor:pointer;margin:8px 0;font-size:12px;display:flex;align-items:center;justify-content:center;gap:6px'
+      }, '▼ 用其他方式登入 (班級+姓名)');
+      altToggle.onclick = function(){
+        const collapsed = altContainer.style.display === 'none';
+        altContainer.style.display = collapsed ? '' : 'none';
+        altToggle.textContent = collapsed ? '▲ 收起' : '▼ 用其他方式登入 (班級+姓名)';
+      };
+      // 收集 welcomeCard 後面所有 sibling (先存 ref,因為 appendChild 會 detach)
+      const after = [];
+      let n = welcomeCard.nextSibling;
+      while(n){ after.push(n); n = n.nextSibling; }
+      after.forEach(function(node){ altContainer.appendChild(node); });
+      // 接上 toggle + 收合區
+      stage.appendChild(altToggle);
+      stage.appendChild(altContainer);
+    } catch(e){ console.warn('[student-stage] collapse-alt-login:', e); }
   }
 
   return stage;
