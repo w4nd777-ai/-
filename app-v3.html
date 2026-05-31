@@ -1155,6 +1155,7 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
 }
 .spinner.big{ width:48px; height:48px; border-width:4px; }
 @keyframes spin{ to{ transform:rotate(360deg); } }
+.spinner-inline{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite;margin-right:6px;vertical-align:middle;}
 .loading-overlay{
   position:fixed; inset:0; z-index:99;
   background:rgba(0,0,0,.4); display:flex;
@@ -1931,7 +1932,16 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   --lc-input-bg: #fff;
   --lc-input-fg: #222;
   --lc-input-border: #fff;
+  /* A11y: muted 文字顏色 — 暗卡片用白色透明 / 亮卡片自動翻黑 (對比 ≥ 4.5:1) */
+  --lc-muted-fg: rgba(255,255,255,.85);
+  --lc-muted-weak: rgba(255,255,255,.7);
+  --lc-divider-fg: rgba(255,255,255,.55);
   font-family: var(--lc-font-stack);
+}
+.login-spotify-shell[data-login-card-tone="light"]{
+  --lc-muted-fg: rgba(0,0,0,.7);
+  --lc-muted-weak: rgba(0,0,0,.55);
+  --lc-divider-fg: rgba(0,0,0,.35);
 }
 .login-spotify-card{
   border: var(--lc-card-border);
@@ -4113,7 +4123,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-05-29-audit-fixes-batch4';
+const APP_BUILD = '2026-05-29-audit-fixes-batch5';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4255,6 +4265,21 @@ const __DEBUG = (function(){
 function dbg(...args){ if(__DEBUG) console.log('[cms]', ...args); }
 function dbgWarn(...args){ if(__DEBUG) console.warn('[cms]', ...args); }
 
+// Async button loading helper — disables button + shows inline spinner during async work
+async function withButtonLoading(btn, label, fn){
+  if(!btn) return await fn();
+  const oldText = btn.textContent;
+  const oldDisabled = btn.disabled;
+  try {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-inline"></span>' + (label || '處理中...');
+    return await fn();
+  } finally {
+    btn.disabled = oldDisabled;
+    btn.textContent = oldText;
+  }
+}
+
 const App = {
   cfg: null,           // workspace config: {roomCode, role, ...}
   session: null,       // {role:'teacher'|'student', id, name, ...}
@@ -4379,6 +4404,22 @@ function el(tag, attrs, ...children){
   return e;
 }
 
+/* ── Reg form helpers — shared by studentRegisterFlow & teacherRegisterFlow ── */
+function _regFormField(label, input, hint){
+  const f = el('div', { class:'field' });
+  f.appendChild(el('label', { class:'label' }, label));
+  f.appendChild(input);
+  if(hint) f.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} }, hint));
+  return f;
+}
+function _regFormErrBox(){
+  return el('div', { class:'small', style:{color:'var(--danger)',display:'none',padding:'8px 12px',background:'var(--danger-soft)',borderRadius:'8px',marginTop:'8px'} });
+}
+function _regFormShowErr(box, msg){
+  box.textContent = msg;
+  box.style.display = 'block';
+}
+
 function esc(s){
   if(s == null) return '';
   return String(s).replace(/[&<>"']/g, c => ({
@@ -4498,7 +4539,7 @@ function friendlyError(e){
   if(/permission|denied|forbidden/i.test(msg)) return '權限不足';
   if(/abort/i.test(msg)) return '操作已取消';
   if(/timeout|timed out/i.test(msg)) return '操作逾時，請稍後再試';
-  if(/storage/i.test(msg)) return '儲存失敗';
+  if(/storage/i.test(msg)) return '儲存失敗 — 瀏覽器儲存空間可能不足 — 請先匯出備份後清理舊資料，或聯絡管理員';
   if(/crypto|subtle/i.test(msg)) return '加密功能不可用 (請改用 https://)';
   if(/json|unexpected token|syntax/i.test(msg)) return '資料格式錯誤';
   // 不認得 → 通用訊息，把原文丟到 silent errors 供 debug
@@ -5642,6 +5683,8 @@ const Sync = (() => {
       const addCb = ref.on('child_added', snap => {
         const v = snap.val();
         if(!v) return;
+        // perf: 標記 SDK listener 已成功收到首個 child event → 跳過 3s 補抓 fetch
+        App._syncFirstChildSeen = true;
         const id = v.id != null ? v.id : snap.key;
         if(_shouldIgnoreEcho(node, id)) return;
         App.db[node] = App.db[node] || [];
@@ -5698,6 +5741,8 @@ const Sync = (() => {
       const cb = ref.on('value', snap => {
         const v = snap.val();
         if(!v) return;
+        // perf: 標記 SDK listener 已成功收到 value → 跳過 3s 補抓 fetch
+        App._syncFirstChildSeen = true;
         if(node === 'settings' || node === 'branding'){
           // 🔧 修：比 updatedAt → 本機剛改的不會被雲端舊版蓋掉
           //    1. 雲端版本較舊 (v.updatedAt < local.updatedAt) → 本機保留 (local wins)
@@ -5735,7 +5780,13 @@ const Sync = (() => {
     //    後續 collection (assignments / attendance / submissions / evals) 都沒抓回
     //    用 fetch 直接打 Firebase REST API 完全繞過 SDK WebSocket 問題
     //    PowerShell curl 能成功 = fetch 也一定能成功
+    //    perf: 只在 SDK listener 沒收到資料 OR DB 看起來空時才補抓 → 省頻寬
     setTimeout(function(){
+      const looksEmpty = !App.db || !App.db.students || App.db.students.length === 0;
+      const noChildSeen = !App._syncFirstChildSeen;
+      if(!(looksEmpty || noChildSeen)){
+        return; // SDK listener 已成功 → 不浪費頻寬補抓
+      }
       _fetchAllFromFirebase().then(function(updated){
         if(updated > 0){
           console.log('[fetch-sync] 補抓回', updated, '個 collection 的資料');
@@ -7256,7 +7307,7 @@ async function attachGetUrl(meta){
 
 // 下載附件（新舊版 + Drive + catbox 皆可）
 async function attachDownload(meta){
-  if(!meta){ toast('找不到附件','danger'); return; }
+  if(!meta){ toast('找不到附件 — 紀錄裡沒有附件資料 — 請聯絡學生在原裝置重新上傳','danger', 5000); return; }
   // catbox.moe:直接開連結 (跨域 a.download 屬性無效)
   if(meta.storage === 'catbox' && meta.catboxUrl){
     window.open(meta.catboxUrl, '_blank');
@@ -7269,7 +7320,7 @@ async function attachDownload(meta){
     return;
   }
   const url = await attachGetUrl(meta);
-  if(!url){ toast('找不到附件檔案','danger'); return; }
+  if(!url){ toast('找不到附件檔案 — 檔案可能只存在原上傳裝置(IndexedDB) — 請聯絡學生在原裝置重新上傳','danger', 5000); return; }
   const a = document.createElement('a');
   a.href = url;
   a.download = meta.name || 'attachment';
@@ -7284,7 +7335,7 @@ async function attachDownload(meta){
 
 // 預覽附件 — 用 in-app modal 顯示（之前 window.open(dataURI) 會被 Chrome 60+ 擋）
 async function attachPreview(meta){
-  if(!meta){ toast('找不到附件','danger'); return; }
+  if(!meta){ toast('找不到附件 — 紀錄裡沒有附件資料 — 請聯絡學生在原裝置重新上傳','danger', 5000); return; }
   // Drive 走 webViewLink（有公開分享連結）
   if(meta.storage === 'drive' || meta.driveFileId){
     const url = meta.driveLink || ('https://drive.google.com/file/d/' + meta.driveFileId + '/view');
@@ -7795,14 +7846,7 @@ function studentRegisterFlow(){
   // (Google 自動填按鈕已移除 — Chrome 第三方 cookie 政策會擋 signInWithPopup 造成錯誤)
   // 學生請直接填表單,Email 用一般信箱即可
 
-  function field(label, input, hint){
-    const f = el('div', { class:'field' });
-    const lbl = el('label', { class:'label' }, label);
-    f.appendChild(lbl);
-    f.appendChild(input);
-    if(hint) f.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} }, hint));
-    return f;
-  }
+  const field = _regFormField;
 
   const iName = el('input', { class:'input', placeholder:'王小明' });
   const iSid = el('input', { class:'input', placeholder:'例：1095001', inputmode:'numeric' });
@@ -7826,10 +7870,10 @@ function studentRegisterFlow(){
   m.root.appendChild(field('密碼 *', iPw, '至少 4 字元'));
   m.root.appendChild(field('確認密碼 *', iPw2));
 
-  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',padding:'8px 12px',background:'var(--danger-soft)',borderRadius:'8px',marginTop:'8px'} });
+  const err = _regFormErrBox();
   m.root.appendChild(err);
 
-  function showErr(msg){ err.textContent = msg; err.style.display = 'block'; }
+  const showErr = (msg)=> _regFormShowErr(err, msg);
 
   const submit = async ()=> {
     const name = iName.value.trim();
@@ -7887,13 +7931,7 @@ function teacherRegisterFlow(){
   m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'13px',marginBottom:'10px'} },
     '請完整填寫資料,等待管理員審核通過後即可使用 Email 登入'));
 
-  function field(label, input, hint){
-    const f = el('div', { class:'field' });
-    f.appendChild(el('label', { class:'label' }, label));
-    f.appendChild(input);
-    if(hint) f.appendChild(el('div', { class:'small muted', style:{marginTop:'4px'} }, hint));
-    return f;
-  }
+  const field = _regFormField;
 
   const iName = el('input', { class:'input', placeholder:'王老師' });
   const iEmail = el('input', { class:'input', type:'email', placeholder:'your@example.com', autocomplete:'email' });
@@ -7907,9 +7945,9 @@ function teacherRegisterFlow(){
   m.root.appendChild(field('確認密碼 *', iPw2));
   m.root.appendChild(field('備註 (選填)', iNote));
 
-  const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',padding:'8px 12px',background:'var(--danger-soft)',borderRadius:'8px',marginTop:'8px'} });
+  const err = _regFormErrBox();
   m.root.appendChild(err);
-  function showErr(msg){ err.textContent = msg; err.style.display = 'block'; }
+  const showErr = (msg)=> _regFormShowErr(err, msg);
 
   const submit = async (ev)=> {
     const btn = ev.currentTarget;
@@ -9601,17 +9639,21 @@ async function _completeEmailLogin(user, role){
     if(typeof saveCfg === 'function') saveCfg(App.cfg);
   } catch(_){}
   // 寫 email_users mapping (跨裝置同步用)
-  try {
-    if(window.firebase && firebase.database){
-      const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
-      firebase.database().ref('cms-v3/' + App.cfg.roomCode + '/email_users/' + emailKey).update({
-        email: user.email,
-        uid: user.uid,
-        role: role,
-        lastLoginAt: firebase.database.ServerValue.TIMESTAMP
-      }).catch(function(e){ console.warn('[email-login] mapping write:', e); });
-    }
-  } catch(_){}
+  // ⚠️ 已停用 (dead write):全專案 grep 過 cms-v3/{roomCode}/email_users/*
+  //   只有「這一處寫入」，沒有任何讀取點 → 純粹是空跑、浪費 Firebase 寫入額度。
+  //   保留註解供未來若要做「Email 跨裝置自動帶 roomCode」功能時參考；
+  //   屆時要補上對應的讀取邏輯，才有實際效用。
+  // try {
+  //   if(window.firebase && firebase.database){
+  //     const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
+  //     firebase.database().ref('cms-v3/' + App.cfg.roomCode + '/email_users/' + emailKey).update({
+  //       email: user.email,
+  //       uid: user.uid,
+  //       role: role,
+  //       lastLoginAt: firebase.database.ServerValue.TIMESTAMP
+  //     }).catch(function(e){ console.warn('[email-login] mapping write:', e); });
+  //   }
+  // } catch(_){}
   // 確保 accounts 有對應 entry (老師審核通過才會有,沒有就不該到這裡)
   try {
     App.db = App.db || { accounts: [] };
@@ -9908,7 +9950,7 @@ function renderLoginTeacherStage(){
     stage.appendChild(el('div', { style:'text-align:center;margin-bottom:14px' },
       el('a', {
         href:'javascript:void(0)',
-        style:'font-size:11px;color:rgba(255,255,255,.6);text-decoration:underline',
+        style:'font-size:11px;color:var(--lc-muted-fg, rgba(255,255,255,.85));text-decoration:underline',
         onclick: async function(){
           try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
           try { toast('已登出，請重新登入', 'success', 2000); } catch(_){}
@@ -10116,12 +10158,12 @@ function renderLoginTeacherStage(){
     }, '申請註冊'));
   }
   if(!_lcT.hideRegister && !_lcT.hideForgot){
-    bottomRow.appendChild(el('span', { style:'color:rgba(255,255,255,.3);font-size:11px' }, '|'));
+    bottomRow.appendChild(el('span', { style:'color:var(--lc-divider-fg, rgba(255,255,255,.55));font-size:11px' }, '|'));
   }
   if(!_lcT.hideForgot){
     bottomRow.appendChild(el('a', {
       href:'javascript:void(0)', onclick: showTeacherForgotPassword,
-      class:'lsc-link', style:'color:rgba(255,255,255,.7)'
+      class:'lsc-link', style:'color:var(--lc-muted-fg, rgba(255,255,255,.85))'
     }, '忘記密碼？'));
   }
   if(bottomRow.childNodes.length) stage.appendChild(bottomRow);
@@ -11262,7 +11304,7 @@ function renderLoginStudentStage(){
     stage.appendChild(el('div', { style:'text-align:center;margin-bottom:14px' },
       el('a', {
         href:'javascript:void(0)',
-        style:'font-size:11px;color:rgba(255,255,255,.6);text-decoration:underline',
+        style:'font-size:11px;color:var(--lc-muted-fg, rgba(255,255,255,.85));text-decoration:underline',
         onclick: async function(){
           try { if(firebase.auth) await firebase.auth().signOut(); } catch(_){}
           try { toast('已登出 Google，請重新選擇帳號', 'success', 2000); } catch(_){}
@@ -11301,13 +11343,13 @@ function renderLoginStudentStage(){
       el('div', { style:{color:'#fff',fontSize:'15px',fontWeight:'700',marginBottom:'2px',
                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
         '👋 歡迎回來,' + (studentRem.name || studentRem.email) + '!'),
-      el('div', { style:{color:'rgba(255,255,255,.65)',fontSize:'12px',
+      el('div', { style:{color:'var(--lc-muted-fg, rgba(255,255,255,.85))',fontSize:'12px',
                          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'} },
         '學生 · 上次登入:' + lastTimeStr)
     ));
     welcomeCard.appendChild(headerRow);
 
-    welcomeCard.appendChild(el('div', { style:{color:'rgba(255,255,255,.7)',fontSize:'12px',marginBottom:'8px'} },
+    welcomeCard.appendChild(el('div', { style:{color:'var(--lc-muted-weak, rgba(255,255,255,.7))',fontSize:'12px',marginBottom:'8px'} },
       '輸入密碼以繼續'));
 
     // 密碼欄 (with eye)
@@ -11361,7 +11403,7 @@ function renderLoginStudentStage(){
     welcomeCard.appendChild(el('div', { style:{textAlign:'center',marginTop:'10px'} },
       el('a', {
         href:'javascript:void(0)',
-        style:'color:rgba(255,255,255,.55);font-size:11px;text-decoration:underline',
+        style:'color:var(--lc-muted-fg, rgba(255,255,255,.85));font-size:11px;text-decoration:underline',
         onclick: () => {
           if(typeof saveEmailRemember === 'function') saveEmailRemember('student', null);
           try { rerender(); } catch(_){ location.reload(); }
@@ -11605,7 +11647,7 @@ function renderLoginStudentStage(){
   }
   if(!_lcS.hideRegister && !_lcS.hideForgot){
     // 分隔符
-    bottomRow.appendChild(el('span', { style:'color:rgba(255,255,255,.3);font-size:11px' }, '|'));
+    bottomRow.appendChild(el('span', { style:'color:var(--lc-divider-fg, rgba(255,255,255,.55));font-size:11px' }, '|'));
   }
   if(!_lcS.hideForgot){
     // 忘記密碼 — 次要 (一般字、灰色)
@@ -11613,7 +11655,7 @@ function renderLoginStudentStage(){
       href:'javascript:void(0)',
       onclick: showForgotPassword,
       class:'lsc-link',
-      style:'color:rgba(255,255,255,.7)'
+      style:'color:var(--lc-muted-fg, rgba(255,255,255,.85))'
     }, '忘記密碼？'));
   }
   if(bottomRow.children.length > 0){
@@ -13038,7 +13080,12 @@ function rOv(content){
           tb.appendChild(el('tr', null, el('td', { colspan:'8', style:{textAlign:'center',padding:'12px',color:'var(--text-muted)'} }, '🔍 沒有符合條件的紀錄')));
         }
       }
-      searchInp.addEventListener('input', renderRows);
+      // perf: 搜尋框 debounce 150ms,避免 Chromebook 每按一鍵就重繪 200 列表格
+      let _attSearchDebounce;
+      searchInp.addEventListener('input', () => {
+        clearTimeout(_attSearchDebounce);
+        _attSearchDebounce = setTimeout(renderRows, 150);
+      });
       clsSel.addEventListener('change', renderRows);
       statSel.addEventListener('change', renderRows);
       renderRows();
@@ -13246,7 +13293,12 @@ function rOv(content){
             todaySubs.length === 0 ? '📭 今日尚無學生繳交' : '🔍 沒有符合條件的紀錄')));
         }
       }
-      sInp.addEventListener('input', renderSubRows);
+      // perf: 搜尋框 debounce 150ms,避免 Chromebook 每按一鍵就重繪 200 列表格
+      let _subSearchDebounce;
+      sInp.addEventListener('input', () => {
+        clearTimeout(_subSearchDebounce);
+        _subSearchDebounce = setTimeout(renderSubRows, 150);
+      });
       sCls.addEventListener('change', renderSubRows);
       sStat.addEventListener('change', renderSubRows);
       renderSubRows();
@@ -17521,7 +17573,7 @@ function rSettings(content){
   card3.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'10px'}, onclick: async ()=> {
     const uRaw = await promptDlg('新帳號名稱'); if(!uRaw) return;
     const u = uRaw.trim().toLowerCase();  // 統一存小寫，避免日後手機大小寫不一致
-    if(App.db.accounts.find(a => String(a.username||'').toLowerCase() === u)) return toast('已存在','danger');
+    if(App.db.accounts.find(a => String(a.username||'').toLowerCase() === u)) return toast('帳號名稱「' + u + '」已存在 — 帳號清單裡已有同名帳號 — 請改用其他名稱，或先刪除舊帳號','danger', 5000);
     const p = await promptDlg('密碼', '', { type:'password' }); if(!p) return;
     const n = await promptDlg('顯示名稱', u); if(n === null) return;
     const hashed = await hashPassword(p);  // H5: 自動 per-account salt
@@ -29498,6 +29550,10 @@ function openTeacherProfile(){
           const emailKey = String(user.email).replace(/[.@]/g, '_').toLowerCase();
           const rc = (App.cfg && App.cfg.roomCode) || 'DEMO01';
           // 寫 google_users 對應 → 之後同帳號從別台裝置點「用 Google 登入」會自動進到這個 roomCode + 老師身份
+          // ⚠️ 資料完整性註記:此路徑 cms-v3/google_users/{emailKey} 是「全域」(不在 {roomCode} 底下)
+          //   → 同一老師若在別教室重新綁定，會覆蓋原本的綁定 (lost-update)
+          //   → 未來要改成 per-room 路徑 (cms-v3/{roomCode}/google_users/{emailKey}) 需做資料遷移
+          //   → 目前先把 roomCode / role / accountId / ts 寫進 value，方便日後遷移時還原來源
           await firebase.database().ref('cms-v3/google_users/' + emailKey).set({
             email: user.email,
             displayName: user.displayName || me.name || '',
@@ -29506,6 +29562,7 @@ function openTeacherProfile(){
             firebaseUid: user.uid,
             accountId: me.id,
             role: 'teacher',
+            ts: Date.now(),  // ★ 寫入當下 timestamp (client clock)，與 createdAt/lastLoginAt (server TS) 互補,方便偵測跨教室覆蓋
             createdAt: firebase.database.ServerValue.TIMESTAMP,
             lastLoginAt: firebase.database.ServerValue.TIMESTAMP
           });
@@ -32460,7 +32517,7 @@ const TOUR_STEPS = {
   student: [
     { title:'歡迎！',           body:'30 秒帶你熟悉介面，點右上 ✕ 可隨時關閉。' },
     { title:'簽到很簡單',       body:'點側邊欄「簽到」，按下大按鈕即可完成今日簽到。' },
-    { title:'查看成績與作業',   body:'「我的成績」可看到所有作業成績與教師評語；「個人」可調整密碼等設定。' }
+    { title:'查看成績與作業',   body:'「我的成績」可看到所有作業成績與老師評語；「個人」可調整密碼等設定。' }
   ]
 };
 function tourKey(role){
