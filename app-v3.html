@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-batch-transcript';
+const APP_BUILD = '2026-06-01-semester-wizard-plus';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -33885,8 +33885,51 @@ function _bShowSemesterSummary(s){
     m.root.appendChild(el('div', { class:'small muted' }, '此學期沒有保存摘要資料'));
   }
   m.root.appendChild(el('div', { class:'small muted', style:{marginTop:'10px'} },
-    '起訖：' + (s.startDate||'') + ' ~ ' + (s.endDate||'')
+    '起訖:' + (s.startDate||'') + ' ~ ' + (s.endDate||'')
   ));
+  // ★ FEATURE #1: 顯示凍結成績 snapshot (如果結算時有勾)
+  if(Array.isArray(s.frozenGrades) && s.frozenGrades.length){
+    m.root.appendChild(el('h3', { style:{marginTop:'14px'} }, '🎯 凍結的成績 (' + s.frozenGrades.length + ' 位)'));
+    m.root.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'6px'} },
+      '此學期結算時凍結 — 不會被新資料覆蓋。'));
+    // 表格 (可滾動)
+    const tWrap = el('div', { style:{maxHeight:'280px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px'} });
+    const tbl = el('table', { class:'compact', style:{width:'100%',fontSize:'12px',borderCollapse:'collapse'} });
+    const thead = el('thead', null, el('tr', null,
+      el('th', { style:{padding:'6px',background:'var(--surface-2)'} }, '班級'),
+      el('th', { style:{padding:'6px',background:'var(--surface-2)'} }, '姓名'),
+      el('th', { style:{padding:'6px',background:'var(--surface-2)',textAlign:'right'} }, '出席%'),
+      el('th', { style:{padding:'6px',background:'var(--surface-2)',textAlign:'right'} }, '作業'),
+      el('th', { style:{padding:'6px',background:'var(--surface-2)',textAlign:'right'} }, '期中'),
+      el('th', { style:{padding:'6px',background:'var(--surface-2)',textAlign:'right'} }, '期末'),
+      el('th', { style:{padding:'6px',background:'var(--surface-2)',textAlign:'right'} }, '總分'),
+      el('th', { style:{padding:'6px',background:'var(--surface-2)',textAlign:'right'} }, '排名')
+    ));
+    tbl.appendChild(thead);
+    const tbody = el('tbody');
+    s.frozenGrades.slice().sort((a,b) => (a.cls||'').localeCompare(b.cls||'') || (b.total||0) - (a.total||0)).forEach(fg => {
+      tbody.appendChild(el('tr', null,
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)'} }, fg.cls || '-'),
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)'} }, fg.name),
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)',textAlign:'right'} }, String(fg.att||0)),
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)',textAlign:'right'} }, String(fg.asgn||0)),
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)',textAlign:'right'} }, String(fg.mid||0)),
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)',textAlign:'right'} }, String(fg.final||0)),
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)',textAlign:'right',fontWeight:'700'} }, String(fg.total||0)),
+        el('td', { style:{padding:'4px 6px',borderTop:'1px solid var(--border)',textAlign:'right'} }, fg.rank ? '#' + fg.rank : '-')
+      ));
+    });
+    tbl.appendChild(tbody);
+    tWrap.appendChild(tbl);
+    m.root.appendChild(tWrap);
+    // 下載 CSV
+    m.root.appendChild(el('button', { class:'btn btn-sm', style:{marginTop:'10px'}, onclick:()=> {
+      const rows = [['班級','姓名','學號','座號','出席%','作業','期中','期末','總分','排名']];
+      s.frozenGrades.forEach(fg => rows.push([fg.cls||'', fg.name||'', fg.sid||'', fg.seat||'', fg.att||0, fg.asgn||0, fg.mid||0, fg.final||0, fg.total||0, fg.rank||'']));
+      try { downloadCSV(rows, (s.name||'學期') + '_凍結成績_' + td() + '.csv'); toast('已下載','success'); }
+      catch(e){ toast('下載失敗','danger'); }
+    }}, '📤 下載 CSV'));
+  }
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '關閉'));
   m.root.appendChild(actions);
@@ -33924,8 +33967,15 @@ function openSemesterTransitionWizard(){
       keepStudents: true,
       resetPasswords: false,
       clearTodos: true,
-      clearNotes: false
+      clearNotes: false,
+      // ★ FEATURE #1 新增選項
+      freezeGrades: true,         // 凍結成績 snapshot 進舊學期 (建議開,日後查歷史用)
+      promoteStudents: false,     // 升年級/班級異動
+      exportTranscripts: false    // 結算後批次匯出全班成績單
     },
+    // ★ 班級對照表 (key=舊班, value=新班 或 '' 代表保持)
+    //   '__graduated__' 特殊值代表畢業 (從學生清單移除)
+    classMap: {},
     newSem: {
       id: 'sem_' + nid().slice(0,8),
       name: '',
@@ -33983,14 +34033,17 @@ function openSemesterTransitionWizard(){
     m.root.appendChild(navRow(true, '下一步：清理選項 →', true));
   }
   function renderStep3(){
-    m.root.appendChild(el('h3', null, '🧹 切換時的清理選項'));
+    m.root.appendChild(el('h3', null, '🧹 結算 / 清理選項'));
     m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
-      '勾選的項目會在新學期開始時清空（資料封存於舊學期，不會丟失）。'));
-    const mk = (key, label, hint) => {
+      '凍結成績 / 升年級 / 批次成績單 都是新學期常用流程,建議全勾選。'));
+    const mk = (key, label, hint, onChange) => {
       const row = el('label', { class:'flex', style:{padding:'8px 0',gap:'8px',alignItems:'flex-start'} });
       const cb = el('input', { type:'checkbox' });
       if(state.options[key]) cb.checked = true;
-      cb.addEventListener('change', e => { state.options[key] = e.target.checked; });
+      cb.addEventListener('change', e => {
+        state.options[key] = e.target.checked;
+        if(typeof onChange === 'function') onChange();
+      });
       row.appendChild(cb);
       row.appendChild(el('div', null,
         el('div', { style:{fontWeight:'600'} }, label),
@@ -33998,11 +34051,82 @@ function openSemesterTransitionWizard(){
       ));
       return row;
     };
-    m.root.appendChild(mk('keepStudents','保留學生名單','取消勾選 → 清空學生（一般不建議）'));
+    // === 結算動作 ===
+    m.root.appendChild(el('div', { style:{padding:'6px 10px',background:'var(--surface-2)',borderRadius:'8px',fontWeight:'700',marginBottom:'4px'} }, '🎯 結算動作 (建議全勾)'));
+    m.root.appendChild(mk('freezeGrades','凍結成績 snapshot','本學期每位學生的總分/出席/作業均分,寫進舊學期封存。日後查歷史成績不會被新資料覆蓋'));
+    m.root.appendChild(mk('exportTranscripts','結算後批次匯出全班成績單','切換前自動跳出列印視窗,可另存 PDF。如果學生很多會比較久'));
+    m.root.appendChild(mk('promoteStudents','升年級 / 班級異動', '勾選後下方會出現對照表編輯區,逐班填新班名 (空白=保持原班)', renderStep3 /* re-render to show/hide map editor */));
+
+    // === 班級對照表 (升年級用) — 只在 promoteStudents 開時顯示 ===
+    if(state.options.promoteStudents){
+      const classes = Array.from(new Set((App.db.students||[]).map(s => s.cls || '未分班'))).sort();
+      const mapBox = el('div', { style:{background:'#fff8dc',border:'1px solid #f0c040',borderRadius:'8px',padding:'12px',marginTop:'8px'} });
+      mapBox.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '🎓 升年級 / 班級異動對照表'));
+      mapBox.appendChild(el('div', { class:'tiny muted', style:{marginBottom:'10px'} },
+        '左邊舊班 → 右邊新班。空白 = 保持原班。填「畢業」= 移除該班所有學生 (進回收桶,可救回)。'));
+      // 工具列:自動猜測升年級
+      const tools = el('div', { class:'flex', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap'} });
+      tools.appendChild(el('button', { class:'btn btn-sm', onclick:(ev)=> {
+        ev.preventDefault();
+        // 嘗試把「N 年 X 班」→「(N+1) 年 X 班」
+        // 中文數字一二三四五六七八 + 阿拉伯數字 1-12
+        const cnMap = { '一':'二','二':'三','三':'四','四':'五','五':'六','六':'七','七':'八','八':'九','九':'十','十':'十一','十一':'十二','十二':'(畢業)' };
+        classes.forEach(c => {
+          let newC = c;
+          // 中文
+          const cnMatch = c.match(/^([一二三四五六七八九十]+)年/);
+          if(cnMatch && cnMap[cnMatch[1]]){
+            const next = cnMap[cnMatch[1]];
+            newC = next === '(畢業)' ? '__graduated__' : c.replace(cnMatch[1], next);
+          } else {
+            // 阿拉伯
+            const arMatch = c.match(/^(\d+)/);
+            if(arMatch){
+              const n = parseInt(arMatch[1],10);
+              if(n >= 12) newC = '__graduated__';
+              else newC = c.replace(/^\d+/, String(n+1));
+            }
+          }
+          state.classMap[c] = newC;
+        });
+        renderStep3();
+      }}, '🔮 自動建議 (升一級)'));
+      tools.appendChild(el('button', { class:'btn btn-sm', onclick:(ev)=> {
+        ev.preventDefault();
+        classes.forEach(c => { state.classMap[c] = ''; });
+        renderStep3();
+      }}, '🧹 全部清空'));
+      mapBox.appendChild(tools);
+      // 每個班一行
+      classes.forEach(c => {
+        const cnt = (App.db.students||[]).filter(s => (s.cls||'未分班') === c).length;
+        const cur = state.classMap[c] || '';
+        const row = el('div', { class:'flex', style:{gap:'8px',alignItems:'center',marginBottom:'6px'} },
+          el('div', { style:{minWidth:'140px',fontWeight:'600'} }, c + ' (' + cnt + ')'),
+          el('span', null, '→'),
+          (function(){
+            const inp = el('input', { class:'input', style:{flex:'1'}, placeholder:'新班名 (空 = 保持) / 畢業',
+              value: cur === '__graduated__' ? '畢業' : cur });
+            inp.addEventListener('input', e => {
+              const v = (e.target.value || '').trim();
+              if(v === '畢業' || v === 'graduate' || v === 'graduated') state.classMap[c] = '__graduated__';
+              else state.classMap[c] = v;
+            });
+            return inp;
+          })()
+        );
+        mapBox.appendChild(row);
+      });
+      m.root.appendChild(mapBox);
+    }
+
+    // === 清理選項 ===
+    m.root.appendChild(el('div', { style:{padding:'6px 10px',background:'var(--surface-2)',borderRadius:'8px',fontWeight:'700',margin:'14px 0 4px'} }, '🧹 新學期啟動前的資料清理'));
+    m.root.appendChild(mk('keepStudents','保留學生名單','取消勾選 → 清空學生(一般不建議)'));
     m.root.appendChild(mk('resetPasswords','歸零學生密碼','學生需重新設定密碼'));
     m.root.appendChild(mk('clearTodos','清除學生待辦','建議勾選'));
     m.root.appendChild(mk('clearNotes','清除學生筆記','預設保留'));
-    m.root.appendChild(navRow(true, '下一步：新學期設定 →', true));
+    m.root.appendChild(navRow(true, '下一步:新學期設定 →', true));
   }
   function renderStep4(){
     m.root.appendChild(el('h3', null, '🎯 設定新學期'));
@@ -34048,18 +34172,51 @@ function openSemesterTransitionWizard(){
   }
   function renderStep5(){
     m.root.appendChild(el('h3', null, '✅ 最終確認'));
+    // 標籤化動作清單
+    const actLabels = {
+      freezeGrades: '🎯 凍結成績 snapshot',
+      exportTranscripts: '📑 批次匯出全班成績單',
+      promoteStudents: '🎓 升年級/班級異動',
+      keepStudents: '保留學生名單',
+      resetPasswords: '歸零學生密碼',
+      clearTodos: '清除學生待辦',
+      clearNotes: '清除學生筆記'
+    };
+    const selected = Object.keys(state.options).filter(k => state.options[k])
+      .map(k => actLabels[k] || k);
     m.root.appendChild(el('div', { class:'card', style:{background:'var(--surface-2)'} },
-      el('div', null, el('strong', null, '結束學期：'), cur.name),
-      el('div', null, el('strong', null, '新學期名稱：'), state.newSem.name || '(未填)'),
-      el('div', null, el('strong', null, '新學期起訖：'), (state.newSem.startDate||'?') + ' ~ ' + (state.newSem.endDate||'?')),
-      el('div', null, el('strong', null, '清理選項：'),
-        Object.keys(state.options).filter(k => state.options[k]).join(', ') || '(無)')
+      el('div', null, el('strong', null, '結束學期:'), cur.name),
+      el('div', null, el('strong', null, '新學期名稱:'), state.newSem.name || '(未填)'),
+      el('div', null, el('strong', null, '新學期起訖:'), (state.newSem.startDate||'?') + ' ~ ' + (state.newSem.endDate||'?')),
+      el('div', { style:{marginTop:'6px'} }, el('strong', null, '即將執行:')),
+      el('ul', { style:{margin:'4px 0 0 18px',padding:'0'} },
+        ...selected.map(s => el('li', null, s)))
     ));
+    // 升年級摘要
+    if(state.options.promoteStudents){
+      const classes = Array.from(new Set((App.db.students||[]).map(s => s.cls || '未分班'))).sort();
+      const movedRows = [];
+      let gradN = 0;
+      classes.forEach(c => {
+        const target = state.classMap[c] || '';
+        const cnt = (App.db.students||[]).filter(s => (s.cls||'未分班') === c).length;
+        if(target === '__graduated__'){ gradN += cnt; movedRows.push(c + ' (' + cnt + ' 位) → 🎓 畢業'); }
+        else if(target && target !== c) movedRows.push(c + ' (' + cnt + ' 位) → ' + target);
+        else movedRows.push(c + ' (' + cnt + ' 位) → 保持原班');
+      });
+      m.root.appendChild(el('div', { class:'card', style:{marginTop:'8px',background:'#fff8dc',borderColor:'#f0c040'} },
+        el('div', { style:{fontWeight:'700',marginBottom:'6px'} }, '🎓 升年級 / 班級異動結果'),
+        el('div', { class:'small', style:{maxHeight:'180px',overflow:'auto',fontFamily:'monospace'} },
+          ...movedRows.map(r => el('div', null, '  ' + r))),
+        gradN ? el('div', { class:'small', style:{color:'var(--warn)',marginTop:'6px'} },
+          '⚠ ' + gradN + ' 位學生會被移除 (進資源回收桶,30 天內可救回)') : null
+      ));
+    }
     m.root.appendChild(el('div', { class:'small', style:{color:'var(--warn)',marginTop:'8px'} },
       '⚠ 系統會自動備份完整資料後再切換。執行後仍可在「學期管理 → 切換備份」下載復原。'));
     if(!state.newSem.name || !state.newSem.startDate || !state.newSem.endDate){
       m.root.appendChild(el('div', { class:'small', style:{color:'var(--danger)',marginTop:'6px'} },
-        '⚠ 學期名稱 / 起訖日必填，請回上一步補齊'));
+        '⚠ 學期名稱 / 起訖日必填,請回上一步補齊'));
       m.root.appendChild(navRow(true, '完成', false, true));
     } else {
       m.root.appendChild(navRow(true, '🚀 確認執行', true, true));
@@ -34096,6 +34253,45 @@ function _bExecuteSemesterTransition(state, m){
     const cur = getCurrentSemester();
     if(!cur){ toast('找不到當前學期', 'danger'); return; }
 
+    const opts = state.options;
+
+    // ★ FEATURE #1.A — 結算前先批次匯出全班成績單 (在資料異動之前!)
+    if(opts.exportTranscripts){
+      try {
+        if(typeof exportClassTranscripts === 'function'){
+          exportClassTranscripts(null);
+        }
+      } catch(e){ console.warn('[wizard exportTranscripts]', e); }
+    }
+
+    // ★ FEATURE #1.B — 凍結成績 snapshot:給舊學期算每位學生的完整成績,寫進封存
+    //   日後就算學生資料動了/作業改了,舊學期的成績還在
+    let frozenGrades = null;
+    if(opts.freezeGrades){
+      try {
+        frozenGrades = (App.db.students||[]).map(s => {
+          const g = (typeof calcGrade === 'function') ? calcGrade(s.id) : null;
+          const rk = (typeof studentRank === 'function') ? studentRank(s.id) : null;
+          const ar = (typeof attendanceRate === 'function') ? attendanceRate(s.id) : 0;
+          return {
+            studentId: s.id,
+            sid: s.sid || '',
+            name: s.name || '',
+            cls: s.cls || '',
+            seat: s.seat || '',
+            total: g ? g.total : 0,
+            att: g ? g.att : 0,
+            asgn: g ? g.asgn : 0,
+            mid: g ? g.mid : 0,
+            final: g ? g.final : 0,
+            rank: rk ? rk.rank : null,
+            of: rk ? rk.of : null,
+            attRate: ar
+          };
+        });
+      } catch(e){ console.warn('[wizard freezeGrades]', e); }
+    }
+
     // 1) 完整備份
     try {
       App.db._archives = App.db._archives || [];
@@ -34108,17 +34304,18 @@ function _bExecuteSemesterTransition(state, m){
       if(App.db._archives.length > 5) App.db._archives = App.db._archives.slice(0,5);
     } catch(e){ dbgWarn('archive failed', e); }
 
-    // 2) 把 cur archive
+    // 2) 把 cur archive (含 frozenGrades 永久封存)
     if(Array.isArray(App.db.semesters)){
       const idx = App.db.semesters.findIndex(s => s.id === cur.id);
       if(idx >= 0){
         App.db.semesters[idx].current = false;
         App.db.semesters[idx].archivedAt = Date.now();
         App.db.semesters[idx].summary = state.summary;
+        if(frozenGrades) App.db.semesters[idx].frozenGrades = frozenGrades;
       }
     } else {
       App.db.semesters = [];
-      App.db.semesters.push(Object.assign({}, cur, { current:false, archivedAt: Date.now(), summary: state.summary }));
+      App.db.semesters.push(Object.assign({}, cur, { current:false, archivedAt: Date.now(), summary: state.summary, frozenGrades: frozenGrades || null }));
     }
 
     // 3) push new semester
@@ -34139,7 +34336,6 @@ function _bExecuteSemesterTransition(state, m){
     };
 
     // 5) 套用清理選項
-    const opts = state.options;
     if(!opts.keepStudents){
       App.db.students = [];
       App.db.attendance = [];
@@ -34158,6 +34354,31 @@ function _bExecuteSemesterTransition(state, m){
       App.db.notes = [];
     }
 
+    // ★ FEATURE #1.C — 升年級 / 班級異動
+    let promoted = 0, graduated = 0;
+    if(opts.promoteStudents && state.classMap){
+      try {
+        const cmap = state.classMap;
+        const remaining = [];
+        (App.db.students||[]).forEach(s => {
+          const oldC = s.cls || '未分班';
+          const target = cmap[oldC];
+          if(target === '__graduated__'){
+            // 移除學生 (進回收桶,可救回)
+            try { if(typeof trashAdd === 'function') trashAdd('student', s); } catch(_){}
+            graduated++;
+          } else if(target && target !== oldC){
+            s.cls = target;
+            promoted++;
+            remaining.push(s);
+          } else {
+            remaining.push(s);
+          }
+        });
+        App.db.students = remaining;
+      } catch(e){ console.warn('[wizard promote]', e); }
+    }
+
     saveDB(true);
     try {
       Sync.setMap('semesters', App.db.semesters);
@@ -34167,10 +34388,16 @@ function _bExecuteSemesterTransition(state, m){
     bcNotify();
 
     m.close();
-    toast('🎉 學期切換成功！已自動備份舊資料', 'success', 4000);
+    // 完成 toast 包含結算結果摘要
+    const msgs = ['🎉 學期切換成功!'];
+    if(opts.freezeGrades && frozenGrades) msgs.push('凍結 ' + frozenGrades.length + ' 位學生成績');
+    if(opts.exportTranscripts) msgs.push('已批次匯出成績單');
+    if(promoted) msgs.push('升級 ' + promoted + ' 位');
+    if(graduated) msgs.push(graduated + ' 位畢業 (進回收桶)');
+    toast(msgs.join(' · '), 'success', 6000);
     setTimeout(()=> rerender(), 100);
   } catch(e){
-    toast('切換失敗：' + (e.message||e), 'danger', 5000);
+    toast('切換失敗:' + (e.message||e), 'danger', 5000);
     console.error('[semester transition]', e);
   }
 }
