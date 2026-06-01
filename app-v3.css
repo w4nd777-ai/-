@@ -574,6 +574,8 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   box-shadow:var(--shadow-lg);
   animation:modalIn .25s ease-out;
 }
+.modal.modal-wide{ max-width:720px; }
+.modal.modal-large{ max-width:960px; }
 @keyframes modalIn{
   from{ opacity:0; transform:translateY(20px) scale(.96); }
   to{ opacity:1; transform:none; }
