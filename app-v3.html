@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-show-empty-asg';
+const APP_BUILD = '2026-06-01-show-empty-asg-v2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -17571,6 +17571,20 @@ function rSub(content){
   // 容量狀態 card (抽出至 renderSubCapacityCard)
   renderSubCapacityCard(content);
 
+  // ★ 用戶反映「作業消失」: 主動拉雲端,確保 App.db.assignments 是最新
+  //   (常見情境: 副老師建作業, 主老師快取舊, listener 沒接到)
+  if(!App._subForcedResync && typeof Sync !== 'undefined' && Sync.forceResyncFromCloud && App.fbRef){
+    App._subForcedResync = true;
+    Sync.forceResyncFromCloud().then(n => {
+      console.log('[rSub] force resync pulled', n, 'collections; assignments now=', (App.db.assignments||[]).length);
+      setTimeout(()=> { App._subForcedResync = false; }, 30000);
+      if(n) rerender();
+    }).catch(e => {
+      console.warn('[rSub] force resync failed:', e);
+      App._subForcedResync = false;
+    });
+  }
+
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '繳交記錄'),
@@ -17679,13 +17693,8 @@ function rSub(content){
         return stu && stu.cls === App._subCls;
       });
     }
-    if(list.length === 0){
-      listWrap.appendChild(el('div', { class:'empty card' },
-        el('div', { class:'ico' }, '📭'),
-        el('div', null, '沒有符合的繳交記錄')
-      ));
-      return;
-    }
+    // ★ 注意: 不直接在 list 空就 return — 「全部」「待批改」 tab 即使沒人交也要顯示所有作業
+    //   實際的 empty 判定改到 byAsg 建好之後 (L17787 附近) 才做
 
     // 共用：渲染單一繳交 row
     function renderSubRow(s, i){
@@ -17784,15 +17793,52 @@ function rSub(content){
     // ★ 修「繳交紀錄少了一個作業」:所有作業都顯示, 沒人交就空列表
     //   原本只顯示「有人交」的作業 → 用戶以為作業消失
     //   只在「全部」「待批改」 tab 顯示空作業 (其他 tab 像 已退回, 沒退回的作業出現會混淆)
-    if(tab === 'all' || tab === 'pending'){
-      (App.db.assignments||[]).forEach(a => {
-        if(a && a.id && !byAsg[a.id]) byAsg[a.id] = [];
+    //   v2: 兼容 assignments 可能是 array 或 object form (Firebase 有時兩種都可能)
+    //       + 也補上 submission 引用但 assignments 缺的 orphan id (顯示「作業已刪除」)
+    if(tab === 'all' || tab === 'pending' || tab === 'graded' || tab === 'returned' || tab === 'late'){
+      const _asgRaw = App.db.assignments;
+      const _asgArr = Array.isArray(_asgRaw) ? _asgRaw.filter(Boolean)
+                    : (_asgRaw && typeof _asgRaw === 'object') ? Object.values(_asgRaw).filter(Boolean)
+                    : [];
+      // 班級篩選: 如果用戶選了班級, 只列派發到該班的作業
+      const _clsFilter = App._subCls || '';
+      _asgArr.forEach(a => {
+        if(!a || !a.id) return;
+        if(byAsg[a.id]) return;
+        // 班級過濾: 派發對象不含當前選定班級就跳過
+        if(_clsFilter){
+          const inCls = (a.target === 'all') ||
+                        (a.targetCls === _clsFilter) ||
+                        (Array.isArray(a.targetClsList) && a.targetClsList.includes(_clsFilter));
+          if(!inCls) return;
+        }
+        // 「全部」「待批改」 tab: 列出所有派發的作業 (即使 0 繳交)
+        // 「已批改」「已退回」「遲交」 tab: 不補 (沒符合的不該硬擺一個空殼)
+        if(tab === 'all' || tab === 'pending'){
+          byAsg[a.id] = [];
+        }
       });
+      console.log('[rSub] byAsg keys=', Object.keys(byAsg).length, '| asg.length=', _asgArr.length, '| tab=', tab, '| cls=', _clsFilter||'(all)');
+    }
+    // ★ Empty 判定: byAsg 也空才真的空 (list 空但 byAsg 有作業就會渲染 0/130)
+    if(Object.keys(byAsg).length === 0){
+      listWrap.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '📭'),
+        el('div', null, '沒有符合的繳交記錄')
+      ));
+      return;
     }
     // 排序:依 dueAt 早到晚,沒 dueAt 排後面
+    //   用 helper 函式相容 assignments 是 array 或 object
+    const _findAsg = (id) => {
+      const raw = App.db.assignments;
+      if(Array.isArray(raw)) return raw.find(x => x && x.id === id);
+      if(raw && typeof raw === 'object') return Object.values(raw).find(x => x && x.id === id);
+      return null;
+    };
     const asgIds = Object.keys(byAsg).sort((a, b) => {
-      const aA = App.db.assignments.find(x => x.id === a);
-      const aB = App.db.assignments.find(x => x.id === b);
+      const aA = _findAsg(a);
+      const aB = _findAsg(b);
       return (aA?.dueAt || aA?.due || '9999') < (aB?.dueAt || aB?.due || '9999') ? -1 : 1;
     });
 
