@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-optimistic-v2';
+const APP_BUILD = '2026-06-01-sync-optimistic-v3';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2080,35 +2080,17 @@ const Sync = (() => {
           });
         }
       } catch(e){ console.warn('[firebase] anon-auth setup error:', e); }
-      // ★ 樂觀模式:不再用 .info/connected 偵測 (它會在初始時回 false 把 online 拉回 connecting)
-      //   直接信任 initializeApp 成功 = 已就緒;若實際連線失敗,後續操作會 throw 由各自處理
-      // 清掉 20s timeout (已經是 online 了,不需要 timeout 防護)
+      // ★ 樂觀模式:狀態保持 'online',即使 attachListeners 內部失敗
+      //   listener 失敗不該讓「同步狀態」變紅,個別讀寫操作會自己處理
       if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
-      attachListeners();
-      // 連線逾時提示:從 8s 拉到 20s (慢網路 / 手機冷啟動需要時間)
-      // 不再 toast 提示 (已有狀態指示器),改成靜默 error + 自動重試
-      connectTimer = setTimeout(()=> {
-        if(App.fbStatus === 'connecting'){
-          App.fbStatus = 'error';
-          console.warn('[firebase] 連線逾時 20s,將自動重試');
-          rerender();
-          // 30s 後自動重試 (避免一直卡 error 狀態)
-          if(!App._fbRetryTimer){
-            App._fbRetryTimer = setTimeout(()=> {
-              App._fbRetryTimer = null;
-              if(App.fbStatus !== 'online'){
-                dbg('[firebase] 自動重試連線');
-                init();
-              }
-            }, 30000);
-          }
-        }
-      }, 20000);
+      try { attachListeners(); } catch(e){ console.warn('[firebase] attachListeners failed:', e); }
+      // 不再設 20s timer (樂觀模式)
       return true;
     } catch(e){
+      // 只有 initializeApp / database().ref 本身 throw 才會到這裡
+      // (絕大多數是 config 格式錯誤)
       App.fbStatus = 'error';
       console.warn('[firebase] 設定錯誤:', e);
-      // 不再 toast (改用 UI 狀態指示),避免每次重整都看到紅錯訊
       return false;
     }
   }
