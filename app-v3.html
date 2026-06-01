@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-rerender-typing-guard';
+const APP_BUILD = '2026-06-01-rest-fallback-2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -14362,38 +14362,61 @@ function rSFeedback(content){
   if(existing){
     actions.appendChild(el('button', { class:'btn', onclick:()=> { App._feedbackEdit = false; rerender(); } }, '取消'));
   }
-  actions.appendChild(el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick:()=> {
-    const text = ta.value.trim();
-    if(existing){
-      // 更新並紀錄歷史
-      const prevHistory = Array.isArray(existing.editHistory) ? existing.editHistory.slice() : [];
-      prevHistory.push({ ts: existing.ts, ratings: Object.assign({}, existing.ratings), text: existing.text || '' });
-      existing.ratings = Object.assign({}, ratings);
-      existing.text = text;
-      existing.ts = Date.now();
-      existing.editHistory = prevHistory;
-    } else {
-      const rec = {
-        id: nid(),
-        studentId: me.id,
-        studentName: me.name,
-        cls: me.cls || '',
-        sid: me.sid || '',
-        term: term,
-        ratings: Object.assign({}, ratings),
-        text: text,
-        ts: Date.now(),
-        editHistory: []
-      };
-      if(!Array.isArray(App.db.feedbacks)) App.db.feedbacks = [];
-      App.db.feedbacks.push(rec);
+  actions.appendChild(el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: async (ev)=> {
+    const btn = ev.target;
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '送出中...';
+    const safety = setTimeout(()=> { try { btn.disabled = false; btn.textContent = orig; } catch(_){} }, 15000);
+    try {
+      const text = ta.value.trim();
+      let rec;
+      if(existing){
+        const prevHistory = Array.isArray(existing.editHistory) ? existing.editHistory.slice() : [];
+        prevHistory.push({ ts: existing.ts, ratings: Object.assign({}, existing.ratings), text: existing.text || '' });
+        existing.ratings = Object.assign({}, ratings);
+        existing.text = text;
+        existing.ts = Date.now();
+        existing.editHistory = prevHistory;
+        rec = existing;
+      } else {
+        rec = {
+          id: nid(),
+          studentId: me.id,
+          studentName: me.name,
+          cls: me.cls || '',
+          sid: me.sid || '',
+          term: term,
+          ratings: Object.assign({}, ratings),
+          text: text,
+          ts: Date.now(),
+          editHistory: []
+        };
+        if(!Array.isArray(App.db.feedbacks)) App.db.feedbacks = [];
+        App.db.feedbacks.push(rec);
+      }
+      saveDB();
+      // ★ 用 fbWriteRow (SDK 5s → REST 10s fallback) 取代 setMap
+      const clean = JSON.parse(JSON.stringify(rec));
+      let writeResult = { ok:false, method:'' };
+      if(typeof fbWriteRow === 'function'){
+        writeResult = await fbWriteRow('feedbacks', clean.id, clean);
+      }
+      try { bcNotify(); } catch(_){}
+      App._feedbackEdit = false;
+      if(writeResult.ok){
+        toast('✅ 回饋已送出 (' + writeResult.method + ', 匿名)','success', 4000);
+      } else {
+        toast('⚠️ 已存本機, 雲端同步失敗: ' + (writeResult.err||'') + '\n系統會自動重試', 'warn', 8000);
+      }
+    } catch(e){
+      console.error('[feedback-save]', e);
+      toast('儲存失敗: ' + (e.message||e), 'danger', 8000);
+    } finally {
+      clearTimeout(safety);
+      try { btn.disabled = false; btn.textContent = orig; } catch(_){}
+      try { rerender(); } catch(_){}
     }
-    saveDB();
-    try { Sync.setMap('feedbacks', App.db.feedbacks); } catch(e){_swallow('auto',e)}
-    bcNotify();
-    App._feedbackEdit = false;
-    toast('✅ 回饋已送出（匿名）','success');
-    rerender();
   } }, existing ? '💾 更新' : '📤 送出回饋'));
   formCard.appendChild(actions);
   content.appendChild(formCard);
@@ -19653,23 +19676,37 @@ function openEvalDimsConfig(){
       setEvalDims(cleaned);
       console.log('[dims-save] localStorage saved, count=', cleaned.length);
 
-      let cloudOk = false, cloudErr = '';
-      try {
-        if(App.fbRef){
+      let cloudOk = false, cloudErr = '', cloudMethod = '';
+      // ★ 先試 SDK 5 秒, 失敗改 REST 10 秒 (跟公告/作業一樣的雙重寫入)
+      if(App.fbRef){
+        try {
           await Promise.race([
             App.fbRef.child('settings/evalDims').set(cleaned),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('雲端寫入超時 (8 秒)')), 8000))
+            new Promise((_, rej) => setTimeout(() => rej(new Error('SDK 超時 (5 秒)')), 5000))
           ]);
-          cloudOk = true;
-          console.log('[dims-save] cloud OK');
-        } else cloudErr = 'Firebase 未連線';
-      } catch(e){
-        cloudErr = e.message || String(e);
-        console.error('[dims-save] cloud fail', e);
+          cloudOk = true; cloudMethod = 'sdk';
+          console.log('[dims-save] SDK OK');
+        } catch(sdkErr){
+          console.warn('[dims-save] SDK 失敗, 改 REST:', sdkErr.message);
+          try {
+            if(typeof fbWriteRest === 'function'){
+              await fbWriteRest('settings/evalDims', cleaned, 10000);
+              cloudOk = true; cloudMethod = 'rest';
+              console.log('[dims-save] REST OK');
+            } else {
+              cloudErr = 'SDK fail + REST helper 未載入: ' + sdkErr.message;
+            }
+          } catch(restErr){
+            cloudErr = 'SDK fail: ' + sdkErr.message + ' / REST fail: ' + (restErr.message||restErr);
+            console.error('[dims-save] REST 也失敗', restErr);
+          }
+        }
+      } else {
+        cloudErr = 'Firebase 未連線';
       }
 
       const msg = cloudOk
-        ? '✅ 已儲存 ' + cleaned.length + ' 個評分項目 (已同步雲端)'
+        ? '✅ 已儲存 ' + cleaned.length + ' 個評分項目 (已同步雲端 ' + cloudMethod + ')'
         : '⚠️ 已存本機 (雲端失敗: ' + cloudErr + ')';
       try { await confirmDlg(msg, { title:'儲存結果', cancelText:'', okText:'好' }); } catch(_){}
       m.close();
