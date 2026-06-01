@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-semester-hide-others';
+const APP_BUILD = '2026-06-02-modal-typing-lock';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -26147,6 +26147,15 @@ function rerender(){
   try {
     const a = document.activeElement;
     const isTypingNow = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+    // ★ 進一步保護: 若 modal 開著 + 內部有 input/textarea 被 focus → 鎖住 rerender 直到 modal 關閉
+    //   (避免 modal 編輯時被 BroadcastChannel / Firebase listener 打斷打字)
+    const modalOpen = !!document.querySelector('#modal-host .modal, .modal-host > .modal');
+    if(modalOpen && isTypingNow){
+      // 不固定 timer, 直接放棄這次 rerender — modal 關閉後別人 (如儲存按鈕) 會主動呼叫 rerender
+      console.log('[rerender] modal 編輯中, 跳過');
+      App._rerenderSkippedDuringModal = true;
+      return;
+    }
     if(isTypingNow){
       if(App._rerenderDeferred) return;  // 已排隊
       App._rerenderDeferred = setTimeout(()=> {
@@ -26160,6 +26169,11 @@ function rerender(){
     if(App._rerenderDeferred){
       clearTimeout(App._rerenderDeferred);
       App._rerenderDeferred = null;
+    }
+    // 若 modal 期間有被 skip 過 → 現在沒 typing 也沒 modal 開, 補一次 render
+    if(App._rerenderSkippedDuringModal && !modalOpen){
+      App._rerenderSkippedDuringModal = false;
+      // 繼續往下 render
     }
   } catch(_){}
 
