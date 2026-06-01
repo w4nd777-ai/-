@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-semester-wizard-plus';
+const APP_BUILD = '2026-06-01-2fa-totp';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -725,6 +725,439 @@ function isPasswordHashed(stored){
  */
 function isPasswordV2(stored){
   return typeof stored === 'string' && stored.indexOf('v2$') === 0;
+}
+
+/* ════════════════════════════════════════════════════════════
+   FEATURE #18 — TOTP 2FA (Google Authenticator 相容)
+   ──────────────────────────────────────────────────────────── */
+const _TOTP_B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+// Base32 編碼 (Google Authenticator 標準)
+function _totpB32Encode(bytes){
+  let bits = '';
+  for(let i = 0; i < bytes.length; i++){
+    bits += bytes[i].toString(2).padStart(8, '0');
+  }
+  while(bits.length % 5) bits += '0';
+  let out = '';
+  for(let i = 0; i < bits.length; i += 5){
+    out += _TOTP_B32_ALPHABET[parseInt(bits.slice(i, i+5), 2)];
+  }
+  return out;
+}
+
+// Base32 解碼 (給 HMAC 計算用)
+function _totpB32Decode(b32){
+  b32 = String(b32 || '').toUpperCase().replace(/=/g, '').replace(/\s/g, '');
+  let bits = '';
+  for(const c of b32){
+    const v = _TOTP_B32_ALPHABET.indexOf(c);
+    if(v < 0) throw new Error('Invalid base32 character: ' + c);
+    bits += v.toString(2).padStart(5, '0');
+  }
+  const byteLen = Math.floor(bits.length / 8);
+  const bytes = new Uint8Array(byteLen);
+  for(let i = 0; i < byteLen; i++){
+    bytes[i] = parseInt(bits.slice(i*8, i*8+8), 2);
+  }
+  return bytes;
+}
+
+// 產生 20-byte 隨機 secret,回傳 base32 字串
+function _totpGenerateSecret(){
+  const bytes = new Uint8Array(20);
+  crypto.getRandomValues(bytes);
+  return _totpB32Encode(bytes);
+}
+
+// 算 HMAC-SHA1
+async function _totpHmacSha1(keyBytes, counterBytes){
+  const key = await crypto.subtle.importKey('raw', keyBytes, {name:'HMAC', hash:'SHA-1'}, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, counterBytes);
+  return new Uint8Array(sig);
+}
+
+// 算 6 位 TOTP 碼 (給定 secret + 時間 ms)
+async function _totpCompute(secretB32, timestampMs){
+  const t = Math.floor((timestampMs || Date.now()) / 1000 / 30);
+  const counter = new Uint8Array(8);
+  let v = t;
+  for(let i = 7; i >= 0; i--){
+    counter[i] = v & 0xff;
+    v = Math.floor(v / 256);
+  }
+  const keyBytes = _totpB32Decode(secretB32);
+  const hmac = await _totpHmacSha1(keyBytes, counter);
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const code = ((hmac[offset] & 0x7f) << 24)
+             | ((hmac[offset+1] & 0xff) << 16)
+             | ((hmac[offset+2] & 0xff) << 8)
+             | (hmac[offset+3] & 0xff);
+  return String(code % 1000000).padStart(6, '0');
+}
+
+// 驗 6 位碼,自動容許 ±1 個 30 秒窗 (時鐘漂移)
+async function _totpVerify(secretB32, inputCode, driftWindows){
+  inputCode = String(inputCode || '').replace(/\D/g, '');
+  if(inputCode.length !== 6) return false;
+  const drift = driftWindows == null ? 1 : driftWindows;
+  const now = Date.now();
+  for(let i = -drift; i <= drift; i++){
+    try {
+      const code = await _totpCompute(secretB32, now + i * 30000);
+      if(code === inputCode) return true;
+    } catch(_){}
+  }
+  return false;
+}
+
+// 產生 10 個救援碼 (XXXX-XXXX 格式)
+function _totpGenerateBackupCodes(n){
+  n = n || 10;
+  const out = [];
+  for(let i = 0; i < n; i++){
+    const bytes = new Uint8Array(5);
+    crypto.getRandomValues(bytes);
+    let hex = '';
+    for(const b of bytes) hex += b.toString(16).padStart(2,'0');
+    hex = hex.toUpperCase();
+    out.push(hex.slice(0,4) + '-' + hex.slice(4,8));
+  }
+  return out;
+}
+
+// SHA-256 hash (給救援碼存 hash 不存明文用)
+async function _totpHashBackupCode(plain){
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(String(plain || '').toUpperCase().replace(/[^A-F0-9-]/g, '')));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// 組 otpauth:// URI 給 QR 用
+function _totpOtpauthURL(secretB32, accountLabel, issuer){
+  const lab = encodeURIComponent(accountLabel || 'user');
+  const iss = encodeURIComponent(issuer || 'CMS');
+  return 'otpauth://totp/' + iss + ':' + lab + '?secret=' + secretB32 + '&issuer=' + iss + '&algorithm=SHA1&digits=6&period=30';
+}
+
+// 產生 QR code 圖片 URL (用 qrserver API)
+function _totpQrImageUrl(otpauthURL){
+  return 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=' + encodeURIComponent(otpauthURL);
+}
+
+// 登入流程的 2FA 挑戰 modal — 回傳 Promise<true|false>
+//   true  = 通過(TOTP 碼或救援碼)
+//   false = 取消 / 失敗 / 沒回應
+async function prompt2FACode(account){
+  if(!account || !account.totp || !account.totp.enabled) return true;   // 沒開 2FA 直接過
+  return new Promise(resolve => {
+    let resolved = false;
+    const done = (v) => { if(resolved) return; resolved = true; try { m.close(); } catch(_){} resolve(v); };
+    // mode: 'totp' 或 'backup'
+    let mode = 'totp';
+    const m = (typeof modal === 'function') ? modal('') : null;
+    if(!m){ resolve(false); return; }
+    // 攔截 close 視為取消
+    const origClose = m.close;
+    m.close = function(){ done(false); if(typeof origClose === 'function') origClose.apply(m, arguments); };
+
+    function render(){
+      m.root.innerHTML = '';
+      m.root.appendChild(el('h2', null, '🔐 兩步驟驗證'));
+      m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+        mode === 'totp' ? '請輸入你的 Authenticator App 顯示的 6 位驗證碼' : '請輸入一組 8 字元救援碼 (XXXX-XXXX)'));
+
+      const f = el('div', { class:'field' });
+      const inp = el('input', {
+        class:'input',
+        placeholder: mode === 'totp' ? '6 位數字' : 'ABCD-1234',
+        maxlength: mode === 'totp' ? 6 : 9,
+        inputmode: mode === 'totp' ? 'numeric' : 'text',
+        autocapitalize: 'characters',
+        autocomplete:'one-time-code',
+        spellcheck:'false',
+        style: { fontSize:'24px',letterSpacing:'6px',textAlign:'center',fontFamily:'ui-monospace,monospace' }
+      });
+      // TOTP 限數字
+      if(mode === 'totp'){
+        inp.addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0,6); });
+      } else {
+        inp.addEventListener('input', e => {
+          let v = e.target.value.toUpperCase().replace(/[^A-F0-9-]/g, '');
+          if(v.length > 4 && v[4] !== '-' && v.length > 4) v = v.slice(0,4) + '-' + v.slice(4).replace(/-/g,'');
+          v = v.slice(0,9);
+          e.target.value = v;
+        });
+      }
+      f.appendChild(inp);
+      m.root.appendChild(f);
+
+      const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
+      m.root.appendChild(err);
+
+      const verify = async () => {
+        const v = inp.value.trim();
+        if(mode === 'totp'){
+          if(v.length !== 6){ err.textContent = '請輸入 6 位驗證碼'; err.style.display = 'block'; return; }
+          try {
+            const ok = await _totpVerify(account.totp.secret, v, 1);
+            if(ok){ done(true); return; }
+          } catch(_){}
+          err.textContent = '驗證碼錯誤,請確認 App 顯示的最新號碼'; err.style.display = 'block';
+          inp.value = ''; inp.focus();
+        } else {
+          // backup code
+          const clean = v.replace(/\s/g,'').toUpperCase();
+          if(clean.length !== 9 || clean[4] !== '-'){
+            err.textContent = '救援碼格式錯誤 (XXXX-XXXX)'; err.style.display = 'block'; return;
+          }
+          try {
+            const hash = await _totpHashBackupCode(clean);
+            const list = Array.isArray(account.totp.backupCodes) ? account.totp.backupCodes : [];
+            const hit = list.find(bc => bc && bc.hash === hash && !bc.used);
+            if(hit){
+              hit.used = true;
+              hit.usedAt = Date.now();
+              try { saveDB(true); Sync.setRow('accounts', account.id, account); } catch(_){}
+              done(true);
+              return;
+            }
+          } catch(_){}
+          err.textContent = '救援碼錯誤或已使用過'; err.style.display = 'block';
+          inp.value = ''; inp.focus();
+        }
+      };
+
+      const actions = el('div', { class:'modal-actions' });
+      actions.appendChild(el('button', { class:'btn', onclick: ()=> done(false) }, '取消'));
+      actions.appendChild(el('button', { class:'btn btn-primary', onclick: verify }, '✅ 驗證'));
+      m.root.appendChild(actions);
+
+      m.root.appendChild(el('div', { style:{textAlign:'center',marginTop:'8px'} },
+        el('a', {
+          href:'javascript:void(0)',
+          class:'small',
+          style:{textDecoration:'underline',color:'var(--text-muted)'},
+          onclick: ()=> { mode = (mode === 'totp' ? 'backup' : 'totp'); render(); }
+        }, mode === 'totp' ? '✏️ 改用救援碼' : '↩ 回 Authenticator')
+      ));
+
+      inp.addEventListener('keydown', e => { if(e.key === 'Enter') verify(); });
+      setTimeout(()=> { try { inp.focus(); } catch(_){} }, 100);
+    }
+    render();
+  });
+}
+
+// 啟用 2FA 流程 — 3 步驟 modal
+async function open2FAEnable(account){
+  if(!account){ toast('找不到帳號','danger'); return; }
+  if(!crypto || !crypto.subtle){ toast('瀏覽器不支援 Web Crypto,無法啟用 2FA','danger'); return; }
+  const secret = _totpGenerateSecret();
+  const issuer = (App.db.settings && App.db.settings.schoolName) || '課程管理系統';
+  const accountLabel = account.username || account.name || 'user';
+  const otpauth = _totpOtpauthURL(secret, accountLabel, issuer);
+  const qrUrl = _totpQrImageUrl(otpauth);
+
+  let step = 1;
+  let backupCodes = null;     // 明文 backup codes (給用戶看一次)
+  const m = modal('');
+  render();
+
+  function render(){
+    m.root.innerHTML = '';
+    m.root.appendChild(el('h2', null, '🔐 啟用兩步驟驗證 — 步驟 ' + step + ' / 3'));
+    if(step === 1) renderStep1();
+    else if(step === 2) renderStep2();
+    else if(step === 3) renderStep3();
+  }
+
+  function renderStep1(){
+    m.root.appendChild(el('div', { class:'small', style:{marginBottom:'10px',lineHeight:'1.6'} },
+      '① 開啟你手機上的 Authenticator App (Google / Microsoft / Authy 等)',
+      el('br'),
+      '② 點 App 內的「+ 新增」→ 選「掃描 QR Code」',
+      el('br'),
+      '③ 對準下方 QR code → App 會自動加入帳號'));
+    // QR
+    const qrImg = el('img', {
+      src: qrUrl,
+      style:{display:'block',margin:'0 auto 10px',background:'#fff',padding:'8px',borderRadius:'8px',width:'240px',height:'240px'}
+    });
+    m.root.appendChild(qrImg);
+    // 手動輸入備案
+    m.root.appendChild(el('div', { class:'small muted', style:{textAlign:'center',marginBottom:'6px'} }, '無法掃描?手動輸入這串:'));
+    const secretBox = el('div', { style:{textAlign:'center',padding:'8px',background:'var(--surface-2)',borderRadius:'6px',fontFamily:'ui-monospace,monospace',fontSize:'13px',letterSpacing:'2px',marginBottom:'10px',wordBreak:'break-all'} },
+      secret);
+    m.root.appendChild(secretBox);
+    m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+      '帳號名稱:' + issuer + ':' + accountLabel + ' (App 內會自動帶入)'));
+    const actions = el('div', { class:'modal-actions' });
+    actions.appendChild(el('button', { class:'btn', onclick: ()=> m.close() }, '取消'));
+    actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> { step = 2; render(); } }, 'App 已加入,下一步 →'));
+    m.root.appendChild(actions);
+  }
+
+  function renderStep2(){
+    m.root.appendChild(el('div', { class:'small', style:{marginBottom:'10px',lineHeight:'1.6'} },
+      '為了確認你正確設定了 App,請輸入 App 上「目前顯示」的 6 位驗證碼:'));
+    const f = el('div', { class:'field' });
+    const inp = el('input', {
+      class:'input',
+      placeholder:'6 位數字',
+      maxlength:6,
+      inputmode:'numeric',
+      autocomplete:'one-time-code',
+      style:{fontSize:'24px',letterSpacing:'6px',textAlign:'center',fontFamily:'ui-monospace,monospace'}
+    });
+    inp.addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g,'').slice(0,6); });
+    f.appendChild(inp);
+    m.root.appendChild(f);
+    const err = el('div', { class:'small', style:{color:'var(--danger)',display:'none',marginTop:'4px'} });
+    m.root.appendChild(err);
+
+    const verify = async () => {
+      const v = inp.value.trim();
+      if(v.length !== 6){ err.textContent = '請輸入 6 位數字'; err.style.display='block'; return; }
+      try {
+        const ok = await _totpVerify(secret, v, 1);
+        if(ok){
+          // 驗證通過 → 產生救援碼,寫進 account
+          backupCodes = _totpGenerateBackupCodes(10);
+          const hashed = [];
+          for(const code of backupCodes){
+            hashed.push({ hash: await _totpHashBackupCode(code), used:false, usedAt:null });
+          }
+          account.totp = {
+            enabled: true,
+            secret: secret,
+            backupCodes: hashed,
+            enabledAt: Date.now()
+          };
+          saveDB(true);
+          try { Sync.setRow('accounts', account.id, account); } catch(_){}
+          step = 3;
+          render();
+          return;
+        }
+      } catch(_){}
+      err.textContent = '驗證碼錯誤,請確認 App 顯示的最新號碼'; err.style.display = 'block';
+      inp.value = ''; inp.focus();
+    };
+    inp.addEventListener('keydown', e => { if(e.key === 'Enter') verify(); });
+
+    const actions = el('div', { class:'modal-actions' });
+    actions.appendChild(el('button', { class:'btn', onclick: ()=> { step = 1; render(); } }, '← 上一步'));
+    actions.appendChild(el('button', { class:'btn btn-primary', onclick: verify }, '✅ 驗證並啟用'));
+    m.root.appendChild(actions);
+    setTimeout(()=> { try { inp.focus(); } catch(_){} }, 100);
+  }
+
+  function renderStep3(){
+    m.root.appendChild(el('div', { class:'card', style:{background:'var(--success-soft)',borderColor:'var(--success)'} },
+      el('div', { style:{fontWeight:'700',color:'var(--success)'} }, '🎉 2FA 已啟用!')));
+    m.root.appendChild(el('div', { class:'small', style:{marginTop:'10px',lineHeight:'1.7',fontWeight:'700',color:'var(--danger)'} },
+      '⚠️ 重要:請立刻保存以下 10 組救援碼 (這是唯一顯示的機會)'));
+    m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
+      '當你手機遺失/Authenticator App 無法用時,可以用任一組救援碼登入 (每組只能用一次)。'));
+    // 救援碼方塊
+    const grid = el('div', { style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'6px',padding:'12px',background:'#fff8dc',border:'1px dashed #f0c040',borderRadius:'8px',marginBottom:'10px'} });
+    backupCodes.forEach(c => {
+      grid.appendChild(el('div', { style:{padding:'6px 10px',background:'#fff',borderRadius:'4px',fontFamily:'ui-monospace,monospace',fontSize:'14px',letterSpacing:'2px',textAlign:'center'} }, c));
+    });
+    m.root.appendChild(grid);
+    // 工具按鈕
+    const tools = el('div', { class:'flex', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap'} });
+    tools.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+      try { await navigator.clipboard.writeText(backupCodes.join('\n')); toast('已複製到剪貼簿','success'); }
+      catch(_){ toast('複製失敗','danger'); }
+    }}, '📋 複製全部'));
+    tools.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> {
+      const content = '課程管理系統 - 2FA 救援碼\n帳號:' + accountLabel + '\n產生時間:' + new Date().toLocaleString() + '\n\n' + backupCodes.join('\n') + '\n\n注意:每組只能用一次,用完請到設定重新產生';
+      const blob = new Blob([content], { type:'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = '2fa-backup-codes-' + accountLabel + '-' + td() + '.txt';
+      a.click();
+      setTimeout(()=> URL.revokeObjectURL(url), 500);
+      toast('已下載','success');
+    }}, '⬇️ 下載 .txt'));
+    tools.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> { try { window.print(); } catch(_){} } }, '🖨 列印'));
+    m.root.appendChild(tools);
+    // 必勾才能關
+    const chkLbl = el('label', { style:{display:'flex',gap:'8px',alignItems:'center',marginTop:'10px',padding:'10px',background:'var(--warn-soft)',borderRadius:'8px'} });
+    const chk = el('input', { type:'checkbox' });
+    chkLbl.appendChild(chk);
+    chkLbl.appendChild(el('span', null, '我已妥善保存救援碼 (截圖 / 抄寫 / 下載)'));
+    m.root.appendChild(chkLbl);
+    const actions = el('div', { class:'modal-actions' });
+    const closeBtn = el('button', { class:'btn btn-primary', disabled:true, onclick: ()=> { m.close(); rerender(); } }, '✓ 完成');
+    chk.addEventListener('change', ()=> { closeBtn.disabled = !chk.checked; });
+    actions.appendChild(closeBtn);
+    m.root.appendChild(actions);
+  }
+}
+
+// 停用 2FA — 要先 prompt 一次 2FA 碼確認
+async function open2FADisable(account){
+  if(!account || !account.totp || !account.totp.enabled){ toast('未啟用 2FA','warn'); return; }
+  const ok = await confirmDlg('停用 2FA 後,登入只剩密碼一關。\n要先驗證一次 2FA 才能停用。\n\n確定停用嗎?', { danger:true, title:'⚠ 停用兩步驟驗證' });
+  if(!ok) return;
+  // 用同一個登入挑戰 modal 確認
+  const verified = await prompt2FACode(account);
+  if(!verified){ toast('停用取消 (驗證未通過)','warn'); return; }
+  // 清掉
+  delete account.totp;
+  saveDB(true);
+  try { Sync.setRow('accounts', account.id, account); } catch(_){}
+  toast('已停用 2FA','warn', 4000);
+  rerender();
+}
+
+// 重新產生救援碼 — 要先驗 2FA
+async function open2FARegenBackups(account){
+  if(!account || !account.totp || !account.totp.enabled){ toast('未啟用 2FA','warn'); return; }
+  const ok = await confirmDlg('重新產生會讓舊的救援碼全部失效。\n要先驗證一次 2FA 才能產生新的。\n\n繼續嗎?', { title:'🔄 重新產生救援碼' });
+  if(!ok) return;
+  const verified = await prompt2FACode(account);
+  if(!verified){ toast('取消 (驗證未通過)','warn'); return; }
+  const newCodes = _totpGenerateBackupCodes(10);
+  const hashed = [];
+  for(const code of newCodes){
+    hashed.push({ hash: await _totpHashBackupCode(code), used:false, usedAt:null });
+  }
+  account.totp.backupCodes = hashed;
+  saveDB(true);
+  try { Sync.setRow('accounts', account.id, account); } catch(_){}
+  // 顯示新救援碼 modal
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '🔄 新的救援碼'));
+  m.root.appendChild(el('div', { class:'small', style:{marginBottom:'10px',color:'var(--danger)',fontWeight:'700'} },
+    '⚠️ 舊救援碼已全部失效,以下是新的 10 組 (唯一顯示機會)'));
+  const grid = el('div', { style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'6px',padding:'12px',background:'#fff8dc',border:'1px dashed #f0c040',borderRadius:'8px',marginBottom:'10px'} });
+  newCodes.forEach(c => {
+    grid.appendChild(el('div', { style:{padding:'6px 10px',background:'#fff',borderRadius:'4px',fontFamily:'ui-monospace,monospace',fontSize:'14px',letterSpacing:'2px',textAlign:'center'} }, c));
+  });
+  m.root.appendChild(grid);
+  const tools = el('div', { class:'flex', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap'} });
+  tools.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+    try { await navigator.clipboard.writeText(newCodes.join('\n')); toast('已複製到剪貼簿','success'); }
+    catch(_){ toast('複製失敗','danger'); }
+  }}, '📋 複製全部'));
+  tools.appendChild(el('button', { class:'btn btn-sm', onclick: ()=> {
+    const content = '課程管理系統 - 2FA 救援碼 (重新產生)\n帳號:' + account.username + '\n產生時間:' + new Date().toLocaleString() + '\n\n' + newCodes.join('\n');
+    const blob = new Blob([content], { type:'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = '2fa-backup-codes-' + (account.username||'user') + '-' + td() + '.txt';
+    a.click();
+    setTimeout(()=> URL.revokeObjectURL(url), 500);
+    toast('已下載','success');
+  }}, '⬇️ 下載 .txt'));
+  m.root.appendChild(tools);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> { m.close(); rerender(); } }, '✓ 完成'));
+  m.root.appendChild(actions);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -6557,6 +6990,21 @@ function renderLoginTeacherStage(){
         saveDB(true);  // 立即寫入（避免使用者立即關掉視窗）
         try { Sync.setRow('accounts', candidate.id, candidate); } catch(e){_swallow('auto',e)}
       } catch(e){ _swallow('upgrade-acc-pw', e); }
+    }
+    // ★ FEATURE #18: 2FA gate — 密碼通過後,如果開了 2FA 還要再過一關
+    if(candidate.totp && candidate.totp.enabled){
+      try {
+        const ok2fa = await prompt2FACode(candidate);
+        if(!ok2fa){
+          toast('已取消登入 (2FA 驗證未通過)','warn', 4000);
+          setMascotState('idle');
+          return;
+        }
+      } catch(e){
+        console.warn('[login 2fa]', e);
+        toast('2FA 驗證錯誤,登入取消','danger', 4000);
+        return;
+      }
     }
     const a = candidate;
     App.session = { role:'teacher', id:a.id, name:a.name, username:a.username, subRole: a.subRole || null };
@@ -14134,6 +14582,35 @@ function rSettings(content){
     '修改頭像、顯示名稱、密碼'));
   cardProfile.appendChild(el('button', { class:'btn btn-primary', onclick: openTeacherProfile }, '✏️ 編輯我的個人資料'));
   content.appendChild(cardProfile);
+
+  // ★ FEATURE #18: 兩步驟驗證 (2FA)
+  try {
+    const meAcc = (App.db.accounts||[]).find(x => x.id === (App.session && App.session.id));
+    if(meAcc){
+      const card2fa = el('div', { class:'card', style:{marginTop:'12px'} });
+      const totp = meAcc.totp || {};
+      const enabled = !!(totp && totp.enabled);
+      card2fa.appendChild(el('h3', null, '🔐 兩步驟驗證 (2FA)'));
+      if(enabled){
+        card2fa.appendChild(el('div', { class:'small', style:{marginBottom:'6px',color:'var(--success)',fontWeight:'600'} },
+          '✅ 已啟用 (' + (totp.enabledAt ? new Date(totp.enabledAt).toLocaleDateString('zh-TW') : '-') + ')'));
+        const unusedBackups = (Array.isArray(totp.backupCodes) ? totp.backupCodes.filter(b => b && !b.used).length : 0);
+        card2fa.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+          '剩餘未使用救援碼:' + unusedBackups + ' / ' + ((totp.backupCodes||[]).length || 0)));
+        card2fa.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap'} },
+          el('button', { class:'btn btn-sm', onclick: ()=> open2FARegenBackups(meAcc) }, '🔄 重新產生救援碼'),
+          el('button', { class:'btn btn-sm btn-danger', onclick: ()=> open2FADisable(meAcc) }, '🔓 停用 2FA')
+        ));
+      } else {
+        card2fa.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.6'} },
+          '啟用後,登入時除了密碼還要輸入 Authenticator App 顯示的 6 位數字。即使密碼外洩,別人也進不來帳號。',
+          el('br'),
+          '相容 Google Authenticator / Microsoft Authenticator / Authy / 1Password 等。'));
+        card2fa.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> open2FAEnable(meAcc) }, '🔐 啟用兩步驟驗證'));
+      }
+      content.appendChild(card2fa);
+    }
+  } catch(e){ console.warn('[rSettings 2FA]', e); }
 
   // account
   const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
