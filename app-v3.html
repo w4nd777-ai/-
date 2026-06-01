@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-eval-big-clear';
+const APP_BUILD = '2026-06-01-save-no-hang';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -17528,14 +17528,22 @@ function openAssignmentEdit(asg){
     try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_) {}
     if(isNew) App.db.assignments.push(rec);
     saveDB();
-    // ★ 跟公告一樣 await + 老實回報雲端寫入結果
+    // ★ await + 老實回報, 8 秒 timeout 防卡死
     let cloudOk = false, cloudErr = '';
     try {
       if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
-        try { await Sync.init(); } catch(_){}
+        try {
+          await Promise.race([
+            Sync.init(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
+          ]);
+        } catch(_){}
       }
       if(App.fbRef){
-        await App.fbRef.child('assignments').child(rec.id).set(rec);
+        await Promise.race([
+          App.fbRef.child('assignments').child(rec.id).set(rec),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('雲端寫入超時 (8 秒)')), 8000))
+        ]);
         cloudOk = true;
       } else {
         cloudErr = 'Firebase 同步未就緒';
@@ -17543,23 +17551,26 @@ function openAssignmentEdit(asg){
     } catch(e){
       cloudErr = e.code || e.message || String(e);
     }
-    bcNotify();
+    try { bcNotify(); } catch(_){}
     if(cloudOk){
       toast('✅ ' + (isNew?'已新增':'已更新') + ' (已同步到雲端,學生會收到)', 'success', 4000);
     } else {
-      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n學生暫時看不到, 系統會自動重試', 'warn', 12000);
+      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr, 'warn', 12000);
       console.warn('[assignment] cloud sync failed:', cloudErr);
       setTimeout(async ()=> {
         try {
           if(App.fbRef){
-            await App.fbRef.child('assignments').child(rec.id).set(rec);
+            await Promise.race([
+              App.fbRef.child('assignments').child(rec.id).set(rec),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('retry timeout')), 8000))
+            ]);
             try { toast('✅ 作業「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
           }
         } catch(_){}
       }, 5000);
     }
     m.close();
-    rerender();
+    try { rerender(); } catch(_){}
   }}, isNew?'新增':'儲存'));
   m.root.appendChild(actions);
 }
@@ -19532,27 +19543,25 @@ function openEvalDimsConfig(){
     const orig = btn.textContent;
     btn.disabled = true;
     btn.textContent = '儲存中...';
+    // 安全網: 12 秒一定恢復 (防卡死)
+    const safety = setTimeout(()=> {
+      try { btn.disabled = false; btn.textContent = orig; } catch(_){}
+    }, 12000);
+    let _closed = false;
     try {
       console.log('[dims-save] state=', JSON.stringify(state));
-      // 自動產生缺少的代號 (從 label 拼音或 dim+index)
       state.forEach((d, idx) => {
-        if(!d.key || !d.key.trim()){
-          d.key = 'dim' + (idx + 1);
-        }
-        if(!d.label || !d.label.trim()){
-          d.label = '項目 ' + (idx + 1);
-        }
+        if(!d.key || !d.key.trim()){ d.key = 'dim' + (idx + 1); }
+        if(!d.label || !d.label.trim()){ d.label = '項目 ' + (idx + 1); }
         d.max = Math.max(1, Math.min(10, parseInt(d.max, 10) || 5));
       });
-      // 去除空項目
       const cleaned = state.filter(d => d.label && d.label.trim());
       if(!cleaned.length){
         await confirmDlg('沒有任何評分項目, 至少要保留一個', { title:'不能空白', cancelText:'', okText:'好' });
-        btn.disabled = false; btn.textContent = orig; return;
+        return;
       }
-      // 處理重複代號 — 自動加後綴
       const seen = new Set();
-      cleaned.forEach((d, idx) => {
+      cleaned.forEach((d) => {
         let k = d.key;
         let n = 2;
         while(seen.has(k)){ k = d.key + '_' + n; n++; }
@@ -19566,7 +19575,10 @@ function openEvalDimsConfig(){
       let cloudOk = false, cloudErr = '';
       try {
         if(App.fbRef){
-          await App.fbRef.child('settings/evalDims').set(cleaned);
+          await Promise.race([
+            App.fbRef.child('settings/evalDims').set(cleaned),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('雲端寫入超時 (8 秒)')), 8000))
+          ]);
           cloudOk = true;
           console.log('[dims-save] cloud OK');
         } else cloudErr = 'Firebase 未連線';
@@ -19578,14 +19590,18 @@ function openEvalDimsConfig(){
       const msg = cloudOk
         ? '✅ 已儲存 ' + cleaned.length + ' 個評分項目 (已同步雲端)'
         : '⚠️ 已存本機 (雲端失敗: ' + cloudErr + ')';
-      await confirmDlg(msg, { title:'儲存結果', cancelText:'', okText:'好' });
+      try { await confirmDlg(msg, { title:'儲存結果', cancelText:'', okText:'好' }); } catch(_){}
       m.close();
-      rerender();
+      _closed = true;
+      try { rerender(); } catch(_){}
     } catch(e){
       console.error('[dims-save] EXCEPTION', e);
-      await confirmDlg('儲存失敗: ' + (e.message||String(e)) + '\n\n請截圖回報', { title:'錯誤', cancelText:'', okText:'知道了' });
-      btn.disabled = false;
-      btn.textContent = orig;
+      try { await confirmDlg('儲存失敗: ' + (e.message||String(e)) + '\n\n請截圖回報', { title:'錯誤', cancelText:'', okText:'知道了' }); } catch(_){}
+    } finally {
+      clearTimeout(safety);
+      if(!_closed){
+        try { btn.disabled = false; btn.textContent = orig; } catch(_){}
+      }
     }
   }
 
@@ -20423,25 +20439,27 @@ function openAnnouncementEdit(a){
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick: async (ev)=> {
-    // ★ 整段 wrap try/catch — 確保任何錯誤都會被使用者看到, 不會「按了沒反應」
     const saveBtn = ev.target;
     const origText = saveBtn.textContent;
     saveBtn.disabled = true;
     saveBtn.textContent = '儲存中...';
+    // ★ 安全網: 最遲 15 秒一定恢復按鈕 (避免「卡死」)
+    const safetyTimer = setTimeout(()=> {
+      try { saveBtn.disabled = false; saveBtn.textContent = origText; } catch(_){}
+      try { toast('⚠️ 雲端寫入太久 — 公告已存本機, 請檢查網路', 'warn', 8000); } catch(_){}
+    }, 15000);
     try {
       const t = iT.value.trim();
-      if(!t){ toast('標題必填','danger', 5000); saveBtn.disabled = false; saveBtn.textContent = origText; return; }
+      if(!t){ toast('標題必填','danger', 5000); return; }
       // ★ 解析排程時間
       let _scheduledAt = '';
       const _schedRaw = iSched.value.trim();
       if(_schedRaw){
         const _t = new Date(_schedRaw).getTime();
-        if(!Number.isFinite(_t)){
-          toast('預約時間格式錯誤','danger', 5000); saveBtn.disabled = false; saveBtn.textContent = origText; return;
-        }
+        if(!Number.isFinite(_t)){ toast('預約時間格式錯誤','danger', 5000); return; }
         if(_t <= Date.now()){
           const _ok = await confirmDlg('預約時間已過,要直接立即發布嗎?', { title:'時間已過' });
-          if(!_ok){ saveBtn.disabled = false; saveBtn.textContent = origText; return; }
+          if(!_ok) return;
           _scheduledAt = '';
         } else {
           _scheduledAt = _schedRaw;
@@ -20455,13 +20473,13 @@ function openAnnouncementEdit(a){
         _annTgtClsList = _annClsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
         if(!_annTgtClsList.length){
           await confirmDlg('「派發對象」選了「指定班級」, 但沒勾選任何班級\n\n請至少勾選一個班級, 或改回「全部學生」', { title:'請選擇班級', cancelText:'', okText:'好' });
-          saveBtn.disabled = false; saveBtn.textContent = origText; return;
+          return;
         }
       } else if(_annTgt === 'students'){
         _annTgtIds = Object.keys(_annStuChecks).filter(k => _annStuChecks[k].checked);
         if(!_annTgtIds.length){
           await confirmDlg('「派發對象」選了「指定學生」, 但沒勾選任何學生\n\n請至少勾選一位學生, 或改回「全部學生」', { title:'請選擇學生', cancelText:'', okText:'好' });
-          saveBtn.disabled = false; saveBtn.textContent = origText; return;
+          return;
         }
       }
       const rec = isNew ? { id:nid(), ts:Date.now() } : a;
@@ -20478,14 +20496,24 @@ function openAnnouncementEdit(a){
       rec.targetIds = _annTgtIds;
       if(isNew) App.db.announcements.push(rec);
       saveDB();
-      // ★ 修: 直接 await 雲端寫入, 失敗時老實告訴老師 (原本 setRow 失敗悄悄回 false, 老師以為成功)
+      // ★ 修: 直接 await 雲端寫入 + 8 秒 timeout, 避免 hang 死
       let cloudOk = false, cloudErr = '';
       try {
+        // Sync.init 也加 5 秒 timeout 避免 hang
         if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
-          try { await Sync.init(); } catch(_){}
+          try {
+            await Promise.race([
+              Sync.init(),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
+            ]);
+          } catch(_){}
         }
         if(App.fbRef){
-          await App.fbRef.child('announcements').child(rec.id).set(rec);
+          // ★ 8 秒 timeout: Firebase set() 在連線異常時可能永遠 hang
+          await Promise.race([
+            App.fbRef.child('announcements').child(rec.id).set(rec),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('雲端寫入超時 (8 秒)')), 8000))
+          ]);
           cloudOk = true;
         } else {
           cloudErr = 'Firebase 同步未就緒';
@@ -20493,38 +20521,43 @@ function openAnnouncementEdit(a){
       } catch(e){
         cloudErr = e.code || e.message || String(e);
       }
-      bcNotify();
-      if(isNew && !_scheduledAt && cloudOk) triggerWebhook('announcement', { title: rec.title, author: rec.author });
+      try { bcNotify(); } catch(_){}
+      if(isNew && !_scheduledAt && cloudOk) {
+        try { triggerWebhook('announcement', { title: rec.title, author: rec.author }); } catch(_){}
+      }
       if(_scheduledAt && cloudOk){
         const _dStr = new Date(_scheduledAt).toLocaleString('zh-TW',{hour12:false});
         toast('✅ 已排程於 ' + _dStr + ' 發送 (已同步雲端)','success', 5000);
       } else if(cloudOk){
         toast('✅ ' + (isNew?'已發布':'已更新') + ' (已同步到雲端,學生會收到)','success', 5000);
       } else {
-        // 雲端失敗 → 老實告訴老師 + 開始背景重試
-        toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n系統會自動重試', 'warn', 12000);
+        toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n系統會自動重試 (或老師按「強制同步」推上去)', 'warn', 12000);
         console.warn('[announcement] cloud sync failed:', cloudErr);
         setTimeout(async ()=> {
           try {
             if(App.fbRef){
-              await App.fbRef.child('announcements').child(rec.id).set(rec);
+              await Promise.race([
+                App.fbRef.child('announcements').child(rec.id).set(rec),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('retry timeout')), 8000))
+              ]);
               try { toast('✅ 公告「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
             }
           } catch(_){}
         }, 5000);
       }
       m.close();
-      rerender();
+      try { rerender(); } catch(_){}
     } catch(e){
-      // ★ 任何儲存錯誤一律彈 modal 告知 (不能讓「按了沒反應」發生)
       console.error('[announcement-save]', e);
       try {
-        await confirmDlg('儲存公告時發生錯誤:\n\n' + (e.message||String(e)) + '\n\n請截圖回報問題', { title:'儲存失敗', cancelText:'', okText:'知道了' });
+        await confirmDlg('儲存公告時發生錯誤:\n\n' + (e.message||String(e)) + '\n\n公告已存本機, 雲端可能還沒同步。', { title:'儲存失敗', cancelText:'', okText:'知道了' });
       } catch(_){
         try { toast('儲存失敗: ' + (e.message||e), 'danger', 8000); } catch(__){}
       }
-      saveBtn.disabled = false;
-      saveBtn.textContent = origText;
+    } finally {
+      // ★ 不管怎樣都要恢復按鈕狀態 (修「卡在儲存中」死局)
+      clearTimeout(safetyTimer);
+      try { saveBtn.disabled = false; saveBtn.textContent = origText; } catch(_){}
     }
   }}, isNew?'發布':'儲存'));
   m.root.appendChild(actions);
