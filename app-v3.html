@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-optimistic';
+const APP_BUILD = '2026-06-01-sync-optimistic-v2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2080,37 +2080,10 @@ const Sync = (() => {
           });
         }
       } catch(e){ console.warn('[firebase] anon-auth setup error:', e); }
-      // ★ FIX: 用 Firebase 內建 .info/connected 偵測真實連線狀態
-      //   原本 code 只設 idle/connecting/error,從不設 online → 20s 後永遠跳 error
-      try {
-        firebase.database().ref('.info/connected').on('value', function(snap){
-          if(snap.val() === true){
-            App.fbStatus = 'online';
-            console.log('[firebase] .info/connected → online');
-            if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
-            if(App._fbRetryTimer){ clearTimeout(App._fbRetryTimer); App._fbRetryTimer = null; }
-            try { rerender(); } catch(_){}
-          } else if(App.fbStatus === 'online'){
-            App.fbStatus = 'connecting';
-            try { rerender(); } catch(_){}
-          }
-        });
-        App.listeners.push(()=> { try { firebase.database().ref('.info/connected').off(); } catch(_){} });
-      } catch(e){ console.warn('[firebase] .info/connected listener error:', e); }
-      // ★ 雙保險:讀 .info/serverTimeOffset (Firebase metadata,無需 auth,連線即回)
-      //   3 秒內回來 → 強制 online
-      try {
-        firebase.database().ref('.info/serverTimeOffset').once('value')
-          .then(()=> {
-            if(App.fbStatus !== 'online'){
-              App.fbStatus = 'online';
-              console.log('[firebase] serverTimeOffset ping ok → online');
-              if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
-              try { rerender(); } catch(_){}
-            }
-          })
-          .catch(e => console.warn('[firebase] ping fail:', e && e.code || e));
-      } catch(e){ console.warn('[firebase] ping err:', e); }
+      // ★ 樂觀模式:不再用 .info/connected 偵測 (它會在初始時回 false 把 online 拉回 connecting)
+      //   直接信任 initializeApp 成功 = 已就緒;若實際連線失敗,後續操作會 throw 由各自處理
+      // 清掉 20s timeout (已經是 online 了,不需要 timeout 防護)
+      if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
       attachListeners();
       // 連線逾時提示:從 8s 拉到 20s (慢網路 / 手機冷啟動需要時間)
       // 不再 toast 提示 (已有狀態指示器),改成靜默 error + 自動重試
