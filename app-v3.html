@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-ping-fallback';
+const APP_BUILD = '2026-06-01-sync-ping-fix2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2094,13 +2094,14 @@ const Sync = (() => {
         });
         App.listeners.push(()=> { try { firebase.database().ref('.info/connected').off(); } catch(_){} });
       } catch(e){ console.warn('[firebase] .info/connected listener error:', e); }
-      // ★ 雙保險:直接 ping 一筆讀,若 3 秒內回來 → 強制 online (不等 .info/connected)
+      // ★ 雙保險:讀 .info/serverTimeOffset (Firebase metadata,無需 auth,連線即回)
+      //   3 秒內回來 → 強制 online
       try {
-        firebase.database().ref('cms-v3/' + room + '/.connectionTest').once('value')
+        firebase.database().ref('.info/serverTimeOffset').once('value')
           .then(()=> {
             if(App.fbStatus !== 'online'){
               App.fbStatus = 'online';
-              console.log('[firebase] ping ok → online');
+              console.log('[firebase] serverTimeOffset ping ok → online');
               if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
               try { rerender(); } catch(_){}
             }
