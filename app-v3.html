@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sub-dedupe';
+const APP_BUILD = '2026-06-01-push-unsynced';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2167,6 +2167,10 @@ const Sync = (() => {
       // ★ Step 3: 接 realtime listener,之後的變動即時推
       if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
       try { attachListeners(); } catch(e){ console.warn('[firebase] attachListeners failed:', e); }
+      // ★ Step 4: 推本機累積的「未同步」項目到雲端
+      //   情境:之前 Sync 未啟用時 (例如手機 SW 舊版) 學生註冊/繳交存了本機
+      //   現在 Sync 啟用後,把本機這些補推到雲端
+      try { setTimeout(()=> _pushLocalUnsynced().catch(()=>{}), 1500); } catch(_){}
       return true;
     } catch(e){
       App.fbStatus = 'error';
@@ -2409,6 +2413,34 @@ const Sync = (() => {
         console.warn('[fetch-sync] failed:', e);
       });
     }, 3000);
+  }
+
+  // ★ 推本機累積的「應同步但未同步」資料到雲端
+  //   解決手機 SW 舊版 + 後來 Sync 啟用後,本機資料沒上雲
+  async function _pushLocalUnsynced(){
+    if(!App.fbRef) return;
+    // 高優先級 collections (用戶常抱怨「對方看不到」)
+    const COLLS = ['pending','submissions','attendance','messages','leaves','behavior'];
+    let pushed = 0;
+    for(const node of COLLS){
+      const local = App.db[node];
+      if(!Array.isArray(local) || !local.length) continue;
+      try {
+        const snap = await App.fbRef.child(node).once('value');
+        const cloud = snap.val() || {};
+        const cloudIds = new Set(Object.keys(cloud));
+        // 把本機有但雲端沒的推上去
+        for(const rec of local){
+          if(!rec || !rec.id) continue;
+          if(cloudIds.has(String(rec.id))) continue;
+          try { _markEcho && _markEcho(node, rec.id); } catch(_){}
+          await App.fbRef.child(node).child(rec.id).set(rec);
+          pushed++;
+        }
+      } catch(e){ console.warn('[push-unsynced]', node, e); }
+    }
+    if(pushed) console.log('[push-unsynced] 補推', pushed, '筆到雲端');
+    return pushed;
   }
 
   // ★ 強制從雲端重抓所有資料,完全覆蓋本地 (給「老師看不到學生改的東西」用)
