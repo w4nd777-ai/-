@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-auto-anon-auth';
+const APP_BUILD = '2026-06-01-sync-online-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2074,10 +2074,26 @@ const Sync = (() => {
         if(firebase.auth && !firebase.auth().currentUser){
           firebase.auth().signInAnonymously().catch(e => {
             console.warn('[firebase] signInAnonymously failed:', e && e.code || e);
-            // 如果是 admin/restricted 開了又關 — 不致命,Email 登入後會有 user
           });
         }
       } catch(e){ console.warn('[firebase] anon-auth setup error:', e); }
+      // ★ FIX: 用 Firebase 內建 .info/connected 偵測真實連線狀態
+      //   原本 code 只設 idle/connecting/error,從不設 online → 20s 後永遠跳 error
+      try {
+        firebase.database().ref('.info/connected').on('value', function(snap){
+          if(snap.val() === true){
+            App.fbStatus = 'online';
+            if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
+            if(App._fbRetryTimer){ clearTimeout(App._fbRetryTimer); App._fbRetryTimer = null; }
+            try { rerender(); } catch(_){}
+          } else if(App.fbStatus === 'online'){
+            // 從連線變斷線 — 回到 connecting 等重連
+            App.fbStatus = 'connecting';
+            try { rerender(); } catch(_){}
+          }
+        });
+        App.listeners.push(()=> { try { firebase.database().ref('.info/connected').off(); } catch(_){} });
+      } catch(e){ console.warn('[firebase] .info/connected listener error:', e); }
       attachListeners();
       // 連線逾時提示:從 8s 拉到 20s (慢網路 / 手機冷啟動需要時間)
       // 不再 toast 提示 (已有狀態指示器),改成靜默 error + 自動重試
