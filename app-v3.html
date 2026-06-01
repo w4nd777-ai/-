@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-eval-anon-locked';
+const APP_BUILD = '2026-06-02-anon-short';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -21311,15 +21311,13 @@ function rSEv(content){
         cbAnon.checked = true;
         cbAnon.disabled = true;
         formCard.appendChild(el('div', { style:{
-          marginTop:'10px', padding:'10px 12px',
+          marginTop:'10px', padding:'8px 12px',
           background:'var(--primary-soft)', border:'1px solid var(--primary)',
-          borderRadius:'8px', fontSize:'13px', display:'flex', alignItems:'center', gap:'8px'
+          borderRadius:'8px', fontSize:'14px', display:'flex', alignItems:'center', gap:'6px',
+          fontWeight:'700', color:'var(--primary)'
         }},
-          el('span', { style:{fontSize:'18px'} }, '🔒'),
-          el('div', null,
-            el('div', { style:{fontWeight:'700',color:'var(--primary)'} }, '本學期評價一律匿名'),
-            el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '老師不會看到是誰填的, 請放心真實表達')
-          )
+          el('span', { style:{fontSize:'16px'} }, '🔒'),
+          el('span', null, '匿名')
         ));
       } else {
         // 每日: 保留 checkbox 讓學生選
