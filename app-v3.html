@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-cropper-1024-idb';
+const APP_BUILD = '2026-06-01-sub-dedupe';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -3236,8 +3236,14 @@ function assignmentTargets(asg){
 function assignmentStats(asg){
   const targets = assignmentTargets(asg);
   const total = targets.size;
-  // ★ 修:退回的繳交不算「已繳」(球在學生那邊,他要重交)
-  const subs = App.db.submissions.filter(s => s.assignmentId === asg.id && targets.has(s.studentId) && !s.returned);
+  // ★ 修:退回的繳交不算「已繳」+ 同學生重交去重 (只算最新)
+  const rawSubs = App.db.submissions.filter(s => s.assignmentId === asg.id && targets.has(s.studentId) && !s.returned);
+  const byStu = new Map();
+  rawSubs.forEach(s => {
+    const prev = byStu.get(s.studentId);
+    if(!prev || (s.ts||0) > (prev.ts||0)) byStu.set(s.studentId, s);
+  });
+  const subs = [...byStu.values()];
   const submitted = subs.length;
   const graded = subs.filter(s => typeof s.score === 'number').length;
   const scores = subs.filter(s => typeof s.score === 'number').map(s => s.score);
@@ -17339,9 +17345,21 @@ function rSub(content){
       el('h1', null, '繳交記錄'),
       el('div', { class:'muted small' }, (function(){
         const all = App.db.submissions || [];
-        const active = all.filter(s => !s.returned).length;
+        const active = all.filter(s => !s.returned);
         const returned = all.filter(s => s.returned).length;
-        return '共 ' + active + ' 筆有效繳交' + (returned ? ' (另 ' + returned + ' 筆退回中)' : '');
+        // ★ 同學生對同作業重複繳交去重 (只算最新一筆)
+        const seen = new Map();
+        active.forEach(s => {
+          const key = s.studentId + '::' + s.assignmentId;
+          const prev = seen.get(key);
+          if(!prev || (s.ts||0) > (prev.ts||0)) seen.set(key, s);
+        });
+        const distinctCount = seen.size;
+        const dupCount = active.length - distinctCount;
+        let txt = '共 ' + distinctCount + ' 筆有效繳交';
+        if(dupCount) txt += ' (含 ' + dupCount + ' 筆重複交僅算最新)';
+        if(returned) txt += ' · 另 ' + returned + ' 筆退回中';
+        return txt;
       })())
     )
   ));
@@ -17363,6 +17381,14 @@ function rSub(content){
   function renderList(){
     listWrap.innerHTML = '';
     let list = App.db.submissions.slice();
+    // ★ 同學生對同作業重複繳交 → 只留最新一筆 (老師看不到累積版本)
+    const _dedup = new Map();
+    list.forEach(s => {
+      const key = s.studentId + '::' + s.assignmentId;
+      const prev = _dedup.get(key);
+      if(!prev || (s.ts||0) > (prev.ts||0)) _dedup.set(key, s);
+    });
+    list = [..._dedup.values()];
     // ★ 修:退回的繳交在「待批改」「已批改」「遲交」都不算
     //   它已經傳給學生了, 等學生重交才會回到待批改
     if(tab === 'pending') list = list.filter(s => typeof s.score !== 'number' && !s.returned);
