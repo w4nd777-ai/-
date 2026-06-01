@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-eval-stats-compact';
+const APP_BUILD = '2026-06-02-semester-hide-others';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -21452,6 +21452,10 @@ function rSEv(content){
     }}, '📤 發布'));
   }
   content.appendChild(formCard);
+
+  // ★ 學期評價是匿名的, 不該讓其他學生看到別人寫了什麼 (隱私 + 避免互相影響)
+  //   只有留言牆 + 每日評價才顯示其他人的列表
+  if(tab === 'semester') return;
 
   // existing
   const list = App.db.evals.filter(e => e.type === tab).slice().sort((a,b)=> (b.ts||0)-(a.ts||0));
