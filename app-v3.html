@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-daily-refresh-msg';
+const APP_BUILD = '2026-06-02-eval-stats-compact';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -19934,9 +19934,64 @@ function rEv(content){
     if(q) list = list.filter(e => (e.text||'').toLowerCase().includes(q) || (e.fromName||'').toLowerCase().includes(q));
     list.sort((a,b)=> (b.ts||0)-(a.ts||0));
 
-    // ★ 多維度統計輔助 — 一個 dim 一張小圖 (avg bar + 5 顆星分布)
-    //   傳入 evals list 跟 dims, 回 DOM element
-    function buildDimStats(evals, dimsToShow, titlePrefix){
+    // ★ 多維度統計輔助
+    //   2 種顯示模式:
+    //   - 'compact' (預設): 緊湊表格, 一個 dim 一行
+    //   - 'detail': 展開分布條 (max → 1 顆星各一條)
+    function buildDimStats(evals, dimsToShow, mode){
+      mode = mode || App._evStatMode || 'compact';
+      if(mode === 'compact'){
+        return buildDimStatsCompact(evals, dimsToShow);
+      }
+      return buildDimStatsDetail(evals, dimsToShow);
+    }
+
+    // 緊湊表格: 一行一個維度
+    function buildDimStatsCompact(evals, dimsToShow){
+      // table-like 但是 div 避免 mobile 折斷
+      const wrap = el('div', { style:{display:'flex',flexDirection:'column',gap:'4px'} });
+      // 表頭
+      const hdr = el('div', { class:'flex', style:{
+        padding:'8px 12px', fontWeight:'700', fontSize:'12px',
+        color:'var(--text-muted)', background:'var(--surface-2)',
+        borderRadius:'6px', gap:'8px', alignItems:'center'
+      }});
+      hdr.appendChild(el('div', { style:{flex:'1',minWidth:'120px'} }, '評分項目'));
+      hdr.appendChild(el('div', { style:{minWidth:'60px',textAlign:'right'} }, '平均'));
+      hdr.appendChild(el('div', { style:{minWidth:'90px',textAlign:'right'} }, '星等'));
+      hdr.appendChild(el('div', { style:{minWidth:'50px',textAlign:'right'} }, '樣本'));
+      wrap.appendChild(hdr);
+
+      dimsToShow.forEach(d => {
+        const scoresAll = evals.map(e => getEvalScore(e, d.key)).filter(s => s > 0);
+        const cnt = scoresAll.length;
+        const avg = cnt ? (scoresAll.reduce((a,b)=>a+b,0) / cnt) : 0;
+        const avgColor = avg >= (d.max*0.8) ? 'var(--success)' : avg >= (d.max*0.6) ? 'var(--warn)' : avg > 0 ? 'var(--danger)' : 'var(--text-muted)';
+        const row = el('div', { class:'flex', style:{
+          padding:'10px 12px', borderBottom:'1px solid var(--border)',
+          gap:'8px', alignItems:'center', fontSize:'14px',
+          cursor:'pointer', userSelect:'none'
+        }, title:'點此查看分布細節' });
+        row.appendChild(el('div', { style:{flex:'1',minWidth:'120px',fontWeight:'600'} }, '⭐ ' + d.label));
+        row.appendChild(el('div', { style:{minWidth:'60px',textAlign:'right',fontWeight:'700',color:avgColor} },
+          cnt ? avg.toFixed(1) + '/' + d.max : '—'));
+        row.appendChild(el('div', { style:{minWidth:'90px',textAlign:'right'} },
+          cnt ? el('span', { class:'stars readonly', style:{fontSize:'13px'} },
+            ...Array.from({length:d.max}, (_,i) => el('span', { class:'s ' + (i < Math.round(avg) ? 'on' : '') }, '★'))) : el('span', { class:'muted' }, '—')));
+        row.appendChild(el('div', { style:{minWidth:'50px',textAlign:'right',color:'var(--text-muted)',fontSize:'13px'} },
+          cnt + ' 則'));
+        // 點此 row 切到 detail
+        row.addEventListener('click', ()=> {
+          App._evStatMode = 'detail';
+          renderInner();
+        });
+        wrap.appendChild(row);
+      });
+      return wrap;
+    }
+
+    // 詳細圖: 一張卡 + 分布條
+    function buildDimStatsDetail(evals, dimsToShow){
       const wrap = el('div', { style:{display:'flex',flexDirection:'column',gap:'14px'} });
       dimsToShow.forEach(d => {
         const scoresAll = evals.map(e => getEvalScore(e, d.key)).filter(s => s > 0);
@@ -19945,10 +20000,8 @@ function rEv(content){
         const avgColor = avg >= (d.max*0.8) ? 'var(--success)' : avg >= (d.max*0.6) ? 'var(--warn)' : avg > 0 ? 'var(--danger)' : 'var(--text-muted)';
 
         const dimBox = el('div', { style:{padding:'10px 12px',background:'var(--surface-2)',borderRadius:'8px'} });
-        // header: 維度名稱 + 平均
         dimBox.appendChild(el('div', { class:'flex-between', style:{marginBottom:'6px',alignItems:'center',flexWrap:'wrap',gap:'6px'} },
-          el('div', { style:{fontWeight:'700',fontSize:'14px'} },
-            (titlePrefix || '') + '⭐ ' + d.label),
+          el('div', { style:{fontWeight:'700',fontSize:'14px'} }, '⭐ ' + d.label),
           el('div', { class:'flex', style:{gap:'6px',alignItems:'center',flexWrap:'wrap'} },
             cnt > 0 ? el('span', { class:'stars readonly', style:{fontSize:'13px'} },
               ...Array.from({length:d.max}, (_,i) => el('span', { class:'s ' + (i < Math.round(avg) ? 'on' : '') }, '★'))) : null,
@@ -19956,7 +20009,6 @@ function rEv(content){
               cnt > 0 ? avg.toFixed(1) + ' / ' + d.max + ' · ' + cnt + ' 則' : '0 則')
           )
         ));
-        // 分布: max → 1 顆星, 每一級一條 bar
         if(cnt > 0){
           const distBar = el('div', { style:{marginTop:'4px'} });
           for(let n = d.max; n >= 1; n--){
@@ -19977,14 +20029,25 @@ function rEv(content){
     }
 
     if(tab === 'semester' || tab === 'daily'){
-      // ★ 全班統計 (多維度)
       const dims = getEvalDims();
+      App._evStatMode = App._evStatMode || 'compact';
+      const curMode = App._evStatMode;
       const statCard = el('div', { class:'card', style:{marginBottom:'12px'} });
-      statCard.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+      // 標題 + 模式切換
+      statCard.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
         el('h3', null, '📊 全班總統計 · 共 ' + list.length + ' 則回饋'),
-        el('span', null)
+        el('div', { class:'flex', style:{gap:'4px'} },
+          el('button', { class:'btn btn-sm ' + (curMode === 'compact' ? 'btn-primary' : ''),
+            style:{fontSize:'12px'},
+            onclick:()=> { App._evStatMode = 'compact'; renderInner(); }
+          }, '📋 表格'),
+          el('button', { class:'btn btn-sm ' + (curMode === 'detail' ? 'btn-primary' : ''),
+            style:{fontSize:'12px'},
+            onclick:()=> { App._evStatMode = 'detail'; renderInner(); }
+          }, '📊 詳細')
+        )
       ));
-      statCard.appendChild(buildDimStats(list, dims, ''));
+      statCard.appendChild(buildDimStats(list, dims, curMode));
       inner.appendChild(statCard);
     }
 
