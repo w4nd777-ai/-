@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-msg-multi-attach';
+const APP_BUILD = '2026-06-01-avatar-cropper';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11243,6 +11243,127 @@ function openLeaveDialog(studentId){
    - 顯示一位學生的所有資料: 基本卡 + 統計 + 時間軸
    ──────────────────────────────────────────────────────────── */
 // 🖼 學生頭像放大檢視 — 老師端點頭像可放大、下載原圖
+// ★ 頭像裁切 modal — 給 user 拖框決定要哪一塊 (圓形預覽,輸出方形 512x512 JPEG)
+//   回傳 Promise<dataURL | null>;取消 → null
+function openAvatarCropModal(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const m = modal('', { dismissable:false });
+        m.root.style.maxWidth = '92vw';
+        m.root.appendChild(el('h2', null, '✂️ 裁切頭像'));
+        m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+          '拖動圓圈中央 → 移動位置;拖動右下角小點 → 改變大小'));
+
+        const maxW = Math.min(window.innerWidth * 0.82, 540);
+        const scale = maxW / img.width;
+        const containerW = maxW;
+        const containerH = img.height * scale;
+        const stage = el('div', { style:{
+          position:'relative',margin:'0 auto',width:containerW+'px',height:containerH+'px',
+          touchAction:'none',userSelect:'none',background:'#000',borderRadius:'6px',overflow:'hidden'
+        }});
+        const bgImg = el('img', { src: e.target.result, style:{
+          width:'100%',height:'100%',display:'block',pointerEvents:'none'
+        }});
+        stage.appendChild(bgImg);
+        const minSize = Math.min(containerW, containerH);
+        let cropSize = Math.min(minSize, 300);
+        let cropX = (containerW - cropSize) / 2;
+        let cropY = (containerH - cropSize) / 2;
+        const cropBox = el('div', { style:{
+          position:'absolute',
+          left: cropX + 'px', top: cropY + 'px',
+          width: cropSize + 'px', height: cropSize + 'px',
+          border:'2px solid #fff',
+          boxShadow:'0 0 0 9999px rgba(0,0,0,.55)',
+          borderRadius:'50%',
+          boxSizing:'border-box',
+          cursor:'move'
+        }});
+        const handle = el('div', { style:{
+          position:'absolute', right:'-10px', bottom:'-10px',
+          width:'22px', height:'22px',
+          background:'#fff', border:'3px solid #2563eb',
+          borderRadius:'50%', cursor:'nwse-resize', touchAction:'none'
+        }});
+        cropBox.appendChild(handle);
+        stage.appendChild(cropBox);
+        function sync(){
+          cropBox.style.left = cropX + 'px';
+          cropBox.style.top = cropY + 'px';
+          cropBox.style.width = cropSize + 'px';
+          cropBox.style.height = cropSize + 'px';
+        }
+        let mode = null;
+        let startX = 0, startY = 0, sCx = 0, sCy = 0, sSize = 0;
+        function getP(ev){
+          if(ev.touches && ev.touches[0]) return { x:ev.touches[0].clientX, y:ev.touches[0].clientY };
+          return { x:ev.clientX, y:ev.clientY };
+        }
+        function onStart(ev){
+          ev.preventDefault();
+          const isHandle = ev.target === handle;
+          const p = getP(ev);
+          startX = p.x; startY = p.y;
+          sCx = cropX; sCy = cropY; sSize = cropSize;
+          mode = isHandle ? 'resize' : 'move';
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('touchmove', onMove, { passive:false });
+          window.addEventListener('mouseup', onEnd);
+          window.addEventListener('touchend', onEnd);
+        }
+        function onMove(ev){
+          ev.preventDefault();
+          const p = getP(ev);
+          const dx = p.x - startX, dy = p.y - startY;
+          if(mode === 'move'){
+            cropX = Math.max(0, Math.min(containerW - cropSize, sCx + dx));
+            cropY = Math.max(0, Math.min(containerH - cropSize, sCy + dy));
+          } else if(mode === 'resize'){
+            const d = Math.max(dx, dy);
+            cropSize = Math.max(50, Math.min(containerW - cropX, containerH - cropY, sSize + d));
+          }
+          sync();
+        }
+        function onEnd(){
+          mode = null;
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('touchmove', onMove);
+          window.removeEventListener('mouseup', onEnd);
+          window.removeEventListener('touchend', onEnd);
+        }
+        cropBox.addEventListener('mousedown', onStart);
+        cropBox.addEventListener('touchstart', onStart, { passive:false });
+        m.root.appendChild(stage);
+        const actions = el('div', { class:'modal-actions' });
+        actions.appendChild(el('button', { class:'btn', onclick: ()=> { m.close(); resolve(null); } }, '取消'));
+        actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+          const realX = cropX / scale, realY = cropY / scale, realSize = cropSize / scale;
+          const canvas = document.createElement('canvas');
+          const outSize = 512;
+          canvas.width = outSize; canvas.height = outSize;
+          const ctx = canvas.getContext('2d');
+          // 白底 (萬一原圖有 alpha)
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, outSize, outSize);
+          ctx.drawImage(img, realX, realY, realSize, realSize, 0, 0, outSize, outSize);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          m.close();
+          resolve(dataUrl);
+        }}, '✂️ 確認裁切'));
+        m.root.appendChild(actions);
+      };
+      img.onerror = () => { reject(new Error('圖片載入失敗')); };
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('檔案讀取失敗'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function openAvatarViewer(s){
   if(!s || !s.avatar){ try { toast('此學生尚未上傳頭像', 'warning'); } catch(_){} return; }
   const m = modal('', { dismissable: true });
@@ -15836,7 +15957,10 @@ function rMe(content){
   const card = el('div', { class:'card', style:{textAlign:'center',padding:'24px'} });
   if(me.avatar){
     card.appendChild(lazyImg({ src: me.avatar, alt: me.name,
-      style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',margin:'0 auto 12px',display:'block',border:'3px solid var(--primary)',contain:'layout style',minHeight:'100px'} }));
+      title:'點擊放大下載原圖',
+      style:{width:'100px',height:'100px',borderRadius:'50%',objectFit:'cover',margin:'0 auto 12px',display:'block',border:'3px solid var(--primary)',contain:'layout style',minHeight:'100px',cursor:'zoom-in'},
+      onclick: ()=> openAvatarViewer(me)
+    }));
   } else {
     card.appendChild(el('div', { class:'avatar', style:{width:'100px',height:'100px',fontSize:'36px',margin:'0 auto 12px',border:'3px solid var(--primary)'} }, initials(me.name)));
   }
@@ -16050,13 +16174,15 @@ function rMe(content){
     if(!f) return;
     if(f.size > 20*1024*1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
-      const result = await _compressAvatarUnder1MB(f);
-      me.avatar = result.dataUrl;
+      // ★ 跳裁切框讓用戶決定範圍
+      const croppedDataUrl = await openAvatarCropModal(f);
+      if(!croppedDataUrl) return;  // 用戶取消
+      me.avatar = croppedDataUrl;
       saveDB(); Sync.setRow('students', me.id, me); bcNotify();
-      const kb = Math.round(result.dataUrl.length / 1024);
-      toast('✅ 頭像已更新 (' + result.size + '×' + result.size + ' · ' + kb + ' KB · 品質 ' + Math.round(result.quality*100) + '%)','success', 3000);
+      const kb = Math.round(croppedDataUrl.length / 1024);
+      toast('✅ 頭像已更新 (' + kb + ' KB)','success', 3000);
       rerender();
-    } catch(err){ toast('上傳失敗：'+friendlyError(err),'danger'); }
+    } catch(err){ toast('上傳失敗:' + friendlyError(err),'danger'); }
   });
   cardAv.appendChild(avFile);
   if(me.avatar){
@@ -16309,14 +16435,16 @@ function openStudentSelfEdit(){
     if(!f) return;
     if(f.size > 20 * 1024 * 1024){ return toast('圖片不可超過 20MB','danger'); }
     try {
-      const result = await _compressAvatarUnder1MB(f);
-      avatarData = result.dataUrl;
+      // ★ 跳裁切框讓用戶決定範圍
+      const croppedDataUrl = await openAvatarCropModal(f);
+      if(!croppedDataUrl) return;
+      avatarData = croppedDataUrl;
       avImg.src = avatarData;
       avImg.style.display = 'block';
       avInitials.style.display = 'none';
       try {
         const kb = Math.round(avatarData.length / 1024);
-        toast('已儲存 ' + result.size + '×' + result.size + ' 頭像 (' + kb + ' KB · 品質 ' + Math.round(result.quality*100) + '%)', 'success', 3000);
+        toast('✅ 頭像已裁切 (' + kb + ' KB)', 'success', 3000);
       } catch(_){}
     } catch(err){ toast('讀取失敗：' + (err.message||err), 'danger'); }
   });
@@ -27215,12 +27343,20 @@ function openTeacherProfile(){
   const fileInp = el('input', { type:'file', accept:'image/*', style:{display:'none'} });
   fileInp.addEventListener('change', async e => {
     const f = e.target.files[0]; if(!f) return;
-    if(f.size > 2 * 1024 * 1024){ toast('圖片不能超過 2MB','danger'); return; }
+    e.target.value = '';
+    if(f.size > 20 * 1024 * 1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
+      // ★ 跳裁切框
+      const croppedDataUrl = await openAvatarCropModal(f);
+      if(!croppedDataUrl) return;
+      // 把 dataURL 轉回 File 餵給 attachUpload
+      const resp = await fetch(croppedDataUrl);
+      const blob = await resp.blob();
+      const croppedFile = new File([blob], 'avatar.jpg', { type:'image/jpeg' });
       if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){_swallow('auto',_)} }
-      avatarMeta = await attachUpload(f);
+      avatarMeta = await attachUpload(croppedFile);
       await refreshAvatar();
-      toast('頭像已上傳','success');
+      toast('✅ 頭像已上傳','success');
     } catch(err){ toast('上傳失敗：' + friendlyError(err),'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
