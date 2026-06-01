@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-ann-tgt-prominent';
+const APP_BUILD = '2026-06-01-ann-save-honest';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -19964,88 +19964,110 @@ function openAnnouncementEdit(a){
 
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
-    const t = iT.value.trim();
-    if(!t) return toast('標題必填','danger');
-    // ★ 解析排程時間
-    let _scheduledAt = '';
-    const _schedRaw = iSched.value.trim();
-    if(_schedRaw){
-      const _t = new Date(_schedRaw).getTime();
-      if(!Number.isFinite(_t)){
-        toast('預約時間格式錯誤','danger'); return;
-      }
-      if(_t <= Date.now()){
-        const _ok = await confirmDlg('預約時間已過,要直接立即發布嗎?', { title:'時間已過' });
-        if(!_ok) return;
-        _scheduledAt = '';
-      } else {
-        _scheduledAt = _schedRaw;
-      }
-    }
-    // ★ 派發對象驗證
-    const _annTgt = iTgt.value;
-    let _annTgtClsList = [];
-    let _annTgtIds = [];
-    if(_annTgt === 'class'){
-      _annTgtClsList = _annClsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
-      if(!_annTgtClsList.length){ toast('請至少選一個班級','warn'); return; }
-    } else if(_annTgt === 'students'){
-      _annTgtIds = Object.keys(_annStuChecks).filter(k => _annStuChecks[k].checked);
-      if(!_annTgtIds.length){ toast('請至少選一個學生','warn'); return; }
-    }
-    const rec = isNew ? { id:nid(), ts:Date.now() } : a;
-    rec.title = t;
-    rec.body = iB.value;
-    rec.expireAt = iE.value;
-    rec.pinned = iP.checked;
-    rec.scheduledAt = _scheduledAt;
-    rec.attaches = _attachState;
-    rec.author = App.session?.name || '老師';
-    rec.target = _annTgt;
-    rec.targetClsList = _annTgtClsList;
-    rec.targetCls = _annTgtClsList[0] || '';
-    rec.targetIds = _annTgtIds;
-    if(isNew) App.db.announcements.push(rec);
-    saveDB();
-    // ★ 修: 直接 await 雲端寫入, 失敗時老實告訴老師 (原本 setRow 失敗悄悄回 false, 老師以為成功)
-    //   跟之前註冊時的 bug 一樣: 寫到本機 → 跳成功 toast → 學生根本沒收到
-    let cloudOk = false, cloudErr = '';
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async (ev)=> {
+    // ★ 整段 wrap try/catch — 確保任何錯誤都會被使用者看到, 不會「按了沒反應」
+    const saveBtn = ev.target;
+    const origText = saveBtn.textContent;
+    saveBtn.disabled = true;
+    saveBtn.textContent = '儲存中...';
     try {
-      if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
-        try { await Sync.init(); } catch(_){}
+      const t = iT.value.trim();
+      if(!t){ toast('標題必填','danger', 5000); saveBtn.disabled = false; saveBtn.textContent = origText; return; }
+      // ★ 解析排程時間
+      let _scheduledAt = '';
+      const _schedRaw = iSched.value.trim();
+      if(_schedRaw){
+        const _t = new Date(_schedRaw).getTime();
+        if(!Number.isFinite(_t)){
+          toast('預約時間格式錯誤','danger', 5000); saveBtn.disabled = false; saveBtn.textContent = origText; return;
+        }
+        if(_t <= Date.now()){
+          const _ok = await confirmDlg('預約時間已過,要直接立即發布嗎?', { title:'時間已過' });
+          if(!_ok){ saveBtn.disabled = false; saveBtn.textContent = origText; return; }
+          _scheduledAt = '';
+        } else {
+          _scheduledAt = _schedRaw;
+        }
       }
-      if(App.fbRef){
-        await App.fbRef.child('announcements').child(rec.id).set(rec);
-        cloudOk = true;
+      // ★ 派發對象驗證
+      const _annTgt = iTgt.value;
+      let _annTgtClsList = [];
+      let _annTgtIds = [];
+      if(_annTgt === 'class'){
+        _annTgtClsList = _annClsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
+        if(!_annTgtClsList.length){
+          await confirmDlg('「派發對象」選了「指定班級」, 但沒勾選任何班級\n\n請至少勾選一個班級, 或改回「全部學生」', { title:'請選擇班級', cancelText:'', okText:'好' });
+          saveBtn.disabled = false; saveBtn.textContent = origText; return;
+        }
+      } else if(_annTgt === 'students'){
+        _annTgtIds = Object.keys(_annStuChecks).filter(k => _annStuChecks[k].checked);
+        if(!_annTgtIds.length){
+          await confirmDlg('「派發對象」選了「指定學生」, 但沒勾選任何學生\n\n請至少勾選一位學生, 或改回「全部學生」', { title:'請選擇學生', cancelText:'', okText:'好' });
+          saveBtn.disabled = false; saveBtn.textContent = origText; return;
+        }
+      }
+      const rec = isNew ? { id:nid(), ts:Date.now() } : a;
+      rec.title = t;
+      rec.body = iB.value;
+      rec.expireAt = iE.value;
+      rec.pinned = iP.checked;
+      rec.scheduledAt = _scheduledAt;
+      rec.attaches = _attachState;
+      rec.author = App.session?.name || '老師';
+      rec.target = _annTgt;
+      rec.targetClsList = _annTgtClsList;
+      rec.targetCls = _annTgtClsList[0] || '';
+      rec.targetIds = _annTgtIds;
+      if(isNew) App.db.announcements.push(rec);
+      saveDB();
+      // ★ 修: 直接 await 雲端寫入, 失敗時老實告訴老師 (原本 setRow 失敗悄悄回 false, 老師以為成功)
+      let cloudOk = false, cloudErr = '';
+      try {
+        if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
+          try { await Sync.init(); } catch(_){}
+        }
+        if(App.fbRef){
+          await App.fbRef.child('announcements').child(rec.id).set(rec);
+          cloudOk = true;
+        } else {
+          cloudErr = 'Firebase 同步未就緒';
+        }
+      } catch(e){
+        cloudErr = e.code || e.message || String(e);
+      }
+      bcNotify();
+      if(isNew && !_scheduledAt && cloudOk) triggerWebhook('announcement', { title: rec.title, author: rec.author });
+      if(_scheduledAt && cloudOk){
+        const _dStr = new Date(_scheduledAt).toLocaleString('zh-TW',{hour12:false});
+        toast('✅ 已排程於 ' + _dStr + ' 發送 (已同步雲端)','success', 5000);
+      } else if(cloudOk){
+        toast('✅ ' + (isNew?'已發布':'已更新') + ' (已同步到雲端,學生會收到)','success', 5000);
       } else {
-        cloudErr = 'Firebase 同步未就緒';
+        // 雲端失敗 → 老實告訴老師 + 開始背景重試
+        toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n系統會自動重試', 'warn', 12000);
+        console.warn('[announcement] cloud sync failed:', cloudErr);
+        setTimeout(async ()=> {
+          try {
+            if(App.fbRef){
+              await App.fbRef.child('announcements').child(rec.id).set(rec);
+              try { toast('✅ 公告「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
+            }
+          } catch(_){}
+        }, 5000);
       }
+      m.close();
+      rerender();
     } catch(e){
-      cloudErr = e.code || e.message || String(e);
+      // ★ 任何儲存錯誤一律彈 modal 告知 (不能讓「按了沒反應」發生)
+      console.error('[announcement-save]', e);
+      try {
+        await confirmDlg('儲存公告時發生錯誤:\n\n' + (e.message||String(e)) + '\n\n請截圖回報問題', { title:'儲存失敗', cancelText:'', okText:'知道了' });
+      } catch(_){
+        try { toast('儲存失敗: ' + (e.message||e), 'danger', 8000); } catch(__){}
+      }
+      saveBtn.disabled = false;
+      saveBtn.textContent = origText;
     }
-    bcNotify();
-    if(isNew && !_scheduledAt && cloudOk) triggerWebhook('announcement', { title: rec.title, author: rec.author });
-    if(_scheduledAt && cloudOk){
-      const _dStr = new Date(_scheduledAt).toLocaleString('zh-TW',{hour12:false});
-      toast('✅ 已排程於 ' + _dStr + ' 發送 (已同步雲端)','success', 4000);
-    } else if(cloudOk){
-      toast('✅ ' + (isNew?'已發布':'已更新') + ' (已同步到雲端,學生會收到)','success', 4000);
-    } else {
-      // 雲端失敗 → 老實告訴老師 + 開始背景重試
-      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n學生暫時看不到, 系統會自動重試', 'warn', 12000);
-      console.warn('[announcement] cloud sync failed:', cloudErr);
-      // 背景重試: 5 秒後再試一次
-      setTimeout(async ()=> {
-        try {
-          if(App.fbRef){
-            await App.fbRef.child('announcements').child(rec.id).set(rec);
-            try { toast('✅ 公告「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
-          }
-        } catch(_){}
-      }, 5000);
-    }
-    m.close(); rerender();
   }}, isNew?'發布':'儲存'));
   m.root.appendChild(actions);
 }
