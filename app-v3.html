@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-no-demote';
+const APP_BUILD = '2026-06-01-auto-reupload-attach';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -8791,6 +8791,72 @@ function finishStudentLogin(s){
       }
     } catch(e){ _swallow('stu-recov-prompt', e); }
   }, 1500);
+  // ★ FIX: 自動補傳「本機 IDB 有但雲端沒有」的附件
+  //   起因:學生在 Firebase 還沒設好時繳的作業, storage='idb' 只存學生本機
+  //   現在 Firebase 同步好了 → 學生開系統時背景檢查 + 補傳到雲端
+  //   老師之後就能打開那些附件了
+  setTimeout(()=> { try { _autoReuploadMyAttachments(s.id); } catch(e){ console.warn('[reupload]', e); } }, 3000);
+}
+
+// 自動補傳該學生繳交過、storage=idb、雲端沒有的附件
+async function _autoReuploadMyAttachments(studentId){
+  if(!firebase || !firebase.database) return;
+  if(!App.cfg || !App.cfg.roomCode) return;
+  const rc = App.cfg.roomCode;
+  // 找這個學生繳的所有附件 (storage='idb' 才需要補)
+  const mySubs = (App.db.submissions||[]).filter(s => s && s.studentId === studentId);
+  const toCheck = [];
+  mySubs.forEach(sub => {
+    const atts = [];
+    if(sub.attach) atts.push({sub, attach: sub.attach});
+    if(Array.isArray(sub.attaches)) sub.attaches.forEach(a => atts.push({sub, attach: a}));
+    atts.forEach(({sub, attach}) => {
+      if(!attach || !attach.key) return;
+      if(attach.storage !== 'idb' && attach.storage !== undefined) return;  // 只處理 idb
+      if(attach.fbUrl || attach.driveLink || attach.catboxUrl) return;
+      toCheck.push({sub, attach});
+    });
+  });
+  if(!toCheck.length) return;
+  console.log('[reupload] 需檢查 ' + toCheck.length + ' 個附件');
+  let uploaded = 0, failed = 0, skipped = 0;
+  for(const {sub, attach} of toCheck){
+    try {
+      // 1. 雲端是不是已經有 (chunked or 單檔)
+      const cloudRef = firebase.database().ref('cms-v3/' + rc + '/attachments/' + attach.key);
+      const snap = await cloudRef.once('value');
+      if(snap.exists() && snap.val()){
+        skipped++;
+        continue;  // 雲端已有,不用補
+      }
+      // 2. 本機 IDB 有沒有 blob
+      const blob = await (typeof idbGet === 'function' ? idbGet(attach.key) : Promise.resolve(null));
+      if(!blob){
+        failed++;
+        continue;  // 本機也沒,無解 (要學生重交)
+      }
+      // 3. 把 blob 重新跑一次 upload + 寫雲端
+      const file = new File([blob], attach.name || 'file', { type: attach.type || blob.type || 'application/octet-stream' });
+      const newMeta = await attachUpload(file).catch(e => { console.warn('[reupload]', e); return null; });
+      if(!newMeta){ failed++; continue; }
+      // 4. 把繳交記錄裡的 attach 換成新 meta (新 key/fbUrl/etc)
+      if(sub.attach === attach) sub.attach = newMeta;
+      if(Array.isArray(sub.attaches)){
+        const idx = sub.attaches.indexOf(attach);
+        if(idx >= 0) sub.attaches[idx] = newMeta;
+      }
+      try { saveDB(true); } catch(_){}
+      try { Sync.setRow('submissions', sub.id, sub); } catch(_){}
+      uploaded++;
+    } catch(e){
+      failed++;
+      console.warn('[reupload] one failed:', e);
+    }
+  }
+  if(uploaded > 0){
+    try { toast('✅ 已補傳 ' + uploaded + ' 個附件到雲端,老師現在可以看了','success', 5000); } catch(_){}
+  }
+  console.log('[reupload] 結果:', { uploaded, skipped, failed });
 }
 
 // 強制改密碼（無法關閉的 modal）— batch 1 強化：複雜度檢查
