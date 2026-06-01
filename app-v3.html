@@ -94,6 +94,21 @@ const LS_KEY = 'cms_v3';
 const LS_CFG = LS_KEY + '_cfg';
 const LS_DB  = LS_KEY + '_db';
 const LS_FB  = LS_KEY + '_fb_cfg';
+
+// ★ 內建預設 Firebase 設定 — bare URL 開啟自動套用
+//   apiKey 是公開值 (Firebase 設計如此, 安全靠 rules 保護),嵌入 source 沒問題
+//   用戶若用 #fb=... 分享連結會覆蓋這個,用於切換教室
+const DEFAULT_FB_CONFIG = {
+  apiKey: "AIzaSyCtQSuH3OzkjXsIS0BE7enHelqE5rgli7U",
+  authDomain: "cms-w4nd777.firebaseapp.com",
+  databaseURL: "https://cms-w4nd777-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "cms-w4nd777",
+  storageBucket: "cms-w4nd777.firebasestorage.app",
+  messagingSenderId: "833333904571",
+  appId: "1:833333904571:web:0e6d36806831bf5e9a959e",
+  measurementId: "G-DCTV4KDPEW"
+};
+const DEFAULT_ROOM_CODE = "DEMO01";
 const LS_THEME = LS_KEY + '_theme';
 const LS_ACCENT = LS_KEY + '_accent';
 const LS_APPEARANCE = LS_KEY + '_appearance';
@@ -102,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-init-await';
+const APP_BUILD = '2026-06-01-default-fb-config';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2059,10 +2074,18 @@ const Sync = (() => {
   async function init(){
     detachAll();
     if(typeof firebase === 'undefined') return false;
-    const fbCfg = (() => { try{ return JSON.parse(localStorage.getItem(LS_FB) || 'null'); }catch(e){return null;} })();
+    let fbCfg = (() => { try{ return JSON.parse(localStorage.getItem(LS_FB) || 'null'); }catch(e){return null;} })();
+    // ★ 沒 LS_FB → 用內建 DEFAULT_FB_CONFIG (bare URL 開啟也能同步)
     if(!fbCfg || !fbCfg.databaseURL){
-      App.fbStatus = 'idle';
-      return false;
+      if(typeof DEFAULT_FB_CONFIG !== 'undefined' && DEFAULT_FB_CONFIG && DEFAULT_FB_CONFIG.databaseURL){
+        fbCfg = DEFAULT_FB_CONFIG;
+        // 順便寫回 localStorage,後續 share / 修改流程都能讀到
+        try { localStorage.setItem(LS_FB, JSON.stringify(fbCfg)); } catch(_){}
+        console.log('[firebase] 用內建預設設定 (沒檢到 LS_FB)');
+      } else {
+        App.fbStatus = 'idle';
+        return false;
+      }
     }
     try {
       if(firebase.apps.length){ try{firebase.app().delete();}catch(e){_swallow('auto',e)} }
