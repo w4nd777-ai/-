@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-batch-bug-fixes';
+const APP_BUILD = '2026-06-01-batch-bug-fixes-r2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -3659,7 +3659,7 @@ async function _compressImageIfNeeded(file){
     return compressedFile;
   } catch(e){
     // 壓縮失敗（HEIC 等格式）→ 跳出明確提示
-    try { toast('⚠️ ' + (e.message||'圖片無法壓縮') + '，將上傳原檔（可能較大）', 'warning', 4000); } catch(_){}
+    try { toast('⚠️ ' + (e.message||'圖片無法壓縮') + '，將上傳原檔（可能較大）', 'warn', 4000); } catch(_){}
     return file;
   }
 }
@@ -13405,7 +13405,7 @@ function buildMsgComposer(onSend, _legacy, opts){
           el('span', null, (isImg?'🖼':'📎') + ' ' + att.name + ' (' + Math.round((att.size||0)/1024) + ' KB)'),
           el('span', { style:{cursor:'pointer'}, onclick: ()=> {
             const removed = pendingAttaches.splice(idx, 1)[0];
-            if(removed && removed.key) { try { attachDelete(removed); } catch(e){_swallow('auto',e)} }
+            if(removed && removed.key) { try { Promise.resolve(attachDelete(removed)).catch(()=>{}); } catch(e){_swallow('auto',e)} }
             refreshAttachSlot();
           } }, '✗')
         );
@@ -14070,7 +14070,7 @@ function rFeedback(content){
       saveDB();
       try { Sync.setMap('feedbacks', App.db.feedbacks); } catch(e){_swallow('auto',e)}
       bcNotify();
-      toast('已刪除','success');
+      toast('已刪除','warn');
       rerender();
     }}, '🗑'));
     card.appendChild(acts);
@@ -16974,7 +16974,7 @@ function openAssignmentEdit(asg){
     if(attached){
       const chip = el('div', { class:'file-chip' },
         el('span', null, '📎 ' + attached.name),
-        el('span', { class:'x', onclick: e => { e.stopPropagation(); attachDelete(attached); attached = null; upBox.classList.remove('has-file'); refreshAtt(); } }, '✗')
+        el('span', { class:'x', onclick: e => { e.stopPropagation(); try { Promise.resolve(attachDelete(attached)).catch(()=>{}); } catch(_){} attached = null; upBox.classList.remove('has-file'); refreshAtt(); } }, '✗')
       );
       upBox.appendChild(chip);
     } else {
@@ -22490,13 +22490,13 @@ function rStorage(content){
   actions.appendChild(el('button', { class:'btn', onclick: async ()=> {
     const ok = await confirmDlg('清除操作紀錄？');
     if(!ok) return;
-    App.db._logs = []; saveDB(); rerender(); toast('已清除','success');
+    App.db._logs = []; saveDB(); rerender(); toast('已清除','warn');
   }}, '🗑 清操作紀錄'));
   actions.appendChild(el('button', { class:'btn', onclick: async ()=> {
     const ok = await confirmDlg('刪除所有自動備份？');
     if(!ok) return;
     backupList().forEach(b => { try{ localStorage.removeItem(b.key); }catch(e){_swallow('auto',e)} });
-    rerender(); toast('已刪除','success');
+    rerender(); toast('已刪除','warn');
   }}, '🗑 清備份'));
   card3.appendChild(actions);
   content.appendChild(card3);
@@ -22861,7 +22861,7 @@ function rBackup(content){
         const ok = await confirmDlg('刪除這份備份？', { danger:true });
         if(!ok) return;
         try { localStorage.removeItem(b.key); } catch(e){_swallow('auto',e)}
-        rerender(); toast('已刪除','success');
+        rerender(); toast('已刪除','warn');
       }}, '🗑'));
       row.appendChild(acts);
       cardH.appendChild(row);
@@ -23049,7 +23049,7 @@ function buildSubmissionForm(asg, me, existing){
           el('span', { class:'x', onclick: e => {
             e.stopPropagation();
             const removed = attaches.splice(idx,1)[0];
-            if(removed) attachDelete(removed);
+            if(removed) try { Promise.resolve(attachDelete(removed)).catch(()=>{}); } catch(_){}
             refresh();
           }}, '✗')
         );
@@ -23496,7 +23496,7 @@ function rPeerDetail(content, pe){
       App.db.peerEvals = App.db.peerEvals.filter(x => x.id !== pe.id);
       saveDB();
       if(typeof bcNotify === 'function') bcNotify();
-      toast('已刪除','success');
+      toast('已刪除','warn');
       go('peer');
     }}, '🗑 刪除')
   );
@@ -25803,7 +25803,7 @@ function getSmartReminders(){
         out.push({
           ico:'⏰',
           text:'你有 <b>' + dueSoon.length + '</b> 份作業即將到期 (' + titles + ')',
-          action:{ label:'去寫', onclick: ()=> go('assignments') }
+          action:{ label:'去寫', onclick: ()=> go(App.session?.role==='student' ? 'sasgn' : 'assignments') }
         });
       }
     } catch(_){}
@@ -26374,7 +26374,7 @@ function openGroupDetail(gid){
         App.db.groups = App.db.groups.filter(x => x.id !== g.id);
         saveDB();
         m.close();
-        toast('已刪除','success');
+        toast('已刪除','warn');
         rerender();
       }}, '🗑️ 刪除')
     )
@@ -32082,6 +32082,8 @@ function syncQuizScore(sub, quiz){
   };
   if(exist) Object.assign(exist, ent);
   else App.db.scores.push(ent);
+  // ★ 修:helper 沒呼叫 saveDB/Sync,呼叫端不一定都會做 → 在 helper 內保證
+  try { saveDB(); Sync.setMap('scores', App.db.scores); bcNotify(); } catch(_){}
 }
 
 /* 學生端：線上小考 */
@@ -33151,7 +33153,7 @@ function openTeacherNoteEditor(note){
       if(!await confirmDlg('確定刪除此筆記？', { danger:true })) return;
       App.db.teacherNotes = (App.db.teacherNotes || []).filter(x => x.id !== data.id);
       saveDB(); clearDraft('tnote_' + tid + '_' + data.id);
-      m.close(); toast('已刪除','success'); rerender();
+      m.close(); toast('已刪除','warn'); rerender();
     }}, '🗑 刪除'));
   }
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
@@ -33457,7 +33459,7 @@ function openNoteEditor(note){
       App.db.notes = (App.db.notes || []).filter(n => n.id !== data.id);
       saveDB();
       m.close();
-      toast('已刪除','success');
+      toast('已刪除','warn');
       rerender();
     } }, '🗑 刪除'));
   }
@@ -33515,6 +33517,7 @@ function syncTodosFromAssignmentsQuizzes(studentId){
     });
     existing.add(key);
   });
+  const _todosBeforeQuiz = App.db.todos.length;
   // 小考
   (App.db.quizzes || []).forEach(q => {
     if(!q) return;
@@ -33541,6 +33544,10 @@ function syncTodosFromAssignmentsQuizzes(studentId){
     });
     existing.add(key);
   });
+  // ★ 修:autopush 完 todos 沒呼叫 saveDB/Sync → 重整就丟,其他裝置看不到
+  if(App.db.todos.length > _todosBeforeQuiz || existing.size > 0){
+    try { saveDB(); Sync.setMap('todos', App.db.todos); bcNotify(); } catch(_){}
+  }
 }
 
 /* 學生繳交作業後，自動把對應 todo 標 done */
