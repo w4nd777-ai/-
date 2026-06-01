@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-online-fix';
+const APP_BUILD = '2026-06-01-sync-ping-fallback';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2083,17 +2083,30 @@ const Sync = (() => {
         firebase.database().ref('.info/connected').on('value', function(snap){
           if(snap.val() === true){
             App.fbStatus = 'online';
+            console.log('[firebase] .info/connected → online');
             if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
             if(App._fbRetryTimer){ clearTimeout(App._fbRetryTimer); App._fbRetryTimer = null; }
             try { rerender(); } catch(_){}
           } else if(App.fbStatus === 'online'){
-            // 從連線變斷線 — 回到 connecting 等重連
             App.fbStatus = 'connecting';
             try { rerender(); } catch(_){}
           }
         });
         App.listeners.push(()=> { try { firebase.database().ref('.info/connected').off(); } catch(_){} });
       } catch(e){ console.warn('[firebase] .info/connected listener error:', e); }
+      // ★ 雙保險:直接 ping 一筆讀,若 3 秒內回來 → 強制 online (不等 .info/connected)
+      try {
+        firebase.database().ref('cms-v3/' + room + '/.connectionTest').once('value')
+          .then(()=> {
+            if(App.fbStatus !== 'online'){
+              App.fbStatus = 'online';
+              console.log('[firebase] ping ok → online');
+              if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
+              try { rerender(); } catch(_){}
+            }
+          })
+          .catch(e => console.warn('[firebase] ping fail:', e && e.code || e));
+      } catch(e){ console.warn('[firebase] ping err:', e); }
       attachListeners();
       // 連線逾時提示:從 8s 拉到 20s (慢網路 / 手機冷啟動需要時間)
       // 不再 toast 提示 (已有狀態指示器),改成靜默 error + 自動重試
