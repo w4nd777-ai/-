@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-avatar-cropper';
+const APP_BUILD = '2026-06-01-force-resync';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2331,6 +2331,48 @@ const Sync = (() => {
     }, 3000);
   }
 
+  // ★ 強制從雲端重抓所有資料,完全覆蓋本地 (給「老師看不到學生改的東西」用)
+  //   跟 _fetchAllFromFirebase 不同:沒有 updatedAt 比較邏輯,雲端永遠贏
+  async function forceResyncFromCloud(){
+    if(!App.cfg || !App.cfg.roomCode) throw new Error('沒設定教室代碼');
+    if(!window.firebase || !firebase.database) throw new Error('Firebase 未連線');
+    // 確保 anon auth
+    try {
+      if(firebase.auth && !firebase.auth().currentUser){
+        await firebase.auth().signInAnonymously();
+      }
+    } catch(_){}
+    const dbURL = firebase.database().app.options.databaseURL;
+    const url = dbURL.replace(/\/$/, '') + '/cms-v3/' + App.cfg.roomCode + '.json';
+    // 加 auth token 確保能讀
+    let token = '';
+    try { token = await firebase.auth().currentUser.getIdToken(); } catch(_){}
+    const fullUrl = token ? (url + '?auth=' + token) : url;
+    const r = await fetch(fullUrl, { cache:'no-store' });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if(!data) throw new Error('雲端沒資料');
+    let cnt = 0;
+    const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','attachments','timetable','teachers','groups','courses'];
+    const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
+    ARR_NODES.forEach(node => {
+      if(data[node]){
+        const v = data[node];
+        const arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+        App.db[node] = arr;
+        cnt++;
+      }
+    });
+    OBJ_NODES.forEach(node => {
+      if(data[node]){
+        App.db[node] = data[node];
+        cnt++;
+      }
+    });
+    try { saveDB(true); } catch(_){}
+    return cnt;
+  }
+
   // 用 fetch REST API 抓 cms-v3/<roomCode> 完整資料 (繞過 SDK WebSocket)
   async function _fetchAllFromFirebase(){
     if(!App.cfg || !App.cfg.roomCode) return 0;
@@ -2524,7 +2566,7 @@ const Sync = (() => {
       }
     });
   } catch(_){_swallow('sync-beforeunload',_)}
-  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync };
+  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync, forceResyncFromCloud };
 })();
 
 /* ════════════════════════════════════════════════════════════
@@ -15224,7 +15266,16 @@ function rFirebase(content){
       const card = e.target.closest('.card') || document.querySelector('.content');
       try { await withLoading(card, ()=> Promise.resolve(Sync.init()), 'Firebase 連線中...'); }
       catch(err){ toast('重連失敗：' + friendlyError(err), 'warn'); }
-    }}, '🔄 重連')
+    }}, '🔄 重連'),
+    // ★ 強制重抓 — 學生在手機改的東西如果老師沒看到時用
+    el('button', { class:'btn btn-warn', onclick: async ()=> {
+      try {
+        toast('📥 強制從雲端拉資料...','info', 3000);
+        const cnt = await Sync.forceResyncFromCloud();
+        toast('✅ 已從雲端拉回 ' + cnt + ' 個集合的資料','success', 4000);
+        setTimeout(()=> rerender(), 500);
+      } catch(e){ toast('拉取失敗: ' + (e.message||e),'danger', 5000); }
+    }}, '🔄 強制重抓 (雲端 → 本機)')
   ));
   content.appendChild(card);
 
