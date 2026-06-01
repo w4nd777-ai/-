@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-default-fb-config';
+const APP_BUILD = '2026-06-01-returned-tab-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -17241,7 +17241,8 @@ function rSub(content){
   ));
 
   const tabs = el('div', { class:'tabs-line' });
-  [['pending','🟡 待批改'],['graded','✅ 已批改'],['late','⚠️ 遲交'],['all','全部']].forEach(([v,t]) => {
+  // ★ 修:加「已退回」tab + pending/graded 排除退回的
+  [['pending','🟡 待批改'],['graded','✅ 已批改'],['returned','↩ 已退回'],['late','⚠️ 遲交'],['all','全部']].forEach(([v,t]) => {
     tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('submissions', v) }, t));
   });
   content.appendChild(tabs);
@@ -17256,9 +17257,13 @@ function rSub(content){
   function renderList(){
     listWrap.innerHTML = '';
     let list = App.db.submissions.slice();
-    if(tab === 'pending') list = list.filter(s => typeof s.score !== 'number');
-    else if(tab === 'graded') list = list.filter(s => typeof s.score === 'number');
+    // ★ 修:退回的繳交在「待批改」「已批改」「遲交」都不算
+    //   它已經傳給學生了, 等學生重交才會回到待批改
+    if(tab === 'pending') list = list.filter(s => typeof s.score !== 'number' && !s.returned);
+    else if(tab === 'graded') list = list.filter(s => typeof s.score === 'number' && !s.returned);
+    else if(tab === 'returned') list = list.filter(s => s.returned);
     else if(tab === 'late') list = list.filter(s => {
+      if(s.returned) return false;
       const asg = App.db.assignments.find(a => a.id === s.assignmentId);
       return asg && isSubmissionLate(asg, s);
     });
