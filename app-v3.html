@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-ann-save-honest';
+const APP_BUILD = '2026-06-01-side-selfeval';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -29730,6 +29730,8 @@ function getSidebarItems(role){
         { key:'sev', icon:'⭐', label:'課程評價' },
         { key:'sfeedback', icon:'📝', label:'課程回饋' },
         { key:'speer', icon:'⭐', label:'我的互評' },
+        { key:'selfeval', icon:'✍️', label:'學期自評' },   // ★ 補上 — 桌面 sidebar 原本漏列, 但手機 picker 有
+        { key:'sgroups', icon:'👥', label:'我的小組' },     // ★ 同樣補上
         { key:'sann', icon:'📢', label:'公告' },
         { key:'me', icon:'👤', label:'個人' }
       ]},
