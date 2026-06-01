@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-push-unsynced';
+const APP_BUILD = '2026-06-01-root-fixes';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -1480,8 +1480,43 @@ function _saveDBNow(){
   if(!Array.isArray(App.db.feeds)) App.db.feeds = [];
   if(!Array.isArray(App.db.feedbacks)) App.db.feedbacks = [];
   if(!Array.isArray(App.db.messages)) App.db.messages = [];
+  // ★ 根本修:寫 localStorage 之前先把大頭像移到 IDB,localStorage 只存 reference
+  //   App.db 記憶體版本不變 (UI 仍能顯示),只是 persisted 版本不含 base64 大資料
+  //   解決 iOS Safari 5MB 上限爆炸的根因
+  const _stripAvatarsForStorage = (obj) => {
+    if(!obj) return obj;
+    const out = Object.assign({}, obj);
+    if(Array.isArray(out.students)){
+      out.students = out.students.map(s => {
+        if(s && typeof s.avatar === 'string' && s.avatar.length > 20*1024 && !s.avatar.startsWith('idb:')){
+          // 寫進 IDB (背景, 不 await — 下次 load 時 reconcile)
+          const idbKey = 'student_avatar_' + s.id;
+          try {
+            fetch(s.avatar).then(r => r.blob()).then(blob => idbPut(idbKey, blob)).catch(()=>{});
+          } catch(_){}
+          return Object.assign({}, s, { avatar: 'idb:' + idbKey });
+        }
+        return s;
+      });
+    }
+    if(Array.isArray(out.accounts)){
+      out.accounts = out.accounts.map(a => {
+        if(a && typeof a.avatar === 'string' && a.avatar.length > 20*1024 && !a.avatar.startsWith('idb:')){
+          const idbKey = 'account_avatar_' + a.id;
+          try { fetch(a.avatar).then(r => r.blob()).then(blob => idbPut(idbKey, blob)).catch(()=>{}); } catch(_){}
+          return Object.assign({}, a, { avatar: 'idb:' + idbKey });
+        }
+        return a;
+      });
+    }
+    // 也順便砍掉本來就不該存的
+    delete out.attachments;
+    delete out._errors;
+    return out;
+  };
   try {
-    const json = JSON.stringify(App.db);
+    const lite = _stripAvatarsForStorage(App.db);
+    const json = JSON.stringify(lite);
     localStorage.setItem(dbKey(), json);
   } catch(e){
     const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 ||
@@ -1564,9 +1599,6 @@ function loadDB(){
     const parsed = JSON.parse(raw);
     App.db = Object.assign(defaultDB(), parsed);
     // ★ 修:attachments / _errors / _archives 過量 — 不該在本機
-    //   舊版 Sync 把 attachments (含 base64 大檔) 拉到本機 → localStorage 爆量
-    //   _errors 是錯誤 log,雲端可能累積幾 MB,本機不需要
-    //   _archives 只留最近一份 (學期切換備份)
     if(App.db.attachments){
       try { delete App.db.attachments; console.log('[loadDB] 清掉殘留 attachments'); } catch(_){}
     }
@@ -1576,6 +1608,36 @@ function loadDB(){
     if(Array.isArray(App.db._archives) && App.db._archives.length > 2){
       try { App.db._archives = App.db._archives.slice(0, 2); console.log('[loadDB] _archives 截短到 2 份'); } catch(_){}
     }
+    // ★ 把 'idb:xxx' reference 還原成 dataURL (背景, 不阻塞)
+    //   先讓 UI 顯示 initials,IDB 載完後 patch App.db + rerender
+    setTimeout(async ()=> {
+      let restored = 0;
+      const restore = async (rec, idbKey) => {
+        try {
+          const blob = await idbGet(idbKey);
+          if(!blob) return false;
+          const dataUrl = await new Promise(res => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.onerror = () => res(null);
+            r.readAsDataURL(blob);
+          });
+          if(dataUrl){ rec.avatar = dataUrl; restored++; return true; }
+        } catch(_){}
+        return false;
+      };
+      for(const s of (App.db.students||[])){
+        if(s && typeof s.avatar === 'string' && s.avatar.startsWith('idb:')){
+          await restore(s, s.avatar.slice(4));
+        }
+      }
+      for(const a of (App.db.accounts||[])){
+        if(a && typeof a.avatar === 'string' && a.avatar.startsWith('idb:')){
+          await restore(a, a.avatar.slice(4));
+        }
+      }
+      if(restored){ console.log('[loadDB] 從 IDB 還原', restored, '個頭像'); try { rerender(); } catch(_){} }
+    }, 100);
     // ensure all arrays exist
     // Round 2 M2: 'parents' 已從 arrFields 移除
     const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications','_trash'];
@@ -2212,6 +2274,42 @@ const Sync = (() => {
     }
     return App._echoSet;
   }
+  // ★ Graveyard — 已刪除 id 的墓地, 7 天內擋 Sync 復活
+  //   解 listener race: 本機 remove → 雲端 still has it → child_added 把死人挖出來
+  const _GRAVEYARD_TTL_MS = 7 * 24 * 3600 * 1000;
+  function _graveyardLoad(){
+    try { return JSON.parse(localStorage.getItem(LS_KEY + '_graveyard') || '{}'); } catch(_){ return {}; }
+  }
+  function _graveyardSave(g){
+    try {
+      // 清過期
+      const cutoff = Date.now() - _GRAVEYARD_TTL_MS;
+      Object.keys(g).forEach(k => { if((g[k]||0) < cutoff) delete g[k]; });
+      localStorage.setItem(LS_KEY + '_graveyard', JSON.stringify(g));
+    } catch(_){}
+  }
+  function _addToGraveyard(node, id){
+    if(!node || !id) return;
+    const g = _graveyardLoad();
+    g[node + '::' + id] = Date.now();
+    _graveyardSave(g);
+  }
+  function _isInGraveyard(node, id){
+    if(!node || !id) return false;
+    const g = _graveyardLoad();
+    const ts = g[node + '::' + id];
+    if(!ts) return false;
+    if(Date.now() - ts > _GRAVEYARD_TTL_MS){
+      delete g[node + '::' + id];
+      _graveyardSave(g);
+      return false;
+    }
+    return true;
+  }
+  // 把它暴露出去, 讓 trashAdd / 各 delete callsite 用
+  if(typeof window !== 'undefined'){
+    window._addToGraveyard = _addToGraveyard;
+  }
   function _shouldIgnoreEcho(node, id){
     const s = App._echoSet;
     if(!s) return false;
@@ -2299,6 +2397,13 @@ const Sync = (() => {
         App._syncFirstChildSeen = true;
         const id = v.id != null ? v.id : snap.key;
         if(_shouldIgnoreEcho(node, id)) return;
+        // ★ 修「刪除復活」:檢查 graveyard,本機已刪的 id 7 天內不要 add 回來
+        if(_isInGraveyard(node, id)) {
+          console.log('[sync] 拒絕復活已刪 ' + node + '/' + id);
+          // 順便從雲端 remove (徹底斷根)
+          try { App.fbRef.child(node).child(id).remove().catch(()=>{}); } catch(_){}
+          return;
+        }
         App.db[node] = App.db[node] || [];
         const idx = App.db[node].findIndex(x => x && (x.id == id));
         const isNew = idx < 0;
@@ -7188,6 +7293,29 @@ function renderLoginTeacherStage(){
       toast('此帳號為 Email/Google 登入,請改用「使用 Email 登入」按鈕','warning', 5000);
       return;
     }
+    // ★ 修跨分頁密碼問題:Tab A 改了密碼但 Tab B App.db.accounts 還是舊的
+    //   登入前永遠從「最新來源」拉一次 — 優先雲端 (Firebase Auth + RTDB) → fallback localStorage
+    try {
+      if(App.fbRef && firebase.auth){
+        // 雲端拉最新 accounts (繞過記憶體 cache)
+        if(!firebase.auth().currentUser) await firebase.auth().signInAnonymously().catch(()=>{});
+        const snap = await App.fbRef.child('accounts').once('value');
+        const v = snap.val();
+        if(v){
+          const arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+          if(arr.length) App.db.accounts = arr;
+        }
+      } else {
+        // 沒雲端 → 從 localStorage reload (Tab A 剛剛 saveDB 寫進去的)
+        try {
+          const raw = localStorage.getItem(dbKey());
+          if(raw){
+            const parsed = JSON.parse(raw);
+            if(Array.isArray(parsed.accounts)) App.db.accounts = parsed.accounts;
+          }
+        } catch(_){}
+      }
+    } catch(_){}
     // username 不分大小寫比對
     const candidate = App.db.accounts.find(x => String(x.username||'').toLowerCase() === u);
     // 再次安全擋下:即便比對到,若帳號是 email: 或沒 password (新審核老師),擋下不讓 attemptLogin 處理
@@ -10045,6 +10173,13 @@ function trashAdd(kind, record){
     deletedBy: (App.session && App.session.name) || '系統'
   });
   trashPurgeExpired();
+  // ★ 也記到 graveyard,7 天內擋 Sync listener 復活
+  try {
+    const coll = TRASH_KIND_MAP[kind].coll;
+    if(coll && record.id && typeof window._addToGraveyard === 'function'){
+      window._addToGraveyard(coll, record.id);
+    }
+  } catch(_){}
 }
 function trashPurgeExpired(){
   App.db._trash = App.db._trash || [];
@@ -10060,6 +10195,12 @@ function trashRestore(trashId){
   const map = TRASH_KIND_MAP[entry.kind];
   if(!map) return false;
   App.db[map.coll] = App.db[map.coll] || [];
+  // 從 graveyard 移除 (還原後不該再擋)
+  try {
+    const g = JSON.parse(localStorage.getItem(LS_KEY + '_graveyard') || '{}');
+    delete g[map.coll + '::' + entry.payload.id];
+    localStorage.setItem(LS_KEY + '_graveyard', JSON.stringify(g));
+  } catch(_){}
   // 避免 dup (萬一已有同 id record 存在)
   const exists = App.db[map.coll].some(r => r && r.id === entry.payload.id);
   if(!exists){
