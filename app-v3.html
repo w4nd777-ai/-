@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-optimistic-v3';
+const APP_BUILD = '2026-06-01-sync-no-demote';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2293,13 +2293,18 @@ const Sync = (() => {
       App.listeners.push(()=> ref.off('value', cb));
     });
 
-    // connection
+    // connection — 樂觀模式:只 PROMOTE 不 DEMOTE
+    //   .info/connected 初始 fire 是 false (連線還沒建立) → 不要降級已經 online 的狀態
+    //   只要曾經 fire true,就保留 online 不再回頭
     const cref = firebase.database().ref('.info/connected');
     const ccb = cref.on('value', snap => {
       const ok = !!snap.val();
-      if(connectTimer && ok){ clearTimeout(connectTimer); connectTimer = null; }
-      App.fbStatus = ok ? 'online' : (App.fbStatus === 'error' ? 'error' : 'connecting');
-      rerender();
+      if(ok){
+        if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
+        App.fbStatus = 'online';
+        rerender();
+      }
+      // ok=false 時什麼都不做,保留現有狀態 (避免 online → connecting 抖動)
     });
     App.listeners.push(()=> cref.off('value', ccb));
 
