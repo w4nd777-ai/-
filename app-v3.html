@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-revert-cropper-tabsync';
+const APP_BUILD = '2026-06-01-sid-dup-msg';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4919,10 +4919,20 @@ function studentRegisterFlow(){
     if(!pw || pw.length < MIN_PW_STUDENT) return showErr('密碼至少 4 字元');
     if(pw !== pw2) return showErr('兩次密碼不一致');
 
-    // 檢查學號重複
-    const dupStu = App.db.students.find(s => String(s.sid||'') === sid);
-    const dupPending = App.db.pending.find(p => String(p.sid||'') === sid);
-    if(dupStu || dupPending) return showErr('此學號已被使用');
+    // ★ 修「任何學號都顯示已被使用」:
+    //   1. 嚴格 trim 兩邊,避免空字串對空字串假陽性
+    //   2. 跳過 sid 空白/falsy 的舊資料 (測試殘留)
+    //   3. 告訴用戶具體跟誰衝突 + 沒衝突是看到哪 160 個學生
+    const sidNorm = String(sid).trim();
+    const dupStu = App.db.students.find(s => s && s.sid && String(s.sid).trim() === sidNorm);
+    const dupPending = (App.db.pending||[]).find(p => p && p.sid && String(p.sid).trim() === sidNorm);
+    console.log('[register] 學號重複檢查', { sidNorm, dupStu: dupStu?.name, dupPending: dupPending?.name, students: (App.db.students||[]).length });
+    if(dupStu){
+      return showErr('學號「' + sidNorm + '」已被使用 — 已在學生名單裡:「' + dupStu.name + '」(' + (dupStu.cls||'未分班') + ')。如果這是同學請改用 Email 登入,如果不是請換學號');
+    }
+    if(dupPending){
+      return showErr('學號「' + sidNorm + '」已在審核中 — 申請人:「' + dupPending.name + '」。請等老師審核或換學號');
+    }
 
     const pending = {
       id: nid(),
