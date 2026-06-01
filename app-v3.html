@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-force-resync';
+const APP_BUILD = '2026-06-01-sync-init-await';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2053,7 +2053,10 @@ const Sync = (() => {
     App.fbStatus = 'idle';
     if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
   }
-  function init(){
+  // ★ 改成 async:確保「驗證 → 拉資料 → 接 listener」順序正確
+  //   原本 init 是同步,signInAnonymously 是 fire-and-forget,listener 接太早 → PERMISSION_DENIED
+  //   修法:await auth → force pull → attach listeners,三步穩定
+  async function init(){
     detachAll();
     if(typeof firebase === 'undefined') return false;
     const fbCfg = (() => { try{ return JSON.parse(localStorage.getItem(LS_FB) || 'null'); }catch(e){return null;} })();
@@ -2064,31 +2067,52 @@ const Sync = (() => {
     try {
       if(firebase.apps.length){ try{firebase.app().delete();}catch(e){_swallow('auto',e)} }
       App.fb = firebase.initializeApp(fbCfg);
-      const room = (App.cfg && App.cfg.roomCode) || 'default';
-      App.fbRef = firebase.database().ref('cms-v3/' + room);
-      // ★ 樂觀策略:initializeApp 沒 throw → 直接標 online
-      //   (反正後續 listener / 寫入失敗會自己處理,狀態指示器不要卡在 connecting)
-      App.fbStatus = 'online';
-      setTimeout(()=> { try { rerender(); } catch(_){} }, 100);
-      // ★ FIX: Firebase 規則 require auth != null,但 App 沒人 signIn 時 RTDB 全 PERMISSION_DENIED
-      //   解法:如果還沒有任何 auth user (沒 Email 登入過),自動 signInAnonymously
-      //   Email/Google 登入會接管,anonymous 只當 fallback 給 read 用
+      // ★ Step 1: 先 AWAIT 匿名登入,確保有 auth token 再做後續
       try {
         if(firebase.auth && !firebase.auth().currentUser){
-          firebase.auth().signInAnonymously().catch(e => {
-            console.warn('[firebase] signInAnonymously failed:', e && e.code || e);
-          });
+          await firebase.auth().signInAnonymously();
         }
-      } catch(e){ console.warn('[firebase] anon-auth setup error:', e); }
-      // ★ 樂觀模式:狀態保持 'online',即使 attachListeners 內部失敗
-      //   listener 失敗不該讓「同步狀態」變紅,個別讀寫操作會自己處理
+      } catch(e){ console.warn('[firebase] signInAnonymously failed:', e); }
+      const room = (App.cfg && App.cfg.roomCode) || 'default';
+      App.fbRef = firebase.database().ref('cms-v3/' + room);
+      App.fbStatus = 'online';
+      setTimeout(()=> { try { rerender(); } catch(_){} }, 100);
+      // ★ Step 2: FORCE 從雲端拉一次完整資料 (用雲端覆蓋本地舊版)
+      //   解決「本地 localStorage 有舊資料 → child_added 被去重後不更新」的核心 bug
+      try {
+        const dbURL = firebase.database().app.options.databaseURL;
+        let token = '';
+        try { token = await firebase.auth().currentUser.getIdToken(); } catch(_){}
+        const fullUrl = dbURL.replace(/\/$/, '') + '/cms-v3/' + room + '.json' + (token ? ('?auth=' + token) : '');
+        const r = await fetch(fullUrl, { cache:'no-store' });
+        if(r.ok){
+          const data = await r.json();
+          if(data){
+            const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','attachments','timetable','teachers','groups','courses'];
+            const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
+            let pulled = 0;
+            ARR_NODES.forEach(node => {
+              if(data[node]){
+                const v = data[node];
+                const arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+                App.db[node] = arr;
+                pulled++;
+              }
+            });
+            OBJ_NODES.forEach(node => {
+              if(data[node]){ App.db[node] = data[node]; pulled++; }
+            });
+            try { saveDB(true); } catch(_){}
+            console.log('[firebase] init: 從雲端拉了', pulled, '個 collection');
+            setTimeout(()=> { try { rerender(); } catch(_){} }, 200);
+          }
+        }
+      } catch(e){ console.warn('[firebase] initial pull failed:', e); }
+      // ★ Step 3: 接 realtime listener,之後的變動即時推
       if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
       try { attachListeners(); } catch(e){ console.warn('[firebase] attachListeners failed:', e); }
-      // 不再設 20s timer (樂觀模式)
       return true;
     } catch(e){
-      // 只有 initializeApp / database().ref 本身 throw 才會到這裡
-      // (絕大多數是 config 格式錯誤)
       App.fbStatus = 'error';
       console.warn('[firebase] 設定錯誤:', e);
       return false;
