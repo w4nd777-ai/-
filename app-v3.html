@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-cropper-square-sticky';
+const APP_BUILD = '2026-06-01-cropper-512-quality';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11492,17 +11492,20 @@ function openAvatarCropModal(file){
         actions.appendChild(el('button', { class:'btn btn-primary', style:{padding:'12px 28px',fontSize:'15px',fontWeight:'700'}, onclick: ()=> {
           const realX = cropX / scale, realY = cropY / scale, realSize = cropSize / scale;
           const canvas = document.createElement('canvas');
-          // ★ 縮小輸出尺寸 + 降低品質 → 避免 localStorage 爆量
-          //   舊版 512×512 @ 85% = 100-300 KB / 頭像
-          //   新版 320×320 @ 75% = 20-60 KB / 頭像 (省 5 倍空間)
-          const outSize = 320;
+          // ★ 輸出 512×512 @ 88% (industry 標準, 跟 LinkedIn/Twitter 頭像一樣)
+          //   清晰但仍可控:約 50-150 KB / 頭像
+          //   即使 30 個學生上頭像 = ~3 MB,仍在 iOS Safari 5MB localStorage 上限內
+          const outSize = 512;
           canvas.width = outSize; canvas.height = outSize;
           const ctx = canvas.getContext('2d');
           // 白底 (萬一原圖有 alpha)
           ctx.fillStyle = '#fff';
           ctx.fillRect(0, 0, outSize, outSize);
+          // 高品質繪製 (確保縮放後不糊)
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, realX, realY, realSize, realSize, 0, 0, outSize, outSize);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
           m.close();
           resolve(dataUrl);
         }}, '✂️ 確認裁切'));
