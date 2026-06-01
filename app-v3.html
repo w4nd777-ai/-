@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-aggressive-sync';
+const APP_BUILD = '2026-06-01-ann-tgt-prominent';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -19541,17 +19541,43 @@ function rAnn(content){
           const orig = btn.textContent;
           btn.textContent = '同步中...';
           btn.disabled = true;
+          // 用 modal 顯示診斷, 不用 toast (toast 容易被忽略)
+          const localAnn = (App.db.announcements||[]).length;
+          let lines = ['📊 同步診斷'];
+          lines.push('本機公告數: ' + localAnn);
+          lines.push('Firebase 連線: ' + (App.fbRef ? '✓ OK' : '✗ 未連線'));
+          lines.push('教室代碼: ' + (App.cfg?.roomCode || '未設定'));
           try {
-            if(typeof Sync !== 'undefined' && Sync.pushLocalUnsynced){
-              const n = await Sync.pushLocalUnsynced();
-              if(n > 0){
-                toast('✅ 已把 ' + n + ' 筆本機資料推到雲端', 'success', 5000);
-              } else {
-                toast('本機所有資料都已同步雲端 ✓', 'success', 3000);
-              }
+            if(!App.fbRef){
+              lines.push('');
+              lines.push('❌ Firebase 沒連線 → 沒辦法推到雲端');
+              lines.push('請檢查「設定 → Firebase 同步」是否有填正確的 config');
+              await confirmDlg(lines.join('\n'), { title:'同步診斷', cancelText:'', okText:'知道了' });
+              return;
             }
+            if(typeof Sync === 'undefined' || !Sync.pushLocalUnsynced){
+              lines.push('❌ Sync 模組未載入');
+              await confirmDlg(lines.join('\n'), { title:'同步診斷', cancelText:'', okText:'知道了' });
+              return;
+            }
+            // 真的推
+            const n = await Sync.pushLocalUnsynced();
+            lines.push('');
+            lines.push('結果: 推了 ' + n + ' 筆 (含全部 collection)');
+            if(typeof Sync.countUnsyncedFor === 'function'){
+              const annLeft = await Sync.countUnsyncedFor('announcements');
+              const asgLeft = await Sync.countUnsyncedFor('assignments');
+              lines.push('  公告剩 ' + annLeft + ' 筆未同步');
+              lines.push('  作業剩 ' + asgLeft + ' 筆未同步');
+            }
+            lines.push('');
+            lines.push(n > 0 ? '✅ 同步成功' : '本機已全部同步 (沒東西要推)');
+            await confirmDlg(lines.join('\n'), { title:'同步結果', cancelText:'', okText:'好' });
           } catch(e){
-            toast('同步失敗: ' + (e.message||e), 'danger', 5000);
+            lines.push('');
+            lines.push('❌ 錯誤: ' + (e.message || e));
+            console.error('[sync-btn]', e);
+            await confirmDlg(lines.join('\n'), { title:'同步失敗', cancelText:'', okText:'知道了' });
           } finally {
             btn.textContent = orig;
             btn.disabled = false;
@@ -19716,6 +19742,132 @@ function openAnnouncementEdit(a){
   const iT = el('input', { class:'input', value: a?.title||'' });
   fT.appendChild(iT); m.root.appendChild(fT);
 
+  // ★ 派發對象 — 移到「標題」下面 (用戶反映「沒看到班級功能」, 原本被擠到下面)
+  //   藍底 box 框起來, 不會錯過
+  const fTgtWrap = el('div', { style:{
+    marginBottom:'16px', padding:'12px', borderRadius:'10px',
+    background:'rgba(99,102,241,.08)', border:'2px solid var(--primary)'
+  }});
+  fTgtWrap.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'8px',color:'var(--primary)'} },
+    '🎯 派發對象 (誰會看到這則公告)'));
+  const iTgt = el('select', { class:'select' });
+  ['all','class','students'].forEach(v => {
+    iTgt.appendChild(el('option', { value:v }, { all:'🌐 全部學生', class:'🏫 指定班級', students:'👥 指定學生' }[v]));
+  });
+  iTgt.value = a?.target || 'all';
+  fTgtWrap.appendChild(iTgt);
+
+  // 班級多選 (target=class 時顯示)
+  const fAnnCls = el('div', { style:{marginTop:'10px',display:'none'} });
+  fAnnCls.appendChild(el('div', { class:'small', style:{marginBottom:'4px',fontWeight:'600'} }, '選擇班級 (可複選)'));
+  const _annClasses = (typeof getAllClassesEverywhere === 'function')
+    ? getAllClassesEverywhere()
+    : Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))).sort();
+  const _annClsChecks = [];
+  const _annClsControls = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} },
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annClsChecks.forEach(cb=> cb.checked=true); }}, '全選'),
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annClsChecks.forEach(cb=> cb.checked=false); }}, '全清')
+  );
+  fAnnCls.appendChild(_annClsControls);
+  const _annClsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px',maxHeight:'150px',overflow:'auto'} });
+  const _preSelAnnCls = new Set(a?.targetClsList || (a?.targetCls ? [a.targetCls] : []));
+  _annClasses.forEach(c => {
+    const lbl = el('label', { style:{display:'inline-flex',alignItems:'center',gap:'4px',padding:'4px 10px',background:'var(--surface-2)',borderRadius:'6px',cursor:'pointer'} });
+    const cb = el('input', { type:'checkbox', value:c });
+    if(_preSelAnnCls.has(c)) cb.checked = true;
+    _annClsChecks.push(cb);
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', null, ' ' + c));
+    _annClsBox.appendChild(lbl);
+  });
+  if(!_annClasses.length) _annClsBox.appendChild(el('div', { class:'muted small' }, '尚無班級資料 (先去學生管理建立學生)'));
+  fAnnCls.appendChild(_annClsBox);
+  fTgtWrap.appendChild(fAnnCls);
+
+  // 學生多選 (target=students 時顯示) — 含搜尋 + 班級篩選
+  const fAnnStu = el('div', { style:{marginTop:'10px',display:'none'} });
+  fAnnStu.appendChild(el('div', { class:'small', style:{marginBottom:'4px',fontWeight:'600'} }, '選擇學生 (可複選)'));
+  const _annStuToolbar = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px',flexWrap:'wrap'} });
+  const _annStuSearch = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號 / 班級', style:{flex:'1',minWidth:'160px'} });
+  const _annStuClsFilter = el('select', { class:'select', style:{width:'auto'} });
+  _annStuClsFilter.appendChild(el('option', { value:'' }, '全部班級'));
+  _annClasses.forEach(c => _annStuClsFilter.appendChild(el('option', { value:c }, c)));
+  _annStuToolbar.appendChild(_annStuSearch);
+  _annStuToolbar.appendChild(_annStuClsFilter);
+  fAnnStu.appendChild(_annStuToolbar);
+  const _annStuActions = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} });
+  const _annStuCountLbl = el('span', { class:'tiny muted', style:{marginLeft:'auto',alignSelf:'center'} }, '');
+  function _annVisibleStu(){ return Object.entries(_annStuChecks).filter(([id])=> _annStuRows[id].style.display !== 'none').map(([_,cb])=> cb); }
+  function _annUpdateCount(){
+    const total = Object.keys(_annStuChecks).length;
+    const sel = Object.values(_annStuChecks).filter(cb=>cb.checked).length;
+    _annStuCountLbl.textContent = '已選 ' + sel + ' / ' + total + ' 人';
+  }
+  _annStuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annVisibleStu().forEach(cb=> cb.checked=true); _annUpdateCount(); }}, '全選可見'));
+  _annStuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annVisibleStu().forEach(cb=> cb.checked=false); _annUpdateCount(); }}, '全清可見'));
+  _annStuActions.appendChild(_annStuCountLbl);
+  fAnnStu.appendChild(_annStuActions);
+  const _annStuBox = el('div', { style:{maxHeight:'260px',overflow:'auto',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
+  const _annStuChecks = {};
+  const _annStuRows = {};
+  (App.db.students||[]).forEach(s => {
+    const row = el('label', { class:'flex', style:{padding:'4px',cursor:'pointer',borderRadius:'4px'} });
+    const cb = el('input', { type:'checkbox' });
+    if(a?.targetIds && a.targetIds.includes(s.id)) cb.checked = true;
+    cb.addEventListener('change', _annUpdateCount);
+    _annStuChecks[s.id] = cb;
+    _annStuRows[s.id] = row;
+    row.appendChild(cb);
+    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + (s.seat?s.seat+'號 ':'') + s.name + (s.sid?' ('+s.sid+')':'')));
+    _annStuBox.appendChild(row);
+  });
+  fAnnStu.appendChild(_annStuBox);
+  fTgtWrap.appendChild(fAnnStu);
+
+  // 預覽: 即時顯示「將會發給 N 位學生」
+  const _annTgtPreview = el('div', { style:{marginTop:'8px',padding:'6px 10px',background:'var(--surface)',borderRadius:'8px',fontWeight:'600',fontSize:'13px'} });
+  function _updateAnnTgtPreview(){
+    const tgt = iTgt.value;
+    let n = 0;
+    if(tgt === 'all'){
+      n = (App.db.students||[]).length;
+      _annTgtPreview.textContent = '✉️ 將發給全部 ' + n + ' 位學生';
+    } else if(tgt === 'class'){
+      const sel = _annClsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
+      n = (App.db.students||[]).filter(s => sel.includes(s.cls)).length;
+      _annTgtPreview.textContent = sel.length ? '✉️ 將發給 ' + sel.join(' / ') + ' 班共 ' + n + ' 位學生' : '⚠️ 尚未選擇任何班級';
+    } else {
+      n = Object.values(_annStuChecks).filter(cb=>cb.checked).length;
+      _annTgtPreview.textContent = n ? '✉️ 將發給選定的 ' + n + ' 位學生' : '⚠️ 尚未選擇任何學生';
+    }
+  }
+  _annClsChecks.forEach(cb => cb.addEventListener('change', _updateAnnTgtPreview));
+  Object.values(_annStuChecks).forEach(cb => cb.addEventListener('change', _updateAnnTgtPreview));
+  fTgtWrap.appendChild(_annTgtPreview);
+
+  function _annFilterStu(){
+    const q = (_annStuSearch.value||'').trim().toLowerCase();
+    const cFilter = _annStuClsFilter.value;
+    (App.db.students||[]).forEach(s => {
+      const matchQ = !q || (s.name||'').toLowerCase().includes(q) || String(s.sid||'').toLowerCase().includes(q) || String(s.cls||'').toLowerCase().includes(q);
+      const matchC = !cFilter || s.cls === cFilter;
+      if(_annStuRows[s.id]) _annStuRows[s.id].style.display = (matchQ && matchC) ? '' : 'none';
+    });
+  }
+  _annStuSearch.addEventListener('input', _annFilterStu);
+  _annStuClsFilter.addEventListener('change', _annFilterStu);
+  _annUpdateCount();
+
+  function _syncAnnTgt(){
+    fAnnCls.style.display = iTgt.value === 'class' ? '' : 'none';
+    fAnnStu.style.display = iTgt.value === 'students' ? '' : 'none';
+    _updateAnnTgtPreview();
+  }
+  iTgt.addEventListener('change', _syncAnnTgt);
+  _syncAnnTgt();
+
+  m.root.appendChild(fTgtWrap);
+
   const fB = el('div', { class:'field' });
   fB.appendChild(el('label', { class:'label' }, '內容'));
   const iB = el('textarea', { class:'textarea', placeholder:'公告內容...' });
@@ -19758,104 +19910,6 @@ function openAnnouncementEdit(a){
   fSched.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
     '排程時間到之前,學生看不到這則公告,也不會收到通知。'));
   m.root.appendChild(fSched);
-
-  // ★ 派發對象 — 跟作業編輯一致 (全班 / 指定班級 / 指定學生)
-  const fTgt = el('div', { class:'field' });
-  fTgt.appendChild(el('label', { class:'label' }, '🎯 派發對象'));
-  const iTgt = el('select', { class:'select' });
-  ['all','class','students'].forEach(v => {
-    iTgt.appendChild(el('option', { value:v }, { all:'全部學生', class:'指定班級', students:'指定學生' }[v]));
-  });
-  iTgt.value = a?.target || 'all';
-  fTgt.appendChild(iTgt);
-  m.root.appendChild(fTgt);
-
-  // 班級多選 (target=class 時顯示)
-  const fAnnCls = el('div', { class:'field', style:{display:'none'} });
-  fAnnCls.appendChild(el('label', { class:'label' }, '選擇班級 (可複選)'));
-  const _annClasses = (typeof getAllClassesEverywhere === 'function')
-    ? getAllClassesEverywhere()
-    : Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))).sort();
-  const _annClsChecks = [];
-  const _annClsControls = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} },
-    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annClsChecks.forEach(cb=> cb.checked=true); }}, '全選'),
-    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annClsChecks.forEach(cb=> cb.checked=false); }}, '全清')
-  );
-  fAnnCls.appendChild(_annClsControls);
-  const _annClsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px',maxHeight:'150px',overflow:'auto'} });
-  const _preSelAnnCls = new Set(a?.targetClsList || (a?.targetCls ? [a.targetCls] : []));
-  _annClasses.forEach(c => {
-    const lbl = el('label', { style:{display:'inline-flex',alignItems:'center',gap:'4px',padding:'4px 10px',background:'var(--surface-2)',borderRadius:'6px',cursor:'pointer'} });
-    const cb = el('input', { type:'checkbox', value:c });
-    if(_preSelAnnCls.has(c)) cb.checked = true;
-    _annClsChecks.push(cb);
-    lbl.appendChild(cb);
-    lbl.appendChild(el('span', null, ' ' + c));
-    _annClsBox.appendChild(lbl);
-  });
-  if(!_annClasses.length) _annClsBox.appendChild(el('div', { class:'muted small' }, '尚無班級資料'));
-  fAnnCls.appendChild(_annClsBox);
-  m.root.appendChild(fAnnCls);
-
-  // 學生多選 (target=students 時顯示) — 含搜尋 + 班級篩選
-  const fAnnStu = el('div', { class:'field', style:{display:'none'} });
-  fAnnStu.appendChild(el('label', { class:'label' }, '選擇學生 (可複選)'));
-  const _annStuToolbar = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px',flexWrap:'wrap'} });
-  const _annStuSearch = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號 / 班級', style:{flex:'1',minWidth:'160px'} });
-  const _annStuClsFilter = el('select', { class:'select', style:{width:'auto'} });
-  _annStuClsFilter.appendChild(el('option', { value:'' }, '全部班級'));
-  _annClasses.forEach(c => _annStuClsFilter.appendChild(el('option', { value:c }, c)));
-  _annStuToolbar.appendChild(_annStuSearch);
-  _annStuToolbar.appendChild(_annStuClsFilter);
-  fAnnStu.appendChild(_annStuToolbar);
-  const _annStuActions = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} });
-  const _annStuCountLbl = el('span', { class:'tiny muted', style:{marginLeft:'auto',alignSelf:'center'} }, '');
-  function _annVisibleStu(){ return Object.entries(_annStuChecks).filter(([id])=> _annStuRows[id].style.display !== 'none').map(([_,cb])=> cb); }
-  function _annUpdateCount(){
-    const total = Object.keys(_annStuChecks).length;
-    const sel = Object.values(_annStuChecks).filter(cb=>cb.checked).length;
-    _annStuCountLbl.textContent = '已選 ' + sel + ' / ' + total + ' 人';
-  }
-  _annStuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annVisibleStu().forEach(cb=> cb.checked=true); _annUpdateCount(); }}, '全選可見'));
-  _annStuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annVisibleStu().forEach(cb=> cb.checked=false); _annUpdateCount(); }}, '全清可見'));
-  _annStuActions.appendChild(_annStuCountLbl);
-  fAnnStu.appendChild(_annStuActions);
-  const _annStuBox = el('div', { style:{maxHeight:'260px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
-  const _annStuChecks = {};
-  const _annStuRows = {};
-  (App.db.students||[]).forEach(s => {
-    const row = el('label', { class:'flex', style:{padding:'4px',cursor:'pointer',borderRadius:'4px'} });
-    const cb = el('input', { type:'checkbox' });
-    if(a?.targetIds && a.targetIds.includes(s.id)) cb.checked = true;
-    cb.addEventListener('change', _annUpdateCount);
-    _annStuChecks[s.id] = cb;
-    _annStuRows[s.id] = row;
-    row.appendChild(cb);
-    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + (s.seat?s.seat+'號 ':'') + s.name + (s.sid?' ('+s.sid+')':'')));
-    _annStuBox.appendChild(row);
-  });
-  fAnnStu.appendChild(_annStuBox);
-  m.root.appendChild(fAnnStu);
-
-  function _annFilterStu(){
-    const q = (_annStuSearch.value||'').trim().toLowerCase();
-    const cFilter = _annStuClsFilter.value;
-    (App.db.students||[]).forEach(s => {
-      const matchQ = !q || (s.name||'').toLowerCase().includes(q) || String(s.sid||'').toLowerCase().includes(q) || String(s.cls||'').toLowerCase().includes(q);
-      const matchC = !cFilter || s.cls === cFilter;
-      if(_annStuRows[s.id]) _annStuRows[s.id].style.display = (matchQ && matchC) ? '' : 'none';
-    });
-  }
-  _annStuSearch.addEventListener('input', _annFilterStu);
-  _annStuClsFilter.addEventListener('change', _annFilterStu);
-  _annUpdateCount();
-
-  function _syncAnnTgt(){
-    fAnnCls.style.display = iTgt.value === 'class' ? '' : 'none';
-    fAnnStu.style.display = iTgt.value === 'students' ? '' : 'none';
-  }
-  iTgt.addEventListener('change', _syncAnnTgt);
-  _syncAnnTgt();
 
   // ★ 附件 (照片 / 檔案 / PDF / 影片 等)
   const _attachState = (a && Array.isArray(a.attaches)) ? a.attaches.slice() : [];
