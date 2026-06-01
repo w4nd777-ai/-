@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-batch-bug-fixes-r2';
+const APP_BUILD = '2026-06-01-storage-leak-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -1543,6 +1543,19 @@ function loadDB(){
     }
     const parsed = JSON.parse(raw);
     App.db = Object.assign(defaultDB(), parsed);
+    // ★ 修:attachments / _errors / _archives 過量 — 不該在本機
+    //   舊版 Sync 把 attachments (含 base64 大檔) 拉到本機 → localStorage 爆量
+    //   _errors 是錯誤 log,雲端可能累積幾 MB,本機不需要
+    //   _archives 只留最近一份 (學期切換備份)
+    if(App.db.attachments){
+      try { delete App.db.attachments; console.log('[loadDB] 清掉殘留 attachments'); } catch(_){}
+    }
+    if(App.db._errors){
+      try { delete App.db._errors; console.log('[loadDB] 清掉殘留 _errors'); } catch(_){}
+    }
+    if(Array.isArray(App.db._archives) && App.db._archives.length > 2){
+      try { App.db._archives = App.db._archives.slice(0, 2); console.log('[loadDB] _archives 截短到 2 份'); } catch(_){}
+    }
     // ensure all arrays exist
     // Round 2 M2: 'parents' 已從 arrFields 移除
     const arrFields = ['courses','students','accounts','attendance','assignments','submissions','scores','evals','feeds','groups','messages','announcements','leaves','pending','peerEvals','selfEvals','attendanceNotes','feedbacks','behavior','quizzes','quizSubmissions','teachers','badges','notes','todos','notifications','_trash'];
@@ -2111,7 +2124,7 @@ const Sync = (() => {
         if(r.ok){
           const data = await r.json();
           if(data){
-            const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','attachments','timetable','teachers','groups','courses'];
+            const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','timetable','teachers','groups','courses'];
             const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
             let pulled = 0;
             ARR_NODES.forEach(node => {
@@ -2400,7 +2413,7 @@ const Sync = (() => {
     const data = await r.json();
     if(!data) throw new Error('雲端沒資料');
     let cnt = 0;
-    const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','attachments','timetable','teachers','groups','courses'];
+    const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','timetable','teachers','groups','courses'];
     const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
     ARR_NODES.forEach(node => {
       if(data[node]){
@@ -2434,7 +2447,7 @@ const Sync = (() => {
     if(!data || data.error){ throw new Error(data && data.error ? data.error : 'no data'); }
 
     let updated = 0;
-    const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','_qrCodes','subjects','notifications','attachments','timetable','teachers','groups','courses'];
+    const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','_qrCodes','subjects','notifications','timetable','teachers','groups','courses'];
     ARR_NODES.forEach(function(node){
       if(!_shouldSubscribe(node)) return;
       const v = data[node];
