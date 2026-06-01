@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-auto-reupload-attach';
+const APP_BUILD = '2026-06-01-attach-help-ui';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -3967,8 +3967,62 @@ async function attachGetUrl(meta){
 }
 
 // 下載附件（新舊版 + Drive + catbox 皆可）
+// 掃描所有繳交,列出「storage=idb + 雲端沒有 URL」的問題附件,提醒老師
+function renderIdbOnlyAttachWarning(content){
+  const problems = [];
+  (App.db.submissions||[]).forEach(sub => {
+    if(!sub) return;
+    const atts = [];
+    if(sub.attach) atts.push(sub.attach);
+    if(Array.isArray(sub.attaches)) sub.attaches.forEach(a => atts.push(a));
+    atts.forEach(a => {
+      if(!a || !a.key) return;
+      if(a.storage && a.storage !== 'idb') return;
+      if(a.fbUrl || a.driveLink || a.catboxUrl) return;
+      problems.push({ sub, attach: a });
+    });
+  });
+  if(!problems.length) return;
+  // 依學生分組
+  const byStudent = {};
+  problems.forEach(p => {
+    const sid = p.sub.studentId;
+    if(!byStudent[sid]) byStudent[sid] = { name: p.sub.studentName || (App.db.students||[]).find(s => s.id===sid)?.name || '?', count: 0, files: [] };
+    byStudent[sid].count++;
+    byStudent[sid].files.push(p.attach.name || '?');
+  });
+  const studentList = Object.entries(byStudent);
+  const card = el('div', { class:'card', style:{ marginBottom:'12px', padding:'12px 14px',
+    background:'var(--warn-soft)', border:'1px solid var(--warn)', borderRadius:'10px' }});
+  card.appendChild(el('div', { style:{fontWeight:'700',marginBottom:'6px'} },
+    '⚠️ 有 ' + problems.length + ' 個附件還在學生本機,你現在打不開'));
+  card.appendChild(el('div', { class:'small', style:{lineHeight:'1.6',marginBottom:'8px'} },
+    '這些附件是學生在 Firebase 同步啟用前繳交的, 只存在他們原本上傳那台裝置 (手機/電腦) 的 IDB 裡。',
+    el('br'),
+    '請通知以下 ' + studentList.length + ' 位學生「在原本繳作業那台裝置上, 打開系統登入一次」, 系統會 3 秒後自動補傳到雲端。'));
+  // 列出學生
+  const ul = el('div', { style:{maxHeight:'160px',overflow:'auto',background:'rgba(0,0,0,.04)',padding:'8px 12px',borderRadius:'6px',fontSize:'12px',marginBottom:'8px'} });
+  studentList.forEach(([sid, info]) => {
+    ul.appendChild(el('div', { style:{padding:'2px 0'} },
+      '• ' + info.name + '  (' + info.count + ' 個檔案: ' + info.files.slice(0,3).join(', ') + (info.files.length>3?'...':'') + ')'));
+  });
+  card.appendChild(ul);
+  // 一鍵複製名單按鈕
+  card.appendChild(el('button', { class:'btn btn-sm', onclick: async ()=> {
+    const txt = studentList.map(([sid, info]) => info.name + '  (' + info.count + '個檔案待補傳)').join('\n');
+    try { await navigator.clipboard.writeText('需要重新登入補傳附件的學生:\n\n' + txt + '\n\n請在你原本繳作業那台裝置打開系統登入一次, 系統會自動把檔案傳到雲端讓老師看。'); toast('已複製名單到剪貼簿','success'); }
+    catch(_){ toast('複製失敗','danger'); }
+  }}, '📋 複製名單'));
+  content.appendChild(card);
+}
+
 async function attachDownload(meta){
   if(!meta){ toast('找不到附件 — 紀錄裡沒有附件資料 — 請聯絡學生在原裝置重新上傳','danger', 5000); return; }
+  // ★ 友善提示:如果 storage='idb' 且沒 URL — 純本機附件,雲端找不到,不用試
+  if(meta.storage === 'idb' && !meta.fbUrl && !meta.driveLink && !meta.catboxUrl && meta.key){
+    try { toast('⚠️ 此檔案還沒上雲端 — 請學生在原本繳交那台裝置打開系統登入一次 (會自動補傳)','warn', 9000); } catch(_){}
+    // 還是試一下 (萬一這台裝置剛好就是學生那台)
+  }
   // catbox.moe:直接開連結 (跨域 a.download 屬性無效)
   if(meta.storage === 'catbox' && meta.catboxUrl){
     window.open(meta.catboxUrl, '_blank');
@@ -3997,6 +4051,10 @@ async function attachDownload(meta){
 // 預覽附件 — 用 in-app modal 顯示（之前 window.open(dataURI) 會被 Chrome 60+ 擋）
 async function attachPreview(meta){
   if(!meta){ toast('找不到附件 — 紀錄裡沒有附件資料 — 請聯絡學生在原裝置重新上傳','danger', 5000); return; }
+  // ★ 友善提示:純本機附件 (Firebase 同步啟用前繳交的),學生重新登入會自動補傳
+  if(meta.storage === 'idb' && !meta.fbUrl && !meta.driveLink && !meta.catboxUrl && meta.key){
+    try { toast('⚠️ 此檔案還在學生本機,雲端沒有 — 請學生開系統登入一次自動補傳','warn', 9000); } catch(_){}
+  }
   // Drive 走 webViewLink（有公開分享連結）
   if(meta.storage === 'drive' || meta.driveFileId){
     const url = meta.driveLink || ('https://drive.google.com/file/d/' + meta.driveFileId + '/view');
@@ -16797,6 +16855,8 @@ function renderSubCapacityCard(content){
         gdPreload().catch(()=>{});
       }
     } catch(_){}
+    // ★ 掃出「老師打不開」的附件 — Firebase 同步啟用前繳交、雲端沒有的本機附件
+    try { renderIdbOnlyAttachWarning(content); } catch(e){ console.warn('[idb-warn]', e); }
     const cap = el('div', { class:'card', style:{
       marginBottom:'12px',padding:'10px 14px',
       background:'linear-gradient(to right, rgba(99,102,241,.06), transparent 60%)',
