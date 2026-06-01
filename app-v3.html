@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-ann-sync-honest';
+const APP_BUILD = '2026-06-01-asg-multi-sticky';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -17114,13 +17114,19 @@ function rAsgnDetail(content, asg){
       el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'6px'} }, asg.desc)
     ));
   }
-  if(asg.attach){
+  // ★ 多檔附件: 優先用 asg.attaches (陣列), 沒有就 fallback 到 asg.attach (單筆)
+  const _asgAtts = (Array.isArray(asg.attaches) && asg.attaches.length) ? asg.attaches
+                 : (asg.attach ? [asg.attach] : []);
+  if(_asgAtts.length){
+    const _attRow = el('div', { class:'flex', style:{marginTop:'6px',flexWrap:'wrap',gap:'6px'} });
+    _asgAtts.forEach(_att => {
+      if(!_att) return;
+      _attRow.appendChild(el('button', { class:'btn btn-sm', onclick:()=> attachDownload(_att) }, '⬇ ' + (_att.name||'附件')));
+      _attRow.appendChild(el('button', { class:'btn btn-sm', onclick:()=> attachPreview(_att) }, '👁 預覽'));
+    });
     content.appendChild(el('div', { class:'card', style:{marginBottom:'12px'} },
-      el('h3', null, '📎 附件'),
-      el('div', { class:'flex', style:{marginTop:'6px',flexWrap:'wrap',gap:'6px'} },
-        el('button', { class:'btn btn-sm', onclick:()=> attachDownload(asg.attach) }, '⬇ ' + asg.attach.name),
-        el('button', { class:'btn btn-sm', onclick:()=> attachPreview(asg.attach) }, '👁 預覽')
-      )
+      el('h3', null, '📎 附件 (' + _asgAtts.length + ' 個)'),
+      _attRow
     ));
   }
 
@@ -17317,41 +17323,65 @@ function openAssignmentEdit(asg){
   iTgt.addEventListener('change', syncTgt);
   syncTgt();
 
-  // attachment
+  // attachment — ★ 改為支援多檔 (跟公告一樣 chip 介面)
+  //   舊資料: asg.attach (單檔) → 自動轉成陣列, 保留向下相容
+  //   新資料: asg.attaches (多檔)
+  const _attachState = [];
+  if(asg?.attaches && Array.isArray(asg.attaches)) _attachState.push(...asg.attaches);
+  else if(asg?.attach) _attachState.push(asg.attach);
   const fAtt = el('div', { class:'field' });
-  fAtt.appendChild(el('label', { class:'label' }, '題目附件（單檔 ≤ 50MB，可選）'));
-  let attached = asg?.attach || null;
-  const upBox = el('div', { class:'upload-area' + (attached?' has-file':'') });
-  function refreshAtt(){
-    upBox.innerHTML = '';
-    if(attached){
-      const chip = el('div', { class:'file-chip' },
-        el('span', null, '📎 ' + attached.name),
-        el('span', { class:'x', onclick: e => { e.stopPropagation(); try { Promise.resolve(attachDelete(attached)).catch(()=>{}); } catch(_){} attached = null; upBox.classList.remove('has-file'); refreshAtt(); } }, '✗')
-      );
-      upBox.appendChild(chip);
-    } else {
-      upBox.appendChild(el('div', null, '點此選擇檔案或拖曳'));
-      upBox.appendChild(el('div', { class:'tiny muted' }, '上限 50MB（PDF / Word / 圖片等）'));
+  fAtt.appendChild(el('label', { class:'label' }, '📎 題目附件 (可多選, 單檔 ≤ 50MB)'));
+  const chipsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'8px',minHeight:'30px'} });
+  function _renderAsgAttChips(){
+    chipsBox.innerHTML = '';
+    if(!_attachState.length){
+      chipsBox.appendChild(el('div', { class:'tiny muted' }, '(尚未選擇任何附件)'));
+      return;
     }
+    _attachState.forEach((att, idx) => {
+      const isImg = (att.type||'').startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name||'');
+      const chip = el('div', { style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 8px',background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:'14px',fontSize:'12px'} });
+      chip.appendChild(el('span', null, (isImg?'🖼':'📎') + ' ' + (att.name||'(無名)')));
+      if(att.size){
+        chip.appendChild(el('span', { class:'tiny muted' }, '(' + Math.round(att.size/1024) + ' KB)'));
+      }
+      const rm = el('button', { type:'button', style:{background:'transparent',border:'0',color:'var(--danger)',cursor:'pointer',fontSize:'14px',padding:'0 4px'},
+        onclick: ()=> {
+          try { Promise.resolve(attachDelete(att)).catch(()=>{}); } catch(_){}
+          _attachState.splice(idx, 1);
+          _renderAsgAttChips();
+        }
+      }, '×');
+      chip.appendChild(rm);
+      chipsBox.appendChild(chip);
+    });
   }
-  const fInp = el('input', { type:'file' });
+  _renderAsgAttChips();
+  fAtt.appendChild(chipsBox);
+  const fInp = el('input', { type:'file', multiple:true, style:{display:'none'} });
   fInp.addEventListener('change', async e => {
-    try {
-      const file = e.target.files[0];
-      if(!file) return;
-      const data = await attachUpload(file);
-      if(data){ attached = data; upBox.classList.add('has-file'); refreshAtt(); toast('已加入附件','success'); }
-    } catch(err){ toast(err.message || '上傳失敗','danger'); }
+    const files = Array.from(e.target.files || []);
+    for(const file of files){
+      try {
+        toast('📤 上傳 ' + file.name + '...', 'info', 2000);
+        const data = await attachUpload(file);
+        if(data){ _attachState.push(data); _renderAsgAttChips(); }
+      } catch(err){ toast(err.message || '上傳失敗','danger'); }
+    }
+    e.target.value = '';
   });
-  upBox.appendChild(fInp);
-  upBox.addEventListener('click', ()=> fInp.click());
-  fAtt.appendChild(upBox); m.root.appendChild(fAtt);
-  refreshAtt();
+  fAtt.appendChild(fInp);
+  const pickAsgBtn = el('button', { type:'button', class:'btn btn-sm',
+    onclick: (e)=> { e.preventDefault(); fInp.click(); }
+  }, '📎 選擇檔案 / 照片');
+  fAtt.appendChild(pickAsgBtn);
+  fAtt.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '支援 PDF / Word / 圖片 / 影片等。學生會在作業說明下方看到附件可預覽 / 下載。'));
+  m.root.appendChild(fAtt);
 
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
     // H1: 副老師寫入權限攔截（新增/編輯作業視為編輯成績）
     if(!requirePerm('canEditGrades','建立/編輯作業')) return;
     const title = iT.value.trim();
@@ -17383,7 +17413,9 @@ function openAssignmentEdit(asg){
       rec.targetCls = '';
       rec.targetIds = [];
     }
-    rec.attach = attached;
+    // ★ 多檔附件 — 寫進 rec.attaches; 保留 rec.attach 是第一筆 (向下相容老程式)
+    rec.attaches = _attachState.slice();
+    rec.attach = _attachState[0] || null;
     rec.createdBy = App.session?.name || '老師';
     // 包 B-1：科目
     try { rec.subjectId = iSubj.value || ''; } catch(_){ /* fallback */ }
@@ -17393,9 +17425,36 @@ function openAssignmentEdit(asg){
     try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_) {}
     if(isNew) App.db.assignments.push(rec);
     saveDB();
-    try { Sync.setRow('assignments', rec.id, rec); } catch(_){ Sync.setMap('assignments', App.db.assignments); }
+    // ★ 跟公告一樣 await + 老實回報雲端寫入結果
+    let cloudOk = false, cloudErr = '';
+    try {
+      if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
+        try { await Sync.init(); } catch(_){}
+      }
+      if(App.fbRef){
+        await App.fbRef.child('assignments').child(rec.id).set(rec);
+        cloudOk = true;
+      } else {
+        cloudErr = 'Firebase 同步未就緒';
+      }
+    } catch(e){
+      cloudErr = e.code || e.message || String(e);
+    }
     bcNotify();
-    toast(isNew?'已新增':'已更新','success');
+    if(cloudOk){
+      toast('✅ ' + (isNew?'已新增':'已更新') + ' (已同步到雲端,學生會收到)', 'success', 4000);
+    } else {
+      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n學生暫時看不到, 系統會自動重試', 'warn', 12000);
+      console.warn('[assignment] cloud sync failed:', cloudErr);
+      setTimeout(async ()=> {
+        try {
+          if(App.fbRef){
+            await App.fbRef.child('assignments').child(rec.id).set(rec);
+            try { toast('✅ 作業「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
+          }
+        } catch(_){}
+      }, 5000);
+    }
     m.close();
     rerender();
   }}, isNew?'新增':'儲存'));
@@ -17410,7 +17469,9 @@ async function deleteAssignment(asg){
   const subsBackup = App.db.submissions.filter(s => s.assignmentId === asg.id).map(_clone);
   // 為了允許 Undo，這裡先「暫時不釋放 IDB 附件」；若 6 秒後使用者沒按復原，再 sweep
   const keysToFree = [];
+  // ★ 多檔: 同時 sweep asg.attach (向下相容) + asg.attaches (新版陣列)
   if(asg.attach && asg.attach.key) keysToFree.push(asg.attach.key);
+  if(Array.isArray(asg.attaches)) asg.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
   subsBackup.forEach(s => {
     if(s.attach && s.attach.key) keysToFree.push(s.attach.key);
     if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
@@ -19343,6 +19404,21 @@ function rEv(content){
    PHASE 2 — TEACHER: ANNOUNCEMENTS (rAnn)
    ──────────────────────────────────────────────────────────── */
 function rAnn(content){
+  // ★ 進入老師公告頁: 主動補推本機未同步 + 拉雲端 (修「學生看不到老師發的公告」)
+  if(!App._rAnnForcedSync && App.fbRef && typeof Sync !== 'undefined'){
+    App._rAnnForcedSync = true;
+    setTimeout(()=> { App._rAnnForcedSync = false; }, 30000);
+    if(Sync.pushLocalUnsynced){
+      Sync.pushLocalUnsynced().then(n => {
+        if(n) console.log('[rAnn] 補推', n, '筆未同步資料到雲端');
+      }).catch(()=>{});
+    }
+    if(Sync.forceResyncFromCloud){
+      Sync.forceResyncFromCloud().then(n => {
+        if(n) try { rerender(); } catch(_){}
+      }).catch(()=>{});
+    }
+  }
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '公告管理'),
@@ -23393,13 +23469,19 @@ function rSAsgnDetailV2(content, asg, me){
       el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'4px'} }, asg.desc)
     ));
   }
-  if(asg.attach){
+  // ★ 多檔附件: 優先用 asg.attaches (陣列), fallback 到 asg.attach (單筆)
+  const _sAsgAtts = (Array.isArray(asg.attaches) && asg.attaches.length) ? asg.attaches
+                  : (asg.attach ? [asg.attach] : []);
+  if(_sAsgAtts.length){
+    const _attRow = el('div', { class:'flex', style:{marginTop:'4px',gap:'6px',flexWrap:'wrap'} });
+    _sAsgAtts.forEach(_att => {
+      if(!_att) return;
+      _attRow.appendChild(el('button', { class:'btn btn-sm', onclick:()=> attachDownload(_att) }, '⬇ ' + (_att.name||'附件')));
+      _attRow.appendChild(el('button', { class:'btn btn-sm', onclick:()=> attachPreview(_att) }, '👁 預覽'));
+    });
     content.appendChild(el('div', { class:'card', style:{marginBottom:'10px'} },
-      el('h3', null, '📎 老師附件'),
-      el('div', { class:'flex', style:{marginTop:'4px',gap:'6px',flexWrap:'wrap'} },
-        el('button', { class:'btn btn-sm', onclick:()=> attachDownload(asg.attach) }, '⬇ ' + asg.attach.name),
-        el('button', { class:'btn btn-sm', onclick:()=> attachPreview(asg.attach) }, '👁 預覽')
-      )
+      el('h3', null, '📎 老師附件 (' + _sAsgAtts.length + ' 個)'),
+      _attRow
     ));
   }
 
