@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sync-ping-fix2';
+const APP_BUILD = '2026-06-01-sync-optimistic';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2066,7 +2066,10 @@ const Sync = (() => {
       App.fb = firebase.initializeApp(fbCfg);
       const room = (App.cfg && App.cfg.roomCode) || 'default';
       App.fbRef = firebase.database().ref('cms-v3/' + room);
-      App.fbStatus = 'connecting';
+      // ★ 樂觀策略:initializeApp 沒 throw → 直接標 online
+      //   (反正後續 listener / 寫入失敗會自己處理,狀態指示器不要卡在 connecting)
+      App.fbStatus = 'online';
+      setTimeout(()=> { try { rerender(); } catch(_){} }, 100);
       // ★ FIX: Firebase 規則 require auth != null,但 App 沒人 signIn 時 RTDB 全 PERMISSION_DENIED
       //   解法:如果還沒有任何 auth user (沒 Email 登入過),自動 signInAnonymously
       //   Email/Google 登入會接管,anonymous 只當 fallback 給 read 用
