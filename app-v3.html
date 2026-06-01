@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-honest-register';
+const APP_BUILD = '2026-06-01-revert-cropper-tabsync';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2976,6 +2976,22 @@ function scheduleDueReminders(){
 }
 
 /* ---- BroadcastChannel for same-domain multi-tab ---- */
+// ★ 用戶要求:不同分頁間根本不同步 → tab focus 時自動從雲端拉一次
+//   避免「分頁 A 改了東西,分頁 B 切回去看不到」
+if(typeof document !== 'undefined' && !window._cmsV3VisHook){
+  window._cmsV3VisHook = true;
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible') return;
+    // 進來時若 Sync 已就緒 → 從雲端強制 pull 最新
+    try {
+      if(typeof Sync !== 'undefined' && Sync.forceResyncFromCloud && App.fbRef){
+        Sync.forceResyncFromCloud().then(n => {
+          if(n) try { rerender(); } catch(_){}
+        }).catch(()=>{});
+      }
+    } catch(_){}
+  });
+}
 function initBC(){
   try {
     if(App.bc) App.bc.close();
@@ -16569,20 +16585,12 @@ function rMe(content){
     if(!f) return;
     if(f.size > 20*1024*1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
-      // ★ 跳裁切框讓用戶決定範圍
-      const out = await openAvatarCropModal(f);
-      if(!out) return;  // 用戶取消
-      // thumb 存 student.avatar (同步雲端 + localStorage)
-      me.avatar = out.thumb;
-      // 1024 大圖存 IDB (本機高清檢視, 不吃 localStorage)
-      try {
-        const r = await fetch(out.large); const blob = await r.blob();
-        await idbPut('avatar_' + me.id, blob);
-      } catch(_){}
+      // ★ 用戶要求:不裁切,直接壓縮原圖 (回到最早版本)
+      const result = await _compressAvatarUnder1MB(f);
+      me.avatar = result.dataUrl;
       saveDB(); Sync.setRow('students', me.id, me); bcNotify();
-      const kbT = Math.round(out.thumb.length / 1024);
-      const kbL = Math.round(out.large.length / 1024);
-      toast('✅ 頭像已更新 (thumb ' + kbT + ' KB + 高清 ' + kbL + ' KB)','success', 3500);
+      const kb = Math.round(result.dataUrl.length / 1024);
+      toast('✅ 頭像已更新 (' + result.size + '×' + result.size + ' · ' + kb + ' KB)','success', 3000);
       rerender();
     } catch(err){ toast('上傳失敗:' + friendlyError(err),'danger'); }
   });
@@ -16837,22 +16845,15 @@ function openStudentSelfEdit(){
     if(!f) return;
     if(f.size > 20 * 1024 * 1024){ return toast('圖片不可超過 20MB','danger'); }
     try {
-      // ★ 跳裁切框
-      const out = await openAvatarCropModal(f);
-      if(!out) return;
-      avatarData = out.thumb;  // student.avatar 存 thumb
+      // ★ 用戶要求:不裁切,直接壓縮原圖
+      const result = await _compressAvatarUnder1MB(f);
+      avatarData = result.dataUrl;
       avImg.src = avatarData;
       avImg.style.display = 'block';
       avInitials.style.display = 'none';
-      // 1024 大圖存 IDB (給高清檢視用) — 用 'pending' key,儲存後 reassign 正式 id
       try {
-        const r = await fetch(out.large); const blob = await r.blob();
-        await idbPut('avatar_pending_edit', blob);
-      } catch(_){}
-      try {
-        const kbT = Math.round(out.thumb.length / 1024);
-        const kbL = Math.round(out.large.length / 1024);
-        toast('✅ 頭像已裁切 (thumb ' + kbT + ' KB + 高清 ' + kbL + ' KB)', 'success', 3500);
+        const kb = Math.round(avatarData.length / 1024);
+        toast('已儲存 ' + result.size + '×' + result.size + ' 頭像 (' + kb + ' KB)', 'success', 3000);
       } catch(_){}
     } catch(err){ toast('讀取失敗:' + (err.message||err), 'danger'); }
   });
@@ -27798,17 +27799,11 @@ function openTeacherProfile(){
     e.target.value = '';
     if(f.size > 20 * 1024 * 1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
-      // ★ 跳裁切框
-      const out = await openAvatarCropModal(f);
-      if(!out) return;
-      // 老師走 attachUpload (走 Firebase Storage),用 large 1024 確保畫質
-      const resp = await fetch(out.large);
-      const blob = await resp.blob();
-      const croppedFile = new File([blob], 'avatar.jpg', { type:'image/jpeg' });
+      // ★ 用戶要求:不裁切,直接上傳原檔給 attachUpload (走 Firebase Storage,保持完整解析度)
       if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){_swallow('auto',_)} }
-      avatarMeta = await attachUpload(croppedFile);
+      avatarMeta = await attachUpload(f);
       await refreshAvatar();
-      toast('✅ 頭像已上傳 (1024×1024)','success');
+      toast('✅ 頭像已上傳','success');
     } catch(err){ toast('上傳失敗:' + friendlyError(err),'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
