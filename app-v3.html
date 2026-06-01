@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-account-delete-fix';
+const APP_BUILD = '2026-06-01-sub-tab-counts';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -17596,9 +17596,34 @@ function rSub(content){
   ));
 
   const tabs = el('div', { class:'tabs-line' });
-  // ★ 修:加「已退回」tab + pending/graded 排除退回的
+  // ★ 計算各 tab 的數量 (用戶反映: 不知道退回的跑哪去了)
+  //   先 dedup, 再分類
+  const _allSubs = App.db.submissions || [];
+  const _dedupForCount = new Map();
+  _allSubs.forEach(s => {
+    const key = s.studentId + '::' + s.assignmentId;
+    const prev = _dedupForCount.get(key);
+    if(!prev || (s.ts||0) > (prev.ts||0)) _dedupForCount.set(key, s);
+  });
+  const _dedupSubs = [..._dedupForCount.values()];
+  const _cnt = {
+    pending: _dedupSubs.filter(s => typeof s.score !== 'number' && !s.returned).length,
+    graded: _dedupSubs.filter(s => typeof s.score === 'number' && !s.returned).length,
+    returned: _dedupSubs.filter(s => s.returned).length,
+    late: _dedupSubs.filter(s => {
+      if(s.returned) return false;
+      const asg = App.db.assignments.find(a => a.id === s.assignmentId);
+      return asg && isSubmissionLate(asg, s);
+    }).length,
+    all: _dedupSubs.length
+  };
   [['pending','🟡 待批改'],['graded','✅ 已批改'],['returned','↩ 已退回'],['late','⚠️ 遲交'],['all','全部']].forEach(([v,t]) => {
-    tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('submissions', v) }, t));
+    const n = _cnt[v] || 0;
+    const btn = el('button', { class: tab===v?'active':'', onclick:()=> go('submissions', v) }, t);
+    if(n > 0){
+      btn.appendChild(el('span', { class:'pill', style:{marginLeft:'6px',fontSize:'11px',padding:'1px 7px',background:v===tab?'rgba(255,255,255,.3)':'var(--surface-2)'} }, String(n)));
+    }
+    tabs.appendChild(btn);
   });
   content.appendChild(tabs);
 
