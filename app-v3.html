@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-eval-wide-stable';
+const APP_BUILD = '2026-06-01-eval-big-clear';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -19520,30 +19520,109 @@ function openEvalBonus(e){
   m.root.appendChild(actions);
 }
 
-// 老師設定評分項目 (dims) — wide modal, 卡片化, 不會打字跳掉
+// 老師設定評分項目 (dims) — large modal, 大字體, 儲存鍵在標題列永遠看得到
 function openEvalDimsConfig(){
-  const m = modal('', { wide:true });   // ★ 用 wide modal (720px), 不再擠
-  m.root.appendChild(el('h2', null, '📐 設定評分項目'));
-  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'16px',lineHeight:'1.7'} },
+  const m = modal('', { large:true });   // ★ 960px modal
+  // state — 每張卡 cache 一份, 排序只重排, 不重建
+  const state = getEvalDims().map(d => ({ ...d }));
+  const cardNodes = new Map();  // d → cardEl
+
+  // ★ 儲存函數 — 放在標題列右上, 永遠看得到不用滾
+  async function _doSave(btn){
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '儲存中...';
+    try {
+      console.log('[dims-save] state=', JSON.stringify(state));
+      // 自動產生缺少的代號 (從 label 拼音或 dim+index)
+      state.forEach((d, idx) => {
+        if(!d.key || !d.key.trim()){
+          d.key = 'dim' + (idx + 1);
+        }
+        if(!d.label || !d.label.trim()){
+          d.label = '項目 ' + (idx + 1);
+        }
+        d.max = Math.max(1, Math.min(10, parseInt(d.max, 10) || 5));
+      });
+      // 去除空項目
+      const cleaned = state.filter(d => d.label && d.label.trim());
+      if(!cleaned.length){
+        await confirmDlg('沒有任何評分項目, 至少要保留一個', { title:'不能空白', cancelText:'', okText:'好' });
+        btn.disabled = false; btn.textContent = orig; return;
+      }
+      // 處理重複代號 — 自動加後綴
+      const seen = new Set();
+      cleaned.forEach((d, idx) => {
+        let k = d.key;
+        let n = 2;
+        while(seen.has(k)){ k = d.key + '_' + n; n++; }
+        d.key = k;
+        seen.add(k);
+      });
+
+      setEvalDims(cleaned);
+      console.log('[dims-save] localStorage saved, count=', cleaned.length);
+
+      let cloudOk = false, cloudErr = '';
+      try {
+        if(App.fbRef){
+          await App.fbRef.child('settings/evalDims').set(cleaned);
+          cloudOk = true;
+          console.log('[dims-save] cloud OK');
+        } else cloudErr = 'Firebase 未連線';
+      } catch(e){
+        cloudErr = e.message || String(e);
+        console.error('[dims-save] cloud fail', e);
+      }
+
+      const msg = cloudOk
+        ? '✅ 已儲存 ' + cleaned.length + ' 個評分項目 (已同步雲端)'
+        : '⚠️ 已存本機 (雲端失敗: ' + cloudErr + ')';
+      await confirmDlg(msg, { title:'儲存結果', cancelText:'', okText:'好' });
+      m.close();
+      rerender();
+    } catch(e){
+      console.error('[dims-save] EXCEPTION', e);
+      await confirmDlg('儲存失敗: ' + (e.message||String(e)) + '\n\n請截圖回報', { title:'錯誤', cancelText:'', okText:'知道了' });
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  }
+
+  // ─── 標題列 (含右上儲存鍵) ───────────────
+  const header = el('div', { style:{
+    display:'flex', alignItems:'center', justifyContent:'space-between',
+    gap:'10px', flexWrap:'wrap', marginBottom:'14px', position:'sticky',
+    top:'-20px', background:'var(--surface)', zIndex:'10',
+    padding:'4px 0 10px', borderBottom:'1px solid var(--border)'
+  }});
+  header.appendChild(el('h2', { style:{margin:0,fontSize:'22px'} }, '📐 設定評分項目'));
+  const headerBtns = el('div', { class:'flex', style:{gap:'8px'} });
+  headerBtns.appendChild(el('button', { type:'button', class:'btn', style:{fontSize:'15px',padding:'8px 16px'},
+    onclick:()=> m.close()
+  }, '取消'));
+  const saveBtnTop = el('button', { type:'button', class:'btn btn-primary',
+    style:{fontSize:'16px',padding:'10px 20px',fontWeight:'700'},
+    onclick: async (e)=> { await _doSave(e.target); }
+  }, '💾 儲存');
+  headerBtns.appendChild(saveBtnTop);
+  header.appendChild(headerBtns);
+  m.root.appendChild(header);
+
+  m.root.appendChild(el('div', { style:{fontSize:'15px',marginBottom:'16px',lineHeight:'1.7',color:'var(--text-muted)'} },
     '可以加多個評分維度 (例如:課堂專注 / 作業準時 / 合作精神), 各 1-10 分。',
     el('br'),
     '學生填寫評價時, 每一項都會出現星星讓他打分。',
     el('br'),
-    '預設只有「整體」 5 顆星。'));
+    '💡 不填代號也沒關係 — 系統會自動產生。'));
 
-  // 用 state 維持資料, 但每張卡的 DOM 一開始就建好, 之後不重建 → 打字穩定
-  const state = getEvalDims().map(d => ({ ...d }));
-  const cardsBox = el('div', { style:{display:'flex',flexDirection:'column',gap:'12px',marginBottom:'12px'} });
-
-  // 不重建卡片, 只重排順序 (用 appendChild 重新排) — 避免打字時卡片被重建丟失焦點
-  const cardNodes = new Map();  // d → cardEl
+  const cardsBox = el('div', { style:{display:'flex',flexDirection:'column',gap:'14px',marginBottom:'16px'} });
 
   function _renderCardsOrder(){
-    // 只 reorder, 不重建
     cardsBox.innerHTML = '';
     if(!state.length){
-      cardsBox.appendChild(el('div', { class:'muted small', style:{padding:'18px',textAlign:'center',border:'1px dashed var(--border)',borderRadius:'10px'} },
-        '尚無評分項目, 按下方「+ 新增項目」'));
+      cardsBox.appendChild(el('div', { style:{padding:'24px',textAlign:'center',border:'1px dashed var(--border)',borderRadius:'10px',color:'var(--text-muted)',fontSize:'15px'} },
+        '尚無評分項目, 按下方「➕ 新增項目」'));
       return;
     }
     state.forEach((d, idx) => {
@@ -19552,12 +19631,10 @@ function openEvalDimsConfig(){
         card = buildCard(d);
         cardNodes.set(d, card);
       }
-      // 更新「往上/往下」按鈕的 disabled 狀態
       const upBtn = card.querySelector('[data-action="up"]');
       const downBtn = card.querySelector('[data-action="down"]');
       if(upBtn) upBtn.disabled = idx === 0;
       if(downBtn) downBtn.disabled = idx === state.length - 1;
-      // 更新「項目 N」標題
       const titleEl = card.querySelector('[data-role="card-title"]');
       if(titleEl) titleEl.textContent = '項目 ' + (idx + 1);
       cardsBox.appendChild(card);
@@ -19566,162 +19643,118 @@ function openEvalDimsConfig(){
 
   function buildCard(d){
     const card = el('div', { style:{
-      padding:'14px', background:'var(--surface-2)',
-      border:'1px solid var(--border)', borderRadius:'10px'
+      padding:'18px', background:'var(--surface-2)',
+      border:'1px solid var(--border)', borderRadius:'12px'
     }});
 
-    // 標題列 (項目 N + 移動/刪除按鈕)
-    const header = el('div', { class:'flex-between', style:{marginBottom:'10px',alignItems:'center'} });
-    header.appendChild(el('div', { 'data-role':'card-title', style:{fontWeight:'700',fontSize:'14px',color:'var(--text-muted)'} }, '項目'));
-    const btns = el('div', { class:'flex', style:{gap:'4px'} });
-    const upBtn = el('button', { type:'button', class:'btn btn-sm', 'data-action':'up', title:'往上',
+    // 標題列
+    const cardHdr = el('div', { class:'flex-between', style:{marginBottom:'14px',alignItems:'center'} });
+    cardHdr.appendChild(el('div', { 'data-role':'card-title', style:{fontWeight:'700',fontSize:'17px',color:'var(--primary)'} }, '項目'));
+    const btns = el('div', { class:'flex', style:{gap:'6px'} });
+    btns.appendChild(el('button', { type:'button', class:'btn btn-sm', 'data-action':'up', title:'往上',
+      style:{fontSize:'16px',padding:'6px 12px'},
       onclick:()=> {
         const idx = state.indexOf(d);
-        if(idx > 0){
-          [state[idx-1], state[idx]] = [state[idx], state[idx-1]];
-          _renderCardsOrder();
-        }
+        if(idx > 0){ [state[idx-1], state[idx]] = [state[idx], state[idx-1]]; _renderCardsOrder(); }
       }
-    }, '↑');
-    const downBtn = el('button', { type:'button', class:'btn btn-sm', 'data-action':'down', title:'往下',
+    }, '↑'));
+    btns.appendChild(el('button', { type:'button', class:'btn btn-sm', 'data-action':'down', title:'往下',
+      style:{fontSize:'16px',padding:'6px 12px'},
       onclick:()=> {
         const idx = state.indexOf(d);
-        if(idx >= 0 && idx < state.length - 1){
-          [state[idx+1], state[idx]] = [state[idx], state[idx+1]];
-          _renderCardsOrder();
-        }
+        if(idx >= 0 && idx < state.length - 1){ [state[idx+1], state[idx]] = [state[idx], state[idx+1]]; _renderCardsOrder(); }
       }
-    }, '↓');
-    const rmBtn = el('button', { type:'button', class:'btn btn-sm btn-danger', title:'刪除這個項目',
+    }, '↓'));
+    btns.appendChild(el('button', { type:'button', class:'btn btn-sm btn-danger',
+      style:{fontSize:'14px',padding:'6px 12px'},
       onclick: async ()=> {
         const ok = await confirmDlg('確定刪除「' + (d.label||'此項目') + '」?', { danger:true });
         if(!ok) return;
         const idx = state.indexOf(d);
-        if(idx >= 0){
-          state.splice(idx, 1);
-          cardNodes.delete(d);
-          _renderCardsOrder();
-        }
+        if(idx >= 0){ state.splice(idx, 1); cardNodes.delete(d); _renderCardsOrder(); }
       }
-    }, '🗑 刪除');
-    btns.appendChild(upBtn); btns.appendChild(downBtn); btns.appendChild(rmBtn);
-    header.appendChild(btns);
-    card.appendChild(header);
+    }, '🗑 刪除'));
+    cardHdr.appendChild(btns);
+    card.appendChild(cardHdr);
 
-    // 項目名稱 (學生看到的)
-    const fName = el('div', { class:'field' });
-    fName.appendChild(el('label', { class:'label' }, '項目名稱 (學生會看到)'));
-    const iLabel = el('input', { class:'input', value:d.label || '', placeholder:'例: 課堂專注' });
+    // 項目名稱
+    const fName = el('div', { class:'field', style:{marginBottom:'14px'} });
+    fName.appendChild(el('label', { class:'label', style:{fontSize:'14px',marginBottom:'6px'} }, '⭐ 項目名稱 (學生會看到)'));
+    const iLabel = el('input', { class:'input',
+      style:{fontSize:'18px',height:'52px',padding:'0 14px'},
+      value: d.label || '', placeholder:'例: 課堂專注'
+    });
     iLabel.addEventListener('input', e => { d.label = e.target.value; });
     fName.appendChild(iLabel);
     card.appendChild(fName);
 
-    // 內部代號 + 滿分 並排
-    const row2 = el('div', { class:'row' });
-
-    const fKey = el('div', { class:'field' });
-    fKey.appendChild(el('label', { class:'label' }, '內部代號 (英文)'));
-    const iKey = el('input', { class:'input', value:d.key || '', placeholder:'focus' });
-    iKey.addEventListener('input', e => {
-      const v = e.target.value.replace(/[^a-z0-9_]/gi,'');
-      if(v !== e.target.value){
-        // 只在實際變更時才回寫, 避免 caret 跳
-        const pos = e.target.selectionStart;
-        e.target.value = v;
-        try { e.target.setSelectionRange(pos-1, pos-1); } catch(_){}
-      }
-      d.key = v;
+    // 滿分 (簡化 — 不顯示代號了, 自動產生)
+    const fMax = el('div', { class:'field', style:{marginBottom:0} });
+    fMax.appendChild(el('label', { class:'label', style:{fontSize:'14px',marginBottom:'6px'} }, '🌟 滿分 (1-10 顆星)'));
+    const maxRow = el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} });
+    const iMax = el('input', { class:'input', type:'number', min:'1', max:'10', value: d.max || 5,
+      style:{fontSize:'18px',height:'52px',padding:'0 14px',width:'100px'}
     });
-    fKey.appendChild(iKey);
-    fKey.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '只能英數+底線, 系統內部用'));
-    row2.appendChild(fKey);
-
-    const fMax = el('div', { class:'field' });
-    fMax.appendChild(el('label', { class:'label' }, '滿分 (1-10)'));
-    const iMax = el('input', { class:'input', type:'number', min:'1', max:'10', value:d.max || 5 });
-    iMax.addEventListener('change', e => {  // ★ 用 change 不用 input, 避免「打 1 變 10」這種半輸入狀態
+    iMax.addEventListener('change', e => {
       d.max = Math.max(1, Math.min(10, parseInt(e.target.value,10) || 5));
       e.target.value = d.max;
+      starsPreview.textContent = '★'.repeat(d.max) + '☆'.repeat(10 - d.max);
     });
-    fMax.appendChild(iMax);
-    fMax.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} }, '星星數 (1=不及格起算)'));
-    row2.appendChild(fMax);
+    maxRow.appendChild(iMax);
+    const starsPreview = el('span', { style:{fontSize:'22px',color:'var(--warn)',letterSpacing:'2px'} },
+      '★'.repeat(d.max || 5) + '☆'.repeat(10 - (d.max || 5)));
+    maxRow.appendChild(starsPreview);
+    fMax.appendChild(maxRow);
+    card.appendChild(fMax);
 
-    card.appendChild(row2);
     return card;
   }
 
   _renderCardsOrder();
   m.root.appendChild(cardsBox);
 
-  m.root.appendChild(el('div', { class:'flex', style:{gap:'8px',marginBottom:'10px',flexWrap:'wrap'} },
-    el('button', { type:'button', class:'btn', onclick:()=> {
-      // 加新項目 — 用最大 dim 編號 + 1 避免衝突
-      let n = state.length + 1;
-      while(state.find(x => x.key === 'dim' + n)) n++;
-      const newD = { key:'dim' + n, label:'新項目 ' + n, max:5 };
-      state.push(newD);
-      _renderCardsOrder();
-      // focus 新加項目的「項目名稱」input
-      setTimeout(()=> {
-        const card = cardNodes.get(newD);
-        if(card){
-          const inp = card.querySelector('input');
-          if(inp){ inp.focus(); inp.select(); }
-        }
-      }, 50);
-    }}, '➕ 新增項目'),
-    el('button', { type:'button', class:'btn', onclick: async ()=> {
-      const ok = await confirmDlg('還原為預設「整體 5 顆星」? 目前的設定會清空', { danger:true });
-      if(!ok) return;
-      state.length = 0;
-      cardNodes.clear();
-      state.push({ key:'overall', label:'整體', max:5 });
-      _renderCardsOrder();
-    }}, '↻ 還原預設')
+  // 工具列
+  m.root.appendChild(el('div', { class:'flex', style:{gap:'10px',marginBottom:'14px',flexWrap:'wrap'} },
+    el('button', { type:'button', class:'btn btn-primary',
+      style:{fontSize:'16px',padding:'12px 20px'},
+      onclick:()=> {
+        let n = state.length + 1;
+        while(state.find(x => x.key === 'dim' + n)) n++;
+        const newD = { key:'dim' + n, label:'', max:5 };
+        state.push(newD);
+        _renderCardsOrder();
+        setTimeout(()=> {
+          const card = cardNodes.get(newD);
+          if(card){
+            const inp = card.querySelector('input');
+            if(inp){ inp.focus(); }
+          }
+        }, 50);
+      }
+    }, '➕ 新增項目'),
+    el('button', { type:'button', class:'btn',
+      style:{fontSize:'15px',padding:'12px 16px'},
+      onclick: async ()=> {
+        const ok = await confirmDlg('還原為預設「整體 5 顆星」? 目前的設定會清空', { danger:true });
+        if(!ok) return;
+        state.length = 0;
+        cardNodes.clear();
+        state.push({ key:'overall', label:'整體', max:5 });
+        _renderCardsOrder();
+      }
+    }, '↻ 還原預設')
   ));
 
+  // 底部也放一個儲存鍵 (sticky)
   const actions = el('div', { class:'modal-actions' });
-  actions.appendChild(el('button', { type:'button', class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { type:'button', class:'btn btn-primary', onclick: async (ev)=> {
-    const btn = ev.target;
-    btn.disabled = true;
-    const orig = btn.textContent;
-    btn.textContent = '儲存中...';
-    try {
-      // 驗證
-      const seenKeys = new Set();
-      for(const d of state){
-        if(!d.label || !d.label.trim()){
-          await confirmDlg('每個項目都要有名稱', { title:'缺少名稱', cancelText:'', okText:'好' });
-          btn.disabled = false; btn.textContent = orig; return;
-        }
-        if(!d.key || !d.key.trim()){
-          await confirmDlg('每個項目都要有內部代號 (英文)', { title:'缺少代號', cancelText:'', okText:'好' });
-          btn.disabled = false; btn.textContent = orig; return;
-        }
-        if(seenKeys.has(d.key)){
-          await confirmDlg('代號重複: ' + d.key + '\n每個項目代號必須不同', { title:'代號重複', cancelText:'', okText:'好' });
-          btn.disabled = false; btn.textContent = orig; return;
-        }
-        seenKeys.add(d.key);
-      }
-      setEvalDims(state);
-      let cloudOk = false, cloudErr = '';
-      try {
-        if(App.fbRef){
-          await App.fbRef.child('settings/evalDims').set(state);
-          cloudOk = true;
-        } else cloudErr = 'Firebase 未連線';
-      } catch(e){ cloudErr = e.message || String(e); }
-      toast(cloudOk ? '✅ 評分項目已儲存 (已同步雲端)' : '⚠️ 已存本機, 雲端同步失敗: ' + cloudErr, cloudOk?'success':'warn', 6000);
-      m.close(); rerender();
-    } catch(e){
-      console.error('[dims-save]', e);
-      await confirmDlg('儲存失敗: ' + (e.message||e), { title:'錯誤', cancelText:'', okText:'好' });
-      btn.disabled = false; btn.textContent = orig;
-    }
-  }}, '💾 儲存設定'));
+  actions.appendChild(el('button', { type:'button', class:'btn',
+    style:{fontSize:'15px',padding:'12px 20px'},
+    onclick:()=> m.close()
+  }, '取消'));
+  actions.appendChild(el('button', { type:'button', class:'btn btn-primary',
+    style:{fontSize:'16px',padding:'12px 24px',fontWeight:'700'},
+    onclick: async (e)=> { await _doSave(e.target); }
+  }, '💾 儲存設定'));
   m.root.appendChild(actions);
 }
 
