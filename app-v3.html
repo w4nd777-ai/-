@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-asg-multi-sticky';
+const APP_BUILD = '2026-06-01-ann-target-notify';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2794,7 +2794,7 @@ const Sync = (() => {
    ──────────────────────────────────────────────────────────── */
 const NOTIFY_TYPES = [
   { key:'message',       label:'收到新訊息',     forStudent:true,  forTeacher:true  },
-  { key:'announcement',  label:'收到新公告',     forStudent:true,  forTeacher:false },
+  { key:'announcement',  label:'收到新公告',     forStudent:true,  forTeacher:true  },
   { key:'leaveRequest',  label:'學生請假申請',   forStudent:false, forTeacher:true  },
   { key:'studentSignin', label:'學生簽到',       forStudent:false, forTeacher:true  },
   { key:'dueReminder',   label:'作業到期提醒',   forStudent:true,  forTeacher:false }
@@ -2913,12 +2913,39 @@ function dispatchInboundNotify(node, v){
     return;
   }
   if(node === 'announcements'){
-    if(role !== 'student') return;
     // ★ FEATURE #8: 排程未到的公告不發通知 (時間到後 student 重 render 才會看到)
     if(v && typeof isAnnouncementScheduled === 'function' && isAnnouncementScheduled(v)) return;
-    notify('📢 新公告：' + (v.title || ''), (v.body || '').slice(0, 160), {
-      type:'announcement', tag:'ann-' + v.id, url:'sannouncements'
-    });
+    // ★ 用戶要求: 老師也要收到提醒 (副老師收到主老師發的)
+    //   學生只在自己是派發對象時收到
+    let _shouldShow = false;
+    let _toastTitle = '';
+    if(role === 'student'){
+      try {
+        const targets = (typeof announcementTargets === 'function') ? announcementTargets(v) : null;
+        if(targets && !targets.has(meId)) return;  // 不是發給這個學生
+      } catch(_){}
+      _shouldShow = true;
+      _toastTitle = '📢 新公告:' + (v.title || '');
+      notify('📢 新公告：' + (v.title || ''), (v.body || '').slice(0, 160), {
+        type:'announcement', tag:'ann-' + v.id, url:'sannouncements'
+      });
+    } else if(role === 'teacher'){
+      const myName = App.session?.name;
+      if(v.author && myName && v.author === myName) return;  // 自己發的不再提示自己
+      _shouldShow = true;
+      _toastTitle = '📢 新公告 (由 ' + (v.author||'其他老師') + '): ' + (v.title || '');
+      notify('📢 新公告：' + (v.title || ''), '由 ' + (v.author||'其他老師') + ' 發布 — ' + (v.body || '').slice(0, 140), {
+        type:'announcement', tag:'ann-' + v.id, url:'announcements'
+      });
+    }
+    // ★ 不靠瀏覽器通知權限的 in-app 醒目 toast (公告永遠跳, 確保看得到)
+    if(_shouldShow){
+      try {
+        toast(_toastTitle + '\n' + (v.body || '').slice(0, 80), 'warn', 8000);
+      } catch(_){}
+      // 同時觸發 rerender 讓側欄紅點立刻更新
+      try { rerender && rerender(); } catch(_){}
+    }
     return;
   }
   if(node === 'leaves'){
@@ -3365,6 +3392,26 @@ function submissionRate(studentId){
   if(!total) return 0;
   const sent = (subsByStudent.get(studentId) || []).length;
   return Math.round(100 * sent / total);
+}
+
+// ★ 公告對象解析 — 跟 assignmentTargets 同模式
+//   target='all' / undefined → 全部學生
+//   target='class' + targetClsList[] (或 targetCls)
+//   target='students' + targetIds[]
+function announcementTargets(ann){
+  const set = new Set();
+  if(!ann || !ann.target || ann.target === 'all'){
+    (App.db.students||[]).forEach(s => set.add(s.id));
+  } else if(ann.target === 'class'){
+    const clsList = (ann.targetClsList && ann.targetClsList.length) ? ann.targetClsList : (ann.targetCls ? [ann.targetCls] : []);
+    const clsSet = new Set(clsList);
+    (App.db.students||[]).filter(s => clsSet.has(s.cls)).forEach(s => set.add(s.id));
+  } else if(ann.target === 'students' && Array.isArray(ann.targetIds)){
+    ann.targetIds.forEach(id => set.add(id));
+  } else {
+    (App.db.students||[]).forEach(s => set.add(s.id));
+  }
+  return set;
 }
 
 function assignmentTargets(asg){
@@ -9850,7 +9897,9 @@ function renderSidebarTeacher(){
     submissions: pendingGradeCount() || null,
     feedback: teacherFeedbackBadge() || null,
     pending: ((App.db.pending||[]).length) || null,   // 新增：待審核註冊
-    leave: ((App.db.leaves||[]).filter(l => (l.status||'pending')==='pending').length) || null  // 新增：待批准請假
+    leave: ((App.db.leaves||[]).filter(l => (l.status||'pending')==='pending').length) || null,  // 新增：待批准請假
+    // ★ 用戶要求: 老師端公告也加紅點 (副老師看到主老師發布的, 主老師看到副老師發布的)
+    announcements: teacherUnreadAnnouncements() || null
   };
 
   // 🎨 新分組順序：日常 → 點名 → 作業 → 課程 → 互動 → 工具 → 進階管理 → 系統
@@ -10185,13 +10234,36 @@ function studentNewAssignmentCount(){
   const doneAsgIds = new Set(App.db.submissions.filter(s => s.studentId === me.id && !s.returned).map(s => s.assignmentId));
   return App.db.assignments.filter(a => assignmentTargets(a).has(me.id) && !doneAsgIds.has(a.id) && !isAssignmentOverdue(a)).length;
 }
+// ★ 老師端未讀公告 — 不是自己發的且 ts 比上次看過晚
+function teacherUnreadAnnouncements(){
+  if(!App.session || App.session.role !== 'teacher') return 0;
+  const myName = App.session.name || '';
+  const key = LS_KEY + '_annread_teacher_' + (App.cfg?.roomCode||'local') + '_' + (App.session.id||'main');
+  let last = 0;
+  try { last = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(_){}
+  return (App.db.announcements||[]).filter(a => {
+    if(!a) return false;
+    if(isAnnouncementExpired(a)) return false;
+    if(isAnnouncementScheduled(a)) return false;
+    if(a.author && a.author === myName) return false;  // 自己發的不算
+    return announcementEffectiveTs(a) > last;
+  }).length;
+}
+
 function studentUnreadAnnouncements(){
   if(!App.session || App.session.role !== 'student') return 0;
-  const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + App.session.id;
+  const meId = App.session.id;
+  const key = LS_KEY + '_annread_' + (App.cfg?.roomCode||'local') + '_' + meId;
   let last = 0;
   try { last = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e){_swallow('auto',e)}
   // ★ FEATURE #8: 排程中的公告對學生不可見,不算未讀
-  return App.db.announcements.filter(a => (announcementEffectiveTs(a) > last) && !isAnnouncementExpired(a) && !isAnnouncementScheduled(a)).length;
+  // ★ 派發對象: 只算發給「我」的公告 (announcementTargets 含我才算)
+  return App.db.announcements.filter(a => {
+    if(announcementEffectiveTs(a) <= last) return false;
+    if(isAnnouncementExpired(a)) return false;
+    if(isAnnouncementScheduled(a)) return false;
+    return announcementTargets(a).has(meId);
+  }).length;
 }
 function studentPendingPeerCount(){
   if(!App.session || App.session.role !== 'student') return 0;
@@ -19404,6 +19476,15 @@ function rEv(content){
    PHASE 2 — TEACHER: ANNOUNCEMENTS (rAnn)
    ──────────────────────────────────────────────────────────── */
 function rAnn(content){
+  // ★ 進入老師公告頁: 標記為已讀 (清紅點)
+  try {
+    const key = LS_KEY + '_annread_teacher_' + (App.cfg?.roomCode||'local') + '_' + (App.session?.id||'main');
+    const latest = (App.db.announcements||[]).reduce((m,a)=> {
+      if(!a || isAnnouncementScheduled(a)) return m;
+      return Math.max(m, announcementEffectiveTs(a));
+    }, 0);
+    localStorage.setItem(key, String(latest));
+  } catch(_){}
   // ★ 進入老師公告頁: 主動補推本機未同步 + 拉雲端 (修「學生看不到老師發的公告」)
   if(!App._rAnnForcedSync && App.fbRef && typeof Sync !== 'undefined'){
     App._rAnnForcedSync = true;
@@ -19475,6 +19556,18 @@ function rAnn(content){
         )
       ));
       if(a.body) card.appendChild(el('div', { class:'small', style:{marginTop:'4px',whiteSpace:'pre-wrap'} }, a.body));
+      // ★ 派發對象標籤
+      const _tgt = a.target || 'all';
+      let _tgtLabel = '🌐 全部學生';
+      if(_tgt === 'class'){
+        const _cls = (a.targetClsList && a.targetClsList.length) ? a.targetClsList : (a.targetCls ? [a.targetCls] : []);
+        _tgtLabel = '🏫 ' + (_cls.length ? _cls.join(' / ') + ' 班' : '(未選班級)');
+      } else if(_tgt === 'students'){
+        _tgtLabel = '👥 指定 ' + ((a.targetIds||[]).length) + ' 位學生';
+      }
+      const _tgtCount = (typeof announcementTargets === 'function') ? announcementTargets(a).size : 0;
+      card.appendChild(el('div', { style:{marginTop:'6px',display:'inline-block',padding:'2px 8px',background:'var(--surface-2)',borderRadius:'10px',fontSize:'12px'} },
+        _tgtLabel + ' (' + _tgtCount + ' 人收到)'));
       // ★ 附件 — 可預覽 / 下載
       if(Array.isArray(a.attaches) && a.attaches.length){
         const attRow = el('div', { style:{marginTop:'8px',display:'flex',flexWrap:'wrap',gap:'6px'} });
@@ -19579,6 +19672,104 @@ function openAnnouncementEdit(a){
     '排程時間到之前,學生看不到這則公告,也不會收到通知。'));
   m.root.appendChild(fSched);
 
+  // ★ 派發對象 — 跟作業編輯一致 (全班 / 指定班級 / 指定學生)
+  const fTgt = el('div', { class:'field' });
+  fTgt.appendChild(el('label', { class:'label' }, '🎯 派發對象'));
+  const iTgt = el('select', { class:'select' });
+  ['all','class','students'].forEach(v => {
+    iTgt.appendChild(el('option', { value:v }, { all:'全部學生', class:'指定班級', students:'指定學生' }[v]));
+  });
+  iTgt.value = a?.target || 'all';
+  fTgt.appendChild(iTgt);
+  m.root.appendChild(fTgt);
+
+  // 班級多選 (target=class 時顯示)
+  const fAnnCls = el('div', { class:'field', style:{display:'none'} });
+  fAnnCls.appendChild(el('label', { class:'label' }, '選擇班級 (可複選)'));
+  const _annClasses = (typeof getAllClassesEverywhere === 'function')
+    ? getAllClassesEverywhere()
+    : Array.from(new Set((App.db.students||[]).map(s => s.cls).filter(Boolean))).sort();
+  const _annClsChecks = [];
+  const _annClsControls = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} },
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annClsChecks.forEach(cb=> cb.checked=true); }}, '全選'),
+    el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annClsChecks.forEach(cb=> cb.checked=false); }}, '全清')
+  );
+  fAnnCls.appendChild(_annClsControls);
+  const _annClsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px',maxHeight:'150px',overflow:'auto'} });
+  const _preSelAnnCls = new Set(a?.targetClsList || (a?.targetCls ? [a.targetCls] : []));
+  _annClasses.forEach(c => {
+    const lbl = el('label', { style:{display:'inline-flex',alignItems:'center',gap:'4px',padding:'4px 10px',background:'var(--surface-2)',borderRadius:'6px',cursor:'pointer'} });
+    const cb = el('input', { type:'checkbox', value:c });
+    if(_preSelAnnCls.has(c)) cb.checked = true;
+    _annClsChecks.push(cb);
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', null, ' ' + c));
+    _annClsBox.appendChild(lbl);
+  });
+  if(!_annClasses.length) _annClsBox.appendChild(el('div', { class:'muted small' }, '尚無班級資料'));
+  fAnnCls.appendChild(_annClsBox);
+  m.root.appendChild(fAnnCls);
+
+  // 學生多選 (target=students 時顯示) — 含搜尋 + 班級篩選
+  const fAnnStu = el('div', { class:'field', style:{display:'none'} });
+  fAnnStu.appendChild(el('label', { class:'label' }, '選擇學生 (可複選)'));
+  const _annStuToolbar = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px',flexWrap:'wrap'} });
+  const _annStuSearch = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號 / 班級', style:{flex:'1',minWidth:'160px'} });
+  const _annStuClsFilter = el('select', { class:'select', style:{width:'auto'} });
+  _annStuClsFilter.appendChild(el('option', { value:'' }, '全部班級'));
+  _annClasses.forEach(c => _annStuClsFilter.appendChild(el('option', { value:c }, c)));
+  _annStuToolbar.appendChild(_annStuSearch);
+  _annStuToolbar.appendChild(_annStuClsFilter);
+  fAnnStu.appendChild(_annStuToolbar);
+  const _annStuActions = el('div', { class:'flex', style:{gap:'6px',marginBottom:'6px'} });
+  const _annStuCountLbl = el('span', { class:'tiny muted', style:{marginLeft:'auto',alignSelf:'center'} }, '');
+  function _annVisibleStu(){ return Object.entries(_annStuChecks).filter(([id])=> _annStuRows[id].style.display !== 'none').map(([_,cb])=> cb); }
+  function _annUpdateCount(){
+    const total = Object.keys(_annStuChecks).length;
+    const sel = Object.values(_annStuChecks).filter(cb=>cb.checked).length;
+    _annStuCountLbl.textContent = '已選 ' + sel + ' / ' + total + ' 人';
+  }
+  _annStuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annVisibleStu().forEach(cb=> cb.checked=true); _annUpdateCount(); }}, '全選可見'));
+  _annStuActions.appendChild(el('button', { type:'button', class:'btn btn-sm', onclick:()=> { _annVisibleStu().forEach(cb=> cb.checked=false); _annUpdateCount(); }}, '全清可見'));
+  _annStuActions.appendChild(_annStuCountLbl);
+  fAnnStu.appendChild(_annStuActions);
+  const _annStuBox = el('div', { style:{maxHeight:'260px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'8px',padding:'8px'} });
+  const _annStuChecks = {};
+  const _annStuRows = {};
+  (App.db.students||[]).forEach(s => {
+    const row = el('label', { class:'flex', style:{padding:'4px',cursor:'pointer',borderRadius:'4px'} });
+    const cb = el('input', { type:'checkbox' });
+    if(a?.targetIds && a.targetIds.includes(s.id)) cb.checked = true;
+    cb.addEventListener('change', _annUpdateCount);
+    _annStuChecks[s.id] = cb;
+    _annStuRows[s.id] = row;
+    row.appendChild(cb);
+    row.appendChild(el('span', null, ' ' + (s.cls?s.cls+' · ':'') + (s.seat?s.seat+'號 ':'') + s.name + (s.sid?' ('+s.sid+')':'')));
+    _annStuBox.appendChild(row);
+  });
+  fAnnStu.appendChild(_annStuBox);
+  m.root.appendChild(fAnnStu);
+
+  function _annFilterStu(){
+    const q = (_annStuSearch.value||'').trim().toLowerCase();
+    const cFilter = _annStuClsFilter.value;
+    (App.db.students||[]).forEach(s => {
+      const matchQ = !q || (s.name||'').toLowerCase().includes(q) || String(s.sid||'').toLowerCase().includes(q) || String(s.cls||'').toLowerCase().includes(q);
+      const matchC = !cFilter || s.cls === cFilter;
+      if(_annStuRows[s.id]) _annStuRows[s.id].style.display = (matchQ && matchC) ? '' : 'none';
+    });
+  }
+  _annStuSearch.addEventListener('input', _annFilterStu);
+  _annStuClsFilter.addEventListener('change', _annFilterStu);
+  _annUpdateCount();
+
+  function _syncAnnTgt(){
+    fAnnCls.style.display = iTgt.value === 'class' ? '' : 'none';
+    fAnnStu.style.display = iTgt.value === 'students' ? '' : 'none';
+  }
+  iTgt.addEventListener('change', _syncAnnTgt);
+  _syncAnnTgt();
+
   // ★ 附件 (照片 / 檔案 / PDF / 影片 等)
   const _attachState = (a && Array.isArray(a.attaches)) ? a.attaches.slice() : [];
   const fAttach = el('div', { class:'field' });
@@ -19651,6 +19842,17 @@ function openAnnouncementEdit(a){
         _scheduledAt = _schedRaw;
       }
     }
+    // ★ 派發對象驗證
+    const _annTgt = iTgt.value;
+    let _annTgtClsList = [];
+    let _annTgtIds = [];
+    if(_annTgt === 'class'){
+      _annTgtClsList = _annClsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
+      if(!_annTgtClsList.length){ toast('請至少選一個班級','warn'); return; }
+    } else if(_annTgt === 'students'){
+      _annTgtIds = Object.keys(_annStuChecks).filter(k => _annStuChecks[k].checked);
+      if(!_annTgtIds.length){ toast('請至少選一個學生','warn'); return; }
+    }
     const rec = isNew ? { id:nid(), ts:Date.now() } : a;
     rec.title = t;
     rec.body = iB.value;
@@ -19659,6 +19861,10 @@ function openAnnouncementEdit(a){
     rec.scheduledAt = _scheduledAt;
     rec.attaches = _attachState;
     rec.author = App.session?.name || '老師';
+    rec.target = _annTgt;
+    rec.targetClsList = _annTgtClsList;
+    rec.targetCls = _annTgtClsList[0] || '';
+    rec.targetIds = _annTgtIds;
     if(isNew) App.db.announcements.push(rec);
     saveDB();
     // ★ 修: 直接 await 雲端寫入, 失敗時老實告訴老師 (原本 setRow 失敗悄悄回 false, 老師以為成功)
@@ -20336,7 +20542,11 @@ function rSAnn(content){
 
   let list = App.db.announcements.slice().sort((a,b)=> (b.pinned?1:0)-(a.pinned?1:0) || (announcementEffectiveTs(b))-(announcementEffectiveTs(a)));
   // ★ 排程未到 → 學生不可見
-  list = list.filter(a => !isAnnouncementExpired(a) && !isAnnouncementScheduled(a));
+  // ★ 派發對象: 學生只看到發給「自己班級 / 自己 / 全部」的公告
+  list = list.filter(a => {
+    if(isAnnouncementExpired(a) || isAnnouncementScheduled(a)) return false;
+    return announcementTargets(a).has(me.id);
+  });
   if(list.length === 0){
     content.appendChild(el('div', { class:'empty card' },
       el('div', { class:'ico' }, '📭'),
