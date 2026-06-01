@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-storage-emergency-fix';
+const APP_BUILD = '2026-06-01-cropper-square-sticky';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11390,13 +11390,18 @@ function openAvatarCropModal(file){
       img.onload = () => {
         const m = modal('', { dismissable:false });
         m.root.style.maxWidth = '92vw';
-        m.root.appendChild(el('h2', null, '✂️ 裁切頭像'));
+        m.root.style.maxHeight = '92vh';
+        m.root.style.overflow = 'auto';   // ★ 修:手機 modal 可滾動,確保確認鈕看得到
+        m.root.appendChild(el('h2', { style:{marginBottom:'6px'} }, '✂️ 裁切頭像'));
         m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
-          '拖動圓圈中央 → 移動位置;拖動右下角小點 → 改變大小'));
+          '拖動方框中央 → 移動位置;拖動右下角小點 → 改變大小'));
 
+        // ★ 修:寬高都限制,確保 stage + 確認鈕都裝得進螢幕
         const maxW = Math.min(window.innerWidth * 0.82, 540);
-        const scale = maxW / img.width;
-        const containerW = maxW;
+        const maxH = window.innerHeight * 0.55;  // 留 45% 給標題/說明/按鈕
+        let scale = maxW / img.width;
+        if(img.height * scale > maxH) scale = maxH / img.height;
+        const containerW = img.width * scale;
         const containerH = img.height * scale;
         const stage = el('div', { style:{
           position:'relative',margin:'0 auto',width:containerW+'px',height:containerH+'px',
@@ -11410,13 +11415,14 @@ function openAvatarCropModal(file){
         let cropSize = Math.min(minSize, 300);
         let cropX = (containerW - cropSize) / 2;
         let cropY = (containerH - cropSize) / 2;
+        // ★ 改成方形框 (用戶要求)
         const cropBox = el('div', { style:{
           position:'absolute',
           left: cropX + 'px', top: cropY + 'px',
           width: cropSize + 'px', height: cropSize + 'px',
           border:'2px solid #fff',
           boxShadow:'0 0 0 9999px rgba(0,0,0,.55)',
-          borderRadius:'50%',
+          borderRadius:'4px',
           boxSizing:'border-box',
           cursor:'move'
         }});
@@ -11475,19 +11481,28 @@ function openAvatarCropModal(file){
         cropBox.addEventListener('mousedown', onStart);
         cropBox.addEventListener('touchstart', onStart, { passive:false });
         m.root.appendChild(stage);
-        const actions = el('div', { class:'modal-actions' });
-        actions.appendChild(el('button', { class:'btn', onclick: ()=> { m.close(); resolve(null); } }, '取消'));
-        actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+        // ★ 行動鈕:大而醒目, sticky 在底部不會跑掉
+        const actions = el('div', { style:{
+          display:'flex',gap:'10px',justifyContent:'center',
+          marginTop:'14px',padding:'10px 0',
+          position:'sticky',bottom:'0',background:'var(--surface)',
+          borderTop:'1px solid var(--border)',zIndex:'10'
+        }});
+        actions.appendChild(el('button', { class:'btn', style:{padding:'12px 22px',fontSize:'15px'}, onclick: ()=> { m.close(); resolve(null); } }, '取消'));
+        actions.appendChild(el('button', { class:'btn btn-primary', style:{padding:'12px 28px',fontSize:'15px',fontWeight:'700'}, onclick: ()=> {
           const realX = cropX / scale, realY = cropY / scale, realSize = cropSize / scale;
           const canvas = document.createElement('canvas');
-          const outSize = 512;
+          // ★ 縮小輸出尺寸 + 降低品質 → 避免 localStorage 爆量
+          //   舊版 512×512 @ 85% = 100-300 KB / 頭像
+          //   新版 320×320 @ 75% = 20-60 KB / 頭像 (省 5 倍空間)
+          const outSize = 320;
           canvas.width = outSize; canvas.height = outSize;
           const ctx = canvas.getContext('2d');
           // 白底 (萬一原圖有 alpha)
           ctx.fillStyle = '#fff';
           ctx.fillRect(0, 0, outSize, outSize);
           ctx.drawImage(img, realX, realY, realSize, realSize, 0, 0, outSize, outSize);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
           m.close();
           resolve(dataUrl);
         }}, '✂️ 確認裁切'));
