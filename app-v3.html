@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-eval-dim-stats-by-class';
+const APP_BUILD = '2026-06-02-eval-lock-once';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -21216,54 +21216,138 @@ function rSEv(content){
   // entry form
   const formCard = el('div', { class:'card', style:{marginBottom:'12px'} });
   if(tab === 'semester' || tab === 'daily'){
-    formCard.appendChild(el('h3', null, tab==='semester'?'給學期評分':'今日課程感想'));
+    // ★ 檢查是否已填過 — 學期評價: 同學期一次; 每日評價: 同日一次
+    //   找出我這個學生在這個 type + 期間內已存在的評價 (取最新一筆)
+    const today = td();
+    const term = (typeof currentTerm === 'function') ? currentTerm() : '';
+    const myExisting = (App.db.evals||[]).filter(e =>
+      e && e.type === tab && e.fromId === me.id &&
+      (tab === 'daily' ? e.date === today : true) &&  // 每日: 同日才算
+      (tab === 'semester' ? (() => {
+        // 學期: 同學期才算 (用 ts 反推學期)
+        if(!e.ts) return false;
+        try {
+          const d = new Date(e.ts);
+          const yr = d.getFullYear();
+          const sem = d.getMonth() < 7 ? 'S1' : 'S2';  // 8 月切 (跟 currentTerm 對齊)
+          return (yr + '-' + sem) === term;
+        } catch(_){ return false; }
+      })() : true)
+    ).sort((a,b)=> (b.ts||0)-(a.ts||0));
+    const alreadySubmitted = myExisting[0];
 
-    // ★ 多維度評分 — 依老師設定的 dims (預設只有一個「整體」5顆星)
-    const dims = (typeof getEvalDims === 'function') ? getEvalDims() : [{ key:'overall', label:'整體', max:5 }];
-    const scores = {};
-    dims.forEach(d => { scores[d.key] = Math.ceil(d.max / 2); });  // 預設選一半
-    dims.forEach(d => {
-      const row = el('div', { class:'field', style:{marginBottom:'8px'} });
-      row.appendChild(el('label', { class:'label' }, '⭐ ' + d.label));
-      const starsEl = el('div', { class:'stars' });
-      function paint(){
-        starsEl.innerHTML = '';
-        for(let i=1; i<=d.max; i++){
-          const s = el('span', { class:'s ' + (i<=scores[d.key]?'on':''), style:{cursor:'pointer'} }, '★');
-          s.addEventListener('click', ()=> { scores[d.key] = (scores[d.key] === i) ? 0 : i; paint(); });
-          starsEl.appendChild(s);
-        }
-        starsEl.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, scores[d.key] + ' / ' + d.max));
+    if(alreadySubmitted){
+      // ★ 已填過 → 顯示「你已完成評價」卡片, 不再讓再填
+      formCard.appendChild(el('h3', { style:{color:'var(--success)'} },
+        tab === 'semester' ? '✅ 你已完成本學期評價' : '✅ 你已完成今日評價'));
+      formCard.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} },
+        '提交時間: ' + new Date(alreadySubmitted.ts || 0).toLocaleString('zh-TW', {hour12:false}) +
+        (alreadySubmitted.anonymous ? ' · 匿名' : '')));
+
+      // 顯示自己填的分數 + 內容 (確認用)
+      const dimsForView = (typeof getEvalDims === 'function') ? getEvalDims() : [{key:'overall',label:'整體',max:5}];
+      const showBox = el('div', { style:{
+        marginTop:'10px',padding:'12px',background:'var(--success-soft)',
+        border:'1px solid var(--success)',borderRadius:'8px'
+      }});
+      dimsForView.forEach(d => {
+        const sc = (typeof getEvalScore === 'function') ? getEvalScore(alreadySubmitted, d.key) : 0;
+        if(sc <= 0) return;
+        const row = el('div', { class:'flex', style:{gap:'8px',alignItems:'center',fontSize:'13px',marginBottom:'4px'} });
+        row.appendChild(el('span', { style:{minWidth:'80px',fontWeight:'600'} }, d.label + ':'));
+        row.appendChild(el('span', { class:'stars readonly', style:{fontSize:'14px'} },
+          ...Array.from({length:d.max}, (_,i) => el('span', { class:'s ' + (i < sc?'on':'') }, '★'))
+        ));
+        row.appendChild(el('span', { class:'tiny muted' }, sc + '/' + d.max));
+        showBox.appendChild(row);
+      });
+      if(alreadySubmitted.text){
+        showBox.appendChild(el('div', { style:{
+          marginTop:'8px',padding:'8px 10px',background:'var(--surface)',
+          borderRadius:'6px',whiteSpace:'pre-wrap',fontSize:'13px'
+        }}, '💬 ' + alreadySubmitted.text));
       }
-      paint();
-      row.appendChild(starsEl);
-      formCard.appendChild(row);
-    });
+      formCard.appendChild(showBox);
 
-    const ta = el('textarea', { class:'textarea', placeholder:'分享你的想法（可選）', style:{marginTop:'8px'} });
-    formCard.appendChild(ta);
-    const lblAnon = el('label', { class:'flex', style:{marginTop:'8px',fontSize:'13px'} });
-    const cbAnon = el('input', { type:'checkbox' });
-    lblAnon.appendChild(cbAnon);
-    lblAnon.appendChild(el('span', null, ' 匿名提交'));
-    formCard.appendChild(lblAnon);
-    formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick:()=> {
-      const rec = {
-        id: nid(), type: tab,
-        dims: { ...scores },          // ★ 多維度
-        stars: scores.overall || scores[dims[0].key] || 0,  // 向下相容: 第一個維度當 stars
-        text: ta.value.trim(),
-        date: td(),
-        fromId: me.id, fromName: me.name,
-        anonymous: cbAnon.checked,
-        ts: Date.now()
-      };
-      App.db.evals.push(rec);
-      saveDB(); Sync.push('evals', rec); bcNotify();
-      toast('已送出！','success');
-      ta.value = '';
-      rerender();
-    }}, '📤 送出'));
+      formCard.appendChild(el('div', { class:'small muted', style:{marginTop:'10px',padding:'8px 10px',background:'var(--surface-2)',borderRadius:'6px'} },
+        tab === 'semester'
+          ? '🔒 學期評價每位學生只能填一次, 分數已保留給老師。'
+          : '🔒 每日評價每位學生每天只能填一次, 分數已保留給老師。'));
+    } else {
+      // ★ 還沒填 → 顯示填寫表單
+      formCard.appendChild(el('h3', null, tab==='semester'?'給學期評分':'今日課程感想'));
+
+      // 多維度評分
+      const dims = (typeof getEvalDims === 'function') ? getEvalDims() : [{ key:'overall', label:'整體', max:5 }];
+      const scores = {};
+      dims.forEach(d => { scores[d.key] = Math.ceil(d.max / 2); });
+      dims.forEach(d => {
+        const row = el('div', { class:'field', style:{marginBottom:'8px'} });
+        row.appendChild(el('label', { class:'label' }, '⭐ ' + d.label));
+        const starsEl = el('div', { class:'stars' });
+        function paint(){
+          starsEl.innerHTML = '';
+          for(let i=1; i<=d.max; i++){
+            const s = el('span', { class:'s ' + (i<=scores[d.key]?'on':''), style:{cursor:'pointer'} }, '★');
+            s.addEventListener('click', ()=> { scores[d.key] = (scores[d.key] === i) ? 0 : i; paint(); });
+            starsEl.appendChild(s);
+          }
+          starsEl.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, scores[d.key] + ' / ' + d.max));
+        }
+        paint();
+        row.appendChild(starsEl);
+        formCard.appendChild(row);
+      });
+
+      const ta = el('textarea', { class:'textarea', placeholder:'分享你的想法（可選）', style:{marginTop:'8px'} });
+      formCard.appendChild(ta);
+      const lblAnon = el('label', { class:'flex', style:{marginTop:'8px',fontSize:'13px'} });
+      const cbAnon = el('input', { type:'checkbox' });
+      lblAnon.appendChild(cbAnon);
+      lblAnon.appendChild(el('span', null, ' 匿名提交'));
+      formCard.appendChild(lblAnon);
+      formCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px',padding:'6px 8px',background:'var(--warn-soft)',borderRadius:'4px'} },
+        tab === 'semester' ? '⚠️ 提醒: 本學期評價只能填一次, 送出後不可修改' : '⚠️ 提醒: 今日評價只能填一次, 送出後不可修改'));
+      formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick: async (ev)=> {
+        const btn = ev.target;
+        // 二次確認, 避免誤送
+        const confirmMsg = tab === 'semester'
+          ? '確定送出本學期評價?\n\n送出後不可修改, 也不能再填'
+          : '確定送出今日評價?\n\n送出後不可修改, 今天不能再填';
+        const ok = await confirmDlg(confirmMsg, { title:'確認送出' });
+        if(!ok) return;
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = '送出中...';
+        try {
+          const rec = {
+            id: nid(), type: tab,
+            dims: { ...scores },
+            stars: scores.overall || scores[dims[0].key] || 0,
+            text: ta.value.trim(),
+            date: td(),
+            fromId: me.id, fromName: me.name,
+            anonymous: cbAnon.checked,
+            ts: Date.now()
+          };
+          App.db.evals.push(rec);
+          saveDB();
+          const clean = JSON.parse(JSON.stringify(rec));
+          let writeOk = false, writeMethod = '';
+          if(typeof fbWriteRow === 'function'){
+            const r = await fbWriteRow('evals', clean.id, clean);
+            writeOk = r.ok; writeMethod = r.method;
+          }
+          try { bcNotify(); } catch(_){}
+          toast(writeOk ? '✅ 已送出 (' + writeMethod + ')' : '⚠️ 已存本機, 雲端待重試','success', 4000);
+        } catch(e){
+          console.error('[eval-submit]', e);
+          toast('送出失敗: ' + (e.message||e),'danger', 6000);
+        } finally {
+          btn.disabled = false; btn.textContent = orig;
+          rerender();
+        }
+      }}, '📤 送出'));
+    }
   } else {
     // wall
     formCard.appendChild(el('h3', null, '✍️ 發表留言'));
@@ -21341,9 +21425,10 @@ function rSEv(content){
       card.appendChild(bonusBox);
     }
 
-    if(e.fromId === me.id){
+    // ★ 留言牆才能刪自己的 (學期/每日已鎖定送出後不可改, 含刪除)
+    if(e.fromId === me.id && tab === 'wall'){
       card.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
-        const ok = await confirmDlg('刪除你的這則？', { danger:true });
+        const ok = await confirmDlg('刪除你的這則留言？', { danger:true });
         if(!ok) return;
         try { trashAdd('eval', e); } catch(_){}
         App.db.evals = App.db.evals.filter(x => x.id !== e.id);
