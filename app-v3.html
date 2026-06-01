@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-merge-eval-feedback';
+const APP_BUILD = '2026-06-01-eval-dim-stats-by-class';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -19934,28 +19934,57 @@ function rEv(content){
     if(q) list = list.filter(e => (e.text||'').toLowerCase().includes(q) || (e.fromName||'').toLowerCase().includes(q));
     list.sort((a,b)=> (b.ts||0)-(a.ts||0));
 
+    // ★ 多維度統計輔助 — 一個 dim 一張小圖 (avg bar + 5 顆星分布)
+    //   傳入 evals list 跟 dims, 回 DOM element
+    function buildDimStats(evals, dimsToShow, titlePrefix){
+      const wrap = el('div', { style:{display:'flex',flexDirection:'column',gap:'14px'} });
+      dimsToShow.forEach(d => {
+        const scoresAll = evals.map(e => getEvalScore(e, d.key)).filter(s => s > 0);
+        const cnt = scoresAll.length;
+        const avg = cnt ? (scoresAll.reduce((a,b)=>a+b,0) / cnt) : 0;
+        const avgColor = avg >= (d.max*0.8) ? 'var(--success)' : avg >= (d.max*0.6) ? 'var(--warn)' : avg > 0 ? 'var(--danger)' : 'var(--text-muted)';
+
+        const dimBox = el('div', { style:{padding:'10px 12px',background:'var(--surface-2)',borderRadius:'8px'} });
+        // header: 維度名稱 + 平均
+        dimBox.appendChild(el('div', { class:'flex-between', style:{marginBottom:'6px',alignItems:'center',flexWrap:'wrap',gap:'6px'} },
+          el('div', { style:{fontWeight:'700',fontSize:'14px'} },
+            (titlePrefix || '') + '⭐ ' + d.label),
+          el('div', { class:'flex', style:{gap:'6px',alignItems:'center',flexWrap:'wrap'} },
+            cnt > 0 ? el('span', { class:'stars readonly', style:{fontSize:'13px'} },
+              ...Array.from({length:d.max}, (_,i) => el('span', { class:'s ' + (i < Math.round(avg) ? 'on' : '') }, '★'))) : null,
+            el('span', { class:'pill', style:{fontSize:'11px',background:'var(--primary-soft)',color:avgColor,fontWeight:'700'} },
+              cnt > 0 ? avg.toFixed(1) + ' / ' + d.max + ' · ' + cnt + ' 則' : '0 則')
+          )
+        ));
+        // 分布: max → 1 顆星, 每一級一條 bar
+        if(cnt > 0){
+          const distBar = el('div', { style:{marginTop:'4px'} });
+          for(let n = d.max; n >= 1; n--){
+            const c = scoresAll.filter(s => s === n).length;
+            const pct = 100 * c / cnt;
+            const row = el('div', { class:'bar-row', style:{fontSize:'12px',marginBottom:'2px'} },
+              el('div', { class:'lab', style:{minWidth:'50px',letterSpacing:'-1px'} }, '★'.repeat(n)),
+              el('div', { class:'bar-wrap' }, el('div', { class:'bar', style:{width: pct + '%'} })),
+              el('div', { class:'val', style:{minWidth:'30px',textAlign:'right'} }, String(c))
+            );
+            distBar.appendChild(row);
+          }
+          dimBox.appendChild(distBar);
+        }
+        wrap.appendChild(dimBox);
+      });
+      return wrap;
+    }
+
     if(tab === 'semester' || tab === 'daily'){
-      // stats
-      const stars = list.filter(e => typeof e.stars === 'number').map(e => e.stars);
-      const avg = stars.length ? (stars.reduce((a,b)=>a+b,0)/stars.length).toFixed(1) : '—';
-      const dist = [1,2,3,4,5].map(n => stars.filter(s => s === n).length);
+      // ★ 全班統計 (多維度)
+      const dims = getEvalDims();
       const statCard = el('div', { class:'card', style:{marginBottom:'12px'} });
-      statCard.appendChild(el('div', { class:'flex-between' },
-        el('h3', null, '⭐ 平均評分：' + avg + ' / 5 · 共 ' + list.length + ' 則'),
+      statCard.appendChild(el('div', { class:'flex-between', style:{marginBottom:'10px'} },
+        el('h3', null, '📊 全班總統計 · 共 ' + list.length + ' 則回饋'),
         el('span', null)
       ));
-      const barWrap = el('div', { style:{marginTop:'8px'} });
-      [5,4,3,2,1].forEach(n => {
-        const c = dist[n-1] || 0;
-        const pct = stars.length ? 100 * c / stars.length : 0;
-        const row = el('div', { class:'bar-row' },
-          el('div', { class:'lab' }, '★'.repeat(n)),
-          el('div', { class:'bar-wrap' }, el('div', { class:'bar', style:{width: pct + '%'} })),
-          el('div', { class:'val' }, String(c))
-        );
-        barWrap.appendChild(row);
-      });
-      statCard.appendChild(barWrap);
+      statCard.appendChild(buildDimStats(list, dims, ''));
       inner.appendChild(statCard);
     }
 
@@ -20053,12 +20082,15 @@ function rEv(content){
       inner.appendChild(toolbar);
     }
 
+    const dims = (tab === 'semester' || tab === 'daily') ? getEvalDims() : [];
+
     classes.forEach(cls => {
       const inCls = list.filter(e => clsOf(e) === cls);
-      // 平均星等（只對有 stars 的計算）
-      const starVals = inCls.map(e => e.stars).filter(s => typeof s === 'number');
-      const avg = starVals.length ? (starVals.reduce((a,b)=>a+b,0)/starVals.length) : 0;
-      const avgColor = avg >= 4 ? 'var(--success)' : avg >= 3 ? 'var(--warn)' : avg > 0 ? 'var(--danger)' : 'var(--text-muted)';
+      // 整體平均 (第一個維度) 顯示在 header
+      const headerDim = dims[0] || { key:'overall', max:5 };
+      const scores = inCls.map(e => getEvalScore(e, headerDim.key)).filter(s => s > 0);
+      const avg = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
+      const avgColor = avg >= (headerDim.max*0.8) ? 'var(--success)' : avg >= (headerDim.max*0.6) ? 'var(--warn)' : avg > 0 ? 'var(--danger)' : 'var(--text-muted)';
 
       const isExpanded = App._evExpandedCls[cls] !== false;
 
@@ -20077,14 +20109,40 @@ function rEv(content){
         el('span', { class:'small muted' }, '（' + inCls.length + ' 則）')
       ));
       header.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap',alignItems:'center'} },
-        starVals.length > 0 ? el('span', { class:'stars readonly', style:{fontSize:'12px'} },
-          ...Array.from({length:5}, (_,i) => el('span', { class:'s ' + (i < Math.round(avg) ? 'on' : '') }, '★'))) : null,
-        starVals.length > 0 ? el('span', { class:'pill', style:{background:'var(--primary-soft)',color:avgColor,fontSize:'11px',fontWeight:'700'} }, '平均 ' + avg.toFixed(1)) : null
+        scores.length > 0 ? el('span', { class:'stars readonly', style:{fontSize:'12px'} },
+          ...Array.from({length:headerDim.max}, (_,i) => el('span', { class:'s ' + (i < Math.round(avg) ? 'on' : '') }, '★'))) : null,
+        scores.length > 0 ? el('span', { class:'pill', style:{background:'var(--primary-soft)',color:avgColor,fontSize:'11px',fontWeight:'700'} },
+          avg.toFixed(1) + '/' + headerDim.max) : null
       ));
       inner.appendChild(header);
 
       if(isExpanded){
         const body = el('div', { style:{border:'1px solid var(--border)',borderRadius:'0 0 8px 8px',borderTop:'none',background:'var(--surface)',marginBottom:'8px',padding:'12px'} });
+
+        // ★ 班級內也顯示多維度統計 (折疊收合)
+        if(dims.length > 0 && inCls.length > 0){
+          App._evClsStatExpanded = App._evClsStatExpanded || {};
+          const statKey = cls;
+          const statExpanded = App._evClsStatExpanded[statKey] === true;  // 預設收合
+          const statHdr = el('div', { class:'flex', style:{
+            cursor:'pointer', padding:'6px 10px', marginBottom:'10px',
+            background:'var(--surface-2)', borderRadius:'6px', alignItems:'center', gap:'6px',
+            fontSize:'13px', userSelect:'none'
+          }, onclick:()=> {
+            App._evClsStatExpanded[statKey] = !statExpanded;
+            renderInner();
+          }});
+          statHdr.appendChild(el('span', { style:{fontSize:'12px',transform: statExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',transition:'transform .2s',display:'inline-block'} }, '▼'));
+          statHdr.appendChild(el('span', { style:{fontWeight:'600'} }, '📊 此班統計 (' + dims.length + ' 個維度)'));
+          body.appendChild(statHdr);
+          if(statExpanded){
+            const statContent = el('div', { style:{marginBottom:'12px'} });
+            statContent.appendChild(buildDimStats(inCls, dims, ''));
+            body.appendChild(statContent);
+          }
+        }
+
+        // 評價卡片
         inCls.forEach(e => body.appendChild(renderEvCard(e)));
         inner.appendChild(body);
       }
