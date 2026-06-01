@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-2fa-totp';
+const APP_BUILD = '2026-06-01-overview-tabs';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10365,7 +10365,34 @@ function rOv(content){
     )
   ));
 
+  // ★ 用戶要求:總覽分頁化,避免單頁太長
+  if(App._ovTab === undefined){
+    try { App._ovTab = localStorage.getItem('cms_v3_ov_tab') || 'summary'; } catch(_){ App._ovTab = 'summary'; }
+  }
+  const _ovTab = App._ovTab;
+  const _inTab = (t) => _ovTab === t;
+  const _ovTabBar = el('div', { class:'tabs-line no-print', style:{marginBottom:'14px'} });
+  [
+    ['summary',    '📊 概況',    '統計卡 + 今日班況'],
+    ['attendance', '✅ 出席',    '今日簽到簽退明細'],
+    ['submissions','📥 繳交',    '今日作業繳交狀態'],
+    ['activity',   '🎯 動態',    '加扣分 / 小考 / 即時動態 / 學期週次']
+  ].forEach(([k, lbl, tip]) => {
+    _ovTabBar.appendChild(el('button', {
+      class: _ovTab === k ? 'active' : '',
+      title: tip,
+      onclick: ()=> {
+        App._ovTab = k;
+        try { localStorage.setItem('cms_v3_ov_tab', k); } catch(_){}
+        rerender();
+      }
+    }, lbl));
+  });
+  content.appendChild(_ovTabBar);
+
   // stat tiles (with subtitles explaining each) — 各卡片可獨立隱藏
+  // ★ 只在「📊 概況」tab 顯示
+  if(_inTab('summary')){
   const grid = el('div', { class:'grid grid-4', style:{marginBottom:'16px'} });
   if(isOverviewVisible('signed')){
     grid.appendChild(el('div', { class:'stat s-success card-hover', onclick:()=> go('attendance','signed'), title:'點此查看已簽到名單' },
@@ -10409,15 +10436,20 @@ function rOv(content){
       }
     } catch(_){ _swallow('tween-stats',_); }
   }
+  }   // end summary tab — stat tiles
 
-  // 今日簽到簽退明細 — 抽出為 renderOvAttendanceDetail() 以縮小 rOv 體積 (low-risk extract)
-  renderOvAttendanceDetail(content);
+  // 今日簽到簽退明細 — 只在「✅ 出席」tab 顯示
+  if(_inTab('attendance')){
+    renderOvAttendanceDetail(content);
+  }
 
-  // 今日繳交明細 — 抽出為 renderOvSubmissionDetail() 以縮小 rOv 體積 (low-risk extract)
-  renderOvSubmissionDetail(content);
+  // 今日繳交明細 — 只在「📥 繳交」tab 顯示
+  if(_inTab('submissions')){
+    renderOvSubmissionDetail(content);
+  }
 
-  // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考 (簡潔模式時隱藏)
-  if(!App._ovMinimal) try {
+  // batch 4-23 / 4-25：今日加扣分排行 + 進行中小考 — 只在「🎯 動態」tab 顯示
+  if(_inTab('activity')) if(!App._ovMinimal) try {
     const sideRow = el('div', { class:'grid grid-2', style:{marginBottom:'12px'} });
     // 今日加扣分排行
     const top = getTopBehaviorStudents(5);
@@ -10478,8 +10510,8 @@ function rOv(content){
     }
   } catch(e){ dbgWarn('[overview batch4 cards]', e); }
 
-  // pending registrations
-  if(isOverviewVisible('pending') && App.db.pending && App.db.pending.length){
+  // pending registrations — 只在「📊 概況」tab 顯示
+  if(_inTab('summary') && isOverviewVisible('pending') && App.db.pending && App.db.pending.length){
     const alert = el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'12px'} },
       el('div', { class:'flex-between' },
         el('div', null,
@@ -10492,7 +10524,9 @@ function rOv(content){
     content.appendChild(alert);
   }
 
-  // today's roster — 班級分組可摺疊（可在介面編輯器隱藏）
+  // today's roster — 班級分組可摺疊 — 只在「📊 概況」tab 顯示
+  if(_inTab('summary')){
+  // 班級分組區塊 (可在介面編輯器隱藏)
   // 簡潔模式時也跳過 — 上面的「今日簽到明細」+「今日繳交明細」已涵蓋同樣資訊
   if(!isOverviewVisible('today') || App._ovMinimal){
     // 完整檢視時若使用者隱藏 today,仍顯示 overview-bottom 自訂內容
@@ -10739,14 +10773,15 @@ function rOv(content){
       content.appendChild(card);
     });
   }
+  }   // end summary tab — pending alert + today's roster
 
-  // POLISH-10/5: 即時動態 (顯示在自訂內容之上) — 簡潔模式時隱藏
-  if(!App._ovMinimal) try {
+  // POLISH-10/5: 即時動態 — 只在「🎯 動態」tab 顯示
+  if(_inTab('activity')) if(!App._ovMinimal) try {
     const feed = renderActivityFeed();
     if(feed) content.appendChild(feed);
   } catch(e){ _swallow('activity-feed-rOv', e); }
 
-  // 自訂內容（總覽頁底端） — 簡潔模式時隱藏
+  // 自訂內容(總覽頁底端) — 任何 tab 都顯示
   if(!App._ovMinimal) content.appendChild(renderCustomBlocks('overview-bottom'));
 
   // 🩺 健康儀表板（讓老師一眼看到系統狀態）
