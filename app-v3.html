@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-attach-honest';
+const APP_BUILD = '2026-06-01-ann-sync-honest';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2525,7 +2525,9 @@ const Sync = (() => {
   async function _pushLocalUnsynced(){
     if(!App.fbRef) return;
     // 高優先級 collections (用戶常抱怨「對方看不到」)
-    const COLLS = ['pending','submissions','attendance','messages','leaves','behavior'];
+    // ★ 修: 補上 announcements + assignments + teachers (老師發布完就被同步, 學生才看得到)
+    const COLLS = ['pending','submissions','attendance','messages','leaves','behavior',
+                   'announcements','assignments','teachers','accounts','students','evals','feedbacks','quizzes','quizSubmissions','badges','notes','todos'];
     let pushed = 0;
     for(const node of COLLS){
       const local = App.db[node];
@@ -2783,7 +2785,7 @@ const Sync = (() => {
       }
     });
   } catch(_){_swallow('sync-beforeunload',_)}
-  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync, forceResyncFromCloud };
+  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync, forceResyncFromCloud, pushLocalUnsynced: _pushLocalUnsynced };
 })();
 
 /* ════════════════════════════════════════════════════════════
@@ -2988,6 +2990,10 @@ if(typeof document !== 'undefined' && !window._cmsV3VisHook){
         Sync.forceResyncFromCloud().then(n => {
           if(n) try { rerender(); } catch(_){}
         }).catch(()=>{});
+      }
+      // ★ 也把本機累積的「沒推上雲」筆數推上去 (老師發布完公告後切過 tab 才回來的情況)
+      if(typeof Sync !== 'undefined' && Sync.pushLocalUnsynced && App.fbRef){
+        try { Sync.pushLocalUnsynced().catch(()=>{}); } catch(_){}
       }
     } catch(_){}
   });
@@ -19579,14 +19585,42 @@ function openAnnouncementEdit(a){
     rec.author = App.session?.name || '老師';
     if(isNew) App.db.announcements.push(rec);
     saveDB();
-    try { Sync.setRow('announcements', rec.id, rec); } catch(_){ Sync.setMap('announcements', App.db.announcements); }
+    // ★ 修: 直接 await 雲端寫入, 失敗時老實告訴老師 (原本 setRow 失敗悄悄回 false, 老師以為成功)
+    //   跟之前註冊時的 bug 一樣: 寫到本機 → 跳成功 toast → 學生根本沒收到
+    let cloudOk = false, cloudErr = '';
+    try {
+      if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
+        try { await Sync.init(); } catch(_){}
+      }
+      if(App.fbRef){
+        await App.fbRef.child('announcements').child(rec.id).set(rec);
+        cloudOk = true;
+      } else {
+        cloudErr = 'Firebase 同步未就緒';
+      }
+    } catch(e){
+      cloudErr = e.code || e.message || String(e);
+    }
     bcNotify();
-    if(isNew && !_scheduledAt) triggerWebhook('announcement', { title: rec.title, author: rec.author });
-    if(_scheduledAt){
+    if(isNew && !_scheduledAt && cloudOk) triggerWebhook('announcement', { title: rec.title, author: rec.author });
+    if(_scheduledAt && cloudOk){
       const _dStr = new Date(_scheduledAt).toLocaleString('zh-TW',{hour12:false});
-      toast('已排程於 ' + _dStr + ' 發送','success', 4000);
+      toast('✅ 已排程於 ' + _dStr + ' 發送 (已同步雲端)','success', 4000);
+    } else if(cloudOk){
+      toast('✅ ' + (isNew?'已發布':'已更新') + ' (已同步到雲端,學生會收到)','success', 4000);
     } else {
-      toast(isNew?'已發布':'已更新','success');
+      // 雲端失敗 → 老實告訴老師 + 開始背景重試
+      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n學生暫時看不到, 系統會自動重試', 'warn', 12000);
+      console.warn('[announcement] cloud sync failed:', cloudErr);
+      // 背景重試: 5 秒後再試一次
+      setTimeout(async ()=> {
+        try {
+          if(App.fbRef){
+            await App.fbRef.child('announcements').child(rec.id).set(rec);
+            try { toast('✅ 公告「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
+          }
+        } catch(_){}
+      }, 5000);
     }
     m.close(); rerender();
   }}, isNew?'發布':'儲存'));
@@ -20185,6 +20219,20 @@ function rSAnn(content){
   const me = currentStudent(); if(!me) return;
   content.appendChild(el('h1', null, '📢 公告'));
   content.appendChild(el('div', { class:'muted small', style:{marginBottom:'14px'} }, '老師發布的最新訊息'));
+
+  // ★ 用戶反映「老師發布了但學生看不到」: 進公告頁主動拉雲端
+  //   (常見情境: 學生手機 listener 漏接 / 老師發布時 sync 失敗 → 學生本機沒新公告)
+  if(!App._sAnnForcedResync && typeof Sync !== 'undefined' && Sync.forceResyncFromCloud && App.fbRef){
+    App._sAnnForcedResync = true;
+    Sync.forceResyncFromCloud().then(n => {
+      console.log('[rSAnn] force resync pulled', n, 'collections; announcements now=', (App.db.announcements||[]).length);
+      setTimeout(()=> { App._sAnnForcedResync = false; }, 30000);
+      if(n) rerender();
+    }).catch(e => {
+      console.warn('[rSAnn] force resync failed:', e);
+      App._sAnnForcedResync = false;
+    });
+  }
 
   // mark read on entry — 排程中的不算
   try {
