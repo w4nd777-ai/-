@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-rest-fallback';
+const APP_BUILD = '2026-06-01-rerender-typing-guard';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -25873,6 +25873,28 @@ function showPwaInstallChip(){
 }
 
 function rerender(){
+  // ★ 用戶反映「打字一個字就跳掉」: 焦點在 input/textarea 時延後 rerender
+  //   ↑ 只看「當下」focus, 不看 _lastInputTs, 避免按下 save 按鈕後也被延後
+  //   ↑ Save 後 focus 在按鈕, 不會延後
+  try {
+    const a = document.activeElement;
+    const isTypingNow = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+    if(isTypingNow){
+      if(App._rerenderDeferred) return;  // 已排隊
+      App._rerenderDeferred = setTimeout(()=> {
+        App._rerenderDeferred = null;
+        try { rerender(); } catch(_){}
+      }, 3000);
+      console.log('[rerender] 打字中, 延後 3 秒');
+      return;
+    }
+    // 若之前排了延後, 既然現在 focus 不在 input → 取消延後直接 render
+    if(App._rerenderDeferred){
+      clearTimeout(App._rerenderDeferred);
+      App._rerenderDeferred = null;
+    }
+  } catch(_){}
+
   // PERF: clear render-scoped memo cache so each render pass sees fresh data
   // (used by attendanceRate / submissionRate / assignmentTargets / studentRank
   // to avoid O(students² × assignments) recomputation)
