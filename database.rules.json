@@ -3,24 +3,41 @@
     "cms-v3": {
       ".read": "auth != null",
       "$roomCode": {
-        ".write": "auth != null",
+        "_teacher_emails": {
+          ".write": "auth != null && auth.token.email != null && (!data.exists() || data.child(auth.token.email.toLowerCase().replace('.', ',').replace('@', '_')).exists())"
+        },
         "students": {
-          ".indexOn": ["sid", "cls", "email"]
+          ".indexOn": ["sid", "cls", "email"],
+          ".write": "auth != null && auth.token.email != null && root.child('cms-v3').child($roomCode).child('_teacher_emails').child(auth.token.email.toLowerCase().replace('.', ',').replace('@', '_')).exists()"
+        },
+        "accounts": {
+          ".write": "auth != null && auth.token.email != null && root.child('cms-v3').child($roomCode).child('_teacher_emails').child(auth.token.email.toLowerCase().replace('.', ',').replace('@', '_')).exists()"
+        },
+        "grades": {
+          ".write": "auth != null && auth.token.email != null && root.child('cms-v3').child($roomCode).child('_teacher_emails').child(auth.token.email.toLowerCase().replace('.', ',').replace('@', '_')).exists()"
         },
         "submissions": {
-          ".indexOn": ["studentId", "assignmentId", "ts"]
+          ".indexOn": ["studentId", "assignmentId", "ts"],
+          ".write": "auth != null"
         },
         "attendance": {
-          ".indexOn": ["studentId", "date"]
+          ".indexOn": ["studentId", "date"],
+          ".write": "auth != null"
         },
         "messages": {
-          ".indexOn": ["ts"]
+          ".indexOn": ["ts"],
+          ".write": "auth != null"
         },
         "behavior": {
-          ".indexOn": ["studentId", "ts"]
+          ".indexOn": ["studentId", "ts"],
+          ".write": "auth != null"
         },
         "leaves": {
-          ".indexOn": ["studentId", "date"]
+          ".indexOn": ["studentId", "date"],
+          ".write": "auth != null"
+        },
+        "$other": {
+          ".write": "auth != null"
         }
       },
       "google_users": {

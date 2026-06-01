@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-mobile-polish';
+const APP_BUILD = '2026-06-01-rules-hardening';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -6367,6 +6367,16 @@ async function _completeEmailLogin(user, role){
     App.cfg.role = role;
     if(typeof saveCfg === 'function') saveCfg(App.cfg);
   } catch(_){}
+  // ★ 安全升級:老師 Email 登入時自動寫入 _teacher_emails 白名單
+  //   Firebase rules 用這個白名單區分「老師可寫敏感資料 (grades/students/accounts)」vs「學生不能」
+  //   首位老師 (白名單為空時) 自動領取,之後只有現有老師能加新老師
+  if(role === 'teacher' && user && user.email && window.firebase && firebase.database){
+    try {
+      const ek = String(user.email).toLowerCase().replace(/\./g, ',').replace(/@/g, '_');
+      firebase.database().ref('cms-v3/' + App.cfg.roomCode + '/_teacher_emails/' + ek)
+        .set(true).catch(e => console.warn('[teacher allowlist write]', e && e.message || e));
+    } catch(e){ console.warn('[teacher allowlist]', e); }
+  }
   // 寫 email_users mapping (跨裝置同步用)
   // ⚠️ 已停用 (dead write):全專案 grep 過 cms-v3/{roomCode}/email_users/*
   //   只有「這一處寫入」，沒有任何讀取點 → 純粹是空跑、浪費 Firebase 寫入額度。
