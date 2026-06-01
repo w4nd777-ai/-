@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-attach-help-ui';
+const APP_BUILD = '2026-06-01-announcement-attaches';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -18673,6 +18673,20 @@ function rAnn(content){
         )
       ));
       if(a.body) card.appendChild(el('div', { class:'small', style:{marginTop:'4px',whiteSpace:'pre-wrap'} }, a.body));
+      // ★ 附件 — 可預覽 / 下載
+      if(Array.isArray(a.attaches) && a.attaches.length){
+        const attRow = el('div', { style:{marginTop:'8px',display:'flex',flexWrap:'wrap',gap:'6px'} });
+        a.attaches.forEach(att => {
+          const isImg = (att.type||'').startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name||'');
+          const btn = el('button', { class:'btn btn-sm',
+            style:{padding:'4px 10px',fontSize:'12px'},
+            title:'點此預覽',
+            onclick: ()=> attachPreview(att)
+          }, (isImg?'🖼 ':'📎 ') + (att.name||'附件'));
+          attRow.appendChild(btn);
+        });
+        card.appendChild(attRow);
+      }
       // ★ 排程中 → 顯示 "預約於 X 月 Y 日 H:M 發送" 醒目提示
       if(scheduled){
         const dStr = (function(){ try { return new Date(a.scheduledAt).toLocaleString('zh-TW',{hour12:false}); } catch(_){ return a.scheduledAt; } })();
@@ -18763,6 +18777,57 @@ function openAnnouncementEdit(a){
     '排程時間到之前,學生看不到這則公告,也不會收到通知。'));
   m.root.appendChild(fSched);
 
+  // ★ 附件 (照片 / 檔案 / PDF / 影片 等)
+  const _attachState = (a && Array.isArray(a.attaches)) ? a.attaches.slice() : [];
+  const fAttach = el('div', { class:'field' });
+  fAttach.appendChild(el('label', { class:'label' }, '📎 附件 (照片 / 檔案,可多選)'));
+  const chipsBox = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'8px',minHeight:'30px'} });
+  function _renderAttChips(){
+    chipsBox.innerHTML = '';
+    if(!_attachState.length){
+      chipsBox.appendChild(el('div', { class:'tiny muted' }, '(尚未選擇任何附件)'));
+      return;
+    }
+    _attachState.forEach((att, idx) => {
+      const isImg = (att.type||'').startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name||'');
+      const chip = el('div', { style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 8px',background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:'14px',fontSize:'12px'} });
+      chip.appendChild(el('span', null, (isImg?'🖼':'📎') + ' ' + (att.name||'(無名)')));
+      if(att.size){
+        chip.appendChild(el('span', { class:'tiny muted' }, '(' + Math.round(att.size/1024) + ' KB)'));
+      }
+      const rm = el('button', { type:'button', style:{background:'transparent',border:'0',color:'var(--danger)',cursor:'pointer',fontSize:'14px',padding:'0 4px'},
+        onclick: ()=> { _attachState.splice(idx, 1); _renderAttChips(); }
+      }, '×');
+      chip.appendChild(rm);
+      chipsBox.appendChild(chip);
+    });
+  }
+  _renderAttChips();
+  fAttach.appendChild(chipsBox);
+  const fileInput = el('input', { type:'file', multiple:true, style:{display:'none'} });
+  fileInput.onchange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    for(const f of files){
+      try {
+        toast('📤 上傳 ' + f.name + '...', 'info', 2000);
+        const meta = await attachUpload(f);
+        _attachState.push(meta);
+        _renderAttChips();
+      } catch(err){
+        toast('上傳失敗: ' + (err.message||err), 'danger', 5000);
+      }
+    }
+    e.target.value = '';
+  };
+  fAttach.appendChild(fileInput);
+  const pickBtn = el('button', { type:'button', class:'btn btn-sm',
+    onclick: (e)=> { e.preventDefault(); fileInput.click(); }
+  }, '📎 選擇檔案 / 照片');
+  fAttach.appendChild(pickBtn);
+  fAttach.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px'} },
+    '支援照片、PDF、Word、影片等。學生會在公告下方看到附件可點開預覽 / 下載。'));
+  m.root.appendChild(fAttach);
+
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
@@ -18790,6 +18855,7 @@ function openAnnouncementEdit(a){
     rec.expireAt = iE.value;
     rec.pinned = iP.checked;
     rec.scheduledAt = _scheduledAt;
+    rec.attaches = _attachState;
     rec.author = App.session?.name || '老師';
     if(isNew) App.db.announcements.push(rec);
     saveDB();
@@ -19436,6 +19502,30 @@ function rSAnn(content){
     const card = el('div', { class:'ann-card' + (a.pinned?' pinned':'') });
     card.appendChild(el('h4', null, (a.pinned?'📌 ':'') + (a.title||'')));
     if(a.body) card.appendChild(el('div', { class:'small', style:{marginTop:'4px',whiteSpace:'pre-wrap'} }, a.body));
+    // ★ 附件 — 學生可預覽 / 下載
+    if(Array.isArray(a.attaches) && a.attaches.length){
+      const attRow = el('div', { style:{marginTop:'8px',display:'flex',flexWrap:'wrap',gap:'6px'} });
+      a.attaches.forEach(att => {
+        const isImg = (att.type||'').startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name||'');
+        // 圖片直接 inline 顯示縮圖 (點開預覽全圖)
+        if(isImg){
+          const thumb = el('button', {
+            class:'btn btn-sm',
+            style:{padding:'4px 8px',fontSize:'12px'},
+            onclick: ()=> attachPreview(att)
+          }, '🖼 ' + (att.name||'圖片'));
+          attRow.appendChild(thumb);
+        } else {
+          const btn = el('button', {
+            class:'btn btn-sm',
+            style:{padding:'4px 8px',fontSize:'12px'},
+            onclick: ()=> attachPreview(att)
+          }, '📎 ' + (att.name||'附件'));
+          attRow.appendChild(btn);
+        }
+      });
+      card.appendChild(attRow);
+    }
     // ★ FEATURE #8: 有排程的公告顯示 scheduledAt 而非建立時間
     card.appendChild(el('div', { class:'tiny muted', style:{marginTop:'6px'} },
       relTime(announcementEffectiveTs(a)) + ' · 由 ' + (a.author||'老師')
