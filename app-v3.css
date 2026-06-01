@@ -2314,7 +2314,10 @@ button:focus-visible, .btn:focus-visible, .side-item:focus-visible{
   .role-choice-card { padding: 14px 10px; }
   .role-choice-card .rc-ico, .role-choice-card .rc-icon { font-size: 32px; }
   .role-choice-card .rc-label { font-size: 14px; }
-  .modal { padding: 14px 12px !important; max-width: 96vw !important; }
+  .modal { padding: 14px 12px !important; max-width: 92vw !important; }
+  /* ★ FIX: 2FA 救援碼 / 結算 wizard 等 2 欄方塊在窄機塌成 1 欄 */
+  .grid-2-mobile-stack,
+  .backup-codes-grid { grid-template-columns: 1fr !important; }
   .field input, .field select, .field textarea { font-size: 14px; }
   .checkin-btn { width: 200px !important; height: 200px !important; font-size: 24px !important; }
   .qr-box img { max-width: 80vmin; height: auto; }

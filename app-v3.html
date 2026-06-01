@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-overview-tabs';
+const APP_BUILD = '2026-06-01-mobile-polish';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -1061,7 +1061,7 @@ async function open2FAEnable(account){
     m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'8px'} },
       '當你手機遺失/Authenticator App 無法用時,可以用任一組救援碼登入 (每組只能用一次)。'));
     // 救援碼方塊
-    const grid = el('div', { style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'6px',padding:'12px',background:'#fff8dc',border:'1px dashed #f0c040',borderRadius:'8px',marginBottom:'10px'} });
+    const grid = el('div', { class:'backup-codes-grid', style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'6px',padding:'12px',background:'#fff8dc',border:'1px dashed #f0c040',borderRadius:'8px',marginBottom:'10px'} });
     backupCodes.forEach(c => {
       grid.appendChild(el('div', { style:{padding:'6px 10px',background:'#fff',borderRadius:'4px',fontFamily:'ui-monospace,monospace',fontSize:'14px',letterSpacing:'2px',textAlign:'center'} }, c));
     });
@@ -1134,7 +1134,7 @@ async function open2FARegenBackups(account){
   m.root.appendChild(el('h2', null, '🔄 新的救援碼'));
   m.root.appendChild(el('div', { class:'small', style:{marginBottom:'10px',color:'var(--danger)',fontWeight:'700'} },
     '⚠️ 舊救援碼已全部失效,以下是新的 10 組 (唯一顯示機會)'));
-  const grid = el('div', { style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'6px',padding:'12px',background:'#fff8dc',border:'1px dashed #f0c040',borderRadius:'8px',marginBottom:'10px'} });
+  const grid = el('div', { class:'backup-codes-grid', style:{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'6px',padding:'12px',background:'#fff8dc',border:'1px dashed #f0c040',borderRadius:'8px',marginBottom:'10px'} });
   newCodes.forEach(c => {
     grid.appendChild(el('div', { style:{padding:'6px 10px',background:'#fff',borderRadius:'4px',fontFamily:'ui-monospace,monospace',fontSize:'14px',letterSpacing:'2px',textAlign:'center'} }, c));
   });
