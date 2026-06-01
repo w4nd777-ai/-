@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sub-tab-counts';
+const APP_BUILD = '2026-06-01-show-empty-asg';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -17781,6 +17781,14 @@ function rSub(content){
       if(!byAsg[aid]) byAsg[aid] = [];
       byAsg[aid].push({ sub:s, origIdx:i });
     });
+    // ★ 修「繳交紀錄少了一個作業」:所有作業都顯示, 沒人交就空列表
+    //   原本只顯示「有人交」的作業 → 用戶以為作業消失
+    //   只在「全部」「待批改」 tab 顯示空作業 (其他 tab 像 已退回, 沒退回的作業出現會混淆)
+    if(tab === 'all' || tab === 'pending'){
+      (App.db.assignments||[]).forEach(a => {
+        if(a && a.id && !byAsg[a.id]) byAsg[a.id] = [];
+      });
+    }
     // 排序:依 dueAt 早到晚,沒 dueAt 排後面
     const asgIds = Object.keys(byAsg).sort((a, b) => {
       const aA = App.db.assignments.find(x => x.id === a);
