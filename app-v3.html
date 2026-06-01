@@ -102,7 +102,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-announcement-attaches';
+const APP_BUILD = '2026-06-01-msg-multi-attach';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -13107,21 +13107,23 @@ function renderMsgBubble(m, meId){
     fontSize:'14px'
   }});
   if(m.text) bubble.appendChild(el('div', null, m.text));
-  if(m.attach){
-    const isImg = (m.attach.type||'').indexOf('image/') === 0;
+  // ★ 多檔附件 — 若 attaches 陣列存在優先用,否則 fallback 到舊版 attach 單檔
+  const _attList = Array.isArray(m.attaches) && m.attaches.length ? m.attaches : (m.attach ? [m.attach] : []);
+  _attList.forEach(att => {
+    const isImg = (att.type||'').indexOf('image/') === 0 || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name||'');
     const ac = el('div', { style:{marginTop:'6px',padding:'6px',borderRadius:'8px',background:'rgba(0,0,0,.06)'} });
-    if(isImg && m.attach.data){
-      const im = el('img', { src: m.attach.data, alt: m.attach.name||'',
+    if(isImg && att.data){
+      const im = el('img', { src: att.data, alt: att.name||'',
         style:{maxWidth:'200px',maxHeight:'200px',borderRadius:'6px',cursor:'pointer',display:'block'} });
-      im.addEventListener('click', ()=> attachPreview(m.attach));
+      im.addEventListener('click', ()=> attachPreview(att));
       ac.appendChild(im);
     }
     ac.appendChild(el('div', { class:'flex', style:{gap:'4px',marginTop:isImg?'6px':'0',flexWrap:'wrap'} },
-      el('button', { class:'btn btn-sm', onclick:()=> attachDownload(m.attach), style:{fontSize:'11px',padding:'2px 8px'} }, '⬇ ' + (m.attach.name || '附件')),
-      el('button', { class:'btn btn-sm', onclick:()=> attachPreview(m.attach), style:{fontSize:'11px',padding:'2px 8px'} }, '👁 預覽')
+      el('button', { class:'btn btn-sm', onclick:()=> attachDownload(att), style:{fontSize:'11px',padding:'2px 8px'} }, '⬇ ' + (att.name || '附件')),
+      el('button', { class:'btn btn-sm', onclick:()=> attachPreview(att), style:{fontSize:'11px',padding:'2px 8px'} }, '👁 預覽')
     ));
     bubble.appendChild(ac);
-  }
+  });
   const isPriv = (m.toId && m.toId !== 'all');
   // 計算發訊者顯示名稱
   let displayName;
@@ -13162,43 +13164,59 @@ function buildMsgComposer(onSend, _legacy, opts){
   // F-03: 訊息草稿（用 session id 區分；公開/私訊共用同一個 key 簡化）
   const _draftKey = 'msg_' + ((App.session && App.session.id) || 'anon');
   setupDraftSave(inp, _draftKey);
-  let pendingAttach = null;
+  // ★ 升級成多檔:pendingAttaches 是 array (向後相容: 單檔仍可)
+  let pendingAttaches = [];
   let anonymous = false;
-  const fInp = el('input', { type:'file', style:{display:'none'} });
+  const fInp = el('input', { type:'file', multiple:true, style:{display:'none'} });
   const attachPreviewSlot = el('div', { style:{width:'100%',display:'none',padding:'6px 0'} });
   function refreshAttachSlot(){
     attachPreviewSlot.innerHTML = '';
-    if(pendingAttach){
+    if(pendingAttaches.length){
       attachPreviewSlot.style.display = '';
-      const chip = el('div', { class:'file-chip', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',background:'var(--primary-soft)',color:'var(--primary)',borderRadius:'14px',fontSize:'12px'} },
-        el('span', null, '📎 ' + pendingAttach.name + ' (' + Math.round((pendingAttach.size||0)/1024) + ' KB)'),
-        el('span', { style:{cursor:'pointer'}, onclick: ()=> {
-          if(pendingAttach && pendingAttach.key) { try { attachDelete(pendingAttach); } catch(e){_swallow('auto',e)} }
-          pendingAttach = null; refreshAttachSlot();
-        } }, '✗')
-      );
-      attachPreviewSlot.appendChild(chip);
+      const wrap = el('div', { style:{display:'flex',flexWrap:'wrap',gap:'6px'} });
+      pendingAttaches.forEach((att, idx) => {
+        const isImg = (att.type||'').startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name||'');
+        const chip = el('div', { class:'file-chip', style:{display:'inline-flex',alignItems:'center',gap:'6px',padding:'4px 10px',background:'var(--primary-soft)',color:'var(--primary)',borderRadius:'14px',fontSize:'12px'} },
+          el('span', null, (isImg?'🖼':'📎') + ' ' + att.name + ' (' + Math.round((att.size||0)/1024) + ' KB)'),
+          el('span', { style:{cursor:'pointer'}, onclick: ()=> {
+            const removed = pendingAttaches.splice(idx, 1)[0];
+            if(removed && removed.key) { try { attachDelete(removed); } catch(e){_swallow('auto',e)} }
+            refreshAttachSlot();
+          } }, '✗')
+        );
+        wrap.appendChild(chip);
+      });
+      attachPreviewSlot.appendChild(wrap);
     } else {
       attachPreviewSlot.style.display = 'none';
     }
   }
   fInp.addEventListener('change', async e => {
-    const file = e.target.files[0]; if(!file) return;
-    try {
-      const data = await attachUpload(file);
-      if(data){ pendingAttach = data; refreshAttachSlot(); }
-    } catch(err){ toast(err.message || '上傳失敗','danger'); }
+    const files = Array.from(e.target.files || []);
+    for(const file of files){
+      try {
+        const data = await attachUpload(file);
+        if(data){ pendingAttaches.push(data); refreshAttachSlot(); }
+      } catch(err){ toast(err.message || '上傳失敗','danger'); }
+    }
     fInp.value = '';
   });
-  const attachBtn = el('button', { class:'btn btn-sm', title:'附加檔案', onclick:()=> fInp.click() }, '📎');
+  const attachBtn = el('button', { class:'btn btn-sm', title:'附加檔案 (可多選)', onclick:()=> fInp.click() }, '📎');
   const send = ()=>{
     const t = inp.value.trim();
-    if(!t && !pendingAttach){ return; }
-    onSend(t, pendingAttach, { anonymous });
+    if(!t && !pendingAttaches.length){ return; }
+    // 向後相容:單檔時用 attach,多檔時用 attaches
+    if(pendingAttaches.length === 1){
+      onSend(t, pendingAttaches[0], { anonymous, attaches: pendingAttaches });
+    } else if(pendingAttaches.length > 1){
+      onSend(t, null, { anonymous, attaches: pendingAttaches });
+    } else {
+      onSend(t, null, { anonymous });
+    }
     inp.value = '';
     // F-03: 送出後清掉草稿
     clearDraft(_draftKey);
-    pendingAttach = null;
+    pendingAttaches = [];
     refreshAttachSlot();
   };
   inp.addEventListener('keydown', e => { if(e.key==='Enter') send(); });
@@ -13251,6 +13269,11 @@ function pushMsg(toId, text, attach, opts){
     attach: attach || null,
     ts: Date.now()
   };
+  // ★ 多檔附件 — 同時把 attaches 陣列存進去 (向後相容: attach 仍是第一筆)
+  if(Array.isArray(opts.attaches) && opts.attaches.length){
+    rec.attaches = opts.attaches.slice();
+    if(!rec.attach) rec.attach = rec.attaches[0];   // 舊版渲染還是用 m.attach,要相容
+  }
   // Round 2 M9: 學生公開留言可標 anonymous（私訊 / 老師發訊息不適用）
   if(opts.anonymous && App.session.role === 'student' && (toId === 'all' || !toId)){
     rec.anonymous = true;
@@ -13309,8 +13332,8 @@ function rMsgTeacher(content){
   } else {
     msgs.forEach(m => list.appendChild(renderMsgBubble(m, 'teacher')));
   }
-  const { inputBar, attachPreviewSlot } = buildMsgComposer((text, attach)=> {
-    pushMsg('all', text, attach);
+  const { inputBar, attachPreviewSlot } = buildMsgComposer((text, attach, sendOpts)=> {
+    pushMsg('all', text, attach, sendOpts);
     rerender();
   });
   card.appendChild(attachPreviewSlot);
@@ -13440,8 +13463,8 @@ function rMsgTeacherDM(content){
     conv.forEach(m => list.appendChild(renderMsgBubble(m, 'teacher')));
   }
 
-  const { inputBar, attachPreviewSlot } = buildMsgComposer((text, attach)=> {
-    pushMsg(activeStuId, text, attach);
+  const { inputBar, attachPreviewSlot } = buildMsgComposer((text, attach, sendOpts)=> {
+    pushMsg(activeStuId, text, attach, sendOpts);
     rerender();
   });
   panel.appendChild(attachPreviewSlot);
@@ -13523,7 +13546,7 @@ function rMsgStudent(content){
     const targetId = tab === 'teacher' ? 'teacher' : 'all';
     // 私訊老師 → 不允許匿名（避免「匿名」變舉發保護傘 + 老師仍能對應到學生）
     const anonymous = (sendOpts && sendOpts.anonymous) && targetId === 'all';
-    pushMsg(targetId, text, attach, { anonymous });
+    pushMsg(targetId, text, attach, { anonymous, attaches: sendOpts && sendOpts.attaches });
     rerender();
   }, null, { allowAnonymous: tab === 'all' });
   card.appendChild(attachPreviewSlot);
