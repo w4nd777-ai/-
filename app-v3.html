@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-root-fixes';
+const APP_BUILD = '2026-06-01-honest-register';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4835,8 +4835,24 @@ function studentRegisterFlow(){
   // 完整註冊：姓名 + 學號 + email + 班級 + 座號 + 密碼
   const m = modal('', { dismissable:false });
   m.root.appendChild(el('h2', null, '學生註冊'));
+  // ★ 同步狀態指示器:讓學生送出前就知道能否上雲
+  const syncStatus = el('div', { class:'small', style:{padding:'8px 10px',borderRadius:'6px',marginBottom:'10px',fontWeight:'600'} });
+  function _updateSyncStatus(){
+    if(App.fbRef){
+      syncStatus.textContent = '✅ 雲端同步已就緒,送出會即時通知老師';
+      syncStatus.style.background = 'var(--success-soft)';
+      syncStatus.style.color = 'var(--success)';
+    } else {
+      syncStatus.textContent = '⚠️ 雲端同步未就緒, 等 5 秒再試 (或重整一次)';
+      syncStatus.style.background = 'var(--warn-soft)';
+      syncStatus.style.color = 'var(--warn)';
+      setTimeout(_updateSyncStatus, 2000);
+    }
+  }
+  _updateSyncStatus();
+  m.root.appendChild(syncStatus);
   m.root.appendChild(el('p', { style:{color:'var(--text-muted)',fontSize:'13px',marginBottom:'10px'} },
-    '請完整填寫資料，等待老師審核'));
+    '請完整填寫資料,等待老師審核'));
 
   // (Google 自動填按鈕已移除 — Chrome 第三方 cookie 政策會擋 signInWithPopup 造成錯誤)
   // 學生請直接填表單,Email 用一般信箱即可
@@ -4894,21 +4910,43 @@ function studentRegisterFlow(){
 
     const pending = {
       id: nid(),
-      role: 'student',                       // ★ 修:之前漏掉,導致老師看不到該筆 pending
-      status: 'pending',                     // 跟 teacher 註冊一致
+      role: 'student',
+      status: 'pending',
       name, sid, cls, seat, email,
       password: await hashPassword(pw),
-      mustChangePw: false,  // 自己註冊的不用再改
+      mustChangePw: false,
       ts: Date.now()
     };
-    // (Google 綁定區段已移除 — 一併拿掉)
     App.db.pending = App.db.pending || [];
     App.db.pending.push(pending);
-    saveDB(true);                            // ★ immediate save 確保不丟
-    try { Sync.setRow('pending', pending.id, pending); bcNotify(); } catch(e){_swallow('auto',e)}
-    if(typeof logOp === 'function') logOp('register', name + ' 註冊申請');
+    saveDB(true);
+    // ★ 直接寫雲端而不是用 queued Sync.setRow,並 AWAIT 確認結果
+    //   失敗就明確告訴用戶,不要 toast "成功" 騙人
+    let cloudOk = false;
+    let cloudErr = '';
+    try {
+      // 確保 Sync 已 init (若沒, 試著現場 init)
+      if(!App.fbRef && typeof Sync.init === 'function'){
+        await Sync.init();
+      }
+      if(App.fbRef){
+        await App.fbRef.child('pending').child(pending.id).set(pending);
+        cloudOk = true;
+      } else {
+        cloudErr = 'Firebase 同步未就緒';
+      }
+    } catch(e){
+      cloudErr = e && (e.code || e.message) || '未知錯誤';
+    }
+    try { bcNotify(); } catch(_){}
+    if(typeof logOp === 'function') logOp('register', name + ' 註冊申請' + (cloudOk?' ✓雲端':' ✗本機'));
     m.close();
-    toast('✅ 註冊已送出！等待老師審核','success', 3500);
+    if(cloudOk){
+      toast('✅ 註冊已送達雲端,老師會立刻看到!','success', 5000);
+    } else {
+      // ★ 不騙人:明確告訴用戶「沒上雲」
+      toast('⚠️ 註冊只存了本機,但雲端同步失敗 (' + cloudErr + ')\n請強制重整一次再送出,或截圖此訊息給老師', 'danger', 12000);
+    }
     rerender();
   };
 
