@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-anon-short';
+const APP_BUILD = '2026-06-02-daily-refresh-msg';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -21272,7 +21272,7 @@ function rSEv(content){
       formCard.appendChild(el('div', { class:'small muted', style:{marginTop:'10px',padding:'8px 10px',background:'var(--surface-2)',borderRadius:'6px'} },
         tab === 'semester'
           ? '🔒 學期評價每位學生只能填一次, 分數已保留給老師。'
-          : '🔒 每日評價每位學生每天只能填一次, 分數已保留給老師。'));
+          : '🔒 今日已填過。明天可以再填新的, 每天 1 次, 分數已保留給老師。'));
     } else {
       // ★ 還沒填 → 顯示填寫表單
       formCard.appendChild(el('h3', null, tab==='semester'?'給學期評分':'今日課程感想'));
@@ -21328,13 +21328,13 @@ function rSEv(content){
       }
 
       formCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'8px',padding:'6px 8px',background:'var(--warn-soft)',borderRadius:'4px'} },
-        tab === 'semester' ? '⚠️ 提醒: 本學期評價只能填一次, 送出後不可修改' : '⚠️ 提醒: 今日評價只能填一次, 送出後不可修改'));
+        tab === 'semester' ? '⚠️ 提醒: 本學期評價只能填一次, 送出後不可修改' : '⚠️ 提醒: 今日只能填一次, 送出後不可修改 (明天可以再填新的)'));
       formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick: async (ev)=> {
         const btn = ev.target;
         // 二次確認, 避免誤送
         const confirmMsg = tab === 'semester'
-          ? '確定送出本學期評價?\n\n送出後不可修改, 也不能再填'
-          : '確定送出今日評價?\n\n送出後不可修改, 今天不能再填';
+          ? '確定送出本學期評價?\n\n送出後不可修改, 整學期只能填一次'
+          : '確定送出今日評價?\n\n送出後今天不可修改, 但明天可以再填新的';
         const ok = await confirmDlg(confirmMsg, { title:'確認送出' });
         if(!ok) return;
         const orig = btn.textContent;
