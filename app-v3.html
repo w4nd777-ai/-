@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-cropper-512-quality';
+const APP_BUILD = '2026-06-01-cropper-1024-idb';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4751,15 +4751,18 @@ function studentRegisterFlow(){
 
     const pending = {
       id: nid(),
+      role: 'student',                       // ★ 修:之前漏掉,導致老師看不到該筆 pending
+      status: 'pending',                     // 跟 teacher 註冊一致
       name, sid, cls, seat, email,
       password: await hashPassword(pw),
       mustChangePw: false,  // 自己註冊的不用再改
       ts: Date.now()
     };
     // (Google 綁定區段已移除 — 一併拿掉)
+    App.db.pending = App.db.pending || [];
     App.db.pending.push(pending);
-    saveDB();
-    try { Sync.setMap('pending', App.db.pending); bcNotify(); } catch(e){_swallow('auto',e)}
+    saveDB(true);                            // ★ immediate save 確保不丟
+    try { Sync.setRow('pending', pending.id, pending); bcNotify(); } catch(e){_swallow('auto',e)}
     if(typeof logOp === 'function') logOp('register', name + ' 註冊申請');
     m.close();
     toast('✅ 註冊已送出！等待老師審核','success', 3500);
@@ -11491,23 +11494,26 @@ function openAvatarCropModal(file){
         actions.appendChild(el('button', { class:'btn', style:{padding:'12px 22px',fontSize:'15px'}, onclick: ()=> { m.close(); resolve(null); } }, '取消'));
         actions.appendChild(el('button', { class:'btn btn-primary', style:{padding:'12px 28px',fontSize:'15px',fontWeight:'700'}, onclick: ()=> {
           const realX = cropX / scale, realY = cropY / scale, realSize = cropSize / scale;
-          const canvas = document.createElement('canvas');
-          // ★ 輸出 512×512 @ 88% (industry 標準, 跟 LinkedIn/Twitter 頭像一樣)
-          //   清晰但仍可控:約 50-150 KB / 頭像
-          //   即使 30 個學生上頭像 = ~3 MB,仍在 iOS Safari 5MB localStorage 上限內
-          const outSize = 512;
-          canvas.width = outSize; canvas.height = outSize;
-          const ctx = canvas.getContext('2d');
-          // 白底 (萬一原圖有 alpha)
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(0, 0, outSize, outSize);
-          // 高品質繪製 (確保縮放後不糊)
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(img, realX, realY, realSize, realSize, 0, 0, outSize, outSize);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+          // ★ 雙重輸出:1024 大圖 (存 IDB 高清檢視) + 256 thumb (存 student.avatar 同步用)
+          //   大圖: 1024×1024 @ 90% ≈ 200-500 KB,放 IDB 不吃 localStorage
+          //   thumb: 256×256 @ 80% ≈ 20-40 KB,放 student.avatar (同步雲端)
+          //   列表顯示用 thumb (40-100px 顯示綽綽有餘)
+          //   點放大用 IDB 高清版
+          function makeJpeg(size, quality){
+            const c = document.createElement('canvas');
+            c.width = size; c.height = size;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#fff'; cx.fillRect(0, 0, size, size);
+            cx.imageSmoothingEnabled = true;
+            cx.imageSmoothingQuality = 'high';
+            cx.drawImage(img, realX, realY, realSize, realSize, 0, 0, size, size);
+            return c.toDataURL('image/jpeg', quality);
+          }
+          const dataUrlLarge = makeJpeg(1024, 0.90);
+          const dataUrlThumb = makeJpeg(256, 0.80);
           m.close();
-          resolve(dataUrl);
+          // 回傳兩份 (caller 端決定怎麼存)
+          resolve({ thumb: dataUrlThumb, large: dataUrlLarge });
         }}, '✂️ 確認裁切'));
         m.root.appendChild(actions);
       };
@@ -11519,8 +11525,16 @@ function openAvatarCropModal(file){
   });
 }
 
-function openAvatarViewer(s){
-  if(!s || !s.avatar){ try { toast('此學生尚未上傳頭像', 'warning'); } catch(_){} return; }
+async function openAvatarViewer(s){
+  if(!s || !s.avatar){ try { toast('此學生尚未上傳頭像', 'warn'); } catch(_){} return; }
+  // ★ 優先用 IDB 高清版本 (1024) 取代 student.avatar (256 thumb)
+  let displaySrc = s.avatar;
+  try {
+    const idbBlob = await idbGet('avatar_' + s.id);
+    if(idbBlob){
+      displaySrc = URL.createObjectURL(idbBlob);
+    }
+  } catch(_){}
   const m = modal('', { dismissable: true });
   m.root.style.maxWidth = '92vw';
   m.root.appendChild(el('h2', { style:{marginBottom:'8px'} },
@@ -11528,7 +11542,7 @@ function openAvatarViewer(s){
   m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
     (s.cls || '') + (s.sid ? ' · 學號 ' + s.sid : '')));
   // 顯示原圖（max 88vh、自適應寬度）— 用戶要求顯示更大張
-  const img = el('img', { src: s.avatar, alt: s.name + ' 頭像', style:{
+  const img = el('img', { src: displaySrc, alt: s.name + ' 頭像', style:{
     display:'block',
     maxWidth:'100%',
     maxHeight:'88vh',
@@ -11553,8 +11567,8 @@ function openAvatarViewer(s){
   actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
     try {
       const a = document.createElement('a');
-      // dataUri 或 URL 都可直接 download
-      a.href = s.avatar;
+      // ★ 下載用 displaySrc (有 IDB 1024 就用 1024,沒就 thumb)
+      a.href = displaySrc;
       // 自動判斷副檔名（從 dataURI mime 取，否則預設 jpg）
       let ext = 'jpg';
       const m1 = /^data:image\/(\w+)/i.exec(s.avatar || '');
@@ -16339,12 +16353,19 @@ function rMe(content){
     if(f.size > 20*1024*1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
       // ★ 跳裁切框讓用戶決定範圍
-      const croppedDataUrl = await openAvatarCropModal(f);
-      if(!croppedDataUrl) return;  // 用戶取消
-      me.avatar = croppedDataUrl;
+      const out = await openAvatarCropModal(f);
+      if(!out) return;  // 用戶取消
+      // thumb 存 student.avatar (同步雲端 + localStorage)
+      me.avatar = out.thumb;
+      // 1024 大圖存 IDB (本機高清檢視, 不吃 localStorage)
+      try {
+        const r = await fetch(out.large); const blob = await r.blob();
+        await idbPut('avatar_' + me.id, blob);
+      } catch(_){}
       saveDB(); Sync.setRow('students', me.id, me); bcNotify();
-      const kb = Math.round(croppedDataUrl.length / 1024);
-      toast('✅ 頭像已更新 (' + kb + ' KB)','success', 3000);
+      const kbT = Math.round(out.thumb.length / 1024);
+      const kbL = Math.round(out.large.length / 1024);
+      toast('✅ 頭像已更新 (thumb ' + kbT + ' KB + 高清 ' + kbL + ' KB)','success', 3500);
       rerender();
     } catch(err){ toast('上傳失敗:' + friendlyError(err),'danger'); }
   });
@@ -16599,18 +16620,24 @@ function openStudentSelfEdit(){
     if(!f) return;
     if(f.size > 20 * 1024 * 1024){ return toast('圖片不可超過 20MB','danger'); }
     try {
-      // ★ 跳裁切框讓用戶決定範圍
-      const croppedDataUrl = await openAvatarCropModal(f);
-      if(!croppedDataUrl) return;
-      avatarData = croppedDataUrl;
+      // ★ 跳裁切框
+      const out = await openAvatarCropModal(f);
+      if(!out) return;
+      avatarData = out.thumb;  // student.avatar 存 thumb
       avImg.src = avatarData;
       avImg.style.display = 'block';
       avInitials.style.display = 'none';
+      // 1024 大圖存 IDB (給高清檢視用) — 用 'pending' key,儲存後 reassign 正式 id
       try {
-        const kb = Math.round(avatarData.length / 1024);
-        toast('✅ 頭像已裁切 (' + kb + ' KB)', 'success', 3000);
+        const r = await fetch(out.large); const blob = await r.blob();
+        await idbPut('avatar_pending_edit', blob);
       } catch(_){}
-    } catch(err){ toast('讀取失敗：' + (err.message||err), 'danger'); }
+      try {
+        const kbT = Math.round(out.thumb.length / 1024);
+        const kbL = Math.round(out.large.length / 1024);
+        toast('✅ 頭像已裁切 (thumb ' + kbT + ' KB + 高清 ' + kbL + ' KB)', 'success', 3500);
+      } catch(_){}
+    } catch(err){ toast('讀取失敗:' + (err.message||err), 'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
     el('button', { class:'btn btn-sm', onclick:()=> avFile.click() }, '📷 選擇圖片'),
@@ -16683,6 +16710,14 @@ function openStudentSelfEdit(){
     stu.parentEmail = pem;
     stu.avatar = avatarData;
     stu.profileUpdatedAt = Date.now();
+    // ★ 把暫存的 IDB 大圖 rename 成正式 key (avatar_<id>)
+    try {
+      const pendingBlob = await idbGet('avatar_pending_edit');
+      if(pendingBlob){
+        await idbPut('avatar_' + stu.id, pendingBlob);
+        await idbDelete('avatar_pending_edit');
+      }
+    } catch(_){}
     saveDB();
     try { Sync.setRow('students', stu.id, stu); } catch(e){_swallow('auto',e)}
     bcNotify();
@@ -17302,7 +17337,12 @@ function rSub(content){
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '繳交記錄'),
-      el('div', { class:'muted small' }, '共 ' + App.db.submissions.length + ' 筆繳交')
+      el('div', { class:'muted small' }, (function(){
+        const all = App.db.submissions || [];
+        const active = all.filter(s => !s.returned).length;
+        const returned = all.filter(s => s.returned).length;
+        return '共 ' + active + ' 筆有效繳交' + (returned ? ' (另 ' + returned + ' 筆退回中)' : '');
+      })())
     )
   ));
 
@@ -27522,17 +27562,17 @@ function openTeacherProfile(){
     if(f.size > 20 * 1024 * 1024){ toast('圖片不能超過 20MB','danger'); return; }
     try {
       // ★ 跳裁切框
-      const croppedDataUrl = await openAvatarCropModal(f);
-      if(!croppedDataUrl) return;
-      // 把 dataURL 轉回 File 餵給 attachUpload
-      const resp = await fetch(croppedDataUrl);
+      const out = await openAvatarCropModal(f);
+      if(!out) return;
+      // 老師走 attachUpload (走 Firebase Storage),用 large 1024 確保畫質
+      const resp = await fetch(out.large);
       const blob = await resp.blob();
       const croppedFile = new File([blob], 'avatar.jpg', { type:'image/jpeg' });
       if(avatarMeta){ try { await attachDelete(avatarMeta); } catch(_){_swallow('auto',_)} }
       avatarMeta = await attachUpload(croppedFile);
       await refreshAvatar();
-      toast('✅ 頭像已上傳','success');
-    } catch(err){ toast('上傳失敗：' + friendlyError(err),'danger'); }
+      toast('✅ 頭像已上傳 (1024×1024)','success');
+    } catch(err){ toast('上傳失敗:' + friendlyError(err),'danger'); }
   });
   const avRow = el('div', { class:'flex', style:{justifyContent:'center',gap:'6px',flexWrap:'wrap'} },
     el('button', { class:'btn btn-sm', onclick:()=> fileInp.click() }, '📷 選擇圖片'),
