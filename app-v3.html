@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-sid-dup-msg';
+const APP_BUILD = '2026-06-01-account-delete-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10223,7 +10223,8 @@ const TRASH_KIND_MAP = {
   quiz:         { coll: 'quizzes',       label: '小考',        ico: '📝' },
   subject:      { coll: 'subjects',      label: '科目',        ico: '📚' },
   eval:         { coll: 'evals',         label: '課程評價',     ico: '💬' },
-  group:        { coll: 'groups',        label: '小組',        ico: '👥' }
+  group:        { coll: 'groups',        label: '小組',        ico: '👥' },
+  teacher:      { coll: 'teachers',      label: '副老師',      ico: '🧑‍🏫' }
 };
 function trashAdd(kind, record){
   if(!record || !TRASH_KIND_MAP[kind]) return;
@@ -15428,13 +15429,21 @@ function rSettings(content){
     }}, '📧 清復原'));
     if(App.db.accounts.length > 1){
       acts.appendChild(el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
-        const ok = await confirmDlg('刪除帳號 ' + a.username + '？', { danger:true });
+        const ok = await confirmDlg('刪除帳號 ' + a.username + '?(可在資源回收桶 30 天內救回)', { danger:true });
         if(!ok) return;
         const _delId = a.id;
+        // ★ 修「刪除帳號後復活」:
+        //   1. 進回收桶 (30 天救援)
+        //   2. trashAdd 內部會自動加進 graveyard (7 天內 Sync 不會把這個 id 加回來)
+        try { trashAdd('account', a); } catch(_){}
         App.db.accounts = App.db.accounts.filter(x => x.id !== _delId);
-        saveDB();
+        saveDB(true);
         try { Sync.removeRow('accounts', _delId); bcNotify(); } catch(e){ _swallow('sync-del-account', e); }
-        toast('已刪除','warn'); rerender();
+        // 也順手清雲端 (確保不會被別處的 cache 推回來)
+        try {
+          if(App.fbRef) App.fbRef.child('accounts').child(_delId).remove().catch(()=>{});
+        } catch(_){}
+        toast('已刪除 (可在資源回收桶救回)','warn'); rerender();
       } }, '🗑'));
     }
     row.appendChild(acts);
@@ -31793,10 +31802,16 @@ function rTeachers(content){
           saveDB(); rerender();
         }}, t.active === false ? '✅ 啟用' : '🚫 停用'),
         el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
-          const ok = await confirmDlg('確定刪除「' + t.name + '」？', { danger:true });
+          const ok = await confirmDlg('確定刪除「' + t.name + '」?(可在資源回收桶 30 天內救回)', { danger:true });
           if(!ok) return;
+          // ★ 修「副老師刪除後復活」:回收桶 + graveyard + 雲端 remove
+          try { trashAdd('teacher', t); } catch(_){}
           App.db.teachers = App.db.teachers.filter(x => x.id !== t.id);
-          saveDB(); rerender();
+          saveDB(true);
+          try { Sync.removeRow('teachers', t.id); bcNotify(); } catch(_){}
+          try { if(App.fbRef) App.fbRef.child('teachers').child(t.id).remove().catch(()=>{}); } catch(_){}
+          toast('已刪除 (可救回)','warn');
+          rerender();
         }}, '🗑')
       ));
       card.appendChild(row);
