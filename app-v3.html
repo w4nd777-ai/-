@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-side-selfeval';
+const APP_BUILD = '2026-06-01-eval-edit-bonus-dims';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -19341,13 +19341,279 @@ function exportGradesPDF(){
 /* ════════════════════════════════════════════════════════════
    PHASE 2 — TEACHER: COURSE EVALS (rEv)
    ──────────────────────────────────────────────────────────── */
+// ★ 評價維度設定 — 老師可以加多個評分項目 (預設只有一個「整體」5 顆星)
+//   存在 App.db.settings.evalDims = [{key, label, max}, ...]
+function getEvalDims(){
+  try {
+    const arr = App.db.settings?.evalDims;
+    if(Array.isArray(arr) && arr.length){
+      return arr.filter(d => d && d.key && d.label).map(d => ({
+        key: String(d.key),
+        label: String(d.label),
+        max: Number(d.max) || 5
+      }));
+    }
+  } catch(_){}
+  return [{ key:'overall', label:'整體', max:5 }];
+}
+function setEvalDims(arr){
+  App.db.settings = App.db.settings || {};
+  App.db.settings.evalDims = arr;
+  saveDB();
+  try { Sync.setNode('settings/evalDims', arr); } catch(_){}
+}
+
+// 取得某筆評價在某維度上的分數 (向下相容: 舊版 stars 對應 overall)
+function getEvalScore(e, dimKey){
+  if(!e) return 0;
+  if(e.dims && typeof e.dims[dimKey] === 'number') return e.dims[dimKey];
+  if(dimKey === 'overall' && typeof e.stars === 'number') return e.stars;
+  return 0;
+}
+
+// 老師編輯/刪除一筆評價
+function openEvalEdit(e){
+  if(!e) return;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '編輯評價'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '由 ' + (e.anonymous?'匿名':(e.fromName||'?')) + ' 於 ' + (e.date||'') + ' 提交'));
+
+  // 各維度 star picker
+  const dims = getEvalDims();
+  const newScores = {};
+  dims.forEach(d => {
+    newScores[d.key] = getEvalScore(e, d.key);
+    const row = el('div', { class:'field' });
+    row.appendChild(el('label', { class:'label' }, '⭐ ' + d.label + ' (' + newScores[d.key] + ' / ' + d.max + ')'));
+    const starsEl = el('div', { class:'stars' });
+    function repaint(){
+      starsEl.innerHTML = '';
+      for(let i=1; i<=d.max; i++){
+        const s = el('span', { class:'s ' + (i<=newScores[d.key]?'on':''), style:{cursor:'pointer',fontSize:'20px'} }, '★');
+        s.addEventListener('click', ()=> {
+          newScores[d.key] = (newScores[d.key] === i) ? 0 : i;
+          row.querySelector('.label').textContent = '⭐ ' + d.label + ' (' + newScores[d.key] + ' / ' + d.max + ')';
+          repaint();
+        });
+        starsEl.appendChild(s);
+      }
+    }
+    repaint();
+    row.appendChild(starsEl);
+    m.root.appendChild(row);
+  });
+
+  // 文字
+  const fT = el('div', { class:'field' });
+  fT.appendChild(el('label', { class:'label' }, '評語內容'));
+  const iT = el('textarea', { class:'textarea', style:{minHeight:'100px'} });
+  iT.value = e.text || '';
+  fT.appendChild(iT);
+  m.root.appendChild(fT);
+
+  // 匿名
+  const fA = el('div', { class:'field' });
+  const lblA = el('label', { class:'flex', style:{padding:'10px',border:'1px solid var(--border-strong)',borderRadius:'8px'} });
+  const cbA = el('input', { type:'checkbox' });
+  if(e.anonymous) cbA.checked = true;
+  lblA.appendChild(cbA);
+  lblA.appendChild(el('span', null, ' 匿名顯示 (學生姓名不對其他人公開)'));
+  fA.appendChild(lblA);
+  m.root.appendChild(fA);
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+    const ok = await confirmDlg('刪除這則評價? (可在 30 天內從資源回收桶救回)', { danger:true });
+    if(!ok) return;
+    try { trashAdd('eval', _clone(e)); } catch(_){}
+    App.db.evals = App.db.evals.filter(x => x.id !== e.id);
+    saveDB();
+    try { Sync.removeRow('evals', e.id); } catch(_){ Sync.setMap('evals', App.db.evals); }
+    bcNotify();
+    toast('已刪除','warn');
+    m.close(); rerender();
+  }}, '🗑 刪除'));
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    e.dims = newScores;
+    // 向下相容: 同步寫 stars 為 overall
+    if(typeof newScores.overall === 'number') e.stars = newScores.overall;
+    e.text = iT.value.trim();
+    e.anonymous = cbA.checked;
+    e.editedBy = App.session?.name || '老師';
+    e.editedAt = Date.now();
+    saveDB();
+    let cloudOk = false, cloudErr = '';
+    try {
+      if(App.fbRef){
+        await App.fbRef.child('evals').child(e.id).set(e);
+        cloudOk = true;
+      } else cloudErr = 'Firebase 未連線';
+    } catch(err){ cloudErr = err.message || String(err); }
+    bcNotify();
+    toast(cloudOk ? '✅ 已儲存 (已同步雲端)' : '⚠️ 本機已存, 雲端同步失敗: ' + cloudErr, cloudOk?'success':'warn', 6000);
+    m.close(); rerender();
+  }}, '儲存'));
+  m.root.appendChild(actions);
+}
+
+// 老師加分 (bonus) — 給特定學生加額外分
+function openEvalBonus(e){
+  if(!e) return;
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '🎁 給 ' + (e.fromName||'這位學生') + ' 加分'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '為這則評價額外加分 (例如鼓勵分 / 心得品質分)'));
+
+  const cur = e.teacherBonus || {};
+  const fP = el('div', { class:'field' });
+  fP.appendChild(el('label', { class:'label' }, '加分 (可正可負)'));
+  const iP = el('input', { class:'input', type:'number', value: cur.points || 0, step:'0.5' });
+  fP.appendChild(iP);
+  m.root.appendChild(fP);
+
+  const fR = el('div', { class:'field' });
+  fR.appendChild(el('label', { class:'label' }, '加分原因 (學生會看到)'));
+  const iR = el('textarea', { class:'textarea', placeholder:'例: 心得有深度', style:{minHeight:'80px'} });
+  iR.value = cur.reason || '';
+  fR.appendChild(iR);
+  m.root.appendChild(fR);
+
+  const actions = el('div', { class:'modal-actions' });
+  if(cur.points){
+    actions.appendChild(el('button', { class:'btn btn-danger', onclick: async ()=> {
+      const ok = await confirmDlg('移除這筆加分?', { danger:true });
+      if(!ok) return;
+      delete e.teacherBonus;
+      saveDB();
+      try { if(App.fbRef) await App.fbRef.child('evals').child(e.id).set(e); } catch(_){}
+      bcNotify();
+      toast('已移除加分','warn');
+      m.close(); rerender();
+    }}, '🗑 移除加分'));
+  }
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    const pts = parseFloat(iP.value) || 0;
+    if(pts === 0 && !iR.value.trim()){ toast('請輸入分數或原因','warn'); return; }
+    e.teacherBonus = {
+      points: pts,
+      reason: iR.value.trim(),
+      by: App.session?.name || '老師',
+      ts: Date.now()
+    };
+    saveDB();
+    let cloudOk = false, cloudErr = '';
+    try {
+      if(App.fbRef){
+        await App.fbRef.child('evals').child(e.id).set(e);
+        cloudOk = true;
+      } else cloudErr = 'Firebase 未連線';
+    } catch(err){ cloudErr = err.message || String(err); }
+    bcNotify();
+    toast(cloudOk ? '✅ 已加分 (' + (pts>=0?'+':'') + pts + ')' : '⚠️ 本機已存, 雲端同步失敗', cloudOk?'success':'warn', 6000);
+    m.close(); rerender();
+  }}, '💾 儲存加分'));
+  m.root.appendChild(actions);
+}
+
+// 老師設定評分項目 (dims)
+function openEvalDimsConfig(){
+  const m = modal('');
+  m.root.appendChild(el('h2', null, '📐 設定評分項目'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'12px',lineHeight:'1.6'} },
+    '可以加多個評分維度 (例如:課堂專注 / 作業準時 / 合作精神), 各 1-10 分。',
+    el('br'),
+    '學生填寫評價時, 每一項都會出現星星讓他打分。',
+    el('br'),
+    '預設只有「整體」 5 顆星。'));
+
+  const state = getEvalDims().map(d => ({ ...d }));
+  const rowsBox = el('div', { style:{marginBottom:'10px'} });
+  function renderRows(){
+    rowsBox.innerHTML = '';
+    if(!state.length){
+      rowsBox.appendChild(el('div', { class:'muted small', style:{padding:'12px',textAlign:'center',border:'1px dashed var(--border)',borderRadius:'8px'} },
+        '尚無評分項目, 按下方「+ 新增項目」'));
+      return;
+    }
+    state.forEach((d, idx) => {
+      const row = el('div', { class:'flex', style:{gap:'8px',marginBottom:'8px',alignItems:'center',padding:'8px',background:'var(--surface-2)',borderRadius:'8px'} });
+      const iLabel = el('input', { class:'input', value:d.label, placeholder:'項目名稱', style:{flex:'1'} });
+      iLabel.addEventListener('input', e => { d.label = e.target.value; });
+      const iKey = el('input', { class:'input', value:d.key, placeholder:'內部代號 (英文)', style:{width:'110px'} });
+      iKey.addEventListener('input', e => { d.key = e.target.value.replace(/[^a-z0-9_]/gi,''); });
+      const iMax = el('input', { class:'input', type:'number', min:'1', max:'10', value:d.max||5, style:{width:'70px'} });
+      iMax.addEventListener('input', e => { d.max = Math.max(1, Math.min(10, parseInt(e.target.value,10)||5)); });
+      const upBtn = el('button', { class:'btn btn-sm', title:'往上', onclick:()=> {
+        if(idx > 0){ [state[idx-1], state[idx]] = [state[idx], state[idx-1]]; renderRows(); }
+      }}, '↑');
+      const downBtn = el('button', { class:'btn btn-sm', title:'往下', onclick:()=> {
+        if(idx < state.length-1){ [state[idx+1], state[idx]] = [state[idx], state[idx+1]]; renderRows(); }
+      }}, '↓');
+      const rmBtn = el('button', { class:'btn btn-sm btn-danger', title:'刪除', onclick:()=> {
+        state.splice(idx, 1); renderRows();
+      }}, '🗑');
+      row.appendChild(iLabel); row.appendChild(iKey); row.appendChild(iMax);
+      row.appendChild(upBtn); row.appendChild(downBtn); row.appendChild(rmBtn);
+      rowsBox.appendChild(row);
+    });
+  }
+  renderRows();
+  m.root.appendChild(rowsBox);
+
+  m.root.appendChild(el('div', { class:'flex', style:{gap:'8px',marginBottom:'10px'} },
+    el('button', { class:'btn', onclick:()=> {
+      const n = state.length + 1;
+      state.push({ key:'dim' + n, label:'新項目 ' + n, max:5 });
+      renderRows();
+    }}, '+ 新增項目'),
+    el('button', { class:'btn', onclick:()=> {
+      state.length = 0;
+      state.push({ key:'overall', label:'整體', max:5 });
+      renderRows();
+    }}, '↻ 還原預設')
+  ));
+
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
+    // 驗證
+    const seenKeys = new Set();
+    for(const d of state){
+      if(!d.label.trim() || !d.key.trim()){
+        toast('每一項都要有名稱和代號','warn'); return;
+      }
+      if(seenKeys.has(d.key)){
+        toast('代號重複: ' + d.key,'warn'); return;
+      }
+      seenKeys.add(d.key);
+    }
+    setEvalDims(state);
+    let cloudOk = false;
+    try {
+      if(App.fbRef){
+        await App.fbRef.child('settings/evalDims').set(state);
+        cloudOk = true;
+      }
+    } catch(_){}
+    toast(cloudOk ? '✅ 評分項目已儲存 (已同步雲端)' : '⚠️ 已存本機, 雲端同步失敗', cloudOk?'success':'warn', 5000);
+    m.close(); rerender();
+  }}, '💾 儲存'));
+  m.root.appendChild(actions);
+}
+
 function rEv(content){
   const tab = App.subview || 'semester';
-  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px'} },
+  content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
       el('h1', null, '課程評價'),
       el('div', { class:'muted small' }, '學生對課程的回饋')
-    )
+    ),
+    el('button', { class:'btn btn-sm', title:'設定評分維度 (例: 課堂專注 / 作業準時 / 合作)',
+      onclick:()=> openEvalDimsConfig()
+    }, '📐 設定評分項目')
   ));
 
   const tabs = el('div', { class:'tabs-line' });
@@ -19415,20 +19681,58 @@ function rEv(content){
 
     // 單筆評價卡片（共用）
     function renderEvCard(e){
-      const card = el('div', { class:'feed-msg' });
+      const card = el('div', { class:'feed-msg', style:{position:'relative'} });
       const who = el('div', { class:'who' });
       who.appendChild(el('div', { class:'avatar' }, initials(e.fromName||'?')));
-      who.appendChild(el('div', null,
+      who.appendChild(el('div', { style:{flex:'1'} },
         el('div', { style:{fontWeight:'600'} }, (e.anonymous?'匿名':e.fromName) || '匿名'),
-        el('div', { class:'tiny muted' }, (e.date||'') + ' · ' + relTime(e.ts||0))
+        el('div', { class:'tiny muted' }, (e.date||'') + ' · ' + relTime(e.ts||0) +
+          (e.editedAt ? ' · 老師於 ' + relTime(e.editedAt) + ' 編輯過' : ''))
       ));
+      // ★ 老師端: ✏️ 編輯 / 🎁 加分 按鈕
+      const editBtns = el('div', { class:'flex no-print', style:{gap:'4px',alignItems:'center'} },
+        el('button', { class:'btn btn-sm', title:'編輯/刪除', onclick:(ev)=> { ev.stopPropagation(); openEvalEdit(e); }}, '✏️'),
+        el('button', { class:'btn btn-sm', title:'加分', onclick:(ev)=> { ev.stopPropagation(); openEvalBonus(e); }},
+          (e.teacherBonus && e.teacherBonus.points) ? '🎁 ' + (e.teacherBonus.points>=0?'+':'') + e.teacherBonus.points : '🎁')
+      );
+      who.appendChild(editBtns);
       card.appendChild(who);
-      if(typeof e.stars === 'number'){
-        card.appendChild(el('div', { class:'stars readonly' },
-          ...Array.from({length:5}, (_,i) => el('span', { class: 's ' + (i < e.stars?'on':'') }, '★'))
-        ));
+
+      // ★ 多維度評分顯示
+      const dims = getEvalDims();
+      const hasAnyScore = dims.some(d => getEvalScore(e, d.key) > 0) || typeof e.stars === 'number';
+      if(hasAnyScore){
+        const dimsBox = el('div', { style:{marginTop:'6px',display:'flex',flexDirection:'column',gap:'2px'} });
+        dims.forEach(d => {
+          const sc = getEvalScore(e, d.key);
+          if(sc <= 0) return;
+          const row = el('div', { class:'flex', style:{gap:'8px',alignItems:'center',fontSize:'13px'} });
+          row.appendChild(el('span', { class:'muted', style:{minWidth:'80px',fontSize:'12px'} }, d.label + ':'));
+          row.appendChild(el('span', { class:'stars readonly', style:{fontSize:'14px'} },
+            ...Array.from({length:d.max}, (_,i) => el('span', { class:'s ' + (i < sc?'on':'') }, '★'))
+          ));
+          row.appendChild(el('span', { class:'tiny muted' }, sc + '/' + d.max));
+          dimsBox.appendChild(row);
+        });
+        card.appendChild(dimsBox);
       }
-      if(e.text) card.appendChild(el('div', { class:'text', style:{marginTop:'4px'} }, e.text));
+
+      if(e.text) card.appendChild(el('div', { class:'text', style:{marginTop:'6px'} }, e.text));
+
+      // ★ 老師加分顯示
+      if(e.teacherBonus && (e.teacherBonus.points || e.teacherBonus.reason)){
+        const tb = e.teacherBonus;
+        const bonusBox = el('div', { style:{
+          marginTop:'8px', padding:'6px 10px',
+          background:'rgba(34,197,94,.08)', border:'1px solid var(--success)',
+          borderRadius:'6px', fontSize:'13px'
+        }});
+        bonusBox.appendChild(el('div', { style:{fontWeight:'600',color:'var(--success)'} },
+          '🎁 老師加分 ' + (tb.points>=0?'+':'') + tb.points));
+        if(tb.reason) bonusBox.appendChild(el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'2px'} }, tb.reason));
+        if(tb.by) bonusBox.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '— ' + tb.by));
+        card.appendChild(bonusBox);
+      }
       return card;
     }
 
@@ -20563,18 +20867,29 @@ function rSEv(content){
   const formCard = el('div', { class:'card', style:{marginBottom:'12px'} });
   if(tab === 'semester' || tab === 'daily'){
     formCard.appendChild(el('h3', null, tab==='semester'?'給學期評分':'今日課程感想'));
-    let chosen = 5;
-    const starsEl = el('div', { class:'stars' });
-    function paintStars(){
-      starsEl.innerHTML = '';
-      for(let i=1;i<=5;i++){
-        const s = el('span', { class:'s ' + (i<=chosen?'on':'') }, '★');
-        s.addEventListener('click', ()=> { chosen = i; paintStars(); });
-        starsEl.appendChild(s);
+
+    // ★ 多維度評分 — 依老師設定的 dims (預設只有一個「整體」5顆星)
+    const dims = (typeof getEvalDims === 'function') ? getEvalDims() : [{ key:'overall', label:'整體', max:5 }];
+    const scores = {};
+    dims.forEach(d => { scores[d.key] = Math.ceil(d.max / 2); });  // 預設選一半
+    dims.forEach(d => {
+      const row = el('div', { class:'field', style:{marginBottom:'8px'} });
+      row.appendChild(el('label', { class:'label' }, '⭐ ' + d.label));
+      const starsEl = el('div', { class:'stars' });
+      function paint(){
+        starsEl.innerHTML = '';
+        for(let i=1; i<=d.max; i++){
+          const s = el('span', { class:'s ' + (i<=scores[d.key]?'on':''), style:{cursor:'pointer'} }, '★');
+          s.addEventListener('click', ()=> { scores[d.key] = (scores[d.key] === i) ? 0 : i; paint(); });
+          starsEl.appendChild(s);
+        }
+        starsEl.appendChild(el('span', { class:'tiny muted', style:{marginLeft:'8px'} }, scores[d.key] + ' / ' + d.max));
       }
-    }
-    paintStars();
-    formCard.appendChild(starsEl);
+      paint();
+      row.appendChild(starsEl);
+      formCard.appendChild(row);
+    });
+
     const ta = el('textarea', { class:'textarea', placeholder:'分享你的想法（可選）', style:{marginTop:'8px'} });
     formCard.appendChild(ta);
     const lblAnon = el('label', { class:'flex', style:{marginTop:'8px',fontSize:'13px'} });
@@ -20585,7 +20900,9 @@ function rSEv(content){
     formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick:()=> {
       const rec = {
         id: nid(), type: tab,
-        stars: chosen, text: ta.value.trim(),
+        dims: { ...scores },          // ★ 多維度
+        stars: scores.overall || scores[dims[0].key] || 0,  // 向下相容: 第一個維度當 stars
+        text: ta.value.trim(),
         date: td(),
         fromId: me.id, fromName: me.name,
         anonymous: cbAnon.checked,
@@ -20633,20 +20950,51 @@ function rSEv(content){
     who.appendChild(el('div', { class:'avatar' }, initials(e.anonymous?'?':e.fromName||'?')));
     who.appendChild(el('div', null,
       el('div', { style:{fontWeight:'600'} }, e.anonymous?'匿名':e.fromName),
-      el('div', { class:'tiny muted' }, (e.date||'') + ' · ' + relTime(e.ts||0))
+      el('div', { class:'tiny muted' }, (e.date||'') + ' · ' + relTime(e.ts||0) +
+        (e.editedAt ? ' · 老師編輯過' : ''))
     ));
     card.appendChild(who);
-    if(typeof e.stars === 'number'){
-      card.appendChild(el('div', { class:'stars readonly' },
-        ...Array.from({length:5}, (_,i) => el('span', { class: 's ' + (i < e.stars?'on':'') }, '★'))
-      ));
+
+    // ★ 多維度顯示 (向下相容 e.stars)
+    const dimsForView = (typeof getEvalDims === 'function') ? getEvalDims() : [{key:'overall',label:'整體',max:5}];
+    const showStars = dimsForView.some(d => (typeof getEvalScore === 'function' ? getEvalScore(e, d.key) : 0) > 0) || typeof e.stars === 'number';
+    if(showStars){
+      const dimsBox = el('div', { style:{marginTop:'6px',display:'flex',flexDirection:'column',gap:'2px'} });
+      dimsForView.forEach(d => {
+        const sc = (typeof getEvalScore === 'function') ? getEvalScore(e, d.key) : (d.key==='overall' ? (e.stars||0) : 0);
+        if(sc <= 0) return;
+        const row = el('div', { class:'flex', style:{gap:'8px',alignItems:'center',fontSize:'13px'} });
+        row.appendChild(el('span', { class:'muted', style:{minWidth:'80px',fontSize:'12px'} }, d.label + ':'));
+        row.appendChild(el('span', { class:'stars readonly', style:{fontSize:'14px'} },
+          ...Array.from({length:d.max}, (_,i) => el('span', { class:'s ' + (i < sc?'on':'') }, '★'))
+        ));
+        row.appendChild(el('span', { class:'tiny muted' }, sc + '/' + d.max));
+        dimsBox.appendChild(row);
+      });
+      card.appendChild(dimsBox);
     }
-    if(e.text) card.appendChild(el('div', { class:'text' }, e.text));
+
+    if(e.text) card.appendChild(el('div', { class:'text', style:{marginTop:'6px'} }, e.text));
+
+    // ★ 老師加分顯示
+    if(e.teacherBonus && (e.teacherBonus.points || e.teacherBonus.reason)){
+      const tb = e.teacherBonus;
+      const bonusBox = el('div', { style:{
+        marginTop:'8px', padding:'6px 10px',
+        background:'rgba(34,197,94,.08)', border:'1px solid var(--success)',
+        borderRadius:'6px', fontSize:'13px'
+      }});
+      bonusBox.appendChild(el('div', { style:{fontWeight:'600',color:'var(--success)'} },
+        '🎁 老師加分 ' + (tb.points>=0?'+':'') + tb.points));
+      if(tb.reason) bonusBox.appendChild(el('div', { class:'small', style:{whiteSpace:'pre-wrap',marginTop:'2px'} }, tb.reason));
+      if(tb.by) bonusBox.appendChild(el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '— ' + tb.by));
+      card.appendChild(bonusBox);
+    }
+
     if(e.fromId === me.id){
       card.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
         const ok = await confirmDlg('刪除你的這則？', { danger:true });
         if(!ok) return;
-        // ★ 修:加進回收桶 (30 天救援)
         try { trashAdd('eval', e); } catch(_){}
         App.db.evals = App.db.evals.filter(x => x.id !== e.id);
         saveDB(); Sync.setMap('evals', App.db.evals); bcNotify();
