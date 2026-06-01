@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-rest-fallback-2';
+const APP_BUILD = '2026-06-01-merge-eval-feedback';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -10074,7 +10074,7 @@ function renderTopbar(role){
     leave:'📆 請假管理', messages:'💬 訊息', settings:'⚙️ 設定', firebase:'☁️ 同步設定',
     pending:'📥 待處理事項',
     assignments:'📋 作業管理', submissions:'📥 繳交記錄', grades:'🎯 學期成績',
-    evals:'💬 課程評價', announcements:'📢 公告管理', analytics:'📈 分析工具',
+    evals:'⭐ 學生評價', announcements:'📢 公告管理', analytics:'📈 分析工具',
     qr:'📱 QR Code 簽到', calendar:'📅 行事曆', gantt:'📊 作業甘特圖',
     workspace:'🏢 多教室管理', notify:'📲 通知設定',
     backup:'💼 備份與還原', trash:'🗑 資源回收桶', logs:'📜 操作紀錄', storage:'💾 儲存空間',
@@ -10092,7 +10092,7 @@ function renderTopbar(role){
     help:'📖 使用說明', install:'📲 安裝 App'
   } : {
     checkin:'✋ 我要簽到', myatt:'📅 出席紀錄', myleave:'📆 請假', messages:'💬 訊息', me:'👤 個人',
-    sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 課程評價', sann:'📢 公告',
+    sasgn:'📤 作業', sgrade:'🎯 我的成績', sev:'⭐ 學生評價', sann:'📢 公告',
     speer:'⭐ 我的互評', sgroups:'👥 我的小組', selfeval:'✍️ 學期自評',
     sfeedback:'📝 課程回饋',
     sbehavior:'⭐ 我的點數', squiz:'📝 線上小考',
@@ -10202,8 +10202,8 @@ function openMoreMenuTeacher(){
     ['students','👥 學生名單'],['pending','📥 註冊審核'],['matrix','🪑 座位矩陣'],['qr','📱 QR 簽到'],
     ['groups','👥 分組管理'],['attreport','📊 出席報表'],
     ['leave','📆 請假管理'],['messages','💬 訊息'],
-    ['grades','🎯 學期成績'],['evals','💬 課程評價'],
-    ['feedback','🗳️ 學生回饋'],['peer','⭐ 學生互評'],
+    ['grades','🎯 學期成績'],['evals','⭐ 學生評價'],
+    ['peer','⭐ 學生互評'],
     ['announcements','📢 公告管理'],['analytics','📈 分析工具'],
     ['calendar','📅 行事曆'],['gantt','📊 甘特圖'],
     ['picker','🎲 隨機抽籤'],['timer','⏰ 課堂計時器'],
@@ -10238,7 +10238,7 @@ function openMoreMenuStudent(){
   const items = [
     ['myatt','📅 出席紀錄'],['myleave','📆 請假'],
     ['messages','💬 訊息'],['mynotifs','🔔 我的通知'],
-    ['sev','⭐ 課程評價'],['sfeedback','📝 課程回饋'],
+    ['sev','⭐ 學生評價'],
     ['speer','⭐ 我的互評'],
     ['sgroups','👥 我的小組'],['selfeval','✍️ 學期自評'],
     ['mybadges','🏅 我的徽章'],['mynotes','📒 我的筆記'],
@@ -19896,8 +19896,8 @@ function rEv(content){
   const tab = App.subview || 'semester';
   content.appendChild(el('div', { class:'flex-between', style:{marginBottom:'12px',flexWrap:'wrap',gap:'8px'} },
     el('div', null,
-      el('h1', null, '課程評價'),
-      el('div', { class:'muted small' }, '學生對課程的回饋')
+      el('h1', null, '⭐ 學生評價'),
+      el('div', { class:'muted small' }, '學生對課程的星等與留言 (可在「設定評分項目」自訂評分維度)')
     ),
     el('button', { class:'btn btn-sm', title:'設定評分維度 (例: 課堂專注 / 作業準時 / 合作)',
       onclick:()=> openEvalDimsConfig()
@@ -21148,7 +21148,7 @@ function rSEv(content){
   const me = currentStudent(); if(!me) return;
   const tab = App.subview || 'semester';
 
-  content.appendChild(el('h1', null, '⭐ 課程評價'));
+  content.appendChild(el('h1', null, '⭐ 學生評價'));
   const tabs = el('div', { class:'tabs-line' });
   [['semester','⭐ 學期評價'],['daily','📅 每日評價'],['wall','💬 留言牆']].forEach(([v,t]) => {
     tabs.appendChild(el('button', { class: tab===v?'active':'', onclick:()=> go('sev', v) }, t));
@@ -25619,7 +25619,7 @@ function cmdItems(){
       { i:'📋', t:'作業管理', h:'assignments', go: ()=> go('assignments') },
       { i:'📥', t:'繳交記錄', h:'submissions', go: ()=> go('submissions') },
       { i:'🎯', t:'學期成績', h:'grades', go: ()=> go('grades') },
-      { i:'💬', t:'課程評價', h:'evals', go: ()=> go('evals') },
+      { i:'⭐', t:'學生評價', h:'evals 課程 評價 回饋', go: ()=> go('evals') },
       { i:'⭐', t:'學生互評', h:'peer evaluation', go: ()=> go('peer') },
       { i:'📢', t:'公告管理', h:'announcements', go: ()=> go('announcements') },
       { i:'📈', t:'分析工具', h:'analytics', go: ()=> go('analytics') },
@@ -25657,7 +25657,7 @@ function cmdItems(){
       { i:'💬', t:'訊息', h:'messages', go: ()=> go('messages') },
       { i:'📤', t:'作業', h:'sasgn', go: ()=> go('sasgn') },
       { i:'🎯', t:'我的成績', h:'sgrade', go: ()=> go('sgrade') },
-      { i:'⭐', t:'課程評價', h:'sev', go: ()=> go('sev') },
+      { i:'⭐', t:'學生評價', h:'sev 課程 評價 回饋', go: ()=> go('sev') },
       { i:'⭐', t:'我的互評任務', h:'peer my', go: ()=> go('speer') },
       { i:'📢', t:'公告', h:'sann', go: ()=> go('sann') },
       { i:'🤖', t:'AI 學習助教', h:'AI', go: ()=> openAIAssistant() },
@@ -30338,8 +30338,8 @@ function getSidebarItems(role){
       ]},
       feedback: { label:'互動 / 公告', items: [
         { key:'announcements', icon:'📢', label:'公告管理' },
-        { key:'evals', icon:'💬', label:'課程評價' },
-        { key:'feedback', icon:'🗳️', label:'學生回饋' },
+        // ★ 合併 — 「課程評價」改名「學生評價」(原本 課程回饋/學生回饋 已隱藏, 因為 學生評價設定評分項目能做一樣的事)
+        { key:'evals', icon:'⭐', label:'學生評價' },
         { key:'peer', icon:'⭐', label:'學生互評' }
       ]},
       tools: { label:'課堂工具', items: [
@@ -30389,11 +30389,11 @@ function getSidebarItems(role){
         { key:'sbehavior', icon:'⭐', label:'我的點數' },
         { key:'mybadges', icon:'🏅', label:'我的徽章' },
         { key:'mynotes', icon:'📒', label:'我的筆記' },
-        { key:'sev', icon:'⭐', label:'課程評價' },
-        { key:'sfeedback', icon:'📝', label:'課程回饋' },
+        // ★ 合併 — sev 改名「學生評價」(sfeedback 已隱藏)
+        { key:'sev', icon:'⭐', label:'學生評價' },
         { key:'speer', icon:'⭐', label:'我的互評' },
-        { key:'selfeval', icon:'✍️', label:'學期自評' },   // ★ 補上 — 桌面 sidebar 原本漏列, 但手機 picker 有
-        { key:'sgroups', icon:'👥', label:'我的小組' },     // ★ 同樣補上
+        { key:'selfeval', icon:'✍️', label:'學期自評' },
+        { key:'sgroups', icon:'👥', label:'我的小組' },
         { key:'sann', icon:'📢', label:'公告' },
         { key:'me', icon:'👤', label:'個人' }
       ]},
@@ -31842,7 +31842,7 @@ function renderPageTextEditor(content){
     { key:'assignments',   defaultTitle:'📋 作業管理',     defaultSub:'' },
     { key:'submissions',   defaultTitle:'📥 繳交記錄',     defaultSub:'' },
     { key:'grades',        defaultTitle:'🎯 學期成績',     defaultSub:'' },
-    { key:'evals',         defaultTitle:'💬 課程評價',     defaultSub:'' },
+    { key:'evals',         defaultTitle:'⭐ 學生評價',     defaultSub:'' },
     { key:'feedback',      defaultTitle:'🗳️ 學生回饋',     defaultSub:'' },
     { key:'announcements', defaultTitle:'📢 公告管理',     defaultSub:'' },
     { key:'analytics',     defaultTitle:'📈 分析工具',     defaultSub:'' },
@@ -31860,7 +31860,7 @@ function renderPageTextEditor(content){
     { key:'messages',  defaultTitle:'💬 訊息',       defaultSub:'' },
     { key:'sasgn',     defaultTitle:'📤 作業',       defaultSub:'' },
     { key:'sgrade',    defaultTitle:'🎯 我的成績',   defaultSub:'' },
-    { key:'sev',       defaultTitle:'⭐ 課程評價',   defaultSub:'' },
+    { key:'sev',       defaultTitle:'⭐ 學生評價',   defaultSub:'' },
     { key:'sfeedback', defaultTitle:'📝 課程回饋',   defaultSub:'' },
     { key:'sann',      defaultTitle:'📢 公告',       defaultSub:'' },
     { key:'me',        defaultTitle:'👤 個人',       defaultSub:'' },
