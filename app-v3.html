@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-ann-target-notify';
+const APP_BUILD = '2026-06-01-aggressive-sync';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2233,6 +2233,16 @@ const Sync = (() => {
       //   情境:之前 Sync 未啟用時 (例如手機 SW 舊版) 學生註冊/繳交存了本機
       //   現在 Sync 啟用後,把本機這些補推到雲端
       try { setTimeout(()=> _pushLocalUnsynced().catch(()=>{}), 1500); } catch(_){}
+      // ★ 多次補推 — 用戶反映「老師發布的公告學生看不到」很多次
+      //   1.5 秒可能 listener 還沒接好, 10 / 30 / 60 秒再各跑一次保險
+      try { setTimeout(()=> _pushLocalUnsynced().catch(()=>{}), 10000); } catch(_){}
+      try { setTimeout(()=> _pushLocalUnsynced().catch(()=>{}), 30000); } catch(_){}
+      // ★ 每 90 秒定期掃一次, 把本機累積的全部推上去 (避免老師卡 tab 沒重整)
+      if(!App._syncPushInterval){
+        App._syncPushInterval = setInterval(()=> {
+          if(App.fbRef){ _pushLocalUnsynced().catch(()=>{}); }
+        }, 90000);
+      }
       return true;
     } catch(e){
       App.fbStatus = 'error';
@@ -2522,12 +2532,13 @@ const Sync = (() => {
 
   // ★ 推本機累積的「應同步但未同步」資料到雲端
   //   解決手機 SW 舊版 + 後來 Sync 啟用後,本機資料沒上雲
-  async function _pushLocalUnsynced(){
-    if(!App.fbRef) return;
+  async function _pushLocalUnsynced(specificNode){
+    if(!App.fbRef) return 0;
     // 高優先級 collections (用戶常抱怨「對方看不到」)
     // ★ 修: 補上 announcements + assignments + teachers (老師發布完就被同步, 學生才看得到)
-    const COLLS = ['pending','submissions','attendance','messages','leaves','behavior',
-                   'announcements','assignments','teachers','accounts','students','evals','feedbacks','quizzes','quizSubmissions','badges','notes','todos'];
+    const ALL_COLLS = ['pending','submissions','attendance','messages','leaves','behavior',
+                       'announcements','assignments','teachers','accounts','students','evals','feedbacks','quizzes','quizSubmissions','badges','notes','todos'];
+    const COLLS = specificNode ? [specificNode] : ALL_COLLS;
     let pushed = 0;
     for(const node of COLLS){
       const local = App.db[node];
@@ -2546,8 +2557,26 @@ const Sync = (() => {
         }
       } catch(e){ console.warn('[push-unsynced]', node, e); }
     }
-    if(pushed) console.log('[push-unsynced] 補推', pushed, '筆到雲端');
+    if(pushed) console.log('[push-unsynced] 補推', pushed, '筆到雲端' + (specificNode ? ' ('+specificNode+')' : ''));
     return pushed;
+  }
+
+  // ★ 比對單一 collection: 本機有但雲端沒的數量 (用來顯示「N 筆未同步」警告)
+  async function _countUnsyncedFor(node){
+    if(!App.fbRef) return 0;
+    const local = App.db[node];
+    if(!Array.isArray(local) || !local.length) return 0;
+    try {
+      const snap = await App.fbRef.child(node).once('value');
+      const cloud = snap.val() || {};
+      const cloudIds = new Set(Object.keys(cloud));
+      let cnt = 0;
+      for(const rec of local){
+        if(!rec || !rec.id) continue;
+        if(!cloudIds.has(String(rec.id))) cnt++;
+      }
+      return cnt;
+    } catch(e){ console.warn('[count-unsynced]', node, e); return 0; }
   }
 
   // ★ 強制從雲端重抓所有資料,完全覆蓋本地 (給「老師看不到學生改的東西」用)
@@ -2785,7 +2814,7 @@ const Sync = (() => {
       }
     });
   } catch(_){_swallow('sync-beforeunload',_)}
-  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync, forceResyncFromCloud, pushLocalUnsynced: _pushLocalUnsynced };
+  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync, forceResyncFromCloud, pushLocalUnsynced: _pushLocalUnsynced, countUnsyncedFor: _countUnsyncedFor };
 })();
 
 /* ════════════════════════════════════════════════════════════
@@ -19505,8 +19534,66 @@ function rAnn(content){
       el('h1', null, '公告管理'),
       el('div', { class:'muted small' }, '發布給全班學生')
     ),
-    el('button', { class:'btn btn-primary', onclick:()=> openAnnouncementEdit() }, '＋ 新公告')
+    el('div', { class:'flex', style:{gap:'6px'} },
+      el('button', { class:'btn btn-sm', title:'立刻把本機所有資料推到雲端 — 用在「學生看不到我發的公告」時',
+        onclick: async (ev)=> {
+          const btn = ev.target;
+          const orig = btn.textContent;
+          btn.textContent = '同步中...';
+          btn.disabled = true;
+          try {
+            if(typeof Sync !== 'undefined' && Sync.pushLocalUnsynced){
+              const n = await Sync.pushLocalUnsynced();
+              if(n > 0){
+                toast('✅ 已把 ' + n + ' 筆本機資料推到雲端', 'success', 5000);
+              } else {
+                toast('本機所有資料都已同步雲端 ✓', 'success', 3000);
+              }
+            }
+          } catch(e){
+            toast('同步失敗: ' + (e.message||e), 'danger', 5000);
+          } finally {
+            btn.textContent = orig;
+            btn.disabled = false;
+            rerender();
+          }
+        }
+      }, '🔄 強制同步'),
+      el('button', { class:'btn btn-primary', onclick:()=> openAnnouncementEdit() }, '＋ 新公告')
+    )
   ));
+
+  // ★ 未同步警告 — 比對本機 vs 雲端, 有差就顯示紅條
+  const _syncWarnEl = el('div', { id:'_annSyncWarn', style:{display:'none'} });
+  content.appendChild(_syncWarnEl);
+  (async ()=> {
+    if(!App.fbRef || typeof Sync === 'undefined' || !Sync.countUnsyncedFor) return;
+    try {
+      const cnt = await Sync.countUnsyncedFor('announcements');
+      if(cnt > 0){
+        _syncWarnEl.style.display = '';
+        _syncWarnEl.innerHTML = '';
+        _syncWarnEl.appendChild(el('div', { class:'card', style:{
+          marginBottom:'12px', padding:'12px 14px',
+          background:'var(--warn-soft)', border:'1px solid var(--warn)', borderRadius:'10px'
+        }},
+          el('div', { style:{fontWeight:'700',marginBottom:'4px',color:'var(--warn)'} },
+            '⚠️ 有 ' + cnt + ' 則公告還在你本機, 雲端沒有 — 學生看不到!'),
+          el('div', { class:'small', style:{lineHeight:'1.6'} },
+            '可能原因: 發布時 Firebase 同步未就緒, 或網路斷線。'),
+          el('button', { class:'btn btn-sm btn-primary', style:{marginTop:'8px'},
+            onclick: async ()=> {
+              try {
+                const n = await Sync.pushLocalUnsynced('announcements');
+                toast(n > 0 ? '✅ 已推 ' + n + ' 則公告到雲端' : '已是最新狀態', 'success', 5000);
+                rerender();
+              } catch(e){ toast('同步失敗: ' + (e.message||e), 'danger'); }
+            }
+          }, '立刻推到雲端')
+        ));
+      }
+    } catch(_){}
+  })();
 
   const sBox = el('div', { class:'search-box' });
   const sInp = el('input', { class:'input', placeholder:'搜尋', oninput: e => {
