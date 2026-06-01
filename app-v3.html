@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-save-no-hang';
+const APP_BUILD = '2026-06-01-rest-fallback';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2536,8 +2536,6 @@ const Sync = (() => {
   //   解決手機 SW 舊版 + 後來 Sync 啟用後,本機資料沒上雲
   async function _pushLocalUnsynced(specificNode){
     if(!App.fbRef) return 0;
-    // 高優先級 collections (用戶常抱怨「對方看不到」)
-    // ★ 修: 補上 announcements + assignments + teachers (老師發布完就被同步, 學生才看得到)
     const ALL_COLLS = ['pending','submissions','attendance','messages','leaves','behavior',
                        'announcements','assignments','teachers','accounts','students','evals','feedbacks','quizzes','quizSubmissions','badges','notes','todos'];
     const COLLS = specificNode ? [specificNode] : ALL_COLLS;
@@ -2546,16 +2544,39 @@ const Sync = (() => {
       const local = App.db[node];
       if(!Array.isArray(local) || !local.length) continue;
       try {
-        const snap = await App.fbRef.child(node).once('value');
+        // once('value') 也加 5 秒 timeout
+        const snap = await Promise.race([
+          App.fbRef.child(node).once('value'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('once超時')), 5000))
+        ]).catch(()=> ({ val: ()=> ({}) }));
         const cloud = snap.val() || {};
         const cloudIds = new Set(Object.keys(cloud));
-        // 把本機有但雲端沒的推上去
         for(const rec of local){
           if(!rec || !rec.id) continue;
           if(cloudIds.has(String(rec.id))) continue;
           try { _markEcho && _markEcho(node, rec.id); } catch(_){}
-          await App.fbRef.child(node).child(rec.id).set(rec);
-          pushed++;
+          // ★ 用 SDK 5 秒 + REST 10 秒 fallback (跟公告/作業一樣)
+          const clean = JSON.parse(JSON.stringify(rec));
+          let writeOk = false;
+          try {
+            await Promise.race([
+              App.fbRef.child(node).child(rec.id).set(clean),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('SDK 超時')), 5000))
+            ]);
+            writeOk = true;
+          } catch(sdkErr){
+            // REST fallback
+            try {
+              if(typeof fbWriteRest === 'function'){
+                await fbWriteRest(node + '/' + rec.id, clean, 8000);
+                writeOk = true;
+                console.log('[push-unsynced] REST 救', node, rec.id);
+              }
+            } catch(restErr){
+              console.warn('[push-unsynced]', node, rec.id, 'SDK+REST 都失敗', sdkErr.message, restErr.message);
+            }
+          }
+          if(writeOk) pushed++;
         }
       } catch(e){ console.warn('[push-unsynced]', node, e); }
     }
@@ -17528,44 +17549,29 @@ function openAssignmentEdit(asg){
     try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_) {}
     if(isNew) App.db.assignments.push(rec);
     saveDB();
-    // ★ await + 老實回報, 8 秒 timeout 防卡死
-    let cloudOk = false, cloudErr = '';
-    try {
-      if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
-        try {
-          await Promise.race([
-            Sync.init(),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
-          ]);
-        } catch(_){}
-      }
-      if(App.fbRef){
+    // ★ 跟公告一樣 — SDK 5s → REST fallback 10s
+    if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
+      try {
         await Promise.race([
-          App.fbRef.child('assignments').child(rec.id).set(rec),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('雲端寫入超時 (8 秒)')), 8000))
+          Sync.init(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
         ]);
-        cloudOk = true;
-      } else {
-        cloudErr = 'Firebase 同步未就緒';
-      }
-    } catch(e){
-      cloudErr = e.code || e.message || String(e);
+      } catch(_){}
     }
+    const cleanAsg = JSON.parse(JSON.stringify(rec));
+    const writeR = await fbWriteRow('assignments', cleanAsg.id, cleanAsg);
+    const cloudOk = writeR.ok;
+    const cloudErr = writeR.err || '';
     try { bcNotify(); } catch(_){}
     if(cloudOk){
-      toast('✅ ' + (isNew?'已新增':'已更新') + ' (已同步到雲端,學生會收到)', 'success', 4000);
+      toast('✅ ' + (isNew?'已新增':'已更新') + ' (已同步雲端 ' + writeR.method + ',學生會收到)', 'success', 4000);
     } else {
-      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr, 'warn', 12000);
+      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n' + cloudErr, 'warn', 12000);
       console.warn('[assignment] cloud sync failed:', cloudErr);
       setTimeout(async ()=> {
         try {
-          if(App.fbRef){
-            await Promise.race([
-              App.fbRef.child('assignments').child(rec.id).set(rec),
-              new Promise((_, rej) => setTimeout(() => rej(new Error('retry timeout')), 8000))
-            ]);
-            try { toast('✅ 作業「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
-          }
+          const r = await fbWriteRow('assignments', cleanAsg.id, cleanAsg);
+          if(r.ok) try { toast('✅ 作業「' + cleanAsg.title + '」已補傳到雲端 (' + r.method + ')','success', 5000); } catch(_){}
         } catch(_){}
       }, 5000);
     }
@@ -19354,6 +19360,81 @@ function exportGradesPDF(){
 /* ════════════════════════════════════════════════════════════
    PHASE 2 — TEACHER: COURSE EVALS (rEv)
    ──────────────────────────────────────────────────────────── */
+// ★ REST API fallback 寫入 — SDK WebSocket 不穩時用 HTTP PUT 寫入
+//   解掉「Firebase SDK set() 永遠 hang / 寫不上去」死局
+async function fbWriteRest(nodePath, rec, timeoutMs){
+  if(!window.firebase || !firebase.database || !App.cfg?.roomCode){
+    throw new Error('Firebase 未設定');
+  }
+  const dbUrl = firebase.database().app.options.databaseURL;
+  if(!dbUrl) throw new Error('Firebase databaseURL 未設定');
+  let token = '';
+  try {
+    if(firebase.auth){
+      if(!firebase.auth().currentUser){
+        await Promise.race([
+          firebase.auth().signInAnonymously(),
+          new Promise((_, rej) => setTimeout(()=> rej(new Error('auth 超時')), 5000))
+        ]);
+      }
+      if(firebase.auth().currentUser){
+        token = await firebase.auth().currentUser.getIdToken();
+      }
+    }
+  } catch(e){ console.warn('[fbWriteRest] auth fail', e); }
+  const url = dbUrl.replace(/\/$/,'') + '/cms-v3/' + App.cfg.roomCode + '/' + nodePath + '.json' + (token ? '?auth=' + token : '');
+  // 用 AbortController 加 timeout
+  const ctrl = new AbortController();
+  const timeout = setTimeout(()=> { try { ctrl.abort(); } catch(_){} }, timeoutMs || 10000);
+  try {
+    const r = await fetch(url, {
+      method: 'PUT',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(rec),
+      signal: ctrl.signal,
+      cache: 'no-store'
+    });
+    clearTimeout(timeout);
+    if(!r.ok){
+      const text = await r.text().catch(()=>'');
+      throw new Error('HTTP ' + r.status + ' ' + text.slice(0, 100));
+    }
+    return await r.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ★ 雙重寫入 — 先試 SDK (5 秒), 失敗就改 REST API (10 秒)
+//   SDK 寫得進去就快; SDK 卡死/失敗就 REST 救
+async function fbWriteRow(nodePath, recId, rec){
+  let sdkErr = '';
+  // 1. SDK 5 秒
+  if(App.fbRef){
+    try {
+      await Promise.race([
+        App.fbRef.child(nodePath).child(String(recId)).set(rec),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('SDK 超時 (5 秒)')), 5000))
+      ]);
+      console.log('[fbWriteRow] SDK 寫入成功', nodePath, recId);
+      return { ok: true, method: 'sdk' };
+    } catch(e){
+      sdkErr = e.message || String(e);
+      console.warn('[fbWriteRow] SDK 失敗, 改 REST:', sdkErr);
+    }
+  } else {
+    sdkErr = 'App.fbRef 未就緒';
+  }
+  // 2. REST fallback 10 秒
+  try {
+    await fbWriteRest(nodePath + '/' + recId, rec, 10000);
+    console.log('[fbWriteRow] REST 寫入成功', nodePath, recId);
+    return { ok: true, method: 'rest', sdkErr };
+  } catch(e){
+    return { ok: false, err: 'SDK失敗:' + sdkErr + ' / REST失敗:' + (e.message||e) };
+  }
+}
+
 // ★ 評價維度設定 — 老師可以加多個評分項目 (預設只有一個「整體」5 顆星)
 //   存在 App.db.settings.evalDims = [{key, label, max}, ...]
 function getEvalDims(){
@@ -20496,52 +20577,39 @@ function openAnnouncementEdit(a){
       rec.targetIds = _annTgtIds;
       if(isNew) App.db.announcements.push(rec);
       saveDB();
-      // ★ 修: 直接 await 雲端寫入 + 8 秒 timeout, 避免 hang 死
-      let cloudOk = false, cloudErr = '';
-      try {
-        // Sync.init 也加 5 秒 timeout 避免 hang
-        if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
-          try {
-            await Promise.race([
-              Sync.init(),
-              new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
-            ]);
-          } catch(_){}
-        }
-        if(App.fbRef){
-          // ★ 8 秒 timeout: Firebase set() 在連線異常時可能永遠 hang
+      // ★ 修: 用 fbWriteRow — SDK 5 秒 → 失敗自動改用 REST API 10 秒
+      //   SDK 不穩時 REST API 救
+      // Sync.init 先試 (5 秒 timeout)
+      if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
+        try {
           await Promise.race([
-            App.fbRef.child('announcements').child(rec.id).set(rec),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('雲端寫入超時 (8 秒)')), 8000))
+            Sync.init(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
           ]);
-          cloudOk = true;
-        } else {
-          cloudErr = 'Firebase 同步未就緒';
-        }
-      } catch(e){
-        cloudErr = e.code || e.message || String(e);
+        } catch(_){}
       }
+      // 把可能的 undefined 清掉 (Firebase rejects undefined)
+      const clean = JSON.parse(JSON.stringify(rec));
+      const writeResult = await fbWriteRow('announcements', clean.id, clean);
+      const cloudOk = writeResult.ok;
+      const cloudErr = writeResult.err || '';
+      const method = writeResult.method || '';
       try { bcNotify(); } catch(_){}
       if(isNew && !_scheduledAt && cloudOk) {
         try { triggerWebhook('announcement', { title: rec.title, author: rec.author }); } catch(_){}
       }
       if(_scheduledAt && cloudOk){
         const _dStr = new Date(_scheduledAt).toLocaleString('zh-TW',{hour12:false});
-        toast('✅ 已排程於 ' + _dStr + ' 發送 (已同步雲端)','success', 5000);
+        toast('✅ 已排程於 ' + _dStr + ' 發送 (已同步雲端 ' + method + ')','success', 5000);
       } else if(cloudOk){
-        toast('✅ ' + (isNew?'已發布':'已更新') + ' (已同步到雲端,學生會收到)','success', 5000);
+        toast('✅ ' + (isNew?'已發布':'已更新') + ' (已同步雲端 ' + method + ',學生會收到)','success', 5000);
       } else {
-        toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n錯誤: ' + cloudErr + '\n系統會自動重試 (或老師按「強制同步」推上去)', 'warn', 12000);
+        toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n' + cloudErr + '\n系統會自動重試', 'warn', 12000);
         console.warn('[announcement] cloud sync failed:', cloudErr);
         setTimeout(async ()=> {
           try {
-            if(App.fbRef){
-              await Promise.race([
-                App.fbRef.child('announcements').child(rec.id).set(rec),
-                new Promise((_, rej) => setTimeout(() => rej(new Error('retry timeout')), 8000))
-              ]);
-              try { toast('✅ 公告「' + rec.title + '」已補傳到雲端','success', 5000); } catch(_){}
-            }
+            const r = await fbWriteRow('announcements', clean.id, clean);
+            if(r.ok) try { toast('✅ 公告「' + clean.title + '」已補傳到雲端 (' + r.method + ')','success', 5000); } catch(_){}
           } catch(_){}
         }, 5000);
       }
