@@ -16690,7 +16690,7 @@ function openStudentSelfEdit(){
   // 動作
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> {
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
     // email 基本驗證
     const em = iEmail.value.trim();
     if(em && !EMAIL_RE.test(em)){
