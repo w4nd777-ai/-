@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-returned-tab-fix';
+const APP_BUILD = '2026-06-01-batch-bug-fixes';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -3158,7 +3158,8 @@ function submissionRate(studentId){
   });
   const subsByStudent = _renderCache.get('subsByStudent', () => {
     const m = new Map();
-    (App.db.submissions||[]).forEach(s => {
+    // ★ 修:退回的繳交不算「已交」(學生未完成,要重交)
+    (App.db.submissions||[]).filter(s => !s.returned).forEach(s => {
       if(!m.has(s.studentId)) m.set(s.studentId, []);
       m.get(s.studentId).push(s);
     });
@@ -3202,7 +3203,8 @@ function assignmentTargets(asg){
 function assignmentStats(asg){
   const targets = assignmentTargets(asg);
   const total = targets.size;
-  const subs = App.db.submissions.filter(s => s.assignmentId === asg.id && targets.has(s.studentId));
+  // ★ 修:退回的繳交不算「已繳」(球在學生那邊,他要重交)
+  const subs = App.db.submissions.filter(s => s.assignmentId === asg.id && targets.has(s.studentId) && !s.returned);
   const submitted = subs.length;
   const graded = subs.filter(s => typeof s.score === 'number').length;
   const scores = subs.filter(s => typeof s.score === 'number').map(s => s.score);
@@ -8947,8 +8949,10 @@ function finishStudentLogin(s){
 
 // 自動補傳該學生繳交過、storage=idb、雲端沒有的附件
 async function _autoReuploadMyAttachments(studentId){
-  if(!firebase || !firebase.database) return;
-  if(!App.cfg || !App.cfg.roomCode) return;
+  // ★ 如果 Firebase 沒設好或沒 fbRef → 補傳不可能,silent return 但加 console
+  if(!firebase || !firebase.database){ console.log('[reupload] skip: no firebase'); return; }
+  if(!App.cfg || !App.cfg.roomCode){ console.log('[reupload] skip: no roomCode'); return; }
+  if(!App.fbRef){ console.log('[reupload] skip: no fbRef (Sync 沒 init)'); return; }
   const rc = App.cfg.roomCode;
   // 找這個學生繳的所有附件 (storage='idb' 才需要補)
   const mySubs = (App.db.submissions||[]).filter(s => s && s.studentId === studentId);
@@ -9951,7 +9955,9 @@ const TRASH_KIND_MAP = {
   message:      { coll: 'messages',      label: '訊息',        ico: '💬' },
   note:         { coll: 'notes',         label: '筆記',        ico: '📒' },
   quiz:         { coll: 'quizzes',       label: '小考',        ico: '📝' },
-  subject:      { coll: 'subjects',      label: '科目',        ico: '📚' }
+  subject:      { coll: 'subjects',      label: '科目',        ico: '📚' },
+  eval:         { coll: 'evals',         label: '課程評價',     ico: '💬' },
+  group:        { coll: 'groups',        label: '小組',        ico: '👥' }
 };
 function trashAdd(kind, record){
   if(!record || !TRASH_KIND_MAP[kind]) return;
@@ -10720,7 +10726,16 @@ function rOv(content){
       });
       sideRow.appendChild(c2);
     }
-    if(sideRow.childNodes.length) content.appendChild(sideRow);
+    if(sideRow.childNodes.length){
+      content.appendChild(sideRow);
+    } else {
+      // ★ 加 empty state: 動態 tab 全空時不要白白的
+      content.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '🎯'),
+        el('div', null, '今日尚無動態'),
+        el('div', { class:'small muted', style:{marginTop:'4px'} }, '加扣分 / 進行中小考 / 動態事件 會顯示在這裡')
+      ));
+    }
 
     // 學期週次資訊
     const sem = getSemester();
@@ -19701,9 +19716,11 @@ function rSEv(content){
       card.appendChild(el('button', { class:'btn btn-sm btn-danger', style:{marginTop:'6px'}, onclick: async ()=> {
         const ok = await confirmDlg('刪除你的這則？', { danger:true });
         if(!ok) return;
+        // ★ 修:加進回收桶 (30 天救援)
+        try { trashAdd('eval', e); } catch(_){}
         App.db.evals = App.db.evals.filter(x => x.id !== e.id);
         saveDB(); Sync.setMap('evals', App.db.evals); bcNotify();
-        toast('已刪除','warn'); rerender();
+        toast('已刪除 (可在資源回收桶救回)','warn'); rerender();
       }}, '🗑'));
     }
     content.appendChild(card);
@@ -25753,7 +25770,7 @@ function getSmartReminders(){
         out.push({
           ico:'📋',
           text:'明天有小考 <b>' + esc(q.title||'未命名') + '</b>',
-          action:{ label:'查看', onclick: ()=> go('quizzes') }
+          action:{ label:'查看', onclick: ()=> go(App.session?.role==='student' ? 'squiz' : 'quiz') }
         });
       });
     } catch(_){}
@@ -25817,7 +25834,7 @@ function getSmartReminders(){
               out.push({
                 ico:'🏅',
                 text:'你已累積 <b>' + pts + '</b> 點, 還差 <b>' + diff + '</b> 點達 <b>' + t.n + '</b> 徽章',
-                action:{ label:'查看', onclick: ()=> go('badges') }
+                action:{ label:'查看', onclick: ()=> go('mybadges') }
               });
             }
             break;
@@ -26334,6 +26351,8 @@ function openGroupEdit(gid){
         toast('已更新','success');
       }
       saveDB();
+      // ★ 修:groups 之前漏掉 Sync,其他裝置/老師看不到
+      try { Sync.setRow('groups', g.id, g); bcNotify(); } catch(_){}
       m.close();
       rerender();
     }}, isNew ? '建立' : '儲存')
@@ -26524,6 +26543,8 @@ function openAutoGroup(){
         });
       });
       saveDB();
+      // ★ 修:groups 批次建立也要同步
+      try { Sync.setMap('groups', App.db.groups); bcNotify(); } catch(_){}
       m.close();
       toast('已建立 '+n+' 個小組','success');
       rerender();
