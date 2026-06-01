@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-01-storage-leak-fix';
+const APP_BUILD = '2026-06-01-storage-emergency-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -1495,18 +1495,38 @@ function _saveDBNow(){
       if(typeof toast === 'function'){
         toast('🚨 儲存空間已滿（約 ' + mb + ' MB）！請立即匯出備份','danger', 10000);
       }
-      // 降級嘗試：只把附件 metadata 留下，並截斷較舊資料，但記下警告
+      // ★ 暴力降級:刪掉所有「不該存本機」的大物件,再試
+      //   原本只截短 messages/feeds 還是會爆 → 加上 attachments/_errors/_archives/大 avatars
       try {
         const lite = _clone(App.db);
+        // 1. 附件不該存本機 (預覽時 lazy 抓雲端)
+        if(lite.attachments) delete lite.attachments;
+        // 2. 錯誤 log 不需要本機
+        if(lite._errors) delete lite._errors;
+        // 3. 學期備份 — 緊急時清光,雲端還有
+        lite._archives = [];
+        // 4. 學生頭像 base64 > 50KB → 暫剝離 (重新整理 sync 會從雲端拉回)
+        if(Array.isArray(lite.students)){
+          lite.students.forEach(s => {
+            if(s && typeof s.avatar === 'string' && s.avatar.length > 50 * 1024){
+              s.avatar = null;  // 雲端還在,只是本機暫時不存
+            }
+          });
+        }
+        // 5. 訊息/動態截短 (原本邏輯)
         if(Array.isArray(lite.messages) && lite.messages.length > MSG_HARD_CAP){
           lite.messages = lite.messages.slice(-MSG_HARD_CAP);
         }
         if(Array.isArray(lite.feeds) && lite.feeds.length > FEED_HARD_CAP){
           lite.feeds = lite.feeds.slice(-FEED_HARD_CAP);
         }
-        lite._truncWarning = '⚠️ 儲存空間曾達上限，部分舊資料已暫時隱藏。請盡快匯出備份後清理舊資料。';
+        lite._truncWarning = '⚠️ 儲存空間曾達上限，部分大檔 (頭像/附件) 已從本機清掉,連 Firebase 後自動拉回。';
         lite._truncAt = Date.now();
         localStorage.setItem(dbKey(), JSON.stringify(lite));
+        // 同步清掉記憶體中的 App.db 大物件,避免下一次 saveDB 又爆
+        if(App.db.attachments) delete App.db.attachments;
+        if(App.db._errors) delete App.db._errors;
+        App.db._archives = [];
         // 🔧 修：同步截短「記憶體中」的 App.db，否則下一次 tick 又會把完整 DB 序列化 → 無限重試迴圈
         if(App.db.messages && App.db.messages.length > MSG_HARD_CAP){
           App.db.messages.splice(0, App.db.messages.length - MSG_HARD_CAP);
