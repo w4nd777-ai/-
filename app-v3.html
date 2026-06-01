@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-eval-lock-once';
+const APP_BUILD = '2026-06-02-eval-anon-locked';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -21242,7 +21242,7 @@ function rSEv(content){
         tab === 'semester' ? '✅ 你已完成本學期評價' : '✅ 你已完成今日評價'));
       formCard.appendChild(el('div', { class:'small muted', style:{marginTop:'6px'} },
         '提交時間: ' + new Date(alreadySubmitted.ts || 0).toLocaleString('zh-TW', {hour12:false}) +
-        (alreadySubmitted.anonymous ? ' · 匿名' : '')));
+        (alreadySubmitted.anonymous ? ' · 🔒 匿名 (老師看不到是誰)' : '')));
 
       // 顯示自己填的分數 + 內容 (確認用)
       const dimsForView = (typeof getEvalDims === 'function') ? getEvalDims() : [{key:'overall',label:'整體',max:5}];
@@ -21301,12 +21301,35 @@ function rSEv(content){
 
       const ta = el('textarea', { class:'textarea', placeholder:'分享你的想法（可選）', style:{marginTop:'8px'} });
       formCard.appendChild(ta);
-      const lblAnon = el('label', { class:'flex', style:{marginTop:'8px',fontSize:'13px'} });
+
+      // ★ 匿名選項處理
+      //   學期評價: 強制匿名 (沒選項, 告知顯示)
+      //   每日評價: 可選匿名 (保留 checkbox)
       const cbAnon = el('input', { type:'checkbox' });
-      lblAnon.appendChild(cbAnon);
-      lblAnon.appendChild(el('span', null, ' 匿名提交'));
-      formCard.appendChild(lblAnon);
-      formCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'4px',padding:'6px 8px',background:'var(--warn-soft)',borderRadius:'4px'} },
+      if(tab === 'semester'){
+        // 學期: 鎖匿名, 不給選
+        cbAnon.checked = true;
+        cbAnon.disabled = true;
+        formCard.appendChild(el('div', { style:{
+          marginTop:'10px', padding:'10px 12px',
+          background:'var(--primary-soft)', border:'1px solid var(--primary)',
+          borderRadius:'8px', fontSize:'13px', display:'flex', alignItems:'center', gap:'8px'
+        }},
+          el('span', { style:{fontSize:'18px'} }, '🔒'),
+          el('div', null,
+            el('div', { style:{fontWeight:'700',color:'var(--primary)'} }, '本學期評價一律匿名'),
+            el('div', { class:'tiny muted', style:{marginTop:'2px'} }, '老師不會看到是誰填的, 請放心真實表達')
+          )
+        ));
+      } else {
+        // 每日: 保留 checkbox 讓學生選
+        const lblAnon = el('label', { class:'flex', style:{marginTop:'8px',fontSize:'13px',padding:'8px 10px',background:'var(--surface-2)',borderRadius:'6px',gap:'6px',alignItems:'center'} });
+        lblAnon.appendChild(cbAnon);
+        lblAnon.appendChild(el('span', null, ' 匿名提交 (老師看不到是誰填的)'));
+        formCard.appendChild(lblAnon);
+      }
+
+      formCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'8px',padding:'6px 8px',background:'var(--warn-soft)',borderRadius:'4px'} },
         tab === 'semester' ? '⚠️ 提醒: 本學期評價只能填一次, 送出後不可修改' : '⚠️ 提醒: 今日評價只能填一次, 送出後不可修改'));
       formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick: async (ev)=> {
         const btn = ev.target;
