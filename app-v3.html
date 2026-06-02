@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-attach-rest-upload';
+const APP_BUILD = '2026-06-02-attach-rtdb-only';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -4162,16 +4162,12 @@ async function attachUpload(file){
   // ★ 優先 Firebase Storage (跨裝置 + 共用同一專案 5GB 免費)
   //   注意: 需先在 Firebase Console 啟用 Storage. 若未啟用 / bucket 不存在 → 5 秒 timeout fallback
   // 從 localStorage 還原「Firebase Storage 已停用」狀態 (避免每次 reload 都重新試)
-  // 但 24 小時自動過期重試,讓用戶啟用 Storage 後不用手動清
-  if(App._fbStorageDisabled === undefined){
-    try {
-      const disabledAt = parseInt(localStorage.getItem('cms_v3_fb_storage_disabled_at') || '0', 10);
-      const stillFresh = disabledAt && (Date.now() - disabledAt < 24 * 3600 * 1000);
-      App._fbStorageDisabled = localStorage.getItem('cms_v3_fb_storage_disabled') === '1' && stillFresh;
-      if(!stillFresh){ try { localStorage.removeItem('cms_v3_fb_storage_disabled'); } catch(_){} }
-    } catch(_){}
-  }
-  if(typeof firebase !== 'undefined' && firebase.storage && file.size < FB_STORAGE_MAX && !App._fbStorageDisabled){
+  // ★ 2026-06-02 證實: 此專案 Firebase Storage 沒啟用 (REST 跟 SDK 都 404)
+  //   永遠跳過 Storage, 直接走 RTDB REST chunked (100% 工作)
+  //   舊代碼保留但永遠不會跑 (除非未來啟用 Storage)
+  App._fbStorageDisabled = true;
+  try { localStorage.setItem('cms_v3_fb_storage_disabled', '1'); } catch(_){}
+  if(false && typeof firebase !== 'undefined' && firebase.storage && file.size < FB_STORAGE_MAX && !App._fbStorageDisabled){
     try {
       const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
       if(fbCfg && fbCfg.databaseURL){
@@ -4227,21 +4223,8 @@ async function attachUpload(file){
       }
       // 繼續 fallback 走 RTDB chunked / Drive / IDB
     }
-  } else if(typeof firebase !== 'undefined' && file.size < FB_STORAGE_MAX){
-    // ★ NEW: SDK Storage 被停用 / 沒載入時, 仍試 REST API (直接 HTTP)
-    try {
-      console.log('[fb-storage] SDK 跳過 (停用或未載入), 直接試 REST');
-      try { toast('📤 上傳中 (REST 直連)...', 'info', 3000); } catch(_){}
-      const restKey = _newAttachKey();
-      const restMeta = await attachUploadStorageRest(file, restKey);
-      if(restMeta && restMeta.fbUrl){
-        _doneProgress('✅ 已上傳雲端 (REST): ' + file.name, 'success');
-        return restMeta;
-      }
-    } catch(restErr){
-      console.warn('[fb-storage] REST 失敗, 走 RTDB:', restErr.message);
-    }
   }
+  // ★ 此專案 Firebase Storage 未啟用 — 直接跳過, 走 RTDB 路徑 (見下)
 
   const cfg = gdConfig();
   const driveEnabled = !!(cfg && cfg.enabled && cfg.clientId);
@@ -4356,72 +4339,19 @@ async function attachUpload(file){
       dbg('[v3] 小檔已嘗試同步 Firebase: ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)');
     } catch(e){ _swallow('attach-fb-sync', e); }
   } else if(file.size <= RTDB_CHUNK_LIMIT){
-    // 大檔 4-50 MB:分塊上傳 (用戶要求,免費跨裝置)
+    // 大檔 4-100 MB: 直接走 REST 分塊 (REST 證實穩定, 不浪費時間試 SDK)
     try {
       totalChunks = Math.ceil(file.size / RTDB_CHUNK_SIZE);
       try { toast('📤 ' + file.name + ' (' + Math.round(file.size/1024/1024) + ' MB) 分 ' + totalChunks + ' 塊上傳中...', 'info', 4000); } catch(_){}
-      const fbCfg = JSON.parse(localStorage.getItem(LS_FB) || 'null');
-      if(fbCfg && fbCfg.databaseURL && typeof firebase !== 'undefined'){
-        const roomCode = App.cfg?.roomCode || 'DEFAULT';
-        const baseRef = firebase.database().ref('cms-v3/' + roomCode + '/attachments/' + key);
-        // 先寫 meta
-        await baseRef.child('meta').set({
-          name: file.name, type: file.type||'', size: file.size,
-          chunked: true, totalChunks: totalChunks, chunkSize: RTDB_CHUNK_SIZE,
-          ts: Date.now()
-        });
-        // 分塊上傳 (大檔降併發避免記憶體壓力:>20MB 用 2,否則 4)
-        const CONCURRENT = file.size > 20 * 1024 * 1024 ? 2 : 4;
-        let nextProgress = file.size / 4;
-        let processed = 0;
-        for(let batchStart = 0; batchStart < totalChunks; batchStart += CONCURRENT){
-          const batch = [];
-          for(let i = batchStart; i < Math.min(batchStart + CONCURRENT, totalChunks); i++){
-            const start = i * RTDB_CHUNK_SIZE;
-            const end = Math.min(start + RTDB_CHUNK_SIZE, file.size);
-            const chunkBlob = file.slice(start, end);
-            const chunkDataUri = await new Promise((res, rej) => {
-              const fr = new FileReader();
-              fr.onload = () => res(fr.result);
-              fr.onerror = rej;
-              fr.readAsDataURL(chunkBlob);
-            });
-            batch.push(baseRef.child('c' + i).set(chunkDataUri));
-            processed += (end - start);
-          }
-          await Promise.all(batch);
-          // 進度 toast (每 4 塊一次)
-          const progress = Math.min(batchStart + CONCURRENT, totalChunks);
-          if(totalChunks > 8 && batchStart > 0){
-            try { toast('📤 已上傳 ' + progress + '/' + totalChunks + ' 塊...', 'info', 1500); } catch(_){}
-          }
-          // 每 25% 額外回報百分比 (大檔安心感)
-          if(typeof toast === 'function' && processed > nextProgress && processed < file.size){
-            try { toast('上傳中 ' + Math.round(processed * 100 / file.size) + '%', 'info', 1500); } catch(_){}
-            nextProgress += file.size / 4;
-          }
-          // 讓 UI 有機會渲染 (避免 base64 編碼塞滿主執行緒)
-          await new Promise(r => setTimeout(r, 0));
-        }
+      const restMeta = await attachUploadRtdbRest(file, key);
+      if(restMeta && restMeta.chunked){
         chunked = true;
-        dbg('[v3] 大檔分塊同步 Firebase: ' + file.name + ' (' + totalChunks + ' 塊)');
+        totalChunks = restMeta.totalChunks;
+        dbg('[v3] 大檔 REST 分塊上傳成功: ' + file.name + ' (' + totalChunks + ' 塊)');
       }
     } catch(e){
-      console.warn('[chunked-upload SDK] failed:', e);
-      // ★ NEW: SDK 分塊失敗 → 改用 REST 分塊
-      try {
-        console.log('[chunked-upload] 改用 REST 分塊...');
-        try { toast('🔄 SDK 上傳失敗, 改 REST 分塊...', 'info', 3000); } catch(_){}
-        const restMeta = await attachUploadRtdbRest(file, key);
-        if(restMeta && restMeta.chunked){
-          chunked = true;
-          totalChunks = restMeta.totalChunks;
-          console.log('[chunked-upload] REST 救援成功');
-        }
-      } catch(restErr){
-        console.warn('[chunked-upload REST] failed:', restErr.message);
-        try { toast('分塊上傳失敗 (SDK+REST 都失敗): ' + (restErr.message||''), 'warn', 5000); } catch(_){}
-      }
+      console.warn('[chunked-upload REST] failed:', e);
+      try { toast('⚠️ 雲端上傳失敗 (' + (e.message||'') + '), 檔案只存本機, 老師看不到', 'danger', 8000); } catch(_){}
     }
   } else {
     // 超過 100 MB 引導改貼連結
