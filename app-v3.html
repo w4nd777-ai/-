@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-modal-typing-lock';
+const APP_BUILD = '2026-06-02-bugfix-sweep';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11743,7 +11743,12 @@ function markPresent(studentId, options={}){
   saveDB();
   // Sync.push 內部用 data.id 作為 Firebase child key，
   // 因此「兩台裝置同時 push 同一 recordKey」會 set 到同一節點而非雙筆（idempotent）
-  if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
+  // ★ SDK + REST fallback (修「老師標出席卡住沒上雲端」)
+  if(typeof fbWriteRow === 'function'){
+    fbWriteRow('attendance', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
+      try { if(typeof Sync !== 'undefined' && Sync.push) Sync.push('attendance', rec); } catch(_){}
+    });
+  } else if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
     Sync.push('attendance', rec);
   }
   bcNotify();
@@ -13969,7 +13974,14 @@ function pushMsg(toId, text, attach, opts){
   App.db.messages.push(rec);
   _capArray(App.db.messages, MSG_HARD_CAP);
   saveDB();
-  Sync.push('messages', rec);
+  // ★ SDK + REST fallback (修「訊息卡住對方收不到」)
+  if(typeof fbWriteRow === 'function'){
+    fbWriteRow('messages', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
+      try { Sync.push('messages', rec); } catch(_){}
+    });
+  } else {
+    try { Sync.push('messages', rec); } catch(_){}
+  }
   bcNotify();
   // batch 3: 通知對方（自己端不通知自己）
   try {
@@ -14363,7 +14375,7 @@ function rSFeedback(content){
     actions.appendChild(el('button', { class:'btn', onclick:()=> { App._feedbackEdit = false; rerender(); } }, '取消'));
   }
   actions.appendChild(el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: async (ev)=> {
-    const btn = ev.target;
+    const btn = ev.currentTarget;  // ★ 用 currentTarget 不用 target
     const orig = btn.textContent;
     btn.disabled = true;
     btn.textContent = '送出中...';
@@ -16375,8 +16387,12 @@ function doStudentCheckIn(){
   App.db.attendance.push(rec);
   _capArray(App.db.attendance, ATTENDANCE_HARD_CAP);
   saveDB();
-  // Sync.push 用 data.id 作為 Firebase child key → 同 key 雙端寫入會 set 同一節點（不會雙筆）
-  if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
+  // ★ SDK + REST fallback (修「學生簽到後老師沒收到」)
+  if(typeof fbWriteRow === 'function'){
+    fbWriteRow('attendance', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
+      try { if(typeof Sync !== 'undefined' && Sync.push) Sync.push('attendance', rec); } catch(_){}
+    });
+  } else if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
     Sync.push('attendance', rec);
   }
   bcNotify();
@@ -17528,78 +17544,94 @@ function openAssignmentEdit(asg){
 
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
-  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async ()=> {
-    // H1: 副老師寫入權限攔截（新增/編輯作業視為編輯成績）
-    if(!requirePerm('canEditGrades','建立/編輯作業')) return;
-    const title = iT.value.trim();
-    if(!title) return toast('標題必填','danger');
-    const rec = isNew ? { id: nid(), ts: Date.now() } : asg;
-    rec.title = title;
-    rec.desc = iD.value;
-    rec.dueAt = iDue.value;
-    rec.points = parseInt(iPts.value,10) || 100;
-    rec.latePenalty = parseInt(iLate.value,10) || 0;
-    rec.weight = Math.max(1, Math.min(10, parseFloat(iWeight.value) || 1));
-    rec.target = iTgt.value;
-    // QA #6：依 target 分支寫對應欄位，避免殘留前次選擇
-    const selectedClsList = clsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
-    const selectedStuIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
-    if(iTgt.value === 'class'){
-      if(!selectedClsList.length) return toast('請至少選一個班級', 'warning');
-      rec.targetClsList = selectedClsList;
-      rec.targetCls = selectedClsList[0] || '';
-      rec.targetIds = [];
-    } else if(iTgt.value === 'students'){
-      if(!selectedStuIds.length) return toast('請至少選一個學生', 'warning');
-      rec.targetClsList = [];
-      rec.targetCls = '';
-      rec.targetIds = selectedStuIds;
-    } else {
-      // 'all'
-      rec.targetClsList = [];
-      rec.targetCls = '';
-      rec.targetIds = [];
-    }
-    // ★ 多檔附件 — 寫進 rec.attaches; 保留 rec.attach 是第一筆 (向下相容老程式)
-    rec.attaches = _attachState.slice();
-    rec.attach = _attachState[0] || null;
-    rec.createdBy = App.session?.name || '老師';
-    // 包 B-1：科目
-    try { rec.subjectId = iSubj.value || ''; } catch(_){ /* fallback */ }
-    // Google 表單繳交連結 (選填)
-    rec.googleFormUrl = (iGF.value || '').trim();
-    // 包 B-3：自動帶入當前學期
-    try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_) {}
-    if(isNew) App.db.assignments.push(rec);
-    saveDB();
-    // ★ 跟公告一樣 — SDK 5s → REST fallback 10s
-    if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
-      try {
-        await Promise.race([
-          Sync.init(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
-        ]);
-      } catch(_){}
-    }
-    const cleanAsg = JSON.parse(JSON.stringify(rec));
-    const writeR = await fbWriteRow('assignments', cleanAsg.id, cleanAsg);
-    const cloudOk = writeR.ok;
-    const cloudErr = writeR.err || '';
-    try { bcNotify(); } catch(_){}
-    if(cloudOk){
-      toast('✅ ' + (isNew?'已新增':'已更新') + ' (已同步雲端 ' + writeR.method + ',學生會收到)', 'success', 4000);
-    } else {
-      toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n' + cloudErr, 'warn', 12000);
-      console.warn('[assignment] cloud sync failed:', cloudErr);
-      setTimeout(async ()=> {
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: async (ev)=> {
+    // ★ 防雙擊 + try/catch/finally + 15s 安全計時器 (跟公告編輯一致)
+    const saveBtn = ev.currentTarget;
+    const origText = saveBtn.textContent;
+    saveBtn.disabled = true;
+    saveBtn.textContent = '儲存中...';
+    const safetyTimer = setTimeout(()=> {
+      try { saveBtn.disabled = false; saveBtn.textContent = origText; } catch(_){}
+      try { toast('⚠️ 雲端寫入太久 — 作業已存本機, 請檢查網路', 'warn', 8000); } catch(_){}
+    }, 15000);
+    try {
+      // H1: 副老師寫入權限攔截
+      if(!requirePerm('canEditGrades','建立/編輯作業')) return;
+      const title = iT.value.trim();
+      if(!title){ toast('標題必填','danger'); return; }
+      const rec = isNew ? { id: nid(), ts: Date.now() } : asg;
+      rec.title = title;
+      rec.desc = iD.value;
+      rec.dueAt = iDue.value;
+      rec.points = parseInt(iPts.value,10) || 100;
+      rec.latePenalty = parseInt(iLate.value,10) || 0;
+      rec.weight = Math.max(1, Math.min(10, parseFloat(iWeight.value) || 1));
+      rec.target = iTgt.value;
+      const selectedClsList = clsChecks.filter(cb=>cb.checked).map(cb=>cb.value);
+      const selectedStuIds = Object.keys(stuChecks).filter(k => stuChecks[k].checked);
+      if(iTgt.value === 'class'){
+        if(!selectedClsList.length){ toast('請至少選一個班級', 'warning'); return; }
+        rec.targetClsList = selectedClsList;
+        rec.targetCls = selectedClsList[0] || '';
+        rec.targetIds = [];
+      } else if(iTgt.value === 'students'){
+        if(!selectedStuIds.length){ toast('請至少選一個學生', 'warning'); return; }
+        rec.targetClsList = [];
+        rec.targetCls = '';
+        rec.targetIds = selectedStuIds;
+      } else {
+        rec.targetClsList = [];
+        rec.targetCls = '';
+        rec.targetIds = [];
+      }
+      rec.attaches = _attachState.slice();
+      rec.attach = _attachState[0] || null;
+      rec.createdBy = App.session?.name || '老師';
+      try { rec.subjectId = iSubj.value || ''; } catch(_){}
+      rec.googleFormUrl = (iGF.value || '').trim();
+      try { if(typeof getCurrentSemester === 'function'){ const _cs = getCurrentSemester(); if(_cs && !rec.semesterId) rec.semesterId = _cs.id; } } catch(_){}
+      if(isNew) App.db.assignments.push(rec);
+      saveDB();
+      // ★ SDK 5s → REST fallback 10s
+      if(!App.fbRef && typeof Sync !== 'undefined' && Sync.init){
         try {
-          const r = await fbWriteRow('assignments', cleanAsg.id, cleanAsg);
-          if(r.ok) try { toast('✅ 作業「' + cleanAsg.title + '」已補傳到雲端 (' + r.method + ')','success', 5000); } catch(_){}
+          await Promise.race([
+            Sync.init(),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Sync.init 超時')), 5000))
+          ]);
         } catch(_){}
-      }, 5000);
+      }
+      const cleanAsg = JSON.parse(JSON.stringify(rec));
+      const writeR = await fbWriteRow('assignments', cleanAsg.id, cleanAsg);
+      const cloudOk = writeR.ok;
+      const cloudErr = writeR.err || '';
+      try { bcNotify(); } catch(_){}
+      if(cloudOk){
+        toast('✅ ' + (isNew?'已新增':'已更新') + ' (已同步雲端 ' + writeR.method + ',學生會收到)', 'success', 4000);
+      } else {
+        toast('⚠️ ' + (isNew?'已存本機但雲端同步失敗':'已更新但雲端同步失敗') + '\n' + cloudErr, 'warn', 12000);
+        console.warn('[assignment] cloud sync failed:', cloudErr);
+        setTimeout(async ()=> {
+          try {
+            const r = await fbWriteRow('assignments', cleanAsg.id, cleanAsg);
+            if(r.ok) try { toast('✅ 作業「' + cleanAsg.title + '」已補傳到雲端 (' + r.method + ')','success', 5000); } catch(_){}
+          } catch(_){}
+        }, 5000);
+      }
+      m.close();
+      try { rerender(); } catch(_){}
+    } catch(e){
+      console.error('[assignment-save]', e);
+      try {
+        await confirmDlg('儲存作業時發生錯誤:\n\n' + (e.message||String(e)) + '\n\n作業已存本機, 雲端可能還沒同步。',
+          { title:'儲存失敗', cancelText:'', okText:'知道了' });
+      } catch(_){
+        try { toast('儲存失敗: ' + (e.message||e), 'danger', 8000); } catch(__){}
+      }
+    } finally {
+      clearTimeout(safetyTimer);
+      try { saveBtn.disabled = false; saveBtn.textContent = origText; } catch(_){}
     }
-    m.close();
-    try { rerender(); } catch(_){}
   }}, isNew?'新增':'儲存'));
   m.root.appendChild(actions);
 }
@@ -20250,7 +20282,7 @@ function rAnn(content){
     el('div', { class:'flex', style:{gap:'6px'} },
       el('button', { class:'btn btn-sm', title:'立刻把本機所有資料推到雲端 — 用在「學生看不到我發的公告」時',
         onclick: async (ev)=> {
-          const btn = ev.target;
+          const btn = ev.currentTarget;  // ★ 用 currentTarget 不用 target
           const orig = btn.textContent;
           btn.textContent = '同步中...';
           btn.disabled = true;
@@ -20678,7 +20710,7 @@ function openAnnouncementEdit(a){
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick:()=> m.close() }, '取消'));
   actions.appendChild(el('button', { class:'btn btn-primary', onclick: async (ev)=> {
-    const saveBtn = ev.target;
+    const saveBtn = ev.currentTarget;  // ★ 用 currentTarget 不用 target — 防按鈕內有 span/icon 時抓錯元素
     const origText = saveBtn.textContent;
     saveBtn.disabled = true;
     saveBtn.textContent = '儲存中...';
@@ -21287,12 +21319,13 @@ function rSEv(content){
       e && e.type === tab && e.fromId === me.id &&
       (tab === 'daily' ? e.date === today : true) &&  // 每日: 同日才算
       (tab === 'semester' ? (() => {
-        // 學期: 同學期才算 (用 ts 反推學期)
+        // 學期: 同學期才算 (跟 currentTerm 完全一致 — 2~7 月為 S1, 其餘 S2)
         if(!e.ts) return false;
         try {
           const d = new Date(e.ts);
           const yr = d.getFullYear();
-          const sem = d.getMonth() < 7 ? 'S1' : 'S2';  // 8 月切 (跟 currentTerm 對齊)
+          const mo = d.getMonth() + 1;  // 1-indexed, 跟 currentTerm 一致
+          const sem = (mo >= 2 && mo <= 7) ? 'S1' : 'S2';
           return (yr + '-' + sem) === term;
         } catch(_){ return false; }
       })() : true)
@@ -21393,7 +21426,7 @@ function rSEv(content){
       formCard.appendChild(el('div', { class:'tiny muted', style:{marginTop:'8px',padding:'6px 8px',background:'var(--warn-soft)',borderRadius:'4px'} },
         tab === 'semester' ? '⚠️ 提醒: 本學期評價只能填一次, 送出後不可修改' : '⚠️ 提醒: 今日只能填一次, 送出後不可修改 (明天可以再填新的)'));
       formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick: async (ev)=> {
-        const btn = ev.target;
+        const btn = ev.currentTarget;  // ★ 用 currentTarget 不用 target
         // 二次確認, 避免誤送
         const confirmMsg = tab === 'semester'
           ? '確定送出本學期評價?\n\n送出後不可修改, 整學期只能填一次'
@@ -21437,18 +21470,37 @@ function rSEv(content){
     formCard.appendChild(el('h3', null, '✍️ 發表留言'));
     const ta = el('textarea', { class:'textarea', placeholder:'寫下任何想說的話...', style:{marginTop:'8px'} });
     formCard.appendChild(ta);
-    formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick:()=> {
+    formCard.appendChild(el('button', { class:'btn btn-primary', style:{marginTop:'8px'}, onclick: async (ev)=> {
+      const btn = ev.currentTarget;
+      const orig = btn.textContent;
       const text = ta.value.trim();
-      if(!text) return toast('內容不可空','danger');
-      const rec = {
-        id: nid(), type:'wall', text, date:td(),
-        fromId: me.id, fromName: me.name, ts: Date.now()
-      };
-      App.db.evals.push(rec);
-      saveDB(); Sync.push('evals', rec); bcNotify();
-      toast('已發布！','success');
-      ta.value = '';
-      rerender();
+      if(!text){ toast('內容不可空','danger'); return; }
+      btn.disabled = true; btn.textContent = '發布中...';
+      const safety = setTimeout(()=> { try { btn.disabled = false; btn.textContent = orig; } catch(_){} }, 15000);
+      try {
+        const rec = {
+          id: nid(), type:'wall', text, date:td(),
+          fromId: me.id, fromName: me.name, ts: Date.now()
+        };
+        App.db.evals.push(rec);
+        saveDB();
+        // ★ 用 fbWriteRow (SDK + REST fallback) 取代 Sync.push
+        let writeOk = false, writeMethod = '';
+        if(typeof fbWriteRow === 'function'){
+          const r = await fbWriteRow('evals', rec.id, JSON.parse(JSON.stringify(rec)));
+          writeOk = r.ok; writeMethod = r.method;
+        }
+        try { bcNotify(); } catch(_){}
+        ta.value = '';
+        toast(writeOk ? '✅ 已發布 (' + writeMethod + ')' : '⚠️ 已存本機, 雲端待重試','success', 4000);
+      } catch(e){
+        console.error('[wall-submit]', e);
+        toast('發布失敗: ' + (e.message||e), 'danger', 6000);
+      } finally {
+        clearTimeout(safety);
+        try { btn.disabled = false; btn.textContent = orig; } catch(_){}
+        try { rerender(); } catch(_){}
+      }
     }}, '📤 發布'));
   }
   content.appendChild(formCard);
@@ -22179,8 +22231,12 @@ function tryAutoCheckin(){
   _capArray(App.db.attendance, ATTENDANCE_HARD_CAP);
   markQrUsed(code, me.id);
   saveDB();
-  // batch 2-stab: 用 Sync.push（會 mark echo + 用 recordKey 作 child key），多裝置同碼 = 同節點 set
-  if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
+  // ★ SDK + REST fallback (QR 簽到)
+  if(typeof fbWriteRow === 'function'){
+    fbWriteRow('attendance', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
+      try { if(typeof Sync !== 'undefined' && Sync.push) Sync.push('attendance', rec); } catch(_){}
+    });
+  } else if(typeof Sync !== 'undefined' && typeof Sync.push === 'function'){
     Sync.push('attendance', rec);
   }
   bcNotify();
@@ -32607,13 +32663,25 @@ function buildExportCSV(category){
           return [s.name||sub.studentId||'', asg?asg.title:sub.assignmentId, sName, sub.submittedAt?new Date(sub.submittedAt).toLocaleString():'', sub.score==null?'':sub.score, sub.comment||'', sub.status||''];
         })
       );
-    case 'evals':
-      return [['學生','課程','評分','留言','時間']].concat(
-        (db.evaluations||[]).map(ev => {
-          const s = stuById[ev.studentId] || {};
-          return [s.name||ev.studentId||'', ev.courseId||'', ev.score==null?'':ev.score, ev.comment||'', ev.at?new Date(ev.at).toLocaleString():''];
+    case 'evals': {
+      // ★ 修原本死碼: 讀錯 collection (evaluations) + 讀錯欄位 (score/comment) — 永遠匯出空
+      //   正確結構: db.evals[] 每筆 {fromId, type, dims, stars, text, ts, anonymous}
+      //   加上每個 dim 一個欄位
+      const dims = (typeof getEvalDims === 'function') ? getEvalDims() : [{key:'overall', label:'整體', max:5}];
+      const headers = ['學生', '類型', '日期'];
+      dims.forEach(d => headers.push(d.label + '(/'+d.max+')'));
+      headers.push('留言', '匿名', '時間');
+      return [headers].concat(
+        (db.evals||[]).map(ev => {
+          const s = stuById[ev.fromId] || {};
+          const name = ev.anonymous ? '(匿名)' : (s.name || ev.fromName || ev.fromId || '');
+          const row = [name, ev.type || '', ev.date || ''];
+          dims.forEach(d => row.push(typeof getEvalScore === 'function' ? getEvalScore(ev, d.key) : (d.key === 'overall' ? (ev.stars||'') : '')));
+          row.push(ev.text || '', ev.anonymous ? '是' : '否', ev.ts ? new Date(ev.ts).toLocaleString() : '');
+          return row;
         })
       );
+    }
     case 'feedback':
       return [['學生','類別','內容','時間']].concat(
         (db.feedback||[]).map(fb => {
