@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-02-bugfix-sweep';
+const APP_BUILD = '2026-06-02-rest-fallback-tier2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -11773,7 +11773,14 @@ function openLeaveDialog(studentId){
     App.db.leaves.push(lv);
     _capArray(App.db.leaves, LEAVES_HARD_CAP);
     saveDB();
-    Sync.push('leaves', lv);
+    // ★ SDK + REST fallback (老師代學生請假)
+    if(typeof fbWriteRow === 'function'){
+      fbWriteRow('leaves', lv.id, JSON.parse(JSON.stringify(lv))).catch(()=>{
+        try { Sync.push('leaves', lv); } catch(_){}
+      });
+    } else {
+      try { Sync.push('leaves', lv); } catch(_){}
+    }
     bcNotify();
     toast('已為 ' + s.name + ' 請假','success');
     rerender();
@@ -13759,7 +13766,14 @@ function updateLeaveStatus(id, status){
   l.reviewer = App.session?.name || '老師';
   l.reviewedAt = Date.now();
   saveDB();
-  Sync.push('leaves', l);
+  // ★ SDK + REST fallback (老師審核請假)
+  if(typeof fbWriteRow === 'function'){
+    fbWriteRow('leaves', l.id, JSON.parse(JSON.stringify(l))).catch(()=>{
+      try { Sync.push('leaves', l); } catch(_){}
+    });
+  } else {
+    try { Sync.push('leaves', l); } catch(_){}
+  }
   bcNotify();
   toast(status==='approved' ? '已批准' : '已拒絕', 'success');
   rerender();
@@ -15025,8 +15039,15 @@ async function approveStudent(pid, silent){
   App.db.students.push(newStu);
   App.db.pending = App.db.pending.filter(x => x.id !== pid);
   saveDB();
-  Sync.setRow('students', newStu.id, newStu);
-  Sync.removeRow('pending', pid);
+  // ★ SDK + REST fallback (老師核准註冊)
+  if(typeof fbWriteRow === 'function'){
+    fbWriteRow('students', newStu.id, JSON.parse(JSON.stringify(newStu))).catch(()=>{
+      try { Sync.setRow('students', newStu.id, newStu); } catch(_){}
+    });
+  } else {
+    try { Sync.setRow('students', newStu.id, newStu); } catch(_){}
+  }
+  try { Sync.removeRow('pending', pid); } catch(_){}
   bcNotify();
   if(typeof logOp === 'function') logOp('approveRegister', '核准 ' + p.name + ' 註冊' + (p.googleEmail ? ' (含 Google 綁定)' : ''));
   if(!silent){
@@ -16468,7 +16489,16 @@ function studentRequestLeave(){
     };
     App.db.leaves.push(rec);
     _capArray(App.db.leaves, LEAVES_HARD_CAP);
-    saveDB(); Sync.push('leaves', rec); bcNotify();
+    saveDB();
+    // ★ SDK + REST fallback (學生請假)
+    if(typeof fbWriteRow === 'function'){
+      fbWriteRow('leaves', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
+        try { Sync.push('leaves', rec); } catch(_){}
+      });
+    } else {
+      try { Sync.push('leaves', rec); } catch(_){}
+    }
+    bcNotify();
     triggerWebhook('leave-request', { student: me.name, date: d, reason: r });
     // F-03: 送出後清草稿
     clearDraft('leave_' + me.id);
@@ -18963,7 +18993,14 @@ function openSubmissionGrade(sub, list=null, idx=0){
     // 同步更新 closure 的 sub reference 給後續 advance 邏輯
     sub = target;
     saveDB();
-    Sync.push('submissions', target);
+    // ★ SDK + REST fallback (老師批改作業)
+    if(typeof fbWriteRow === 'function'){
+      fbWriteRow('submissions', target.id, JSON.parse(JSON.stringify(target))).catch(()=>{
+        try { Sync.push('submissions', target); } catch(_){}
+      });
+    } else {
+      try { Sync.push('submissions', target); } catch(_){}
+    }
     bcNotify();
     toast('已儲存批改','success');
     m.close();
@@ -19012,7 +19049,14 @@ function openSubmissionGrade(sub, list=null, idx=0){
       sub.attaches = [];
     } catch(_){}
     saveDB();
-    Sync.push('submissions', sub);
+    // ★ SDK + REST fallback (老師退回繳交)
+    if(typeof fbWriteRow === 'function'){
+      fbWriteRow('submissions', sub.id, JSON.parse(JSON.stringify(sub))).catch(()=>{
+        try { Sync.push('submissions', sub); } catch(_){}
+      });
+    } else {
+      try { Sync.push('submissions', sub); } catch(_){}
+    }
     // 通知學生（同一份繳交同日內去重，避免老師連退多次塞滿）
     try {
       if(!App.db.notifications) App.db.notifications = [];
@@ -24988,7 +25032,16 @@ function buildSubmissionForm(asg, me, existing){
       };
       App.db.submissions.push(rec);
       logOp('submit','繳交：' + asg.title);
-      saveDB(); Sync.push('submissions', rec); bcNotify();
+      saveDB();
+      // ★ SDK + REST fallback (學生交作業 — 最關鍵, 老師收不到 = 學生沒交)
+      if(typeof fbWriteRow === 'function'){
+        fbWriteRow('submissions', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
+          try { Sync.push('submissions', rec); } catch(_){}
+        });
+      } else {
+        try { Sync.push('submissions', rec); } catch(_){}
+      }
+      bcNotify();
       // F-03: 送出成功後清掉草稿
       clearDraft('submit_' + (me?.id || 'x') + '_' + asg.id);
       toast('已繳交！','success');
@@ -33198,8 +33251,14 @@ function openBehaviorQuickAdd(){
     App.db.behavior = App.db.behavior || [];
     App.db.behavior.push(rec);
     saveDB();
-    // F-01: 行為紀錄推到 Firebase（之前漏了，跨裝置看不到）
-    try { Sync.push('behavior', rec); } catch(e){_swallow('sync-beh',e)}
+    // ★ SDK + REST fallback (老師加扣行為點數)
+    if(typeof fbWriteRow === 'function'){
+      fbWriteRow('behavior', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
+        try { Sync.push('behavior', rec); } catch(_){}
+      });
+    } else {
+      try { Sync.push('behavior', rec); } catch(_){}
+    }
     m.close();
     toast('已記錄','success');
     try { checkAndAwardBadges(rec.studentId); } catch(_) {_swallow('auto',_)} // batch 5-27
