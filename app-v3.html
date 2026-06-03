@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-bugfix-sweep-2';
+const APP_BUILD = '2026-06-03-no-flashout';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -26648,9 +26648,15 @@ function rerender(){
   // session: must match a real student (if student)
   if(App.session.role === 'student'){
     const exists = currentStudent();
+    if(exists){
+      // 找到 → 清掉寬限期 flag (上次 session 短暫消失過, 現在恢復了)
+      if(App._sessionLostFirstSeen) App._sessionLostFirstSeen = null;
+    }
     if(!exists){
-      // maybe still pending or got deleted
-      const pending = App.db.pending.find(p => p.name === App.session.name);
+      // ★ 修「登入用一下被閃退」: 同步過程 App.db.students 可能暫時空, 不要立刻登出
+      //   只有「students 已載入 + 確定找不到 + 不在 pending + 至少 3 秒後 retry」才登出
+      const studentsLoaded = Array.isArray(App.db.students) && App.db.students.length > 0;
+      const pending = App.db.pending ? App.db.pending.find(p => p.name === App.session.name) : null;
       if(pending){
         root.innerHTML = '';
         const wrap = el('div', { class:'center-wrap' });
@@ -26663,6 +26669,54 @@ function rerender(){
         root.appendChild(wrap);
         return;
       }
+      // ★ students 還沒載入完 → 顯示 loading + 自動重抓雲端, 不要立刻登出
+      if(!studentsLoaded){
+        console.log('[session-guard] students 還沒載入, 不登出, 等同步');
+        root.innerHTML = '';
+        const wrap = el('div', { class:'center-wrap' });
+        const card = el('div', { class:'login-card', style:{textAlign:'center'} });
+        card.appendChild(el('div', { class:'huge' }, '⏳'));
+        card.appendChild(el('h2', null, '同步中...'));
+        card.appendChild(el('div', { class:'muted' }, '正在從雲端載入學生資料, 請稍候'));
+        wrap.appendChild(card);
+        root.appendChild(wrap);
+        // 觸發強制同步, 然後重 render
+        if(typeof Sync !== 'undefined' && Sync.forceResyncFromCloud && App.fbRef){
+          Sync.forceResyncFromCloud().then(()=> {
+            setTimeout(()=> { try { rerender(); } catch(_){} }, 500);
+          }).catch(()=> {
+            setTimeout(()=> { try { rerender(); } catch(_){} }, 3000);
+          });
+        } else {
+          setTimeout(()=> { try { rerender(); } catch(_){} }, 3000);
+        }
+        return;
+      }
+      // students 載入完了, 真的找不到 → 加一個寬限期重試, 還是沒有才登出
+      if(!App._sessionLostFirstSeen){
+        App._sessionLostFirstSeen = Date.now();
+        console.log('[session-guard] 學生暫時找不到, 給 5 秒寬限期再 retry');
+        // 5 秒後 rerender, 屆時 currentStudent 還是 null 才真的登出
+        setTimeout(()=> { try { rerender(); } catch(_){} }, 5000);
+        // 不登出, 顯示同步中畫面
+        root.innerHTML = '';
+        const wrap = el('div', { class:'center-wrap' });
+        const card = el('div', { class:'login-card', style:{textAlign:'center'} });
+        card.appendChild(el('div', { class:'huge' }, '⏳'));
+        card.appendChild(el('h2', null, '同步中...'));
+        card.appendChild(el('div', { class:'muted' }, '正在確認你的帳號'));
+        wrap.appendChild(card);
+        root.appendChild(wrap);
+        return;
+      }
+      // 寬限期沒過 → 再等一下
+      if(Date.now() - App._sessionLostFirstSeen < 5000){
+        setTimeout(()=> { try { rerender(); } catch(_){} }, 5000 - (Date.now() - App._sessionLostFirstSeen));
+        return;
+      }
+      // 寬限期過了, 還是找不到 → 真的登出
+      console.warn('[session-guard] 寬限期過了學生仍找不到, 登出');
+      App._sessionLostFirstSeen = null;
       App.session = null;
       saveSession();
       rerender();
