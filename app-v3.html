@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-no-flashout';
+const APP_BUILD = '2026-06-03-no-auto-recovery';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -9537,8 +9537,11 @@ function finishStudentLogin(s){
   }
   toast('歡迎回來，' + s.name + '！','success');
   go('checkin');
-  // 若已改過密碼但缺 email / 安全問題 → 延遲 1.5 秒提示設定 (一天內不重複)
-  setTimeout(()=> {
+  // ★ 拿掉自動彈出「設定基本資料」— 用戶反映「學生明明都註冊過 登入過 現在還要跳出」
+  //   原本: 缺 email/securityQ/A 就自動彈 (每天一次, 強制 modal 不能關)
+  //   現在: 完全不主動彈, 學生自己想設可從「👤 個人」頁面進去設
+  //   如果你想恢復 (例如想強制學生補完整資料), 把下面 commented 區塊解開即可
+  /* setTimeout(()=> {
     try {
       if(!s.email || !s.securityQ || !s.securityA){
         const LS_HINT = 'cms_v3_stu_recov_hint_' + s.id;
@@ -9548,7 +9551,7 @@ function finishStudentLogin(s){
         forceSetupStudentRecovery(s.id);
       }
     } catch(e){ _swallow('stu-recov-prompt', e); }
-  }, 1500);
+  }, 1500); */
   // ★ FIX: 自動補傳「本機 IDB 有但雲端沒有」的附件
   //   起因:學生在 Firebase 還沒設好時繳的作業, storage='idb' 只存學生本機
   //   現在 Firebase 同步好了 → 學生開系統時背景檢查 + 補傳到雲端
