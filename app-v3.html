@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-cloud-graveyard';
+const APP_BUILD = '2026-06-03-bugfix-sweep-2';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2349,22 +2349,35 @@ const Sync = (() => {
       const cloudG = await r.json();
       if(!cloudG) return;
       const localG = _graveyardLoad();
-      let added = 0;
+      const cutoff = Date.now() - _GRAVEYARD_TTL_MS;
+      let added = 0, expired = 0;
       Object.keys(cloudG).forEach(k => {
-        // k 是 node__id, 轉成本機格式 node::id
+        const ts = cloudG[k];
+        // ★ 過期的 (>7 天) 不要 merge — 用過去刪除的 id 可以重用
+        if(typeof ts === 'number' && ts < cutoff){
+          expired++;
+          // 順手清雲端過期的 (best effort)
+          try {
+            if(typeof fbWriteRest === 'function' && App.cfg?.roomCode){
+              fbWriteRest('_graveyard/' + k, null, 3000).catch(()=>{});
+            }
+          } catch(_){}
+          return;
+        }
+        // k 是 node__id (RTDB 路徑不能有冒號) → 轉成本機 node::id
         const idx = k.indexOf('__');
         if(idx < 0) return;
         const node = k.slice(0, idx);
         const id = k.slice(idx + 2);
         const localKey = node + '::' + id;
         if(!localG[localKey]){
-          localG[localKey] = cloudG[k];
+          localG[localKey] = ts;
           added++;
         }
       });
-      if(added > 0){
+      if(added > 0 || expired > 0){
         _graveyardSave(localG);
-        console.log('[graveyard] 從雲端拉了', added, '筆已刪標記');
+        console.log('[graveyard] 從雲端拉了', added, '筆已刪標記', expired ? '(清掉 ' + expired + ' 筆過期)' : '');
       }
     } catch(e){ console.warn('[graveyard pull]', e); }
   }
@@ -2488,6 +2501,12 @@ const Sync = (() => {
         if(!v) return;
         const id = v.id != null ? v.id : snap.key;
         if(_shouldIgnoreEcho(node, id)) return;
+        // ★ graveyard 也要擋 — 否則別人改了已死資料 → 復活在本機 (child_added 有擋, change 沒擋是 bug)
+        if(_isInGraveyard(node, id)){
+          console.log('[sync] child_changed 拒絕復活 ' + node + '/' + id);
+          try { App.fbRef.child(node).child(id).remove().catch(()=>{}); } catch(_){}
+          return;
+        }
         App.db[node] = App.db[node] || [];
         const idx = App.db[node].findIndex(x => x && (x.id == id));
         if(idx >= 0){
@@ -2689,13 +2708,17 @@ const Sync = (() => {
     if(!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     if(!data) throw new Error('雲端沒資料');
+    // ★ 拉雲端 graveyard 同步 — 避免下面 forceResync 把已死資料覆蓋回本機
+    try { await _pullCloudGraveyard(); } catch(_){}
     let cnt = 0;
     const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','timetable','teachers','groups','courses'];
     const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
     ARR_NODES.forEach(node => {
       if(data[node]){
         const v = data[node];
-        const arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+        let arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+        // ★ 過濾 graveyard 裡的 — 防雲端有舊資料 (其他裝置還沒刪) 蓋本機
+        arr = arr.filter(x => x && x.id && !_isInGraveyard(node, x.id));
         App.db[node] = arr;
         cnt++;
       }
@@ -2903,7 +2926,9 @@ const Sync = (() => {
       }
     });
   } catch(_){_swallow('sync-beforeunload',_)}
-  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync, forceResyncFromCloud, pushLocalUnsynced: _pushLocalUnsynced, countUnsyncedFor: _countUnsyncedFor };
+  // ★ 把 _markEcho 暴露出去, 讓 fbWriteRow / fbWriteRest 也能標 echo
+  if(typeof window !== 'undefined') window._markEcho = _markEcho;
+  return { init, push, setNode, setMap, setRow, removeRow, remove, detachAll, _flushSync, forceResyncFromCloud, pushLocalUnsynced: _pushLocalUnsynced, countUnsyncedFor: _countUnsyncedFor, _markEcho };
 })();
 
 /* ════════════════════════════════════════════════════════════
@@ -19208,8 +19233,8 @@ function openSubmissionGrade(sub, list=null, idx=0){
     toast('已儲存批改','success');
     m.close();
     if(advance && list && list.length){
-      // find next pending
-      const after = list.slice(idx+1).find(x => typeof x.score !== 'number');
+      // find next pending — 排除已退回 (score=null 是 'object' 不是 'number', 但 returned 仍要排掉)
+      const after = list.slice(idx+1).find(x => typeof x.score !== 'number' && !x.returned);
       if(after){
         setTimeout(()=> openSubmissionGrade(after, list, list.indexOf(after)), 200);
       } else {
@@ -19719,6 +19744,14 @@ async function fbWriteRest(nodePath, rec, timeoutMs){
 //   SDK 寫得進去就快; SDK 卡死/失敗就 REST 救
 async function fbWriteRow(nodePath, recId, rec){
   let sdkErr = '';
+  // ★ 修「自寫自收」雙重渲染: 寫之前先 markEcho, 自己 listener 收到就會跳過
+  try {
+    if(typeof window !== 'undefined' && window._markEcho){
+      window._markEcho(nodePath, recId);
+    } else if(typeof Sync !== 'undefined' && Sync._markEcho){
+      Sync._markEcho(nodePath, recId);
+    }
+  } catch(_){}
   // 1. SDK 5 秒
   if(App.fbRef){
     try {
@@ -25040,7 +25073,10 @@ function rSAsgnDetailV2(content, asg, me){
     ));
   }
 
-  const existing = App.db.submissions.find(s => s.studentId === me.id && s.assignmentId === asg.id);
+  // ★ 修「同學生同作業有多筆繳交」時抓錯版本 — 取最新一筆 (ts 最大)
+  const existing = (App.db.submissions||[])
+    .filter(s => s && s.studentId === me.id && s.assignmentId === asg.id)
+    .sort((a,b) => (b.ts||0) - (a.ts||0))[0];
 
   // 老師退回 → 顯眼提示學生重做
   if(existing && existing.returned){
@@ -25087,7 +25123,8 @@ function rSAsgnDetailV2(content, asg, me){
     }
     // preview + edit/withdraw before due
     content.appendChild(submissionPreview(existing));
-    if(!overdue){
+    // ★ 修「退回+逾期 學生死局」: 即使逾期, 老師退回的 學生仍能修改重交 (老師說了算)
+    if(!overdue || existing.returned){
       content.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'10px'} },
         el('button', { class:'btn btn-sm btn-primary', onclick:()=> { App._editSub = existing.id; rerender(); } },
           existing.returned ? '✏️ 修改重交' : '✏️ 修改繳交'),
