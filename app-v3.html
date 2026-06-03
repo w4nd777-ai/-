@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-attach-rest-read';
+const APP_BUILD = '2026-06-03-returned-state-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -18176,13 +18176,27 @@ function rSub(content){
         if(Array.isArray(s.attaches)) s.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
         // ★ FEATURE #5: 加進資源回收桶
         try { trashAdd('submission', backup); } catch(_){}
+        // ★ 進 graveyard 防 listener 復活
+        try { if(typeof _addToGraveyard === 'function') _addToGraveyard('submissions', s.id); } catch(_){}
         App.db.submissions = App.db.submissions.filter(x => x.id !== s.id);
         saveDB();
+        // ★ REST DELETE — SDK 卡死時雲端刪不掉, 一直復活
+        try {
+          if(typeof fbWriteRest === 'function'){
+            fbWriteRest('submissions/' + s.id, null, 8000).catch(()=>{});
+          }
+        } catch(_){}
         try { Sync.removeRow('submissions', s.id); } catch(_){ Sync.setMap('submissions', App.db.submissions); }
         bcNotify();
         pushUndo('已刪除繳交', () => {
           if(!App.db.submissions.find(x => x.id === backup.id)) App.db.submissions.push(backup);
-          saveDB(); try { Sync.setRow('submissions', backup.id, backup); } catch(_){ Sync.setMap('submissions', App.db.submissions); } bcNotify();
+          saveDB();
+          if(typeof fbWriteRow === 'function'){
+            fbWriteRow('submissions', backup.id, JSON.parse(JSON.stringify(backup))).catch(()=>{
+              try { Sync.setRow('submissions', backup.id, backup); } catch(_){}
+            });
+          } else { try { Sync.setRow('submissions', backup.id, backup); } catch(_){} }
+          bcNotify();
           toast('已復原','success'); rerender();
         });
         setTimeout(() => {
@@ -19226,8 +19240,16 @@ function openSubmissionGrade(sub, list=null, idx=0){
     if(Array.isArray(sub.attaches)){
       sub.attaches.forEach(a => { if(a && a.key) keysToFree.push(a.key); });
     }
+    // ★ 進 graveyard 防 listener 復活
+    try { if(typeof _addToGraveyard === 'function') _addToGraveyard('submissions', sub.id); } catch(_){}
     App.db.submissions = App.db.submissions.filter(x => x.id !== sub.id);
     saveDB();
+    // ★ REST DELETE 直接打雲端
+    try {
+      if(typeof fbWriteRest === 'function'){
+        fbWriteRest('submissions/' + sub.id, null, 8000).catch(()=>{});
+      }
+    } catch(_){}
     try { Sync.removeRow('submissions', sub.id); } catch(_){ Sync.setMap('submissions', App.db.submissions); }
     bcNotify();
     m.close();
@@ -24990,21 +25012,38 @@ function rSAsgnDetailV2(content, asg, me){
 
   // submitted, awaiting grade
   if(existing){
-    content.appendChild(el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'10px'} },
-      el('h3', null, '⌛ 已繳交，等待批改'),
-      el('div', { class:'small muted', style:{marginTop:'4px'} }, '繳交於 ' + relTime(existing.ts||0))
-    ));
+    // ★ 修「退回後狀態錯」: 退回的繳交不顯示「已繳交等待批改」label, 只顯示退回 card 跟修改/刪除按鈕
+    if(!existing.returned){
+      content.appendChild(el('div', { class:'card', style:{borderColor:'var(--warn)',background:'var(--warn-soft)',marginBottom:'10px'} },
+        el('h3', null, '⌛ 已繳交，等待批改'),
+        el('div', { class:'small muted', style:{marginTop:'4px'} }, '繳交於 ' + relTime(existing.ts||0))
+      ));
+    }
     // preview + edit/withdraw before due
     content.appendChild(submissionPreview(existing));
     if(!overdue){
       content.appendChild(el('div', { class:'flex', style:{flexWrap:'wrap',gap:'8px',marginTop:'10px'} },
-        el('button', { class:'btn btn-sm', onclick:()=> { App._editSub = existing.id; rerender(); } }, '✏️ 修改繳交'),
+        el('button', { class:'btn btn-sm btn-primary', onclick:()=> { App._editSub = existing.id; rerender(); } },
+          existing.returned ? '✏️ 修改重交' : '✏️ 修改繳交'),
         el('button', { class:'btn btn-sm btn-danger', onclick: async ()=> {
           const ok = await confirmDlg('要刪除這次繳交以重新提交嗎？', { danger:true });
           if(!ok) return;
-          App.db.submissions = App.db.submissions.filter(x => x.id !== existing.id);
+          const subId = existing.id;
+          App.db.submissions = App.db.submissions.filter(x => x.id !== subId);
           logOp('submit','刪除繳交：' + asg.title);
-          saveDB(); try { Sync.removeRow('submissions', existing.id); } catch(_){ Sync.setMap('submissions', App.db.submissions); } bcNotify();
+          // ★ 進 graveyard (7 天防 listener 復活)
+          try { if(typeof _addToGraveyard === 'function') _addToGraveyard('submissions', subId); } catch(_){}
+          saveDB();
+          // ★ REST DELETE 直接打雲端 (SDK 不穩 → 刪不掉 → 復活)
+          try {
+            if(typeof fbWriteRest === 'function'){
+              await fbWriteRest('submissions/' + subId, null, 8000);
+            }
+          } catch(restErr){
+            console.warn('[del-submission REST 失敗]', restErr.message);
+          }
+          try { Sync.removeRow('submissions', subId); } catch(_){ try { Sync.setMap('submissions', App.db.submissions); } catch(__){} }
+          bcNotify();
           toast('已刪除','warn'); rerender();
         }}, '🗑 刪除繳交')
       ));
@@ -25138,8 +25177,33 @@ function buildSubmissionForm(asg, me, existing){
         existing.attaches = attaches.slice();
         existing.attach = attaches[0] || null;
         existing.ts = Date.now();
+        // ★ 修「退回後修改繳交還是紅色」: 清掉退回 / 批改相關欄位
+        //   學生重新交了, 等同重新等批改
+        if(existing.returned){
+          existing.returned = false;
+          delete existing.returnedAt;
+          delete existing.returnedBy;
+          delete existing.returnReason;
+          // 之前已退回時 score 已被清, 這裡不再動
+        }
+        // 如果是「已批改但學生又改了」(不常見, 但保險起見), 也清掉分數讓老師重評
+        if(typeof existing.score === 'number' && !existing._isResubmitAfterReturn){
+          delete existing.score;
+          delete existing.gradedAt;
+          delete existing.gradedBy;
+          delete existing.comment;
+        }
         logOp('submit','修改繳交：' + asg.title);
-        saveDB(); Sync.push('submissions', existing); bcNotify();
+        saveDB();
+        // ★ REST fallback (避免 SDK 卡住, 雲端維持舊狀態)
+        if(typeof fbWriteRow === 'function'){
+          fbWriteRow('submissions', existing.id, JSON.parse(JSON.stringify(existing))).catch(()=>{
+            try { Sync.push('submissions', existing); } catch(_){}
+          });
+        } else {
+          try { Sync.push('submissions', existing); } catch(_){}
+        }
+        bcNotify();
         toast('已更新','success');
         App._editSub = null;
         rerender();
