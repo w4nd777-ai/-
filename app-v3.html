@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-returned-state-fix';
+const APP_BUILD = '2026-06-03-cloud-graveyard';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2231,9 +2231,11 @@ const Sync = (() => {
       // ★ Step 3: 接 realtime listener,之後的變動即時推
       if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
       try { attachListeners(); } catch(e){ console.warn('[firebase] attachListeners failed:', e); }
-      // ★ Step 4: 推本機累積的「未同步」項目到雲端
+      // ★ Step 4: 先拉雲端 graveyard 到本機 (防別的裝置刪掉的東西本機又推回去)
+      try { setTimeout(()=> _pullCloudGraveyard().catch(()=>{}), 500); } catch(_){}
+      // ★ Step 5: 推本機累積的「未同步」項目到雲端
       //   情境:之前 Sync 未啟用時 (例如手機 SW 舊版) 學生註冊/繳交存了本機
-      //   現在 Sync 啟用後,把本機這些補推到雲端
+      //   現在 Sync 啟用後,把本機這些補推到雲端 (先拉 graveyard, 避免推刪掉的)
       try { setTimeout(()=> _pushLocalUnsynced().catch(()=>{}), 1500); } catch(_){}
       // ★ 多次補推 — 用戶反映「老師發布的公告學生看不到」很多次
       //   1.5 秒可能 listener 還沒接好, 10 / 30 / 60 秒再各跑一次保險
@@ -2303,8 +2305,17 @@ const Sync = (() => {
   function _addToGraveyard(node, id){
     if(!node || !id) return;
     const g = _graveyardLoad();
-    g[node + '::' + id] = Date.now();
+    const now = Date.now();
+    g[node + '::' + id] = now;
     _graveyardSave(g);
+    // ★ 同時寫到雲端 graveyard (跨裝置防復活)
+    //   key 用 node__id 不用 ::, RTDB 路徑不能有冒號
+    try {
+      if(typeof fbWriteRest === 'function' && App.cfg && App.cfg.roomCode){
+        const cloudKey = node + '__' + id;
+        fbWriteRest('_graveyard/' + cloudKey, now, 5000).catch(()=>{});
+      }
+    } catch(_){}
   }
   function _isInGraveyard(node, id){
     if(!node || !id) return false;
@@ -2318,6 +2329,46 @@ const Sync = (() => {
     }
     return true;
   }
+
+  // ★ 從雲端 graveyard 同步本機 (Sync.init 跟 forceResync 時呼叫)
+  async function _pullCloudGraveyard(){
+    try {
+      if(!window.firebase || !firebase.database || !App.cfg?.roomCode) return;
+      const dbUrl = firebase.database().app.options.databaseURL;
+      if(!dbUrl) return;
+      let token = '';
+      try {
+        if(firebase.auth){
+          if(!firebase.auth().currentUser) await firebase.auth().signInAnonymously();
+          if(firebase.auth().currentUser) token = await firebase.auth().currentUser.getIdToken();
+        }
+      } catch(_){}
+      const url = dbUrl.replace(/\/$/, '') + '/cms-v3/' + App.cfg.roomCode + '/_graveyard.json' + (token ? '?auth=' + token : '');
+      const r = await fetch(url, { cache:'no-store' });
+      if(!r.ok) return;
+      const cloudG = await r.json();
+      if(!cloudG) return;
+      const localG = _graveyardLoad();
+      let added = 0;
+      Object.keys(cloudG).forEach(k => {
+        // k 是 node__id, 轉成本機格式 node::id
+        const idx = k.indexOf('__');
+        if(idx < 0) return;
+        const node = k.slice(0, idx);
+        const id = k.slice(idx + 2);
+        const localKey = node + '::' + id;
+        if(!localG[localKey]){
+          localG[localKey] = cloudG[k];
+          added++;
+        }
+      });
+      if(added > 0){
+        _graveyardSave(localG);
+        console.log('[graveyard] 從雲端拉了', added, '筆已刪標記');
+      }
+    } catch(e){ console.warn('[graveyard pull]', e); }
+  }
+  if(typeof window !== 'undefined') window._pullCloudGraveyard = _pullCloudGraveyard;
   // 把它暴露出去, 讓 trashAdd / 各 delete callsite 用
   if(typeof window !== 'undefined'){
     window._addToGraveyard = _addToGraveyard;
@@ -2554,6 +2605,21 @@ const Sync = (() => {
         for(const rec of local){
           if(!rec || !rec.id) continue;
           if(cloudIds.has(String(rec.id))) continue;
+          // ★ 修「刪掉的資料又出現」: graveyard 裡的不要推回去, 而且從本機刪掉
+          //   情境: 老師在 tab A 刪了, graveyard 加, REST DELETE
+          //         tab B (另一裝置/分頁) 還有舊資料, _pushLocalUnsynced 把它推回雲端 → 復活
+          //   修: 跨裝置同步 graveyard 不容易, 但本機檢查仍能擋同瀏覽器多分頁
+          //       對跨裝置, 雲端 listener 的 child_added 那邊的 graveyard 拒絕仍會擋
+          if(typeof _isInGraveyard === 'function' && _isInGraveyard(node, rec.id)){
+            // 從本機 array 移除這筆 (下次 saveDB 寫進去)
+            const arr = App.db[node];
+            if(Array.isArray(arr)){
+              const idx = arr.findIndex(x => x && x.id === rec.id);
+              if(idx >= 0){ arr.splice(idx, 1); }
+            }
+            console.log('[push-unsynced] graveyard 擋下推送 + 從本機清除:', node, rec.id);
+            continue;
+          }
           try { _markEcho && _markEcho(node, rec.id); } catch(_){}
           // ★ 用 SDK 5 秒 + REST 10 秒 fallback (跟公告/作業一樣)
           const clean = JSON.parse(JSON.stringify(rec));
