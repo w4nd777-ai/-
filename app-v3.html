@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-no-auto-recovery';
+const APP_BUILD = '2026-06-03-avatar-fullname';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -546,7 +546,10 @@ function hash(str){
 }
 function initials(name){
   if(!name) return '?';
-  return name.trim().slice(0,2);
+  const n = name.trim();
+  // ★ 用戶要求: 學生頭貼顯示全名 (不再只切前 2 字)
+  //   配合 CSS 字體會自動縮小, 3-4 字全顯, 5+ 字只顯前 4 字避免溢出
+  return n.length <= 4 ? n : n.slice(0, 4);
 }
 
 // ★ 全站班級列表 — 從學生 / pending / 作業派發對象 三個來源 union 出來

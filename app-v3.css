@@ -517,6 +517,10 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   background:var(--primary-soft); color:var(--primary);
   display:flex; align-items:center; justify-content:center;
   font-weight:700; flex-shrink:0;
+  /* ★ 顯示全名: 字小一點 + letter-spacing 緊 + 自動換行避免溢出 */
+  font-size:11px; letter-spacing:-0.5px; line-height:1.1;
+  text-align:center; word-break:break-all; padding:1px;
+  overflow:hidden;
 }
 .list-row .info{ flex:1; min-width:0; }
 .list-row .info .name{ font-weight:600; }
@@ -839,7 +843,7 @@ h1{ font-size:24px; } h2{ font-size:20px; } h3{ font-size:16px; } h4{ font-size:
   border-radius:var(--r-md); padding:12px; margin-bottom:8px;
 }
 .feed-msg .who{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-.feed-msg .who .avatar{ width:28px; height:28px; font-size:12px; }
+.feed-msg .who .avatar{ width:28px; height:28px; font-size:9px; letter-spacing:-0.5px; line-height:1.05; padding:1px; word-break:break-all; text-align:center; }
 .feed-msg .text{ font-size:14px; white-space:pre-wrap; word-break:break-word; }
 .feed-msg .when{ font-size:11px; color:var(--text-muted); margin-top:4px; }
 
