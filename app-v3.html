@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-avatar-fullname';
+const APP_BUILD = '2026-06-03-3-bugs-fix';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2716,14 +2716,27 @@ const Sync = (() => {
     let cnt = 0;
     const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','timetable','teachers','groups','courses'];
     const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
+    // ★ 修「學生交了又消失」: 改成 MERGE 不是 REPLACE
+    //   原本: App.db[node] = arr (雲端直接蓋本機)
+    //   問題: 剛交完的 (REST 還在飛) 沒進雲端 → 被舊雲端版本蓋掉 → 像沒交
+    //   現在: 用 cloud 蓋已有的 id; 本機獨有的 (in-flight) 保留; graveyard 的丟掉
     ARR_NODES.forEach(node => {
       if(data[node]){
         const v = data[node];
-        let arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
-        // ★ 過濾 graveyard 裡的 — 防雲端有舊資料 (其他裝置還沒刪) 蓋本機
-        arr = arr.filter(x => x && x.id && !_isInGraveyard(node, x.id));
-        App.db[node] = arr;
+        let cloudArr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+        cloudArr = cloudArr.filter(x => x && x.id && !_isInGraveyard(node, x.id));
+        const localArr = Array.isArray(App.db[node]) ? App.db[node].filter(Boolean) : [];
+        const cloudIds = new Set(cloudArr.map(x => String(x.id)));
+        // 本機獨有的 (in-flight / 還沒推上雲) 保留 — 但 graveyard 的丟掉
+        const localOnly = localArr.filter(x =>
+          x && x.id && !cloudIds.has(String(x.id)) && !_isInGraveyard(node, x.id)
+        );
+        // 雲端的 + 本機獨有的 (本機剛 push 還沒上雲的)
+        App.db[node] = cloudArr.concat(localOnly);
         cnt++;
+        if(localOnly.length > 0){
+          console.log('[forceResync]', node, '本機獨有', localOnly.length, '筆保留');
+        }
       }
     });
     OBJ_NODES.forEach(node => {
@@ -6980,12 +6993,18 @@ async function _emailSignInTeacherWith(email, password, remember){
   try {
     let userCred;
     try {
-      userCred = await firebase.auth().signInWithEmailAndPassword(email, password);
+      // ★ 加 15 秒 timeout — 修「手機按登入沒反應」(Firebase Auth API 在弱網路會 hang)
+      userCred = await Promise.race([
+        firebase.auth().signInWithEmailAndPassword(email, password),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('登入請求超時 (15 秒) — 請檢查網路')), 15000))
+      ]);
     } catch(e){
       if(e.code === 'auth/user-not-found' || e.code === 'auth/invalid-login-credentials' || e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password'){
         try { toast('帳號或密碼錯誤。沒帳號請到登入畫面點「申請註冊」', 'danger', 5000); } catch(_){}
       } else if(e.code === 'auth/operation-not-allowed'){
         try { toast('管理員尚未在 Firebase Console 啟用 Email/Password 登入', 'danger', 6000); } catch(_){}
+      } else if(String(e.message||'').includes('超時')){
+        try { toast('⚠️ ' + e.message + '\n請確認網路通暢後再試', 'danger', 8000); } catch(_){}
       } else {
         try { toast('登入失敗: ' + (e.message || e.code), 'danger', 6000); } catch(_){}
       }
