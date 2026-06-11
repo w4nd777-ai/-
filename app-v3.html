@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-3-bugs-fix';
+const APP_BUILD = '2026-06-03-graveyard-whitelist';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2305,8 +2305,20 @@ const Sync = (() => {
       localStorage.setItem(LS_KEY + '_graveyard', JSON.stringify(g));
     } catch(_){}
   }
+  // ★ graveyard 只擋這幾類 (append-only / 不會再生): 繳交/訊息/評價/行為/通知/出席/請假
+  //   ✗ 不擋 students / accounts / assignments — 這些是老師管理的, 重新建立會被誤殺
+  //     (如果有刪掉再建同 id 的需求, 比如換裝置, 不能因為以前刪過就擋掉)
+  const _GRAVEYARD_NODES = new Set([
+    'submissions','messages','evals','behavior','notifications',
+    'attendance','leaves','quizSubmissions','peerEvals','selfEvals','feedbacks'
+  ]);
   function _addToGraveyard(node, id){
     if(!node || !id) return;
+    // ★ 不在白名單就不寫 graveyard
+    if(!_GRAVEYARD_NODES.has(node)){
+      console.log('[graveyard] 跳過', node, '— 此 node 不啟用 graveyard');
+      return;
+    }
     const g = _graveyardLoad();
     const now = Date.now();
     g[node + '::' + id] = now;
@@ -2322,6 +2334,9 @@ const Sync = (() => {
   }
   function _isInGraveyard(node, id){
     if(!node || !id) return false;
+    // ★ 白名單外的 node 永遠不在 graveyard (保護 students/accounts/assignments)
+    //   舊版本誤寫的 graveyard entry 也直接忽略
+    if(!_GRAVEYARD_NODES.has(node)) return false;
     const g = _graveyardLoad();
     const ts = g[node + '::' + id];
     if(!ts) return false;
@@ -2353,13 +2368,12 @@ const Sync = (() => {
       if(!cloudG) return;
       const localG = _graveyardLoad();
       const cutoff = Date.now() - _GRAVEYARD_TTL_MS;
-      let added = 0, expired = 0;
+      let added = 0, expired = 0, skipped = 0;
       Object.keys(cloudG).forEach(k => {
         const ts = cloudG[k];
         // ★ 過期的 (>7 天) 不要 merge — 用過去刪除的 id 可以重用
         if(typeof ts === 'number' && ts < cutoff){
           expired++;
-          // 順手清雲端過期的 (best effort)
           try {
             if(typeof fbWriteRest === 'function' && App.cfg?.roomCode){
               fbWriteRest('_graveyard/' + k, null, 3000).catch(()=>{});
@@ -2367,20 +2381,45 @@ const Sync = (() => {
           } catch(_){}
           return;
         }
-        // k 是 node__id (RTDB 路徑不能有冒號) → 轉成本機 node::id
+        // k 是 node__id → 轉成本機 node::id
         const idx = k.indexOf('__');
         if(idx < 0) return;
         const node = k.slice(0, idx);
         const id = k.slice(idx + 2);
+        // ★ 白名單外的 node (students/accounts/assignments) 直接忽略 + 從雲端清掉
+        //   (修舊版誤把 students/accounts 加進 graveyard 的問題)
+        if(!_GRAVEYARD_NODES.has(node)){
+          skipped++;
+          try {
+            if(typeof fbWriteRest === 'function' && App.cfg?.roomCode){
+              fbWriteRest('_graveyard/' + k, null, 3000).catch(()=>{});
+            }
+          } catch(_){}
+          return;
+        }
         const localKey = node + '::' + id;
         if(!localG[localKey]){
           localG[localKey] = ts;
           added++;
         }
       });
-      if(added > 0 || expired > 0){
+      // 也清本機 graveyard 中誤殺的白名單外 entries
+      let localCleaned = 0;
+      Object.keys(localG).forEach(localKey => {
+        const idx = localKey.indexOf('::');
+        if(idx < 0) return;
+        const node = localKey.slice(0, idx);
+        if(!_GRAVEYARD_NODES.has(node)){
+          delete localG[localKey];
+          localCleaned++;
+        }
+      });
+      if(added > 0 || expired > 0 || skipped > 0 || localCleaned > 0){
         _graveyardSave(localG);
-        console.log('[graveyard] 從雲端拉了', added, '筆已刪標記', expired ? '(清掉 ' + expired + ' 筆過期)' : '');
+        console.log('[graveyard] 從雲端拉了', added, '筆',
+          expired ? '(清掉雲端 ' + expired + ' 筆過期)' : '',
+          skipped ? '(忽略 ' + skipped + ' 筆白名單外)' : '',
+          localCleaned ? '(清本機 ' + localCleaned + ' 筆誤殺)' : '');
       }
     } catch(e){ console.warn('[graveyard pull]', e); }
   }
