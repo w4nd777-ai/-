@@ -117,7 +117,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-graveyard-whitelist';
+const APP_BUILD = '2026-06-03-4-deep-fixes';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -2543,7 +2543,6 @@ const Sync = (() => {
         if(!v) return;
         const id = v.id != null ? v.id : snap.key;
         if(_shouldIgnoreEcho(node, id)) return;
-        // ★ graveyard 也要擋 — 否則別人改了已死資料 → 復活在本機 (child_added 有擋, change 沒擋是 bug)
         if(_isInGraveyard(node, id)){
           console.log('[sync] child_changed 拒絕復活 ' + node + '/' + id);
           try { App.fbRef.child(node).child(id).remove().catch(()=>{}); } catch(_){}
@@ -2552,6 +2551,14 @@ const Sync = (() => {
         App.db[node] = App.db[node] || [];
         const idx = App.db[node].findIndex(x => x && (x.id == id));
         if(idx >= 0){
+          // ★ 比 ts — 本機較新就跳過, 別讓舊雲端蓋我剛改的
+          const localRow = App.db[node][idx];
+          const localTs = Number((localRow && (localRow.updatedAt || localRow.ts || localRow.gradedAt || localRow.returnedAt)) || 0);
+          const cloudTs = Number((v.updatedAt || v.ts || v.gradedAt || v.returnedAt) || 0);
+          if(localTs > cloudTs){
+            console.log('[sync] child_changed 跳過 — 本機較新', node, id);
+            return;
+          }
           App.db[node][idx] = v;
         } else {
           App.db[node].push(v);
@@ -2755,26 +2762,51 @@ const Sync = (() => {
     let cnt = 0;
     const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','timetable','teachers','groups','courses'];
     const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
-    // ★ 修「學生交了又消失」: 改成 MERGE 不是 REPLACE
-    //   原本: App.db[node] = arr (雲端直接蓋本機)
-    //   問題: 剛交完的 (REST 還在飛) 沒進雲端 → 被舊雲端版本蓋掉 → 像沒交
-    //   現在: 用 cloud 蓋已有的 id; 本機獨有的 (in-flight) 保留; graveyard 的丟掉
+    // ★ 修「同步打架」: MERGE 用 ts 比較, 最新一筆贏
+    //   - 雲端 + 本機 都有 → 比 ts (updatedAt / ts / gradedAt), 新的贏
+    //   - 雲端獨有 → 採用雲端
+    //   - 本機獨有 → 保留 (in-flight 寫入)
+    //   - graveyard 的不要
+    function _rowTs(rec){
+      if(!rec) return 0;
+      return Number(rec.updatedAt || rec.ts || rec.gradedAt || rec.returnedAt || 0);
+    }
     ARR_NODES.forEach(node => {
       if(data[node]){
         const v = data[node];
         let cloudArr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
         cloudArr = cloudArr.filter(x => x && x.id && !_isInGraveyard(node, x.id));
         const localArr = Array.isArray(App.db[node]) ? App.db[node].filter(Boolean) : [];
-        const cloudIds = new Set(cloudArr.map(x => String(x.id)));
-        // 本機獨有的 (in-flight / 還沒推上雲) 保留 — 但 graveyard 的丟掉
-        const localOnly = localArr.filter(x =>
-          x && x.id && !cloudIds.has(String(x.id)) && !_isInGraveyard(node, x.id)
-        );
-        // 雲端的 + 本機獨有的 (本機剛 push 還沒上雲的)
-        App.db[node] = cloudArr.concat(localOnly);
+        // 用 id 建索引 (本機 + 雲端), 比 ts 取最新
+        const merged = new Map();  // id → row
+        let kept = 0, overrode = 0, localWon = 0;
+        cloudArr.forEach(r => { if(r && r.id) merged.set(String(r.id), r); });
+        localArr.forEach(r => {
+          if(!r || !r.id) return;
+          if(_isInGraveyard(node, r.id)) return;
+          const key = String(r.id);
+          const cloudRow = merged.get(key);
+          if(!cloudRow){
+            // 本機獨有 (in-flight)
+            merged.set(key, r);
+            kept++;
+          } else {
+            // 雲端跟本機都有 — 比 ts
+            const cTs = _rowTs(cloudRow);
+            const lTs = _rowTs(r);
+            if(lTs > cTs){
+              // 本機較新, 不要被雲端蓋
+              merged.set(key, r);
+              localWon++;
+            } else {
+              overrode++;
+            }
+          }
+        });
+        App.db[node] = Array.from(merged.values());
         cnt++;
-        if(localOnly.length > 0){
-          console.log('[forceResync]', node, '本機獨有', localOnly.length, '筆保留');
+        if(kept > 0 || localWon > 0){
+          console.log('[forceResync]', node, '本機獨有保留', kept, ', 本機較新贏', localWon);
         }
       }
     });
@@ -3231,23 +3263,34 @@ function initBC(){
       const msg = e.data;
       if(!msg) return;
       if(msg.type === 'db-update'){
-        loadDB();
-        // 🔧 修並發登入問題:用戶正在打密碼/帳號時,別的 tab/裝置寫入會打斷
+        // ★ 修「正在編輯時被別 tab 蓋掉」: loadDB 也要打字保護
+        //   原本 loadDB 永遠先跑, 把 App.db 整個換掉 → 本機正在編輯的東西消失
+        //   現在: 打字 / modal 開著時也延後 loadDB
         try {
           const a = document.activeElement;
           const isTyping = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
-          // 還沒登入 + 在打字 → 延後 1.5 秒;若還在打字繼續延後
-          if(!App.session && isTyping){
+          const modalOpen = !!document.querySelector('#modal-host .modal, .modal-host > .modal');
+          if(isTyping || modalOpen){
+            console.log('[bc] 編輯中 (modal=' + modalOpen + ', typing=' + isTyping + '), 延後 loadDB+rerender');
             if(App._bcTypingTimer){ clearTimeout(App._bcTypingTimer); }
             App._bcTypingTimer = setTimeout(()=> {
               App._bcTypingTimer = null;
               const a2 = document.activeElement;
-              const stillTyping = a2 && (a2.tagName === 'INPUT' || a2.tagName === 'TEXTAREA');
-              if(!stillTyping) rerender();
+              const stillTyping = a2 && (a2.tagName === 'INPUT' || a2.tagName === 'TEXTAREA' || a2.isContentEditable);
+              const stillModal = !!document.querySelector('#modal-host .modal, .modal-host > .modal');
+              if(!stillTyping && !stillModal){
+                loadDB();
+                rerender();
+              } else {
+                console.log('[bc] 還在編輯, 再延後');
+                // 設一個更短的重排, 直到使用者放手
+                App._bcTypingTimer = setTimeout(()=> { App._bcTypingTimer = null; loadDB(); rerender(); }, 2000);
+              }
             }, 1500);
             return;
           }
-          // 還沒登入 + 沒在打字 → 第一次允許, 之後跳過
+          // 沒在編輯 → 安全 loadDB + rerender
+          loadDB();
           if(!App.session){
             if(!App._loginInitialRerenderDone){
               App._loginInitialRerenderDone = true;
@@ -3255,17 +3298,8 @@ function initBC(){
             }
             return;
           }
-          // 已登入 + 在打字 → 也延後
-          if(isTyping){
-            if(App._bcTypingTimer){ clearTimeout(App._bcTypingTimer); }
-            App._bcTypingTimer = setTimeout(()=> {
-              App._bcTypingTimer = null;
-              rerender();
-            }, 1500);
-            return;
-          }
-        } catch(_){}
-        rerender();
+          rerender();
+        } catch(_){ try { loadDB(); rerender(); } catch(__){} }
       }
     };
   } catch(e){ App.bc = null; }
@@ -25334,74 +25368,85 @@ function buildSubmissionForm(asg, me, existing){
   refresh();
 
   card.appendChild(el('div', { class:'flex', style:{marginTop:'10px',gap:'8px'} },
-    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick:()=> {
-      const txt = iT.value.trim();
-      const lnk = iL.value.trim();
-      if(!txt && !lnk && !attaches.length) return toast('至少填一項內容','danger');
-      if(existing){
-        // update
-        existing.text = txt; existing.link = lnk;
-        existing.attaches = attaches.slice();
-        existing.attach = attaches[0] || null;
-        existing.ts = Date.now();
-        // ★ 修「退回後修改繳交還是紅色」: 清掉退回 / 批改相關欄位
-        //   學生重新交了, 等同重新等批改
-        if(existing.returned){
-          existing.returned = false;
-          delete existing.returnedAt;
-          delete existing.returnedBy;
-          delete existing.returnReason;
-          // 之前已退回時 score 已被清, 這裡不再動
+    el('button', { class:'btn btn-primary', style:{flex:'1'}, onclick: async (ev)=> {
+      // ★ 防雙擊 + try/catch/finally + 安全 timer (跟公告/作業 save 一致)
+      const btn = ev.currentTarget;
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '送出中...';
+      const safety = setTimeout(()=> {
+        try { btn.disabled = false; btn.textContent = origText; } catch(_){}
+        try { toast('⚠️ 雲端寫入太久 — 已存本機, 等同步', 'warn', 8000); } catch(_){}
+      }, 15000);
+      try {
+        const txt = iT.value.trim();
+        const lnk = iL.value.trim();
+        if(!txt && !lnk && !attaches.length){ toast('至少填一項內容','danger'); return; }
+        if(existing){
+          // update
+          existing.text = txt; existing.link = lnk;
+          existing.attaches = attaches.slice();
+          existing.attach = attaches[0] || null;
+          existing.ts = Date.now();
+          if(existing.returned){
+            existing.returned = false;
+            delete existing.returnedAt;
+            delete existing.returnedBy;
+            delete existing.returnReason;
+          }
+          if(typeof existing.score === 'number' && !existing._isResubmitAfterReturn){
+            delete existing.score;
+            delete existing.gradedAt;
+            delete existing.gradedBy;
+            delete existing.comment;
+          }
+          logOp('submit','修改繳交：' + asg.title);
+          saveDB();
+          // ★ AWAIT — 等 fbWriteRow 完成才告訴使用者成功
+          let writeOk = false, method = '';
+          if(typeof fbWriteRow === 'function'){
+            const r = await fbWriteRow('submissions', existing.id, JSON.parse(JSON.stringify(existing)));
+            writeOk = r.ok; method = r.method || '';
+          } else {
+            try { Sync.push('submissions', existing); writeOk = true; } catch(_){}
+          }
+          bcNotify();
+          toast(writeOk ? '✅ 已更新 (' + method + ')' : '⚠️ 已存本機, 等同步', writeOk?'success':'warn', 4000);
+          App._editSub = null;
+          return;
         }
-        // 如果是「已批改但學生又改了」(不常見, 但保險起見), 也清掉分數讓老師重評
-        if(typeof existing.score === 'number' && !existing._isResubmitAfterReturn){
-          delete existing.score;
-          delete existing.gradedAt;
-          delete existing.gradedBy;
-          delete existing.comment;
-        }
-        logOp('submit','修改繳交：' + asg.title);
+        const rec = {
+          id: nid(), assignmentId: asg.id,
+          studentId: me.id, studentName: me.name,
+          text: txt, link: lnk,
+          attaches: attaches.slice(),
+          attach: attaches[0] || null,
+          ts: Date.now()
+        };
+        App.db.submissions.push(rec);
+        logOp('submit','繳交：' + asg.title);
         saveDB();
-        // ★ REST fallback (避免 SDK 卡住, 雲端維持舊狀態)
+        // ★ AWAIT — 等 fbWriteRow 完成才告訴使用者成功 (修「明明繳了又消失」)
+        let writeOk = false, method = '';
         if(typeof fbWriteRow === 'function'){
-          fbWriteRow('submissions', existing.id, JSON.parse(JSON.stringify(existing))).catch(()=>{
-            try { Sync.push('submissions', existing); } catch(_){}
-          });
+          const r = await fbWriteRow('submissions', rec.id, JSON.parse(JSON.stringify(rec)));
+          writeOk = r.ok; method = r.method || '';
         } else {
-          try { Sync.push('submissions', existing); } catch(_){}
+          try { Sync.push('submissions', rec); writeOk = true; } catch(_){}
         }
         bcNotify();
-        toast('已更新','success');
-        App._editSub = null;
-        rerender();
-        return;
+        clearDraft('submit_' + (me?.id || 'x') + '_' + asg.id);
+        toast(writeOk ? '✅ 已繳交 (' + method + ')' : '⚠️ 已存本機, 等同步', writeOk?'success':'warn', 4000);
+        try { checkAndAwardBadges(rec.studentId); } catch(_){}
+        try { autoFinishAsgnTodo(rec.studentId, rec.assignmentId); } catch(_){}
+      } catch(e){
+        console.error('[student-submit]', e);
+        try { toast('送出失敗: ' + (e.message||e), 'danger', 8000); } catch(_){}
+      } finally {
+        clearTimeout(safety);
+        try { btn.disabled = false; btn.textContent = origText; } catch(_){}
+        try { rerender(); } catch(_){}
       }
-      const rec = {
-        id: nid(), assignmentId: asg.id,
-        studentId: me.id, studentName: me.name,
-        text: txt, link: lnk,
-        attaches: attaches.slice(),
-        attach: attaches[0] || null,
-        ts: Date.now()
-      };
-      App.db.submissions.push(rec);
-      logOp('submit','繳交：' + asg.title);
-      saveDB();
-      // ★ SDK + REST fallback (學生交作業 — 最關鍵, 老師收不到 = 學生沒交)
-      if(typeof fbWriteRow === 'function'){
-        fbWriteRow('submissions', rec.id, JSON.parse(JSON.stringify(rec))).catch(()=>{
-          try { Sync.push('submissions', rec); } catch(_){}
-        });
-      } else {
-        try { Sync.push('submissions', rec); } catch(_){}
-      }
-      bcNotify();
-      // F-03: 送出成功後清掉草稿
-      clearDraft('submit_' + (me?.id || 'x') + '_' + asg.id);
-      toast('已繳交！','success');
-      try { checkAndAwardBadges(rec.studentId); } catch(_) {_swallow('auto',_)} // batch 5-27
-      try { autoFinishAsgnTodo(rec.studentId, rec.assignmentId); } catch(_) {_swallow('auto',_)} // batch 5-29
-      rerender();
     }}, existing?'💾 儲存修改':'✅ 送出繳交'),
     existing ? el('button', { class:'btn', onclick:()=> { App._editSub = null; rerender(); } }, '取消') : null
   ));
