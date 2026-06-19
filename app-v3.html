@@ -1888,37 +1888,49 @@ function ensureDefaultsAndDemo(){
     })();
   }
 
-  // 預設管理員帳號
-  // 🔧 重要修復：避免每次 nuclear 後重複建 admin (Firebase 上累積 5 個重複 entry)
-  // 1. 若 Firebase 已連線 → 等 5 秒讓 Sync listener 抓回再判斷，沒抓到才建
-  // 2. 若無 Firebase → 直接本地建
+  // 預設管理員帳號 — 修復 (2026-06-19)
+  // 雲端曾累積 30 個重複 admin (每次換瀏覽器/裝置都重建一個 → mpkn... → mqkk...)
+  // 根因: 5 秒 timeout 太短, sync 還沒拉回就誤判 "沒 admin" → 重建
+  // 改策略: 改用「任何老師都不重建」+ 延長 timeout + REST 直查
+  function _maybeCreateDefaultAdmin(reason){
+    try {
+      const accs = App.db.accounts || [];
+      const hasTeacher = accs.some(function(a){
+        if(!a) return false;
+        const uname = String(a.username||'').toLowerCase();
+        return uname === 'admin' || a.role === 'teacher';
+      });
+      if(hasTeacher){
+        dbg('[v3] 已有 admin 或老師帳號 (' + accs.length + ' accts), 不重建 — ' + reason);
+        return;
+      }
+      // 真的完全沒老師 → 才建
+      _createDefaultAdmin(reason);
+    } catch(e){ console.warn('[ensureDefaults check]', e); }
+  }
+
   if(!App.db.accounts || App.db.accounts.length === 0){
     if(App.fbRef){
-      // 延遲 5 秒，給 Sync.init 的 child_added + once('value') fallback 時間抓資料
-      setTimeout(function(){
-        try {
-          const hasAdmin = (App.db.accounts || []).some(function(a){
-            return a && String(a.username||'').toLowerCase() === 'admin';
-          });
-          if(hasAdmin){
-            dbg('[v3] Firebase 已有 admin，不重複建立');
-            return;
-          }
-          // Firebase 上也沒 admin → 真的建一個（SEC：雜湊 + mustChangePw）
-          _createDefaultAdmin('5 秒後 Firebase 仍無 admin');
-        } catch(e){ console.warn('[ensureDefaults deferred]', e); }
-      }, 5000);
+      // 延長為 10 秒，給 Sync 充足時間從雲端抓回 accounts (slow network / SDK timeout)
+      setTimeout(function(){ _maybeCreateDefaultAdmin('10s 後 Firebase 仍空'); }, 10000);
     } else {
-      // 純本地模式 (沒連 Firebase) → 立即建（SEC：雜湊 + mustChangePw）
+      // 純本地模式 (沒連 Firebase) → 立即建
       _createDefaultAdmin('本地模式無 Firebase');
     }
   } else {
-    // 已有 accounts，但檢查是否有 admin（防止 accounts 有資料但 admin 被誤刪）
-    const hasAdmin = App.db.accounts.some(function(a){
-      return a && String(a.username||'').toLowerCase() === 'admin';
+    // 已有 accounts，但檢查是否有任何老師
+    const hasTeacher = App.db.accounts.some(function(a){
+      if(!a) return false;
+      const uname = String(a.username||'').toLowerCase();
+      return uname === 'admin' || a.role === 'teacher';
     });
-    if(!hasAdmin){
-      _createDefaultAdmin('accounts 有資料但缺 admin');
+    if(!hasTeacher){
+      // 還是延遲一點，等雲端 merge — 避免本機 accounts 只有學生但雲端 admin 還沒拉回
+      if(App.fbRef){
+        setTimeout(function(){ _maybeCreateDefaultAdmin('8s 後仍無老師'); }, 8000);
+      } else {
+        _createDefaultAdmin('本地有 accounts 但無任何老師');
+      }
     }
   }
 
@@ -15132,55 +15144,77 @@ function rPending(content){
     content.appendChild(cardR);
   }
 
-  // ─── 區塊 2：註冊申請 ───
-  const pendCount = App.db.pending.length;
-  const pendHeader = el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
-    el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} },
-      el('h3', { style:{margin:'0'} }, '👤 註冊申請'),
-      el('span', { class:'pill', style:{background: pendCount?'var(--warn-soft)':'var(--surface-2)',color: pendCount?'var(--warn)':'var(--text-muted)',fontWeight:'700'} }, pendCount + ' 件')
-    )
-  );
-  if(pendCount){
-    pendHeader.appendChild(el('div', { class:'flex no-print', style:{gap:'6px'} },
-      el('button', { class:'btn btn-sm btn-success', onclick: async (ev)=> {
-        const btn = ev.currentTarget;
-        if(btn.disabled) return;
-        if(!await confirmDlg('確定接受全部 ' + pendCount + ' 件註冊申請嗎？', {})) return;
-        btn.disabled = true;
-        try {
-          const ids = App.db.pending.map(x => x.id);
-          for(const id of ids){ try { await approveStudent(id, true); } catch(_){} }
-          toast('已接受全部 ' + ids.length + ' 件','success');
-          rerender();
-        } finally { btn.disabled = false; }
-      }}, '✓ 全部接受'),
-      el('button', { class:'btn btn-sm btn-danger', onclick: async (ev)=> {
-        const btn = ev.currentTarget;
-        if(btn.disabled) return;
-        if(!await confirmDlg('確定拒絕並刪除全部 ' + pendCount + ' 件申請？', {danger:true})) return;
-        btn.disabled = true;
-        try {
-          App.db.pending = [];
-          saveDB(); Sync.setMap('pending', App.db.pending); bcNotify();
-          toast('已清空待審核名單','warning');
-          rerender();
-        } finally { btn.disabled = false; }
-      }}, '✗ 全部拒絕')
+  // ─── 區塊 2：註冊申請 (學生 / 老師 分區，避免誤把學生審成老師授予管理權限) ───
+  const allPending = App.db.pending || [];
+  const studentPending = allPending.filter(p => p && p.role !== 'teacher');
+  const teacherPending = allPending.filter(p => p && p.role === 'teacher');
+  const pendCount = allPending.length;
+
+  // ★ 重要警語：老師審核 = 管理權限授予
+  if(teacherPending.length){
+    content.appendChild(el('div', { class:'card', style:{
+      background:'var(--warn-soft)', border:'2px solid var(--warn)',
+      padding:'12px', marginBottom:'12px'
+    } },
+      el('div', { style:{fontWeight:'700', marginBottom:'4px'} },
+        '⚠️ 注意：核准老師申請 = 授予管理權限'),
+      el('div', { class:'small' },
+        '老師可以查看全部學生資料、編輯課程、批改作業、刪除帳號等。請務必確認申請人身分後再核准。')
     ));
   }
-  content.appendChild(pendHeader);
 
-  if(!pendCount){
-    content.appendChild(el('div', { class:'empty card' },
-      el('div', { class:'ico' }, '📭'),
-      el('div', null, '沒有待審核註冊'),
-      el('div', { class:'small muted', style:{marginTop:'8px'} },
-        '新學生在登入頁點「沒帳號？申請註冊」後，會出現在這裡讓您審核')
-    ));
-  } else {
-    // 🔎 搜尋 + 班級篩選（>10 件時很實用）
-    const pendClasses = Array.from(new Set(App.db.pending.map(p=>p.cls).filter(Boolean))).sort();
-    if(pendCount > 5 || pendClasses.length > 1){
+  // ── 學生申請區 ──
+  if(studentPending.length || (allPending.length === 0)){
+    const sHeader = el('div', { class:'flex-between', style:{marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
+      el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} },
+        el('h3', { style:{margin:'0'} }, '🎓 學生註冊申請'),
+        el('span', { class:'pill', style:{background: studentPending.length?'var(--warn-soft)':'var(--surface-2)',color: studentPending.length?'var(--warn)':'var(--text-muted)',fontWeight:'700'} }, studentPending.length + ' 件')
+      )
+    );
+    if(studentPending.length){
+      sHeader.appendChild(el('div', { class:'flex no-print', style:{gap:'6px'} },
+        el('button', { class:'btn btn-sm btn-success', onclick: async (ev)=> {
+          const btn = ev.currentTarget;
+          if(btn.disabled) return;
+          if(!await confirmDlg('確定接受全部 ' + studentPending.length + ' 件「學生」註冊申請嗎？', {})) return;
+          btn.disabled = true;
+          try {
+            const ids = studentPending.map(x => x.id);
+            for(const id of ids){ try { await approveStudent(id, true); } catch(_){} }
+            toast('已接受全部 ' + ids.length + ' 件學生申請','success');
+            rerender();
+          } finally { btn.disabled = false; }
+        }}, '✓ 全部接受'),
+        el('button', { class:'btn btn-sm btn-danger', onclick: async (ev)=> {
+          const btn = ev.currentTarget;
+          if(btn.disabled) return;
+          if(!await confirmDlg('確定拒絕並刪除全部 ' + studentPending.length + ' 件學生申請？', {danger:true})) return;
+          btn.disabled = true;
+          try {
+            const ids = studentPending.map(x => x.id);
+            App.db.pending = (App.db.pending||[]).filter(p => !ids.includes(p.id));
+            saveDB(); Sync.setMap('pending', App.db.pending); bcNotify();
+            toast('已清空學生待審核','warning');
+            rerender();
+          } finally { btn.disabled = false; }
+        }}, '✗ 全部拒絕')
+      ));
+    }
+    content.appendChild(sHeader);
+    if(!studentPending.length && !teacherPending.length){
+      content.appendChild(el('div', { class:'empty card' },
+        el('div', { class:'ico' }, '📭'),
+        el('div', null, '沒有待審核註冊'),
+        el('div', { class:'small muted', style:{marginTop:'8px'} },
+          '新學生在登入頁點「沒帳號？申請註冊」後，會出現在這裡讓您審核')
+      ));
+    }
+  }
+
+  // ── 學生申請清單 ──
+  if(studentPending.length){
+    const pendClasses = Array.from(new Set(studentPending.map(p=>p.cls).filter(Boolean))).sort();
+    if(studentPending.length > 5 || pendClasses.length > 1){
       const filterBar = el('div', { class:'flex no-print', style:{gap:'6px',marginBottom:'10px',flexWrap:'wrap',alignItems:'center'} });
       const pSearch = el('input', { class:'input', placeholder:'🔎 搜尋姓名 / 學號', style:{flex:'1',minWidth:'140px'},
         value: App._pendingSearch || '', oninput: e => { App._pendingSearch = e.target.value; rerender(); }});
@@ -15195,67 +15229,88 @@ function rPending(content){
       content.appendChild(filterBar);
     }
     const card = el('div', { class:'card' });
-    let pendingList = App.db.pending.slice().reverse();
-    // 套用篩選
+    let stuList = studentPending.slice().reverse();
     if(App._pendingSearch){
       const q = App._pendingSearch.trim().toLowerCase();
-      pendingList = pendingList.filter(p =>
+      stuList = stuList.filter(p =>
         (p.name||'').toLowerCase().includes(q) ||
         String(p.sid||'').toLowerCase().includes(q)
       );
     }
     if(App._pendingCls){
-      pendingList = pendingList.filter(p => p.cls === App._pendingCls);
+      stuList = stuList.filter(p => p.cls === App._pendingCls);
     }
-    if(!pendingList.length){
+    if(!stuList.length){
       card.appendChild(el('div', { class:'small muted', style:{padding:'14px',textAlign:'center'} },
-        '🔍 沒有符合條件的申請'));
+        '🔍 沒有符合條件的學生申請'));
     }
-    pendingList.forEach(p => {
-      const isTeacher = p.role === 'teacher';
+    stuList.forEach(p => {
       const row = el('div', { class:'list-row', style:{padding:'10px 12px'} });
-      row.appendChild(el('div', { class:'avatar', style:{background: isTeacher ? 'var(--primary)' : 'var(--accent)'} }, initials(p.name)));
-      // 完整資訊
+      row.appendChild(el('div', { class:'avatar', style:{background:'var(--accent)'} }, initials(p.name)));
       const info = el('div', { class:'info' },
-        el('div', { class:'name' },
-          isTeacher ? el('span', { class:'pill', style:{background:'var(--primary-soft)',color:'var(--primary)',fontSize:'10px',fontWeight:'700',padding:'2px 6px',marginRight:'6px',borderRadius:'4px'} }, '老師') : null,
-          p.name + (p.seat?` (${p.seat}號)`:'')
-        ),
-        isTeacher
-          ? el('div', { class:'sub', style:{lineHeight:'1.7'} },
-              '📧 ' + (p.email || '(無)'),
-              p.note ? el('span', null, ' · 💬 ' + p.note) : null,
-              el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
-            )
-          : el('div', { class:'sub', style:{lineHeight:'1.7'} },
-              '🏫 ' + (p.cls||'(未填班級)'),
-              p.sid ? el('span', null, ' · 🆔 學號 ' + p.sid) : null,
-              el('br'),
-              p.email ? el('span', null, '📧 ' + p.email) : null,
-              el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
-            )
+        el('div', { class:'name' }, p.name + (p.seat?` (${p.seat}號)`:'')),
+        el('div', { class:'sub', style:{lineHeight:'1.7'} },
+          '🏫 ' + (p.cls||'(未填班級)'),
+          p.sid ? el('span', null, ' · 🆔 學號 ' + p.sid) : null,
+          el('br'),
+          p.email ? el('span', null, '📧 ' + p.email) : null,
+          el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
+        )
       );
       row.appendChild(info);
       const acts = el('div', { class:'actions' },
-        isTeacher
-          ? null  // 老師不提供「修改」(申請資料簡單)
-          : el('button', { class:'btn btn-sm', title:'核准前先修改資料', onclick:()=> openPendingEdit(p) }, '✏️ 修改'),
+        el('button', { class:'btn btn-sm', title:'核准前先修改資料', onclick:()=> openPendingEdit(p) }, '✏️ 修改'),
         el('button', { class:'btn btn-sm btn-success', onclick: async (ev)=> {
           ev.currentTarget.disabled = true;
-          try {
-            if(isTeacher) await approveTeacher(p.id);
-            else await approveStudent(p.id);
-          } catch(e){ _swallow('approve-single', e); ev.currentTarget.disabled = false; }
+          try { await approveStudent(p.id); }
+          catch(e){ _swallow('approve-single-stu', e); ev.currentTarget.disabled = false; }
         }}, '✓ 接受'),
-        el('button', { class:'btn btn-sm btn-danger', onclick:()=> {
-          if(isTeacher) rejectTeacher(p.id);
-          else rejectStudent(p.id);
-        }}, '✗ 拒絕')
+        el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectStudent(p.id) }, '✗ 拒絕')
       );
       row.appendChild(acts);
       card.appendChild(row);
     });
     content.appendChild(card);
+  }
+
+  // ── 老師申請清單 (獨立區塊 + 醒目樣式) ──
+  if(teacherPending.length){
+    const tHeader = el('div', { class:'flex-between', style:{marginTop:'24px',marginBottom:'10px',flexWrap:'wrap',gap:'8px'} },
+      el('div', { class:'flex', style:{gap:'8px',alignItems:'center'} },
+        el('h3', { style:{margin:'0',color:'var(--warn)'} }, '🛡️ 老師管理權限申請'),
+        el('span', { class:'pill', style:{background:'var(--warn-soft)',color:'var(--warn)',fontWeight:'700'} }, teacherPending.length + ' 件')
+      )
+    );
+    content.appendChild(tHeader);
+    const tCard = el('div', { class:'card', style:{border:'2px solid var(--warn)',background:'var(--warn-soft)'} });
+    teacherPending.slice().reverse().forEach(p => {
+      const row = el('div', { class:'list-row', style:{padding:'10px 12px'} });
+      row.appendChild(el('div', { class:'avatar', style:{background:'var(--primary)'} }, initials(p.name)));
+      const info = el('div', { class:'info' },
+        el('div', { class:'name' },
+          el('span', { class:'pill', style:{background:'var(--warn)',color:'#fff',fontSize:'10px',fontWeight:'700',padding:'2px 6px',marginRight:'6px',borderRadius:'4px'} }, '⚠️ 管理員'),
+          p.name
+        ),
+        el('div', { class:'sub', style:{lineHeight:'1.7'} },
+          '📧 ' + (p.email || '(無)'),
+          p.note ? el('span', null, ' · 💬 ' + p.note) : null,
+          el('span', { style:{marginLeft:'8px',color:'var(--text-muted)'} }, '⏱ ' + relTime(p.ts||0))
+        )
+      );
+      row.appendChild(info);
+      const acts = el('div', { class:'actions' },
+        el('button', { class:'btn btn-sm btn-success', onclick: async (ev)=> {
+          if(!await confirmDlg('核准「' + p.name + '」為老師?\n\n此操作會授予該 Email 帳號完整管理權限 — 可編輯所有學生資料、刪除帳號、查看成績。\n\n請確認申請人身分後再核准。', { danger:true })) return;
+          ev.currentTarget.disabled = true;
+          try { await approveTeacher(p.id); }
+          catch(e){ _swallow('approve-single-tch', e); ev.currentTarget.disabled = false; }
+        }}, '✓ 授予管理權限'),
+        el('button', { class:'btn btn-sm btn-danger', onclick:()=> rejectTeacher(p.id) }, '✗ 拒絕')
+      );
+      row.appendChild(acts);
+      tCard.appendChild(row);
+    });
+    content.appendChild(tCard);
   }
 }
 
@@ -15865,12 +15920,54 @@ function rSettings(content){
   } catch(e){ console.warn('[rSettings 2FA]', e); }
 
   // account
+  // 🔧 老師帳號去重 (2026-06-19) — 同 username 只顯示最舊的 (createdAt 最小)
+  // 防止雲端曾有 admin 重複的視覺干擾,並提供「掃除重複」按鈕
+  const _teacherAccts = (App.db.accounts || []).filter(a => a && (a.role === 'teacher' || String(a.username||'').toLowerCase() === 'admin'));
+  const _byUname = new Map();
+  _teacherAccts.forEach(a => {
+    const k = String(a.username||'').toLowerCase();
+    if(!k) return;
+    const prev = _byUname.get(k);
+    if(!prev || (a.createdAt||0) < (prev.createdAt||Infinity)){
+      _byUname.set(k, a);
+    }
+  });
+  const _uniqueTeachers = Array.from(_byUname.values());
+  const _dupCount = _teacherAccts.length - _uniqueTeachers.length;
+
   const card3 = el('div', { class:'card', style:{marginTop:'12px'} });
   card3.appendChild(el('div', { class:'flex-between', style:{flexWrap:'wrap',gap:'8px',marginBottom:'10px'} },
-    el('h3', { style:{margin:0} }, '🔐 老師帳號'),
-    el('button', { class:'btn btn-sm btn-warn', onclick: openBulkResetTeachers, title:'批量重設所有老師的密碼/Email/安全問題' }, '🔄 批量重設')
+    el('h3', { style:{margin:0} }, '🔐 老師帳號 (' + _uniqueTeachers.length + ')'),
+    el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap'} },
+      _dupCount > 0 ? el('button', { class:'btn btn-sm btn-danger', title:'發現 ' + _dupCount + ' 個重複帳號 — 清掉',
+        onclick: async ()=> {
+          if(!await confirmDlg('發現 ' + _dupCount + ' 個重複老師帳號 (相同 username)。\n\n要保留每組最舊的一個,其他刪除嗎?', { danger:true })) return;
+          const keepIds = new Set(_uniqueTeachers.map(x => x.id));
+          const removed = [];
+          App.db.accounts = (App.db.accounts || []).filter(a => {
+            if(!a) return false;
+            const isTeacher = a.role === 'teacher' || String(a.username||'').toLowerCase() === 'admin';
+            if(isTeacher && !keepIds.has(a.id)){
+              removed.push(a.id);
+              return false;
+            }
+            return true;
+          });
+          saveDB(true);
+          for(const id of removed){
+            try {
+              Sync.removeRow('accounts', id);
+              if(App.fbRef) await App.fbRef.child('accounts').child(id).remove().catch(()=>{});
+            } catch(_){}
+          }
+          try { bcNotify(); } catch(_){}
+          toast('已刪除 ' + removed.length + ' 個重複老師帳號','success');
+          rerender();
+        }}, '🧹 清重複(' + _dupCount + ')') : null,
+      el('button', { class:'btn btn-sm btn-warn', onclick: openBulkResetTeachers, title:'批量重設所有老師的密碼/Email/安全問題' }, '🔄 批量重設')
+    )
   ));
-  App.db.accounts.forEach(a => {
+  _uniqueTeachers.forEach(a => {
     const row = el('div', { class:'list-row' });
     row.appendChild(el('div', { class:'avatar' }, initials(a.name)));
     // Round 2 M4：不再洩漏密碼長度，改為顯示「✅ 已設定 (上次更新：YYYY-MM-DD)」
