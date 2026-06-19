@@ -2212,7 +2212,11 @@ const Sync = (() => {
       App.fbRef = firebase.database().ref('cms-v3/' + room);
       App.fbStatus = 'online';
       setTimeout(()=> { try { rerender(); } catch(_){} }, 100);
-      // ★ Step 2: FORCE 從雲端拉一次完整資料 (用雲端覆蓋本地舊版)
+      // ★ Step 2a (NEW 2026-06-19): 先拉雲端 graveyard, 避免 Step 2b 把死人載回
+      //   這修「拒絕的 pending 重新整理又跑出來」的根因 — 之前 graveyard 在 +500ms 才拉,
+      //   初始 pull 在 +0ms 就把雲端 pending 整包塞回 App.db, 沒過濾 graveyard
+      try { await _pullCloudGraveyard(); } catch(e){ console.warn('[firebase] graveyard pull early failed:', e); }
+      // ★ Step 2b: FORCE 從雲端拉一次完整資料 (用雲端覆蓋本地舊版)
       //   解決「本地 localStorage 有舊資料 → child_added 被去重後不更新」的核心 bug
       try {
         const dbURL = firebase.database().app.options.databaseURL;
@@ -2225,11 +2229,17 @@ const Sync = (() => {
           if(data){
             const ARR_NODES = ['students','accounts','assignments','submissions','attendance','evals','peerEvals','selfEvals','feedbacks','behavior','quizzes','quizSubmissions','badges','notes','todos','announcements','leaves','messages','passwordResets','attendanceNotes','pending','subjects','notifications','timetable','teachers','groups','courses'];
             const OBJ_NODES = ['settings','branding','grades','semester','semesters','periods'];
-            let pulled = 0;
+            let pulled = 0, filtered = 0;
             ARR_NODES.forEach(node => {
               if(data[node]){
                 const v = data[node];
-                const arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+                let arr = Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean);
+                // ★ 過濾掉 graveyard 內的死人 (避免本地剛拒絕又重新塞回)
+                if(_GRAVEYARD_NODES.has(node)){
+                  const before = arr.length;
+                  arr = arr.filter(x => x && x.id && !_isInGraveyard(node, x.id));
+                  filtered += (before - arr.length);
+                }
                 App.db[node] = arr;
                 pulled++;
               }
@@ -2238,7 +2248,7 @@ const Sync = (() => {
               if(data[node]){ App.db[node] = data[node]; pulled++; }
             });
             try { saveDB(true); } catch(_){}
-            console.log('[firebase] init: 從雲端拉了', pulled, '個 collection');
+            console.log('[firebase] init: 從雲端拉了', pulled, '個 collection (graveyard 擋掉', filtered, '筆死人)');
             setTimeout(()=> { try { rerender(); } catch(_){} }, 200);
           }
         }
@@ -2246,7 +2256,7 @@ const Sync = (() => {
       // ★ Step 3: 接 realtime listener,之後的變動即時推
       if(connectTimer){ clearTimeout(connectTimer); connectTimer = null; }
       try { attachListeners(); } catch(e){ console.warn('[firebase] attachListeners failed:', e); }
-      // ★ Step 4: 先拉雲端 graveyard 到本機 (防別的裝置刪掉的東西本機又推回去)
+      // ★ Step 4: 再拉一次雲端 graveyard (確保跨裝置最新; 第一次在 Step 2a)
       try { setTimeout(()=> _pullCloudGraveyard().catch(()=>{}), 500); } catch(_){}
       // ★ Step 5: 推本機累積的「未同步」項目到雲端
       //   情境:之前 Sync 未啟用時 (例如手機 SW 舊版) 學生註冊/繳交存了本機
