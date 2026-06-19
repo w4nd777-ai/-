@@ -2322,7 +2322,8 @@ const Sync = (() => {
   //     (如果有刪掉再建同 id 的需求, 比如換裝置, 不能因為以前刪過就擋掉)
   const _GRAVEYARD_NODES = new Set([
     'submissions','messages','evals','behavior','notifications',
-    'attendance','leaves','quizSubmissions','peerEvals','selfEvals','feedbacks'
+    'attendance','leaves','quizSubmissions','peerEvals','selfEvals','feedbacks',
+    'pending'  // 註冊申請拒絕後不可復活 (其他裝置 push 回來會被擋)
   ]);
   function _addToGraveyard(node, id){
     if(!node || !id) return;
@@ -5567,7 +5568,12 @@ async function rejectTeacher(pid){
   if(!p) return;
   if(!await confirmDlg('確定拒絕「' + p.name + '」(' + p.email + ') 的申請?\n注意:Firebase 內已建立的帳號可能仍可登入,但無法進系統 (因為缺少 accounts entry)。建議到 Firebase Console 手動刪除使用者。', { danger: true, title: '警告' })) return;
   App.db.pending = App.db.pending.filter(x => x.id !== pid);
-  try { saveDB(); Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
+  try {
+    saveDB();
+    if(typeof _addToGraveyard === 'function') _addToGraveyard('pending', pid);
+    Sync.removeRow('pending', pid);
+    bcNotify();
+  } catch(_){}
   if(typeof logOp === 'function') logOp('rejectTeacher', '拒絕老師 ' + p.name);
   toast('已拒絕老師申請: ' + p.name, 'warn');
   rerender();
@@ -15193,7 +15199,13 @@ function rPending(content){
           try {
             const ids = studentPending.map(x => x.id);
             App.db.pending = (App.db.pending||[]).filter(p => !ids.includes(p.id));
-            saveDB(); Sync.setMap('pending', App.db.pending); bcNotify();
+            saveDB();
+            // 逐筆 graveyard + removeRow → 擋雲端 listener 復活
+            for(const id of ids){
+              try { if(typeof _addToGraveyard === 'function') _addToGraveyard('pending', id); } catch(_){}
+              try { Sync.removeRow('pending', id); } catch(_){}
+            }
+            bcNotify();
             toast('已清空學生待審核','warning');
             rerender();
           } finally { btn.disabled = false; }
@@ -15462,6 +15474,7 @@ function rejectStudent(pid){
     if(!ok) return;
     App.db.pending = App.db.pending.filter(x => x.id !== pid);
     saveDB();
+    try { if(typeof _addToGraveyard === 'function') _addToGraveyard('pending', pid); } catch(_){}
     Sync.removeRow('pending', pid);
     bcNotify();
     toast('已拒絕','warn');
