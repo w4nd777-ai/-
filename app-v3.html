@@ -27581,6 +27581,54 @@ function boot(){
   // 確保有管理員帳號 + 學生資料
   try { ensureDefaultsAndDemo(); } catch(e){ dbgWarn('[v3 defaults]', e); }
 
+  // ★ session 已存在 (已登入狀態 app 開啟 / 重新整理) → 等 Sync 拉完雲端訊息再檢查未讀
+  //   登入流程已在 finishStudentLogin / 老師登入處理, 此處補強「app 已登入狀態啟動」的情境
+  if(App.session){
+    setTimeout(()=> {
+      try {
+        if(!App.session) return;
+        const h = (location.hash || '').replace('#','').toLowerCase();
+        // 已經在訊息頁就不彈
+        if(h === 'smsg' || h.startsWith('messages')) return;
+        const n = (typeof unreadMessages === 'function') ? unreadMessages() : 0;
+        if(n > 0){
+          toast('💬 您有 ' + n + ' 則未讀訊息,點側欄「訊息」查看', 'warn', 7000);
+          try { _playMsgChime(); } catch(_){}
+        }
+      } catch(_){}
+    }, 3500);
+  }
+
+  // ★ tab 從背景切回前景時也檢查 (使用者切回來的時候給個提示)
+  if(!window._cmsV3MsgCheckOnFocus){
+    window._cmsV3MsgCheckOnFocus = true;
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState !== 'visible') return;
+      if(!App.session) return;
+      // 1.5 秒延遲, 等 forceResyncFromCloud 拉完最新
+      setTimeout(()=> {
+        try {
+          if(!App.session) return;
+          const h = (location.hash || '').replace('#','').toLowerCase();
+          if(h === 'smsg' || h.startsWith('messages')) return;
+          const n = (typeof unreadMessages === 'function') ? unreadMessages() : 0;
+          if(n > 0){
+            // 只在 tab 隱藏期間有未讀變化才彈, 避免每次回 tab 都彈
+            const lastShownKey = '_cms_v3_unread_last_shown';
+            const lastShown = parseInt(sessionStorage.getItem(lastShownKey) || '0', 10);
+            if(n > lastShown){
+              toast('💬 您有 ' + n + ' 則未讀訊息', 'warn', 5000);
+              try { _playMsgChime(); } catch(_){}
+              try { sessionStorage.setItem(lastShownKey, String(n)); } catch(_){}
+            }
+          } else {
+            try { sessionStorage.setItem('_cms_v3_unread_last_shown', '0'); } catch(_){}
+          }
+        } catch(_){}
+      }, 1500);
+    });
+  }
+
   // ☁️ Firebase Auth 是 async 初始化 — 登入頁渲染時 currentUser 還是 null
   // 加 onAuthStateChanged 監聽：auth state 變化時，若在登入頁 → rerender 顯示「已登入為 xxx」UI
   try {
