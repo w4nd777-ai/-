@@ -3797,14 +3797,28 @@ function isAssignmentOverdue(asg){
 
 function calcGrade(studentId){
   const w = (App.db.settings.gradeWeights) || defaultWeights();
-  const att = attendanceRate(studentId);
-  const asgn = submissionAvg(studentId);
   const g = App.db.grades[studentId] || {};
+  // 出席/作業 預設自動計算, 若老師手動 override 就用 override
+  const attAuto = attendanceRate(studentId);
+  const asgnAuto = submissionAvg(studentId);
+  const attOverride = (g.attOverride !== undefined && g.attOverride !== null && g.attOverride !== '') ? Number(g.attOverride) : null;
+  const asgnOverride = (g.asgnOverride !== undefined && g.asgnOverride !== null && g.asgnOverride !== '') ? Number(g.asgnOverride) : null;
+  const att = attOverride !== null ? attOverride : attAuto;
+  const asgn = asgnOverride !== null ? asgnOverride : asgnAuto;
   const mid = Number(g.midterm) || 0;
   const final = Number(g.final) || 0;
-  const total = att * (w.att||0)/100 + asgn * (w.asgn||0)/100
-              + mid * (w.mid||0)/100 + final * (w.final||0)/100;
-  return { att, asgn, mid, final, total: Math.round(total), w };
+  const calcTotal = att * (w.att||0)/100 + asgn * (w.asgn||0)/100
+                  + mid * (w.mid||0)/100 + final * (w.final||0)/100;
+  // 總分若老師手動 override 就用 override
+  const totalOverride = (g.totalOverride !== undefined && g.totalOverride !== null && g.totalOverride !== '') ? Number(g.totalOverride) : null;
+  const total = totalOverride !== null ? Math.round(totalOverride) : Math.round(calcTotal);
+  return {
+    att, asgn, mid, final, total, w,
+    _attManual: attOverride !== null,
+    _asgnManual: asgnOverride !== null,
+    _totalManual: totalOverride !== null,
+    _attAuto: attAuto, _asgnAuto: asgnAuto
+  };
 }
 
 function studentRank(studentId){
@@ -19746,27 +19760,85 @@ function rGrades(content){
     const tr = el('tr');
     tr.appendChild(el('td', null, s.name + (s.seat?` (${s.seat})`:'')));
     tr.appendChild(el('td', null, s.cls || '—'));
-    tr.appendChild(el('td', null, g.att + '%'));
-    tr.appendChild(el('td', null, String(g.asgn)));
-    const tdMid = el('td');
-    const iMid = el('input', { type:'number', min:0, max:100, value: g.mid });
-    iMid.addEventListener('change', () => {
+
+    // 共用 helper: 建一個可編輯欄位 (顯示 input + 自動/手動標記 + 可重置)
+    function makeGradeCell(field, value, isManual, autoValue, suffix){
+      const td = el('td');
+      const inp = el('input', { type:'number', min:0, max:100, step:0.1, value: value,
+        style:{width:'56px', textAlign:'center',
+               background: isManual ? 'var(--warn-soft)' : '',
+               fontWeight: isManual ? '700' : '',
+               color: isManual ? 'var(--warn)' : ''},
+        title: isManual ? '手動設定 (自動計算為 ' + autoValue + suffix + ')' : '自動計算 (直接輸入即改為手動覆蓋)'
+      });
+      inp.addEventListener('change', () => {
+        if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+        const v = inp.value.trim();
+        if(v === ''){
+          // 空白 → 清掉 override, 回到自動
+          delete App.db.grades[s.id][field];
+        } else {
+          App.db.grades[s.id][field] = parseFloat(v) || 0;
+        }
+        saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+        renderTbl();
+      });
+      td.appendChild(inp);
+      if(suffix) td.appendChild(el('span', { class:'small muted' }, suffix));
+      // 手動覆蓋時顯示「↻」按鈕讓老師快速回到自動
+      if(isManual && field !== 'midterm' && field !== 'final'){
+        const reset = el('button', { class:'btn btn-sm', style:{padding:'2px 6px',marginLeft:'4px',fontSize:'10px'},
+          title:'清除手動覆蓋, 改回自動計算 (' + autoValue + suffix + ')',
+          onclick: () => {
+            if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+            delete App.db.grades[s.id][field];
+            saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+            renderTbl();
+          }
+        }, '↻');
+        td.appendChild(reset);
+      }
+      return td;
+    }
+
+    tr.appendChild(makeGradeCell('attOverride', g.att, g._attManual, g._attAuto, '%'));
+    tr.appendChild(makeGradeCell('asgnOverride', g.asgn, g._asgnManual, g._asgnAuto, ''));
+    tr.appendChild(makeGradeCell('midterm', g.mid, false, 0, ''));
+    tr.appendChild(makeGradeCell('final', g.final, false, 0, ''));
+
+    // 總分: 也可手動 override
+    const tdTotal = el('td', { class:'total' });
+    const iTotal = el('input', { type:'number', min:0, max:100, step:0.1, value: g.total,
+      style:{width:'60px', textAlign:'center', fontWeight:'700',
+             background: g._totalManual ? 'var(--warn-soft)' : '',
+             color: g._totalManual ? 'var(--warn)' : 'var(--primary)'},
+      title: g._totalManual ? '手動設定 (自動加權為其他欄位算出來的值)' : '自動加權計算 (直接輸入即改為手動覆蓋)'
+    });
+    iTotal.addEventListener('change', () => {
       if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
-      App.db.grades[s.id].midterm = parseFloat(iMid.value) || 0;
+      const v = iTotal.value.trim();
+      if(v === ''){
+        delete App.db.grades[s.id].totalOverride;
+      } else {
+        App.db.grades[s.id].totalOverride = parseFloat(v) || 0;
+      }
       saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
       renderTbl();
     });
-    tdMid.appendChild(iMid); tr.appendChild(tdMid);
-    const tdFinal = el('td');
-    const iFinal = el('input', { type:'number', min:0, max:100, value: g.final });
-    iFinal.addEventListener('change', () => {
-      if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
-      App.db.grades[s.id].final = parseFloat(iFinal.value) || 0;
-      saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
-      renderTbl();
-    });
-    tdFinal.appendChild(iFinal); tr.appendChild(tdFinal);
-    tr.appendChild(el('td', { class:'total' }, String(g.total)));
+    tdTotal.appendChild(iTotal);
+    if(g._totalManual){
+      tdTotal.appendChild(el('button', { class:'btn btn-sm', style:{padding:'2px 6px',marginLeft:'4px',fontSize:'10px'},
+        title:'清除手動覆蓋, 改回自動加權計算',
+        onclick: () => {
+          if(!App.db.grades[s.id]) App.db.grades[s.id] = {};
+          delete App.db.grades[s.id].totalOverride;
+          saveDB(); Sync.setNode('grades', App.db.grades); bcNotify();
+          renderTbl();
+        }
+      }, '↻'));
+    }
+    tr.appendChild(tdTotal);
+
     tr.appendChild(el('td', null, r.rank ? '#' + r.rank : '-'));
     const tdActs = el('td');
     tdActs.appendChild(el('button', { class:'btn btn-sm', onclick:()=> openGradeComment(s) }, '💬'));
