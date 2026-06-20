@@ -3141,10 +3141,34 @@ function notify(title, body, options){
   }
 }
 
+// 訊息進來時的鈴聲 (不靠瀏覽器通知, AudioContext 直接響)
+function _playMsgChime(){
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(!Ctx) return;
+    const ctx = new Ctx();
+    // 雙音 ding-dong (E5 → C5)
+    [659.25, 523.25].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const t0 = ctx.currentTime + i * 0.18;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+      osc.start(t0); osc.stop(t0 + 0.5);
+    });
+  } catch(_){}
+}
+
 // 收到其它裝置同步來的新項，分派到適當的通知類型
 function dispatchInboundNotify(node, v){
   if(!App.session) return;
-  if(notifyPermission() !== 'granted') return;
+  // 訊息一律處理 (不靠瀏覽器通知, in-app toast + 鈴聲);
+  // 其它類型 (公告等) 才需要 notifyPermission
+  if(node !== 'messages' && notifyPermission() !== 'granted') return;
   // 來自啟動時的 backlog 不通知（看 ts 是否太舊）
   const ts = v && v.ts;
   if(ts && (Date.now() - ts > 60 * 1000)) return; // 1 分鐘前的事件不再 ping
@@ -3163,6 +3187,14 @@ function dispatchInboundNotify(node, v){
       type:'message', tag:'msg-' + (v.fromId || ''),
       url: role === 'teacher' ? 'messages/dm' : 'smsg'
     });
+    // ★ in-app 醒目 toast + 鈴聲 + rerender (不靠瀏覽器通知權限,確保訊息進來時看得到)
+    try {
+      const inAppMsg = title + '\n' + (v.text || '(附件)').slice(0, 80);
+      toast(inAppMsg, 'warn', 6000);
+    } catch(_){}
+    try { _playMsgChime(); } catch(_){}
+    // 觸發 rerender 讓側欄訊息數字 badge 立刻更新
+    try { rerender && rerender(); } catch(_){}
     return;
   }
   if(node === 'announcements'){
@@ -7920,6 +7952,15 @@ function renderLoginTeacherStage(){
     App._loginStage = null; App._loginPrefill = null;
     toast('歡迎，' + a.name + '！','success');
     go('overview');
+    // 登入後若有未讀訊息,延遲 1.5 秒再提示 (等 Sync.init 拉完雲端 messages)
+    setTimeout(()=> {
+      try {
+        const n = (typeof unreadMessages === 'function') ? unreadMessages() : 0;
+        if(n > 0){
+          toast('💬 您有 ' + n + ' 則未讀訊息,點側欄「訊息」查看', 'warn', 7000);
+        }
+      } catch(_){}
+    }, 1500);
     // 🔧 改為「只提醒不強制」 — 使用者反映每次登入都被打斷重設密碼
     //    僅在帳號明確標記 mustChangePw 時才強制
     try {
@@ -9660,6 +9701,15 @@ function finishStudentLogin(s){
   }
   toast('歡迎回來，' + s.name + '！','success');
   go('checkin');
+  // ★ 登入後若有未讀訊息,延遲 1.5 秒再提示 (等 Sync.init 拉完雲端 messages)
+  setTimeout(()=> {
+    try {
+      const n = (typeof unreadMessages === 'function') ? unreadMessages() : 0;
+      if(n > 0){
+        toast('💬 您有 ' + n + ' 則未讀訊息,點側欄「訊息」查看', 'warn', 7000);
+      }
+    } catch(_){}
+  }, 1500);
   // ★ 拿掉自動彈出「設定基本資料」— 用戶反映「學生明明都註冊過 登入過 現在還要跳出」
   //   原本: 缺 email/securityQ/A 就自動彈 (每天一次, 強制 modal 不能關)
   //   現在: 完全不主動彈, 學生自己想設可從「👤 個人」頁面進去設
