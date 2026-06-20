@@ -3182,6 +3182,42 @@ function dispatchInboundNotify(node, v){
     const to = v.toId || 'all';
     // 只在這位使用者是收件人時通知
     if(to !== 'all' && to !== meId) return;
+
+    // ★ 已讀檢查 — 若這條訊息的 ts <= 本機 _lastread_,代表使用者已開過訊息頁讀過
+    //   (像作業提醒已繳交就不再提醒一樣) → 跳過 toast/鈴聲/桌面通知
+    try {
+      const lastReadKey = LS_KEY + '_lastread_' + (App.cfg?.roomCode||'local') + '_' + meId;
+      const lastRead = parseInt(localStorage.getItem(lastReadKey) || '0', 10);
+      if((v.ts||0) <= lastRead){
+        // 已讀: 只 rerender 讓 badge 維持正確 (不應該還有未讀數字)
+        try { rerender && rerender(); } catch(_){}
+        return;
+      }
+      // 對 DM 還要額外比 DM-specific 已讀時戳 (老師端用 markDMRead per 學生)
+      if(to !== 'all' && v.fromId){
+        const dmKey = LS_KEY + '_lastread_dm_' + (App.cfg?.roomCode||'local') + '_' + meId + '_' + v.fromId;
+        const dmLastRead = parseInt(localStorage.getItem(dmKey) || '0', 10);
+        if((v.ts||0) <= dmLastRead){
+          try { rerender && rerender(); } catch(_){}
+          return;
+        }
+      }
+    } catch(_){}
+
+    // ★ 目前頁面就是訊息頁 → 也不提醒 (使用者眼睛就在看)
+    //   學生: location.hash === 'smsg' 或 messages
+    //   老師: location.hash 開頭 'messages'
+    try {
+      const h = (location.hash || '').replace('#','').toLowerCase();
+      const onMsgPage = h === 'smsg' || h.startsWith('messages');
+      if(onMsgPage){
+        // 直接 mark read + rerender, 不彈通知
+        try { if(typeof markMessagesRead === 'function') markMessagesRead(); } catch(_){}
+        try { rerender && rerender(); } catch(_){}
+        return;
+      }
+    } catch(_){}
+
     const title = '💬 ' + (v.fromName || '未知') + ' ' + (to === 'all' ? '在公開留言' : '私訊你');
     notify(title, (v.text || '(附件)').slice(0, 120), {
       type:'message', tag:'msg-' + (v.fromId || ''),
@@ -3193,7 +3229,6 @@ function dispatchInboundNotify(node, v){
       toast(inAppMsg, 'warn', 6000);
     } catch(_){}
     try { _playMsgChime(); } catch(_){}
-    // 觸發 rerender 讓側欄訊息數字 badge 立刻更新
     try { rerender && rerender(); } catch(_){}
     return;
   }
