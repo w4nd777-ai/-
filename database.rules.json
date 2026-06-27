@@ -16,7 +16,7 @@
         "messages": {
           ".indexOn": ["ts"],
           "$msgId": {
-            ".validate": "newData.hasChildren(['id','fromId','ts']) && newData.child('text').val().length <= 4000"
+            ".validate": "newData.hasChildren(['id','fromId','ts']) && (!newData.child('text').exists() || (newData.child('text').isString() && newData.child('text').val().length <= 4000))"
           }
         },
         "behavior": {
@@ -27,22 +27,22 @@
         },
         "pending": {
           "$pid": {
-            ".validate": "newData.hasChildren(['id','role','ts']) && (newData.child('role').val() === 'student' || newData.child('role').val() === 'teacher') && newData.child('name').val().length <= 100"
+            ".validate": "newData.hasChildren(['id','role','ts']) && (newData.child('role').val() === 'student' || newData.child('role').val() === 'teacher') && (!newData.child('name').exists() || (newData.child('name').isString() && newData.child('name').val().length <= 100))"
           }
         },
         "attachments": {
           "$attKey": {
-            ".validate": "!newData.exists() || (newData.isString() && newData.val().length < 800000) || (newData.hasChild('data') && newData.child('data').val().length < 800000)"
+            ".validate": "!newData.exists() || newData.isString() || newData.hasChild('dataUri') || newData.hasChild('meta') || newData.hasChild('data')"
           }
         },
         "settings": {
           "roomPinHash": {
-            ".write": "auth != null && (!data.exists() || root.child('cms-v3').child($roomCode).child('_pinAdmins').child(auth.uid).exists() || newData.val() === null)"
+            ".validate": "newData.val() === null || (newData.isString() && newData.val().length >= 8 && newData.val().length <= 256)"
           }
         },
         "_errors": {
           "$errId": {
-            ".validate": "newData.hasChildren(['type','msg']) && newData.child('msg').val().length < 1000"
+            ".validate": "newData.hasChildren(['type','msg']) && newData.child('msg').isString() && newData.child('msg').val().length < 1000"
           }
         },
         "_graveyard": {

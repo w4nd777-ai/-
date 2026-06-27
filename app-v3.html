@@ -25,7 +25,7 @@
   window.__earlyErrors = [];
   window.addEventListener('error', e => {
     try {
-      const info = { type:'error', msg: e.message, file: e.filename, line: e.lineno, col: e.colno, ts: Date.now() };
+      const info = { type:'error', msg: String(e.message || 'unknown'), file: e.filename, line: e.lineno, col: e.colno, ts: Date.now() };
       window.__earlyErrors.push(info);
       // 寫到 Firebase / localStorage (主腳本載入後會撈走上報)
       try { localStorage.setItem('cms_v3_last_error', JSON.stringify(info)); } catch(_){}
@@ -82,7 +82,7 @@
 <body>
 <div id="root" role="main"></div>
 <div id="toast-host" class="toast-host" role="status" aria-live="polite" aria-atomic="false"></div>
-<div id="modal-host" role="dialog" aria-modal="true"></div>
+<div id="modal-host"></div>
 <div id="sr-live" class="sr-only" role="status" aria-live="assertive" aria-atomic="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"></div>
 
 <script>
@@ -118,7 +118,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PW_STUDENT = 4;
 const MIN_PW_TEACHER = 6;
 // 版本標記 — 讓使用者看得到當前載入的版本，跟 sw-v3.js 的 BUILD 對應
-const APP_BUILD = '2026-06-03-4-deep-fixes';
+const APP_BUILD = '2026-06-20-bugfix-batch';
 
 /* ═══════════════════════════════════════════════════════════════════
    🌐 全站預設 Firebase 設定 (所有訪客自動套用, 無需手動設定)
@@ -268,10 +268,14 @@ function _genStudentDefaultPw(len){
   let out = '';
   try {
     if(window.crypto && window.crypto.getRandomValues){
-      const arr = new Uint32Array(len);
-      window.crypto.getRandomValues(arr);
-      for(let i = 0; i < len; i++){
-        out += _PW_ALPHABET[arr[i] % _PW_ALPHABET.length];
+      const n = _PW_ALPHABET.length;
+      const limit = Math.floor(0x100000000 / n) * n;  // rejection sampling 消除 modulo bias
+      while(out.length < len){
+        const arr = new Uint32Array(len);
+        window.crypto.getRandomValues(arr);
+        for(let i = 0; i < len && out.length < len; i++){
+          if(arr[i] < limit) out += _PW_ALPHABET[arr[i] % n];
+        }
       }
       return out;
     }
@@ -281,6 +285,32 @@ function _genStudentDefaultPw(len){
     out += _PW_ALPHABET[Math.floor(Math.random() * _PW_ALPHABET.length)];
   }
   return out;
+}
+
+// 🔐 預設密碼明文「本機專屬」儲存 — 絕不進入會同步到雲端的學生物件
+//    安全修正: 舊版把明文寫進 s.defaultPwPlain, 隨 Sync.setRow 上雲, 任何登入學生都讀得到 → 明文外洩。
+//    改存 localStorage (per 教室), 只給「重設密碼的那台裝置」的老師查/列印, 不上雲。
+function _defPwKey(){
+  return 'cms_v3_defpw_' + ((App.cfg && App.cfg.roomCode) || 'local');
+}
+function _defPwLoad(){
+  try { return JSON.parse(localStorage.getItem(_defPwKey()) || '{}') || {}; } catch(_){ return {}; }
+}
+function _defPwSave(map){
+  try { localStorage.setItem(_defPwKey(), JSON.stringify(map || {})); } catch(_){}
+}
+function _setDefaultPw(studentId, plain){
+  if(!studentId || !plain) return;
+  const m = _defPwLoad(); m[String(studentId)] = plain; _defPwSave(m);
+}
+function _getDefaultPw(studentId){
+  if(!studentId) return '';
+  return _defPwLoad()[String(studentId)] || '';
+}
+function _clearDefaultPw(studentId){
+  if(!studentId) return;
+  const m = _defPwLoad();
+  if(m[String(studentId)]){ delete m[String(studentId)]; _defPwSave(m); }
 }
 
 // 🎓 第一次老師登入引導 — 3 步, 用 localStorage 旗標保證只跑一次
@@ -337,7 +367,8 @@ function _runOnboardingTour(doneKey){
     }
   ];
   let i = 0;
-  const m = modal('', { dismissable: false });
+  // beforeClose: 不論用哪條路徑關閉, 都標記已完成 (避免下次登入又跳)
+  const m = modal('', { dismissable: false, onClose: ()=> { try { localStorage.setItem(doneKey, '1'); } catch(_){} } });
   const render = () => {
     const s = steps[i];
     m.root.innerHTML = '';
@@ -758,9 +789,14 @@ function _swallow(ctx, e){
           const last = App._errDedupe.get(key) || 0;
           if(now - last > 60000){
             App._errDedupe.set(key, now);
+            // 封頂: 避免動態 msg 讓 Map 無限長大 (與 _silentErrors 200 上限對齊)
+            if(App._errDedupe.size > 500){
+              const oldest = App._errDedupe.keys().next().value;
+              if(oldest !== undefined) App._errDedupe.delete(oldest);
+            }
             const payload = {
               app: 'cms-v3',
-              build: (typeof __APP_BUILD === 'string') ? __APP_BUILD : 'unknown',
+              build: (typeof APP_BUILD === 'string') ? APP_BUILD : 'unknown',
               room: (App.cfg && App.cfg.roomCode) || '',
               role: (App.session && App.session.role) || 'anon',
               user: (App.session && App.session.name) || '',
@@ -1457,7 +1493,8 @@ function modal(content, opts={}){
   }});
   // ★ 支援 wide/large modal — 用 modal-wide 類, max-width 改 720px
   const cls = 'modal' + (opts.wide ? ' modal-wide' : '') + (opts.large ? ' modal-large' : '');
-  const m = el('div', { class: cls });
+  // a11y: dialog 語意掛在真正開啟的 modal 元素上 (隨內容開關自然出現/消失), 不掛在常駐 host
+  const m = el('div', { class: cls, role:'dialog', 'aria-modal':'true' });
   if(typeof content === 'string') m.innerHTML = content;
   else if(Array.isArray(content)) content.forEach(c => m.appendChild(c));
   else m.appendChild(content);
@@ -1474,6 +1511,11 @@ function modal(content, opts={}){
       } catch(_){_swallow('modal-beforeClose',_)}
     }
     _closed = true;
+    // ★ onClose hook：不論用哪條路徑關閉 (按鈕 / ESC / 背景點擊 / 外力)，都通知一次
+    //    讓 confirmDlg / promptDlg 能 resolve 預設值，避免 await 永久 pending 卡死
+    if(typeof opts.onClose === 'function'){
+      try { opts.onClose(); } catch(_){_swallow('modal-onClose',_)}
+    }
     // 從 stack 移除
     try {
       const i = App._openModals.indexOf(handle);
@@ -1508,19 +1550,25 @@ function closeModal(){
 
 function confirmDlg(msg, opts={}){
   return new Promise(resolve => {
-    const m = modal('', { dismissable:false });
+    let done = false;
+    const fin = v => { if(done) return; done = true; resolve(v); };
+    // onClose：任何外力關閉 (ESC / 背景) 一律視為「取消」, 避免 await 卡死
+    const m = modal('', { dismissable:false, onClose: ()=> fin(false) });
     m.root.appendChild(el('h2', null, opts.title || '確認'));
     m.root.appendChild(el('p', null, msg));
     const actions = el('div', { class:'modal-actions' });
-    actions.appendChild(el('button', { class:'btn', onclick:()=> { m.close(); resolve(false); } }, opts.cancelText || '取消'));
-    actions.appendChild(el('button', { class: opts.danger ? 'btn btn-danger' : 'btn btn-primary', onclick:()=> { m.close(); resolve(true); } }, opts.okText || '確定'));
+    actions.appendChild(el('button', { class:'btn', onclick:()=> { fin(false); m.close(); } }, opts.cancelText || '取消'));
+    actions.appendChild(el('button', { class: opts.danger ? 'btn btn-danger' : 'btn btn-primary', onclick:()=> { fin(true); m.close(); } }, opts.okText || '確定'));
     m.root.appendChild(actions);
   });
 }
 
 function promptDlg(label, defaultVal='', opts={}){
   return new Promise(resolve => {
-    const m = modal('', { dismissable:false });
+    let done = false;
+    const fin = v => { if(done) return; done = true; resolve(v); };
+    // onClose：任何外力關閉一律視為「取消」(回 null), 避免 await 卡死
+    const m = modal('', { dismissable:false, onClose: ()=> fin(null) });
     m.root.appendChild(el('h2', null, opts.title || '輸入'));
     const lbl = el('label', { class:'label' }, label);
     const inp = el(opts.multiline?'textarea':'input', { class: opts.multiline?'textarea':'input', value:defaultVal });
@@ -1530,11 +1578,11 @@ function promptDlg(label, defaultVal='', opts={}){
     if(opts.placeholder) inp.setAttribute('placeholder', opts.placeholder);
     m.root.appendChild(lbl); m.root.appendChild(inp);
     const actions = el('div', { class:'modal-actions' });
-    actions.appendChild(el('button', { class:'btn', onclick:()=> { m.close(); resolve(null); } }, '取消'));
-    actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> { const v = inp.value; m.close(); resolve(v); } }, '確定'));
+    actions.appendChild(el('button', { class:'btn', onclick:()=> { fin(null); m.close(); } }, '取消'));
+    actions.appendChild(el('button', { class:'btn btn-primary', onclick:()=> { const v = inp.value; fin(v); m.close(); } }, '確定'));
     m.root.appendChild(actions);
     setTimeout(()=> inp.focus(), 60);
-    inp.addEventListener('keydown', e => { if(e.key==='Enter' && !opts.multiline){ const v=inp.value; m.close(); resolve(v); } });
+    inp.addEventListener('keydown', e => { if(e.key==='Enter' && !opts.multiline){ const v=inp.value; fin(v); m.close(); } });
   });
 }
 
@@ -2172,11 +2220,21 @@ function ensureDefaultsAndDemo(){
       const classes = ['202','202','202','202','202','203','203','203','203','203','204','204','204','204','204','205','205','205','205','205'];
       App.db.students = demoNames.map((name, i) => {
         const sid = '109' + String(5001 + i).padStart(4,'0');
-        const pw = _genStudentDefaultPw();
         return { id: nid(), name, sid, cls: classes[i], seat: ((i%5)+1), email:'', phone:'', parentName:'', parentPhone:'', parentEmail:'',
-          password: pw, defaultPwPlain: pw,  // defaultPwPlain 給老師查/列印, 學生改完自動清掉
-          mustChangePw: true };
+          password: '', mustChangePw: true };  // 密碼下面 async 雜湊後填入
       });
+      // 🔐 密碼以 hashPassword 雜湊 (不存明文); 明文預設密碼存本機 map 給老師查/印
+      (async function(){
+        try {
+          for(const s of App.db.students){
+            const pw = _genStudentDefaultPw();
+            s.password = await hashPassword(pw);
+            _setDefaultPw(s.id, pw);
+          }
+          saveDB();
+          try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('students', App.db.students); } catch(_){}
+        } catch(e){ _swallow('demo-hash', e); }
+      })();
       changed = true;
       dbg('[v3] 建立 20 位示範學生 (fallback)');
     }
@@ -2438,8 +2496,12 @@ const Sync = (() => {
               if(data[node]){ App.db[node] = data[node]; pulled++; }
             });
             try { saveDB(true); } catch(_){}
+            // ★ 標記「settings 已從雲端確認拉回」— PIN 強制驗證用它來 fail-closed
+            App._settingsPulled = true;
             console.log('[firebase] init: 從雲端拉了', pulled, '個 collection (graveyard 擋掉', filtered, '筆死人)');
             setTimeout(()=> { try { rerender(); } catch(_){} }, 200);
+          } else {
+            App._settingsPulled = true;  // 雲端確實沒資料 (新教室) 也算確認
           }
         }
       } catch(e){ console.warn('[firebase] initial pull failed:', e); }
@@ -2903,7 +2965,8 @@ const Sync = (() => {
           }
           try { _markEcho && _markEcho(node, rec.id); } catch(_){}
           // ★ 用 SDK 5 秒 + REST 10 秒 fallback (跟公告/作業一樣)
-          const clean = JSON.parse(JSON.stringify(rec));
+          //   🔐 學生物件先 strip 明文預設密碼 (與 setRow/setMap 一致, 防自動補推外洩)
+          const clean = _stripForCloud(node, JSON.parse(JSON.stringify(rec)));
           let writeOk = false;
           try {
             await Promise.race([
@@ -3098,6 +3161,17 @@ const Sync = (() => {
     }
     return updated;
   }
+  // 🔐 上雲前 strip 敏感欄位 (防禦縱深) — 學生物件的明文預設密碼絕不上雲
+  //    即使某 callsite 漏改, 這層也保證 defaultPwPlain / _defPwHint 不會外洩到 Firebase
+  function _stripForCloud(node, x){
+    if(node !== 'students' || !x || typeof x !== 'object') return x;
+    if(x.defaultPwPlain == null && x._defPwHint == null) return x;  // 沒敏感欄位, 免 clone
+    const c = Object.assign({}, x);
+    delete c.defaultPwPlain;
+    delete c._defPwHint;
+    delete c._pendingDefPw;
+    return c;
+  }
   function push(node, data){
     saveDB();
     if(!App.fbRef) return Promise.resolve(false);
@@ -3110,7 +3184,7 @@ const Sync = (() => {
     const key = data.id || App.fbRef.child(node).push().key;
     // batch 3: 標記 echo，避免 listener 把自己 push 的東西重新 apply（造成 rerender 迴圈）
     _markEcho(node, key);
-    return App.fbRef.child(node).child(key).set(data).then(()=>true).catch(()=>false);
+    return App.fbRef.child(node).child(key).set(_stripForCloud(node, data)).then(()=>true).catch(()=>false);
   }
   function _setNodeNow(node, data){
     saveDB();
@@ -3124,7 +3198,7 @@ const Sync = (() => {
     (arr || []).forEach(x => {
       if(!x) return;
       const k = String(x[keyField] != null ? x[keyField] : nid());
-      obj[k] = x;
+      obj[k] = _stripForCloud(node, x);
       // batch 3: 每一筆都要標記 echo
       _markEcho(node, k);
     });
@@ -3199,7 +3273,7 @@ const Sync = (() => {
     if(!node || id == null) return false;
     try {
       _markEcho(node, id);
-      App.fbRef.child(node).child(String(id)).set(data);
+      App.fbRef.child(node).child(String(id)).set(_stripForCloud(node, data));
       return true;
     } catch(e){ console.warn('[Sync.setRow]', e); return false; }
   }
@@ -5824,14 +5898,14 @@ async function approveTeacher(pid, silent){
   }
 
   // 🔐 核准老師 = 授予管理權限 → 必須要求操作人輸入自己密碼確認
-  //    silent=true (批量) 或 已在最近 5 分鐘內驗證過 就跳過
+  //    silent=true (批量) 或 已在最近 90 秒內驗證過 就跳過 (高風險動作, 窗口縮短)
   if(!silent){
     const operatorId = App.session && App.session.id;
     const operator = (App.db.accounts || []).find(a => a && a.id === operatorId);
     if(!operator){ toast('找不到操作人帳號','danger'); return; }
     const lastVerifiedKey = '_teacherApproveVerified_' + operatorId;
     const lastVerified = parseInt(sessionStorage.getItem(lastVerifiedKey) || '0', 10);
-    if(Date.now() - lastVerified > 5 * 60 * 1000){
+    if(Date.now() - lastVerified > 90 * 1000){
       const pw = await promptDlg('🔐 核准老師 = 授予管理權限\n\n為了確認是您本人操作, 請輸入您的登入密碼:', '', { type:'password' });
       if(pw === null) return;
       if(!pw){ toast('需要密碼確認','warn'); return; }
@@ -5843,6 +5917,7 @@ async function approveTeacher(pid, silent){
       if(!pwOk){
         toast('密碼錯誤,審核取消','danger');
         try { if(typeof logOp === 'function') logOp('approveTeacherFail', '密碼驗證失敗 — 嘗試核准 ' + p.name + ' (' + p.email + ')'); } catch(_){}
+        try { saveDB(); } catch(_){}  // 讓失敗稽核存進 localStorage (logOp 本身不存檔)
         return;
       }
       sessionStorage.setItem(lastVerifiedKey, String(Date.now()));
@@ -10129,7 +10204,8 @@ function forceChangePassword(studentId){
     s.password = hashed.value;
     s.mustChangePw = false;
     s.passwordChangedAt = Date.now();
-    delete s.defaultPwPlain;  // 學生改完密碼, 預設密碼明文清掉, 老師看不到了
+    _clearDefaultPw(s.id);  // 學生改完密碼, 本機預設密碼明文清掉
+    delete s.defaultPwPlain; delete s._defPwHint;  // 清掉舊版可能殘留在物件上的明文
     _clearAllLoginTokens(s);  // H2: 改密碼 → 清掉所有記住裝置
     saveDB(true);  // H3: 立即寫入
     if(typeof logOp === 'function') logOp('passwordChange', s.name + ' 完成首次密碼設定');
@@ -13029,7 +13105,7 @@ function rStu(content){
         );
         if(!ok) return;
         s.password = await hashPassword(defPw);  // H5: 自動 per-account salt
-        s.defaultPwPlain = defPw;  // 老師可查/列印
+        _setDefaultPw(s.id, defPw);  // 明文只存本機 (不上雲), 老師可查/列印
         s.mustChangePw = true;
         s.passwordChangedAt = null;
         s.passwordResetAt = Date.now();
@@ -13170,7 +13246,7 @@ function rStu(content){
           for(const s of App.db.students){
             const defPw = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : String(s.sid||'0000').slice(-4);
             s.password = await hashPassword(defPw);  // H5: 自動 per-account salt
-            s.defaultPwPlain = defPw;  // 老師可查/列印
+            _setDefaultPw(s.id, defPw);  // 明文只存本機 (不上雲)
             s.mustChangePw = true;
             s.passwordChangedAt = null;
             s.passwordResetAt = Date.now();
@@ -13380,12 +13456,15 @@ function openStudentEdit(s=null){
           const v = inps[k].value;
           if(k === 'seat') rec[k] = parseInt(v,10) || 0;
           else if(k === 'password'){
-            // 新增：若留空 → 用學號末 4 碼當預設
-            const raw = v || String(rec.sid || '').slice(-4) || '0000';
+            // 新增：若留空 → 用隨機 6 字當預設 (不再用學號末 4 碼)
+            const genPw = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : (String(rec.sid || '').slice(-4) || '0000');
+            const raw = v || genPw;
             rec.password = await hashPassword(raw);  // H5: 自動產生 per-account salt
-            if(!v) rec.mustChangePw = true;
+            if(!v){ rec.mustChangePw = true; rec._pendingDefPw = genPw; }  // 下面 push 後存進本機 map
           } else rec[k] = v;
         }
+        // 新生若用自動產生的預設密碼 → 明文存本機 map (不寫進物件, 不上雲)
+        if(rec._pendingDefPw){ try { _setDefaultPw(rec.id, rec._pendingDefPw); } catch(_){} delete rec._pendingDefPw; }
         App.db.students.push(rec);
       } else {
         // 編輯非自己班級的學生需要班級權限
@@ -13399,7 +13478,8 @@ function openStudentEdit(s=null){
               s.password = await hashPassword(v);  // H5: 自動產生 per-account salt
               s.passwordChangedAt = Date.now();
               s.mustChangePw = false;
-              delete s.defaultPwPlain;  // 老師手動指定的密碼不再屬於「預設」
+              _clearDefaultPw(s.id);  // 老師手動指定的密碼不再屬於「預設」
+              delete s.defaultPwPlain; delete s._defPwHint;  // 清舊版殘留明文
             }
           } else s[k] = v;
         }
@@ -13586,59 +13666,66 @@ function openBulkResetTeachers(){
   m.root.appendChild(actions);
 }
 
-// 🔑 預設密碼表 — 列出尚未改過密碼 + 有 defaultPwPlain 記錄的學生, 可印或複製
+// 🔑 預設密碼表 — 列出尚未改過密碼 + 本機 map 有保存預設密碼的學生, 可印或複製
+//    明文密碼只存本機 (不上雲), 故只有「重設密碼的那台裝置」看得到
 function openDefaultPwSheet(){
   if(!requirePerm('canEditStudents','查看預設密碼')) return;
-  const stus = (App.db.students||[]).filter(s => s && s.defaultPwPlain && (s.mustChangePw !== false));
+  // 從本機 map 取明文; 只列尚未自行改密碼的
+  const rows = (App.db.students||[]).map(s => {
+    if(!s || s.mustChangePw === false) return null;
+    const pw = _getDefaultPw(s.id);
+    if(!pw) return null;
+    return { s, pw };
+  }).filter(Boolean);
   const m = modal('', { dismissable:true });
   m.root.appendChild(el('h2', null, '🔑 學生預設密碼表'));
   m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
-    '只列出「尚未自行改密碼」且系統有保存預設密碼的學生 — 共 ' + stus.length + ' 位。學生改完密碼後自動從本表消失。'));
-  if(!stus.length){
-    m.root.appendChild(el('div', { class:'empty' }, el('div', { class:'ico' }, '✅'), '所有學生都已自行修改密碼,沒有需要列印的預設密碼。'));
+    '只列出「尚未自行改密碼」且本機保存預設密碼的學生 — 共 ' + rows.length + ' 位。學生改完密碼後自動從本表消失。'));
+  m.root.appendChild(el('div', { class:'small', style:{marginBottom:'10px',padding:'6px 10px',background:'var(--warn-soft)',color:'var(--warn)',borderRadius:'6px'} },
+    '⚠️ 為安全起見,明文密碼只存在「您按下重設的這台裝置」,不會上傳雲端。換裝置看不到時請在該裝置重設後立即列印。'));
+  if(!rows.length){
+    m.root.appendChild(el('div', { class:'empty' }, el('div', { class:'ico' }, '✅'), '本機沒有需要列印的預設密碼 (學生都已改密碼, 或重設是在別台裝置做的)。'));
     const actions = el('div', { class:'modal-actions' });
     actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> m.close() }, '關閉'));
     m.root.appendChild(actions);
     return;
   }
   // 排序: 班級 → 座號
-  stus.sort((a,b) => (a.cls||'').localeCompare(b.cls||'') || (a.seat||0) - (b.seat||0));
+  rows.sort((a,b) => (a.s.cls||'').localeCompare(b.s.cls||'') || (a.s.seat||0) - (b.s.seat||0));
   const tbl = el('table', { class:'tbl', style:{width:'100%',fontSize:'13px'} });
-  const thead = el('thead', null,
+  tbl.appendChild(el('thead', null,
     el('tr', null,
-      el('th', null, '班級'),
-      el('th', null, '座號'),
-      el('th', null, '姓名'),
-      el('th', null, '學號'),
-      el('th', null, '預設密碼')
+      el('th', null, '班級'), el('th', null, '座號'), el('th', null, '姓名'),
+      el('th', null, '學號'), el('th', null, '預設密碼')
     )
-  );
-  tbl.appendChild(thead);
+  ));
   const tbody = el('tbody');
-  stus.forEach(s => {
+  rows.forEach(({s, pw}) => {
     tbody.appendChild(el('tr', null,
       el('td', null, s.cls || '—'),
       el('td', null, String(s.seat || '')),
       el('td', null, s.name || ''),
       el('td', null, String(s.sid || '')),
-      el('td', { style:{fontFamily:'monospace',fontWeight:'700',color:'var(--danger)'} }, s.defaultPwPlain)
+      el('td', { style:{fontFamily:'monospace',fontWeight:'700',color:'var(--danger)'} }, pw)
     ));
   });
   tbl.appendChild(tbody);
-  const box = el('div', { style:{maxHeight:'60vh',overflow:'auto',marginBottom:'10px'} }, tbl);
-  m.root.appendChild(box);
+  m.root.appendChild(el('div', { style:{maxHeight:'60vh',overflow:'auto',marginBottom:'10px'} }, tbl));
   const actions = el('div', { class:'modal-actions' });
   actions.appendChild(el('button', { class:'btn', onclick: ()=> {
     const lines = ['班級\t座號\t姓名\t學號\t預設密碼'];
-    stus.forEach(s => lines.push((s.cls||'')+'\t'+(s.seat||'')+'\t'+(s.name||'')+'\t'+(s.sid||'')+'\t'+s.defaultPwPlain));
+    rows.forEach(({s, pw}) => lines.push((s.cls||'')+'\t'+(s.seat||'')+'\t'+(s.name||'')+'\t'+(s.sid||'')+'\t'+pw));
     const text = lines.join('\n');
-    try { navigator.clipboard.writeText(text).then(()=> toast('已複製 ' + stus.length + ' 筆','success')); }
-    catch(_){ toast('複製失敗,請手動選取','warn'); }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text)
+        .then(()=> toast('已複製 ' + rows.length + ' 筆','success'))
+        .catch(()=> toast('複製失敗,請手動選取','warn'));
+    } else { toast('複製失敗,請手動選取','warn'); }
   }}, '📋 複製為表格'));
   actions.appendChild(el('button', { class:'btn', onclick: ()=> {
     const css = '<style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:6px 8px;text-align:left}th{background:#eee}.pw{font-family:monospace;font-weight:700;color:#c00}</style>';
-    const rows = stus.map(s => '<tr><td>'+esc(s.cls||'')+'</td><td>'+esc(String(s.seat||''))+'</td><td>'+esc(s.name||'')+'</td><td>'+esc(String(s.sid||''))+'</td><td class="pw">'+esc(s.defaultPwPlain)+'</td></tr>').join('');
-    const html = '<!doctype html><html><head><meta charset="utf-8"><title>預設密碼表</title>'+css+'</head><body><h2>學生預設密碼表 (' + new Date().toLocaleDateString('zh-TW') + ')</h2><p>共 ' + stus.length + ' 位學生 — 請學生登入後立即修改</p><table><thead><tr><th>班級</th><th>座號</th><th>姓名</th><th>學號</th><th>預設密碼</th></tr></thead><tbody>'+rows+'</tbody></table></body></html>';
+    const trs = rows.map(({s, pw}) => '<tr><td>'+esc(s.cls||'')+'</td><td>'+esc(String(s.seat||''))+'</td><td>'+esc(s.name||'')+'</td><td>'+esc(String(s.sid||''))+'</td><td class="pw">'+esc(pw)+'</td></tr>').join('');
+    const html = '<!doctype html><html><head><meta charset="utf-8"><title>預設密碼表</title>'+css+'</head><body><h2>學生預設密碼表 (' + new Date().toLocaleDateString('zh-TW') + ')</h2><p>共 ' + rows.length + ' 位學生 — 請學生登入後立即修改</p><table><thead><tr><th>班級</th><th>座號</th><th>姓名</th><th>學號</th><th>預設密碼</th></tr></thead><tbody>'+trs+'</tbody></table></body></html>';
     const w = window.open('', '_blank');
     if(w){ w.document.write(html); w.document.close(); setTimeout(()=> { try { w.print(); } catch(_){} }, 300); }
     else { toast('彈窗被擋,請允許彈窗','warn'); }
@@ -13803,8 +13890,11 @@ function openBulkResetStudents(){
         if(picked.includes('password')){
           const def = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : String(s.sid||'0000').slice(-4).padStart(4,'0');
           try { s.password = await hashPassword(def); } catch(e){ continue; }
-          s.defaultPwPlain = def;  // 老師可查/列印
-          s.passwordChangedAt = Date.now();
+          _setDefaultPw(s.id, def);   // 明文只存本機 (不上雲)
+          s.mustChangePw = true;       // 重設密碼即強制下次改 (不依賴另勾 mustChangePw)
+          s.passwordChangedAt = null;  // 修正: 原誤寫 Date.now() 會讓名單顯示「已改」
+          s.passwordResetAt = Date.now();  // 與其他重設點一致
+          _clearAllLoginTokens(s);     // H2: 清掉舊裝置記住的 token
         }
         if(picked.includes('mustChangePw')) s.mustChangePw = true;
         if(picked.includes('email')) s.email = '';
@@ -15842,8 +15932,7 @@ async function approvePwReset(rid){
   // 🔐 改為隨機 6 字 (比舊版「學號末 4 碼」強 1000x+, 排除易混淆字元)
   const defPw = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : String(s.sid||'0000').slice(-4);
   s.password = await hashPassword(defPw);
-  s._defPwHint = defPw;
-  s.defaultPwPlain = defPw;  // 讓老師到「學生名單」可查或列印
+  _setDefaultPw(s.id, defPw);  // 明文只存本機 (不上雲), 老師可在「學生名單 → 預設密碼表」查/印
   s.mustChangePw = true;
   s.passwordChangedAt = null;
   s.passwordResetAt = Date.now();
@@ -16674,14 +16763,19 @@ function rFirebase(content){
       const v = String(pin || '').trim();
       if(v.length < 4 || v.length > 8){ toast('PIN 必須 4~8 字','danger'); return; }
       if(!App.db.settings) App.db.settings = {};
-      App.db.settings.roomPinHash = await hashPassword(v);
+      const newHash = await hashPassword(v);
+      App.db.settings.roomPinHash = newHash;
       App.db.settings.roomPinSetAt = Date.now();
       saveDB();
-      try { Sync.setRow('settings','roomPinHash', App.db.settings.roomPinHash);
+      try { Sync.setRow('settings','roomPinHash', newHash);
             Sync.setRow('settings','roomPinSetAt', App.db.settings.roomPinSetAt);
             bcNotify(); } catch(_){}
-      // 自己這個瀏覽器標記已驗證, 避免下次自己被擋
-      try { sessionStorage.setItem('_roomPinOk_' + (App.cfg?.roomCode||''), '1'); } catch(_){}
+      // 設 PIN 的人標記為 owner + 本機已驗證 (localStorage, 跨分頁/重整都記得; 存 hash 以便改 PIN 後失效)
+      const room = App.cfg?.roomCode || '';
+      try {
+        localStorage.setItem('_roomPinOk_' + room, newHash);
+        if(App.session && App.session.id) localStorage.setItem('_roomPinOwner_' + room, String(App.session.id));
+      } catch(_){}
       toast('✅ 已設定 PIN: ' + v + ' (請分享給合法老師/學生)','success', 8000);
       rerender();
     }}, hasPinNow ? '🔄 更新 PIN' : '🔐 設定 PIN'),
@@ -16695,6 +16789,12 @@ function rFirebase(content){
       try { Sync.setRow('settings','roomPinHash', null);
             Sync.setRow('settings','roomPinSetAt', null);
             bcNotify(); } catch(_){}
+      // 清掉本機 PIN 旗標 (關閉後不再需要)
+      try {
+        const room = App.cfg?.roomCode || '';
+        localStorage.removeItem('_roomPinOk_' + room);
+        localStorage.removeItem('_roomPinOwner_' + room);
+      } catch(_){}
       toast('已關閉 PIN 保護','warn');
       rerender();
     }}, '✗ 關閉 PIN') : null
@@ -20476,6 +20576,11 @@ async function fbWriteRest(nodePath, rec, timeoutMs){
 //   SDK 寫得進去就快; SDK 卡死/失敗就 REST 救
 async function fbWriteRow(nodePath, recId, rec){
   let sdkErr = '';
+  // 🔐 上雲前 strip 學生明文預設密碼 (防禦縱深, 與 Sync 層一致)
+  if(nodePath === 'students' && rec && typeof rec === 'object' && (rec.defaultPwPlain != null || rec._defPwHint != null)){
+    rec = Object.assign({}, rec);
+    delete rec.defaultPwPlain; delete rec._defPwHint; delete rec._pendingDefPw;
+  }
   // ★ 修「自寫自收」雙重渲染: 寫之前先 markEcho, 自己 listener 收到就會跳過
   try {
     if(typeof window !== 'undefined' && window._markEcho){
@@ -27938,42 +28043,110 @@ function boot(){
   // 確保有管理員帳號 + 學生資料
   try { ensureDefaultsAndDemo(); } catch(e){ dbgWarn('[v3 defaults]', e); }
 
-  // 🔐 教室 PIN 保護 — Sync 拉完設定後, 若有設 PIN 但本機未驗證 → 強制 modal
+  // 🔐 一次性淨化: 清掉舊版 (commit 4328056) 殘留在學生物件 + 雲端的明文預設密碼
+  //    把明文搬進本機 map (老師仍可印), 再從物件刪除並重新 setMap 覆蓋雲端
+  setTimeout(function _sanitizeStudentSecrets(){
+    try {
+      if(!Array.isArray(App.db.students)) return;
+      let dirty = 0;
+      App.db.students.forEach(s => {
+        if(!s) return;
+        const plain = s.defaultPwPlain || s._defPwHint;
+        if(plain){
+          // 還沒被學生改密碼的, 把明文留在本機 map 給老師印
+          if(s.mustChangePw !== false && typeof _setDefaultPw === 'function' && !_getDefaultPw(s.id)){
+            _setDefaultPw(s.id, plain);
+          }
+          delete s.defaultPwPlain;
+          delete s._defPwHint;
+          dirty++;
+        }
+      });
+      if(dirty > 0){
+        saveDB(true);
+        // 重新整批寫雲端 (Sync 層的 _stripForCloud 會確保不再外洩)
+        try { if(typeof Sync !== 'undefined' && Sync.setMap) Sync.setMap('students', App.db.students, true); } catch(_){}
+        dbg('[sanitize] 清掉 ' + dirty + ' 筆學生明文密碼欄位');
+      }
+    } catch(e){ _swallow('sanitize-student-secrets', e); }
+  }, 7000);
+
+  // 🔐 教室 PIN 保護 — 若有設 PIN 但本機未驗證 → 強制 modal (fail-closed)
   //    不論已登入或未登入都要過 PIN 才能往下用
-  setTimeout(async function _enforceRoomPin(){
+  async function enforceRoomPin(){
     try {
       const room = App.cfg && App.cfg.roomCode;
       if(!room) return;
+
+      // ── fail-closed: 等 settings 從雲端確認拉回再判斷, 避免慢網路下誤放行 ──
+      //    最多等 30 秒; 離線 (無 fbRef) 則只能用本機 settings
+      if(App.fbRef){
+        let waited = 0;
+        while(!App._settingsPulled && waited < 30000){
+          await new Promise(r => setTimeout(r, 500));
+          waited += 500;
+        }
+      }
+
       const pinHash = App.db && App.db.settings && App.db.settings.roomPinHash;
-      if(!pinHash) return;  // 沒設 PIN
+      if(!pinHash) return;  // 確認沒設 PIN → 放行
+
       const okKey = '_roomPinOk_' + room;
-      try { if(sessionStorage.getItem(okKey) === '1') return; } catch(_){}
-      // 強制 modal — 不能取消
+      const ownerKey = '_roomPinOwner_' + room;
+      // 1) 本裝置先前已驗證過「同一個 PIN hash」→ 放行 (localStorage 跨分頁/重整都記得)
+      try { if(localStorage.getItem(okKey) === pinHash) return; } catch(_){}
+      // 2) 設 PIN 的老師本人 (owner) → 自動放行並補旗標
+      try {
+        const owner = localStorage.getItem(ownerKey);
+        if(owner && App.session && App.session.role === 'teacher' && String(App.session.id) === owner){
+          localStorage.setItem(okKey, pinHash);
+          return;
+        }
+      } catch(_){}
+
       let tries = 0;
       while(tries < 5){
-        const pin = await promptDlg('🔐 此教室「' + room + '」已啟用 PIN 保護\n\n請輸入 PIN 才能繼續使用:', '', { type:'password', title:'教室 PIN' });
-        if(pin === null) continue;  // 不允許取消
-        const v = String(pin || '').trim();
-        if(!v){ toast('需要 PIN','warn'); tries++; continue; }
+        const pin = await promptDlg('🔐 此教室「' + room + '」已啟用 PIN 保護\n\n請輸入 PIN 才能繼續使用:', '', { type:'password', title:'教室 PIN', placeholder:'輸入 4~8 字 PIN' });
+        const v = String(pin == null ? '' : pin).trim();
+        if(!v){
+          // 取消 / 留空都算一次嘗試 (不再無限迴圈卡死)
+          tries++;
+          if(tries < 5) toast('需要輸入 PIN, 無法略過 (剩 ' + (5-tries) + ' 次)','warn');
+          continue;
+        }
         let ok = false;
         try { ok = await verifyPassword(v, pinHash); } catch(_){}
         if(ok){
-          try { sessionStorage.setItem(okKey, '1'); } catch(_){}
+          try { localStorage.setItem(okKey, pinHash); } catch(_){}
           toast('✅ 通過 PIN 驗證','success');
           return;
         }
         tries++;
-        toast('PIN 錯誤 (剩 ' + (5-tries) + ' 次)','danger');
+        if(tries < 5) toast('PIN 錯誤 (剩 ' + (5-tries) + ' 次)','danger');
       }
-      // 5 次都錯 → 清 session + cfg, 回到登入
-      try {
-        App.session = null; saveSession();
-        App.cfg = null; saveCfg();
-        sessionStorage.removeItem(okKey);
-        location.reload();
-      } catch(_){}
+      // 5 次都錯 → 顯示鎖定畫面 (不清 cfg, 不切教室, 避免把人丟進 DEMO01 / 孤兒 DB)
+      _showRoomPinLockScreen(room);
     } catch(e){ _swallow('enforce-room-pin', e); }
-  }, 4000);
+  }
+  // 鎖定畫面: 提供「重新輸入」與「換教室」兩個明確出口
+  function _showRoomPinLockScreen(room){
+    try {
+      const m = modal('', { dismissable:false });
+      m.root.appendChild(el('h2', null, '🔒 PIN 驗證失敗'));
+      m.root.appendChild(el('div', { style:{lineHeight:'1.7',margin:'8px 0'} },
+        '教室「' + room + '」的 PIN 連續輸入錯誤。為保護資料已暫停存取。'));
+      const actions = el('div', { class:'modal-actions' });
+      actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> { m.close(); setTimeout(enforceRoomPin, 200); } }, '🔁 重新輸入 PIN'));
+      actions.appendChild(el('button', { class:'btn', onclick: ()=> {
+        // 使用者「主動」選擇換教室才清 cfg (非系統強制), 避免孤兒 DB
+        if(confirm('確定要離開此教室、回到教室代碼輸入畫面嗎? (本機這個教室的資料不會被刪除)')){
+          try { App.session = null; saveSession(); App.cfg = null; saveCfg(); location.reload(); } catch(_){}
+        }
+      }}, '🚪 換教室'));
+      m.root.appendChild(actions);
+    } catch(e){ _swallow('pin-lock-screen', e); }
+  }
+  setTimeout(enforceRoomPin, 1000);
 
   // ★ session 已存在 (已登入狀態 app 開啟 / 重新整理) → 等 Sync 拉完雲端訊息再檢查未讀
   //   登入流程已在 finishStudentLogin / 老師登入處理, 此處補強「app 已登入狀態啟動」的情境
@@ -28234,7 +28407,7 @@ function boot(){
     }
     window.addEventListener('error', e => {
       const info = {
-        type:'error', msg: e.message?.slice(0,300),
+        type:'error', msg: String(e.message || (e.error && e.error.message) || 'unknown').slice(0,300),
         file: e.filename, line: e.lineno, col: e.colno,
         ua: navigator.userAgent.slice(0,200),
         role: App.session?.role||'guest',
@@ -29319,6 +29492,8 @@ document.addEventListener('keydown', function(e){
     const stack = (App && App._openModals) || [];
     const top = stack[stack.length - 1];
     if(top && typeof top.close === 'function'){
+      // ★ 不可關閉的 modal (dismissable:false, 例如 PIN / onboarding / confirm) → ESC 無效
+      if(top.dismissable === false){ e.preventDefault(); return; }
       try { top.close(); } catch(_){_swallow('esc-close',_)}
       e.preventDefault();
       return;
