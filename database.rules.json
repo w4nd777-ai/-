@@ -14,13 +14,39 @@
           ".indexOn": ["studentId", "date"]
         },
         "messages": {
-          ".indexOn": ["ts"]
+          ".indexOn": ["ts"],
+          "$msgId": {
+            ".validate": "newData.hasChildren(['id','fromId','ts']) && newData.child('text').val().length <= 4000"
+          }
         },
         "behavior": {
           ".indexOn": ["studentId", "ts"]
         },
         "leaves": {
           ".indexOn": ["studentId", "date"]
+        },
+        "pending": {
+          "$pid": {
+            ".validate": "newData.hasChildren(['id','role','ts']) && (newData.child('role').val() === 'student' || newData.child('role').val() === 'teacher') && newData.child('name').val().length <= 100"
+          }
+        },
+        "attachments": {
+          "$attKey": {
+            ".validate": "!newData.exists() || (newData.isString() && newData.val().length < 800000) || (newData.hasChild('data') && newData.child('data').val().length < 800000)"
+          }
+        },
+        "settings": {
+          "roomPinHash": {
+            ".write": "auth != null && (!data.exists() || root.child('cms-v3').child($roomCode).child('_pinAdmins').child(auth.uid).exists() || newData.val() === null)"
+          }
+        },
+        "_errors": {
+          "$errId": {
+            ".validate": "newData.hasChildren(['type','msg']) && newData.child('msg').val().length < 1000"
+          }
+        },
+        "_graveyard": {
+          ".write": "auth != null"
         }
       },
       "google_users": {

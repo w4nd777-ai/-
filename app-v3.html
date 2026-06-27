@@ -80,9 +80,10 @@
 <link rel="stylesheet" href="app-v3.css">
 </head>
 <body>
-<div id="root"></div>
-<div id="toast-host" class="toast-host"></div>
-<div id="modal-host"></div>
+<div id="root" role="main"></div>
+<div id="toast-host" class="toast-host" role="status" aria-live="polite" aria-atomic="false"></div>
+<div id="modal-host" role="dialog" aria-modal="true"></div>
+<div id="sr-live" class="sr-only" role="status" aria-live="assertive" aria-atomic="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"></div>
 
 <script>
 /* ════════════════════════════════════════════════════════════
@@ -259,6 +260,130 @@ const __DEBUG = (function(){
 function dbg(...args){ if(__DEBUG) console.log('[cms]', ...args); }
 function dbgWarn(...args){ if(__DEBUG) console.warn('[cms]', ...args); }
 
+// 🔐 強隨機學生預設密碼 — 6 字, 排除易混淆 (0/O, 1/l/I, B/8 等)
+//    比「學號末 4 碼」可猜性低 10000x, 又不會難念
+const _PW_ALPHABET = 'abcdefghjkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789';
+function _genStudentDefaultPw(len){
+  len = len || 6;
+  let out = '';
+  try {
+    if(window.crypto && window.crypto.getRandomValues){
+      const arr = new Uint32Array(len);
+      window.crypto.getRandomValues(arr);
+      for(let i = 0; i < len; i++){
+        out += _PW_ALPHABET[arr[i] % _PW_ALPHABET.length];
+      }
+      return out;
+    }
+  } catch(_){}
+  // fallback: Math.random (less secure 但仍比 4 碼好)
+  for(let i = 0; i < len; i++){
+    out += _PW_ALPHABET[Math.floor(Math.random() * _PW_ALPHABET.length)];
+  }
+  return out;
+}
+
+// 🎓 第一次老師登入引導 — 3 步, 用 localStorage 旗標保證只跑一次
+function maybeShowOnboarding(){
+  try {
+    if(!App.session || App.session.role !== 'teacher') return;
+    const KEY = 'cms_v3_onboarded_' + (App.session.id || '');
+    if(localStorage.getItem(KEY) === '1') return;
+    // 延遲 1.5 秒等 UI 穩定
+    setTimeout(()=> {
+      try { _runOnboardingTour(KEY); } catch(e){ _swallow('onboarding', e); }
+    }, 1500);
+  } catch(_){}
+}
+
+function _runOnboardingTour(doneKey){
+  const steps = [
+    {
+      title: '🎉 歡迎使用班級管理系統',
+      body: [
+        '這是一套讓老師管理學生 (點名 / 作業 / 成績 / 訊息) 的單頁 PWA。',
+        '',
+        '✦ 跨裝置同步: 你的手機 / 平板 / 電腦資料即時連動',
+        '✦ 學生自己也能登入查看作業 / 訊息 / 出席紀錄',
+        '✦ 全部資料存在你自己的 Firebase, 不會經過第三方'
+      ].join('\n'),
+      cta: '下一步 →'
+    },
+    {
+      title: '📡 教室代碼 = 你的資料庫',
+      body: [
+        '目前教室代碼: ' + (App.cfg?.roomCode || '?'),
+        '',
+        '✦ 其他老師 / 學生用同一個代碼加入 = 看到同一份資料',
+        '✦ 強烈建議到「進階管理 → 跨裝置同步」設個 PIN, 才不會被外人猜到',
+        '✦ 不同班級可以開不同教室代碼, 互不干擾'
+      ].join('\n'),
+      cta: '下一步 →'
+    },
+    {
+      title: '✨ 接下來怎麼開始',
+      body: [
+        '建議流程:',
+        '',
+        '① 「👥 學生名單」→ 批次匯入 / 快速建立你班上的學生',
+        '② 「🔑 預設密碼表」→ 列印帳號密碼發給學生',
+        '③ 「📋 作業管理」→ 派發第一份作業試試看',
+        '④ 「💬 訊息」→ 跟學生聊聊',
+        '⑤ 「⚙️ 設定 → 進階」→ 設「錯誤上報 webhook」(Discord)',
+        '',
+        '⚠️ 預設密碼 admin / admin123 請立即改'
+      ].join('\n'),
+      cta: '✓ 開始使用'
+    }
+  ];
+  let i = 0;
+  const m = modal('', { dismissable: false });
+  const render = () => {
+    const s = steps[i];
+    m.root.innerHTML = '';
+    m.root.appendChild(el('div', { style:{display:'flex',gap:'4px',marginBottom:'10px'} },
+      ...steps.map((_, idx) => el('div', { style:{
+        flex:'1', height:'4px', borderRadius:'2px',
+        background: idx <= i ? 'var(--primary)' : 'var(--surface-2)'
+      }}))
+    ));
+    m.root.appendChild(el('h2', null, s.title));
+    m.root.appendChild(el('div', { style:{whiteSpace:'pre-line',lineHeight:'1.7',margin:'10px 0',color:'var(--text)'} }, s.body));
+    const actions = el('div', { class:'modal-actions' });
+    if(i > 0){
+      actions.appendChild(el('button', { class:'btn', onclick: ()=> { i--; render(); } }, '← 上一步'));
+    }
+    actions.appendChild(el('button', { class:'btn', onclick: ()=> {
+      try { localStorage.setItem(doneKey, '1'); } catch(_){}
+      m.close();
+    }}, '跳過'));
+    actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> {
+      if(i < steps.length - 1){ i++; render(); }
+      else {
+        try { localStorage.setItem(doneKey, '1'); } catch(_){}
+        m.close();
+        toast('🎉 設定完成!','success', 4000);
+      }
+    }}, s.cta));
+    m.root.appendChild(actions);
+  };
+  render();
+}
+
+// 🔒 生產環境噤聲 — 散落各處的 console.log/info/debug 一律靜默 (148 處)
+//    保留 console.error / console.warn 給真正該看的東西
+//    要看 log 就加 ?debug=1 或 localStorage.cms_v3_debug=1 後重整
+if(!__DEBUG && typeof console !== 'undefined'){
+  try {
+    const _noop = function(){};
+    console.log = _noop;
+    console.info = _noop;
+    console.debug = _noop;
+    // console.warn 保留 (像 Firebase auth 失敗、SDK timeout 這類)
+    // console.error 也保留
+  } catch(_){}
+}
+
 // Async button loading helper — disables button + shows inline spinner during async work
 async function withButtonLoading(btn, label, fn){
   if(!btn) return await fn();
@@ -419,7 +544,34 @@ function el(tag, attrs, ...children){
     if(typeof c === 'string' || typeof c === 'number') e.appendChild(document.createTextNode(String(c)));
     else e.appendChild(c);
   });
+  // 🔍 a11y: button 沒 aria-label, 文字只有 emoji/icon → 抄 title 補 aria-label
+  //         input 沒 aria-label 也沒 id 配對 label → 抄 placeholder/title 補
+  if(tag === 'button' && !e.hasAttribute('aria-label')){
+    const txt = (e.textContent || '').trim();
+    // 短文字 (1-3 char) 通常只是 emoji icon, 需要 aria-label 才能讀
+    if(!txt || txt.length <= 3){
+      const lbl = e.getAttribute('title') || (attrs && (attrs['data-label'] || attrs['data-action']));
+      if(lbl) e.setAttribute('aria-label', String(lbl));
+    }
+  } else if(tag === 'input' && !e.hasAttribute('aria-label')){
+    const lbl = e.getAttribute('placeholder') || e.getAttribute('title');
+    if(lbl) e.setAttribute('aria-label', String(lbl));
+  } else if(tag === 'select' && !e.hasAttribute('aria-label')){
+    const lbl = e.getAttribute('title');
+    if(lbl) e.setAttribute('aria-label', String(lbl));
+  }
   return e;
+}
+
+// 🔊 a11y: 讓 screen reader 主動朗讀重要訊息 (toast / modal 開啟)
+function _srAnnounce(msg){
+  try {
+    const host = document.getElementById('sr-live');
+    if(!host) return;
+    // 清掉舊的, 強迫 reader 重讀
+    host.textContent = '';
+    setTimeout(()=> { try { host.textContent = String(msg||''); } catch(_){} }, 30);
+  } catch(_){}
 }
 
 /* ── PERF: 學生/帳號頭像 lazy-load helper ──
@@ -586,13 +738,46 @@ function _swallow(ctx, e){
     // 記到內部 buffer（最多 200 筆）
     if(typeof App !== 'undefined' && App){
       App._silentErrors = App._silentErrors || [];
-      App._silentErrors.push({
+      const rec = {
         ctx: ctx || '?',
         msg: (e && e.message) ? e.message : String(e),
         stack: (e && e.stack) ? String(e.stack).split('\n').slice(0,3).join(' | ') : '',
         ts: Date.now()
-      });
+      };
+      App._silentErrors.push(rec);
       if(App._silentErrors.length > 200) App._silentErrors.shift();
+
+      // ★ 上報 webhook (老師可在「進階」設定 errReportUrl); 失敗仍吞
+      try {
+        const url = App.db && App.db.settings && App.db.settings.errReportUrl;
+        if(url && /^https?:\/\//.test(url)){
+          // 60 秒內同 ctx + msg 只送一次, 避免一個壞按鈕灌爆
+          App._errDedupe = App._errDedupe || new Map();
+          const key = rec.ctx + '|' + rec.msg.slice(0,80);
+          const now = Date.now();
+          const last = App._errDedupe.get(key) || 0;
+          if(now - last > 60000){
+            App._errDedupe.set(key, now);
+            const payload = {
+              app: 'cms-v3',
+              build: (typeof __APP_BUILD === 'string') ? __APP_BUILD : 'unknown',
+              room: (App.cfg && App.cfg.roomCode) || '',
+              role: (App.session && App.session.role) || 'anon',
+              user: (App.session && App.session.name) || '',
+              ua: navigator.userAgent.slice(0,150),
+              ...rec
+            };
+            // 純 fire-and-forget, 不 await, 不影響流程
+            try {
+              fetch(url, {
+                method:'POST', mode:'no-cors', keepalive:true,
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+              }).catch(()=>{});
+            } catch(_){}
+          }
+        }
+      } catch(_){}
     }
   } catch(_){ /* swallow swallow */ }
 }
@@ -1241,8 +1426,10 @@ function toast(msg, type='', dur=2400){
   }
 
   const cls = type ? `toast t-${type}` : 'toast';
-  const t = el('div', { class: cls }, msg);
+  const t = el('div', { class: cls, role:'status' }, msg);
   host.appendChild(t);
+  // a11y: 讓 screen reader 念
+  try { _srAnnounce(String(msg).slice(0, 200)); } catch(_){}
 
   const entry = { key, el: t, hideTimer: null, removeTimer: null, shownAt: now };
   _toastShown.set(key, entry);
@@ -1985,7 +2172,10 @@ function ensureDefaultsAndDemo(){
       const classes = ['202','202','202','202','202','203','203','203','203','203','204','204','204','204','204','205','205','205','205','205'];
       App.db.students = demoNames.map((name, i) => {
         const sid = '109' + String(5001 + i).padStart(4,'0');
-        return { id: nid(), name, sid, cls: classes[i], seat: ((i%5)+1), email:'', phone:'', parentName:'', parentPhone:'', parentEmail:'', password: sid.slice(-4), mustChangePw: true };
+        const pw = _genStudentDefaultPw();
+        return { id: nid(), name, sid, cls: classes[i], seat: ((i%5)+1), email:'', phone:'', parentName:'', parentPhone:'', parentEmail:'',
+          password: pw, defaultPwPlain: pw,  // defaultPwPlain 給老師查/列印, 學生改完自動清掉
+          mustChangePw: true };
       });
       changed = true;
       dbg('[v3] 建立 20 位示範學生 (fallback)');
@@ -5632,6 +5822,33 @@ async function approveTeacher(pid, silent){
     if(!silent) rerender();
     return;
   }
+
+  // 🔐 核准老師 = 授予管理權限 → 必須要求操作人輸入自己密碼確認
+  //    silent=true (批量) 或 已在最近 5 分鐘內驗證過 就跳過
+  if(!silent){
+    const operatorId = App.session && App.session.id;
+    const operator = (App.db.accounts || []).find(a => a && a.id === operatorId);
+    if(!operator){ toast('找不到操作人帳號','danger'); return; }
+    const lastVerifiedKey = '_teacherApproveVerified_' + operatorId;
+    const lastVerified = parseInt(sessionStorage.getItem(lastVerifiedKey) || '0', 10);
+    if(Date.now() - lastVerified > 5 * 60 * 1000){
+      const pw = await promptDlg('🔐 核准老師 = 授予管理權限\n\n為了確認是您本人操作, 請輸入您的登入密碼:', '', { type:'password' });
+      if(pw === null) return;
+      if(!pw){ toast('需要密碼確認','warn'); return; }
+      let pwOk = false;
+      try {
+        if(typeof verifyPassword === 'function') pwOk = await verifyPassword(pw, operator.password);
+        else if(typeof hashPassword === 'function') pwOk = (await hashPassword(pw)) === operator.password;
+      } catch(e){ _swallow('verify-pw-approve', e); }
+      if(!pwOk){
+        toast('密碼錯誤,審核取消','danger');
+        try { if(typeof logOp === 'function') logOp('approveTeacherFail', '密碼驗證失敗 — 嘗試核准 ' + p.name + ' (' + p.email + ')'); } catch(_){}
+        return;
+      }
+      sessionStorage.setItem(lastVerifiedKey, String(Date.now()));
+    }
+  }
+
   const acc = {
     id: 'acc_e_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
     username: uname,
@@ -5641,13 +5858,17 @@ async function approveTeacher(pid, silent){
     role: 'teacher',
     createdAt: Date.now(),
     approvedAt: Date.now(),
+    approvedBy: (App.session && App.session.name) || '?',
+    approvedById: (App.session && App.session.id) || '',
     note: p.note || ''
   };
   App.db.accounts.push(acc);
   App.db.pending = App.db.pending.filter(x => x.id !== pid);
   try { saveDB(); } catch(_){}
   try { Sync.setMap('accounts', App.db.accounts); Sync.setMap('pending', App.db.pending); bcNotify(); } catch(_){}
-  if(typeof logOp === 'function') logOp('approveTeacher', '核准老師 ' + p.name + ' (' + p.email + ')');
+  // audit log
+  if(typeof logOp === 'function') logOp('approveTeacher',
+    '核准老師 ' + p.name + ' (' + p.email + ') — 操作人 ' + ((App.session && App.session.name)||'?') + ' (' + ((App.session && App.session.id)||'?') + ')');
   if(!silent){
     toast('✅ 已核准老師 ' + p.name + ',可用 Email 登入','success', 5000);
     rerender();
@@ -8001,6 +8222,7 @@ function renderLoginTeacherStage(){
     App._loginStage = null; App._loginPrefill = null;
     toast('歡迎，' + a.name + '！','success');
     go('overview');
+    try { maybeShowOnboarding(); } catch(_){}
     // 登入後若有未讀訊息,延遲 1.5 秒再提示 (等 Sync.init 拉完雲端 messages)
     setTimeout(()=> {
       try {
@@ -9907,6 +10129,7 @@ function forceChangePassword(studentId){
     s.password = hashed.value;
     s.mustChangePw = false;
     s.passwordChangedAt = Date.now();
+    delete s.defaultPwPlain;  // 學生改完密碼, 預設密碼明文清掉, 老師看不到了
     _clearAllLoginTokens(s);  // H2: 改密碼 → 清掉所有記住裝置
     saveDB(true);  // H3: 立即寫入
     if(typeof logOp === 'function') logOp('passwordChange', s.name + ' 完成首次密碼設定');
@@ -12660,6 +12883,7 @@ function rStu(content){
       el('button', { class:'btn btn-sm', onclick: printCurrent, title:'列印 / 存 PDF' }, '🖨'),
       el('button', { class:'btn btn-sm', onclick: bulkAddStudents, title:'一次貼上多位學生姓名' }, '＋ 批次'),
       el('button', { class:'btn btn-sm btn-warn', onclick: openBulkResetStudents, title:'重設密碼 / Email / 安全問題（可選全部或分班）' }, '🔄 批量重設'),
+      el('button', { class:'btn btn-sm', onclick: openDefaultPwSheet, title:'列印「尚未改密碼」學生的帳號 + 預設密碼表' }, '🔑 預設密碼表'),
       el('button', { class:'btn btn-sm btn-success', onclick: quickCreateStudent, title:'最快速：只要姓名 + 學號就建立帳號' }, '⚡ 快速建立'),
       el('button', { class:'btn btn-primary', onclick:()=> openStudentEdit(), title:'新增單一學生（含完整欄位）' }, '＋ 新增')
     )
@@ -12798,13 +13022,14 @@ function rStu(content){
       acts.appendChild(el('button', { class:'btn btn-sm', title:'重設密碼為學號末 4 碼', onclick: async ()=> {
         if(!requirePerm('canEditStudents','重設學生密碼')) return;  // H1
         if(!checkStudentClassPerm(s.id)){ toast('您沒有此學生班級的權限','warning'); return; }
-        const defPw = String(s.sid||'0000').slice(-4);
+        const defPw = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : String(s.sid||'0000').slice(-4);
         const ok = await confirmDlg(
-          '確定重設 ' + s.name + ' 的密碼？\n\n新密碼將為「' + defPw + '」（學號末 4 碼）\n下次登入時學生需重新設定密碼',
+          '確定重設 ' + s.name + ' 的密碼？\n\n新密碼將為「' + defPw + '」(隨機 6 字, 強過學號末 4 碼)\n下次登入時學生需重新設定密碼',
           { title:'重設密碼' }
         );
         if(!ok) return;
         s.password = await hashPassword(defPw);  // H5: 自動 per-account salt
+        s.defaultPwPlain = defPw;  // 老師可查/列印
         s.mustChangePw = true;
         s.passwordChangedAt = null;
         s.passwordResetAt = Date.now();
@@ -12939,12 +13164,13 @@ function rStu(content){
         ),
         el('button', { class:'btn btn-sm', onclick: async ()=> {
           if(!requirePerm('canEditStudents','批次重設學生密碼')) return;  // H1
-          const ok = await confirmDlg('確定批次重設所有學生密碼為「學號末 4 碼」？\n\n下次登入時學生會被要求自行修改', { danger:true, title:'批次重設密碼' });
+          const ok = await confirmDlg('確定批次重設所有學生密碼為「隨機 6 字」？\n\n比舊版「學號末 4 碼」強 1000x+, 排除易混淆字元 (0/O, 1/l)。\n重設後可到「學生名單」按學生 → 「查預設密碼」列出, 或印整批帳密表。\n下次登入時學生會被要求自行修改。', { danger:true, title:'批次重設密碼' });
           if(!ok) return;
           let n = 0;
           for(const s of App.db.students){
-            const defPw = String(s.sid||'0000').slice(-4);
+            const defPw = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : String(s.sid||'0000').slice(-4);
             s.password = await hashPassword(defPw);  // H5: 自動 per-account salt
+            s.defaultPwPlain = defPw;  // 老師可查/列印
             s.mustChangePw = true;
             s.passwordChangedAt = null;
             s.passwordResetAt = Date.now();
@@ -13173,6 +13399,7 @@ function openStudentEdit(s=null){
               s.password = await hashPassword(v);  // H5: 自動產生 per-account salt
               s.passwordChangedAt = Date.now();
               s.mustChangePw = false;
+              delete s.defaultPwPlain;  // 老師手動指定的密碼不再屬於「預設」
             }
           } else s[k] = v;
         }
@@ -13359,6 +13586,67 @@ function openBulkResetTeachers(){
   m.root.appendChild(actions);
 }
 
+// 🔑 預設密碼表 — 列出尚未改過密碼 + 有 defaultPwPlain 記錄的學生, 可印或複製
+function openDefaultPwSheet(){
+  if(!requirePerm('canEditStudents','查看預設密碼')) return;
+  const stus = (App.db.students||[]).filter(s => s && s.defaultPwPlain && (s.mustChangePw !== false));
+  const m = modal('', { dismissable:true });
+  m.root.appendChild(el('h2', null, '🔑 學生預設密碼表'));
+  m.root.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px'} },
+    '只列出「尚未自行改密碼」且系統有保存預設密碼的學生 — 共 ' + stus.length + ' 位。學生改完密碼後自動從本表消失。'));
+  if(!stus.length){
+    m.root.appendChild(el('div', { class:'empty' }, el('div', { class:'ico' }, '✅'), '所有學生都已自行修改密碼,沒有需要列印的預設密碼。'));
+    const actions = el('div', { class:'modal-actions' });
+    actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> m.close() }, '關閉'));
+    m.root.appendChild(actions);
+    return;
+  }
+  // 排序: 班級 → 座號
+  stus.sort((a,b) => (a.cls||'').localeCompare(b.cls||'') || (a.seat||0) - (b.seat||0));
+  const tbl = el('table', { class:'tbl', style:{width:'100%',fontSize:'13px'} });
+  const thead = el('thead', null,
+    el('tr', null,
+      el('th', null, '班級'),
+      el('th', null, '座號'),
+      el('th', null, '姓名'),
+      el('th', null, '學號'),
+      el('th', null, '預設密碼')
+    )
+  );
+  tbl.appendChild(thead);
+  const tbody = el('tbody');
+  stus.forEach(s => {
+    tbody.appendChild(el('tr', null,
+      el('td', null, s.cls || '—'),
+      el('td', null, String(s.seat || '')),
+      el('td', null, s.name || ''),
+      el('td', null, String(s.sid || '')),
+      el('td', { style:{fontFamily:'monospace',fontWeight:'700',color:'var(--danger)'} }, s.defaultPwPlain)
+    ));
+  });
+  tbl.appendChild(tbody);
+  const box = el('div', { style:{maxHeight:'60vh',overflow:'auto',marginBottom:'10px'} }, tbl);
+  m.root.appendChild(box);
+  const actions = el('div', { class:'modal-actions' });
+  actions.appendChild(el('button', { class:'btn', onclick: ()=> {
+    const lines = ['班級\t座號\t姓名\t學號\t預設密碼'];
+    stus.forEach(s => lines.push((s.cls||'')+'\t'+(s.seat||'')+'\t'+(s.name||'')+'\t'+(s.sid||'')+'\t'+s.defaultPwPlain));
+    const text = lines.join('\n');
+    try { navigator.clipboard.writeText(text).then(()=> toast('已複製 ' + stus.length + ' 筆','success')); }
+    catch(_){ toast('複製失敗,請手動選取','warn'); }
+  }}, '📋 複製為表格'));
+  actions.appendChild(el('button', { class:'btn', onclick: ()=> {
+    const css = '<style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:6px 8px;text-align:left}th{background:#eee}.pw{font-family:monospace;font-weight:700;color:#c00}</style>';
+    const rows = stus.map(s => '<tr><td>'+esc(s.cls||'')+'</td><td>'+esc(String(s.seat||''))+'</td><td>'+esc(s.name||'')+'</td><td>'+esc(String(s.sid||''))+'</td><td class="pw">'+esc(s.defaultPwPlain)+'</td></tr>').join('');
+    const html = '<!doctype html><html><head><meta charset="utf-8"><title>預設密碼表</title>'+css+'</head><body><h2>學生預設密碼表 (' + new Date().toLocaleDateString('zh-TW') + ')</h2><p>共 ' + stus.length + ' 位學生 — 請學生登入後立即修改</p><table><thead><tr><th>班級</th><th>座號</th><th>姓名</th><th>學號</th><th>預設密碼</th></tr></thead><tbody>'+rows+'</tbody></table></body></html>';
+    const w = window.open('', '_blank');
+    if(w){ w.document.write(html); w.document.close(); setTimeout(()=> { try { w.print(); } catch(_){} }, 300); }
+    else { toast('彈窗被擋,請允許彈窗','warn'); }
+  }}, '🖨 列印'));
+  actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> m.close() }, '關閉'));
+  m.root.appendChild(actions);
+}
+
 function openBulkResetStudents(){
   if(!requirePerm('canEditStudents','批量重設學生')) return;
   const m = modal('', { dismissable:false });
@@ -13513,8 +13801,9 @@ function openBulkResetStudents(){
       let resetCount = 0;
       for(const s of list){
         if(picked.includes('password')){
-          const def = String(s.sid||'0000').slice(-4).padStart(4,'0');
+          const def = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : String(s.sid||'0000').slice(-4).padStart(4,'0');
           try { s.password = await hashPassword(def); } catch(e){ continue; }
+          s.defaultPwPlain = def;  // 老師可查/列印
           s.passwordChangedAt = Date.now();
         }
         if(picked.includes('mustChangePw')) s.mustChangePw = true;
@@ -15550,9 +15839,11 @@ async function approvePwReset(rid){
   if(!r) return;
   const s = App.db.students.find(x => x.id === r.studentId);
   if(!s){ toast('學生已不存在','danger'); return; }
-  const defPw = String(s.sid||'0000').slice(-4);
+  // 🔐 改為隨機 6 字 (比舊版「學號末 4 碼」強 1000x+, 排除易混淆字元)
+  const defPw = (typeof _genStudentDefaultPw === 'function') ? _genStudentDefaultPw() : String(s.sid||'0000').slice(-4);
   s.password = await hashPassword(defPw);
   s._defPwHint = defPw;
+  s.defaultPwPlain = defPw;  // 讓老師到「學生名單」可查或列印
   s.mustChangePw = true;
   s.passwordChangedAt = null;
   s.passwordResetAt = Date.now();
@@ -16233,6 +16524,29 @@ function rSettings(content){
     actions.appendChild(el('button', { class:'btn btn-primary', onclick: ()=> m.close() }, '關閉'));
     m.root.appendChild(actions);
   } }, '🐞 顯示內部錯誤紀錄'));
+
+  // 🆕 錯誤上報 webhook (Discord / Slack / 自建 endpoint)
+  cardDbg.appendChild(el('div', { style:{marginTop:'12px',padding:'10px',background:'var(--surface-2)',borderRadius:'6px'} },
+    el('div', { style:{fontWeight:'600',marginBottom:'4px'} }, '📡 錯誤上報 webhook'),
+    el('div', { class:'small muted', style:{marginBottom:'6px'} }, '貼上 Discord webhook / Slack incoming webhook / 自建 URL。系統 catch 到的錯誤會自動上報 (60 秒同錯誤去重, 失敗仍會吞)。留空關閉。'),
+    (function(){
+      const cur = (App.db.settings && App.db.settings.errReportUrl) || '';
+      const inp = el('input', { class:'input', type:'url', placeholder:'https://discord.com/api/webhooks/...', value: cur, style:{marginBottom:'6px'} });
+      const btn = el('button', { class:'btn btn-sm btn-primary', onclick: ()=> {
+        const v = inp.value.trim();
+        if(v && !/^https?:\/\//i.test(v)){ toast('必須是 http(s):// 開頭','danger'); return; }
+        if(!App.db.settings) App.db.settings = {};
+        if(v){ App.db.settings.errReportUrl = v; } else { delete App.db.settings.errReportUrl; }
+        saveDB(); try { Sync.setRow('settings', 'errReportUrl', v||null); bcNotify(); } catch(_){}
+        toast(v ? '已儲存 (下次錯誤即上報)' : '已關閉','success');
+      }}, '💾 儲存');
+      const test = el('button', { class:'btn btn-sm', style:{marginLeft:'6px'}, onclick: ()=> {
+        _swallow('test-report', new Error('手動測試錯誤上報 ' + new Date().toISOString()));
+        toast('已送測試錯誤,看 Discord/Slack 是否收到','info');
+      }}, '🧪 送測試');
+      return el('div', null, inp, el('div', null, btn, test));
+    })()
+  ));
   content.appendChild(cardDbg);
 
   // Claude API key
@@ -16343,6 +16657,49 @@ function rFirebase(content){
       el('span', { class:'tag ' + st.cls }, st.tag)
     )
   ));
+
+  // 🔐 教室 PIN 保護 — 未設 PIN 任何人知道 roomCode 就能加入, 設了 PIN 必須輸對才進
+  const hasPinNow = !!(App.db.settings && App.db.settings.roomPinHash);
+  const cardPin = el('div', { class:'card', style:{marginBottom:'12px',border: hasPinNow?'2px solid var(--success)':'2px solid var(--warn)'} });
+  cardPin.appendChild(el('h3', null, '🔐 教室 PIN 保護'));
+  cardPin.appendChild(el('div', { class:'small muted', style:{marginBottom:'10px',lineHeight:'1.6'} },
+    hasPinNow
+      ? '✅ 目前已啟用 PIN — 新裝置 / 新使用者要加入這個教室必須輸入 PIN 才能連上'
+      : '⚠️ 目前未設 PIN — 任何人知道教室代碼「' + (App.cfg?.roomCode||'?') + '」就能加入。建議設一個 4~8 字 PIN 給合法老師/學生'
+  ));
+  cardPin.appendChild(el('div', { class:'flex', style:{gap:'6px',flexWrap:'wrap'} },
+    el('button', { class:'btn btn-primary', onclick: async ()=> {
+      const pin = await promptDlg('設定教室 PIN (4~8 字, 英文/數字皆可)', '', { type:'text', title:hasPinNow?'更新 PIN':'設定 PIN' });
+      if(pin === null) return;
+      const v = String(pin || '').trim();
+      if(v.length < 4 || v.length > 8){ toast('PIN 必須 4~8 字','danger'); return; }
+      if(!App.db.settings) App.db.settings = {};
+      App.db.settings.roomPinHash = await hashPassword(v);
+      App.db.settings.roomPinSetAt = Date.now();
+      saveDB();
+      try { Sync.setRow('settings','roomPinHash', App.db.settings.roomPinHash);
+            Sync.setRow('settings','roomPinSetAt', App.db.settings.roomPinSetAt);
+            bcNotify(); } catch(_){}
+      // 自己這個瀏覽器標記已驗證, 避免下次自己被擋
+      try { sessionStorage.setItem('_roomPinOk_' + (App.cfg?.roomCode||''), '1'); } catch(_){}
+      toast('✅ 已設定 PIN: ' + v + ' (請分享給合法老師/學生)','success', 8000);
+      rerender();
+    }}, hasPinNow ? '🔄 更新 PIN' : '🔐 設定 PIN'),
+    hasPinNow ? el('button', { class:'btn btn-danger', onclick: async ()=> {
+      if(!await confirmDlg('關閉 PIN 保護? 之後任何人知道教室代碼就能加入', { danger:true })) return;
+      if(App.db.settings){
+        delete App.db.settings.roomPinHash;
+        delete App.db.settings.roomPinSetAt;
+      }
+      saveDB();
+      try { Sync.setRow('settings','roomPinHash', null);
+            Sync.setRow('settings','roomPinSetAt', null);
+            bcNotify(); } catch(_){}
+      toast('已關閉 PIN 保護','warn');
+      rerender();
+    }}, '✗ 關閉 PIN') : null
+  ));
+  content.appendChild(cardPin);
 
   const card = el('div', { class:'card' });
   card.appendChild(el('h3', null, 'Firebase 設定'));
@@ -27580,6 +27937,43 @@ function boot(){
 
   // 確保有管理員帳號 + 學生資料
   try { ensureDefaultsAndDemo(); } catch(e){ dbgWarn('[v3 defaults]', e); }
+
+  // 🔐 教室 PIN 保護 — Sync 拉完設定後, 若有設 PIN 但本機未驗證 → 強制 modal
+  //    不論已登入或未登入都要過 PIN 才能往下用
+  setTimeout(async function _enforceRoomPin(){
+    try {
+      const room = App.cfg && App.cfg.roomCode;
+      if(!room) return;
+      const pinHash = App.db && App.db.settings && App.db.settings.roomPinHash;
+      if(!pinHash) return;  // 沒設 PIN
+      const okKey = '_roomPinOk_' + room;
+      try { if(sessionStorage.getItem(okKey) === '1') return; } catch(_){}
+      // 強制 modal — 不能取消
+      let tries = 0;
+      while(tries < 5){
+        const pin = await promptDlg('🔐 此教室「' + room + '」已啟用 PIN 保護\n\n請輸入 PIN 才能繼續使用:', '', { type:'password', title:'教室 PIN' });
+        if(pin === null) continue;  // 不允許取消
+        const v = String(pin || '').trim();
+        if(!v){ toast('需要 PIN','warn'); tries++; continue; }
+        let ok = false;
+        try { ok = await verifyPassword(v, pinHash); } catch(_){}
+        if(ok){
+          try { sessionStorage.setItem(okKey, '1'); } catch(_){}
+          toast('✅ 通過 PIN 驗證','success');
+          return;
+        }
+        tries++;
+        toast('PIN 錯誤 (剩 ' + (5-tries) + ' 次)','danger');
+      }
+      // 5 次都錯 → 清 session + cfg, 回到登入
+      try {
+        App.session = null; saveSession();
+        App.cfg = null; saveCfg();
+        sessionStorage.removeItem(okKey);
+        location.reload();
+      } catch(_){}
+    } catch(e){ _swallow('enforce-room-pin', e); }
+  }, 4000);
 
   // ★ session 已存在 (已登入狀態 app 開啟 / 重新整理) → 等 Sync 拉完雲端訊息再檢查未讀
   //   登入流程已在 finishStudentLogin / 老師登入處理, 此處補強「app 已登入狀態啟動」的情境
